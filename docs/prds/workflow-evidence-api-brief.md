@@ -7,9 +7,11 @@ Dependency: [Demo PRD](demo-prd.md). The PRD owns object contracts, authority bo
 
 Process authorised evidence into traceable findings and controlled actions. Persist business state so review, response and recovery work beyond one model session.
 
-Proposed implementation: Azure Functions/Durable Functions for lifecycle; bounded Agent Framework investigation inside an activity; Blob Storage for evidence and SQL Database for business records. Language, hosting plan, Durable backend and model are decisions to resolve before scaffold generation.
+Selected implementation: .NET 10 isolated Azure Functions/Durable Functions for lifecycle; Blob Storage for evidence and Azure SQL for business records. Azure AI Foundry provides governance/evaluation and a governed Azure OpenAI deployment performs bounded model calls.
 
-Use a normal model call if multi-step investigation adds no benefit. Do not create separate long-lived Agent Framework and Durable orchestration of the same case.
+The core workflow does not use Foundry Agent Service or Microsoft Agent Framework. Model calls are limited to bounded extraction, classification and conflict detection inside activities; they cannot choose scope, invoke external actions or mutate policy.
+
+Use a normal model call for the bounded investigation. Do not introduce a separate agent runtime or duplicate orchestration of the same case.
 
 ## 2. Processing pipeline
 
@@ -63,7 +65,7 @@ If a real future connector cannot deduplicate or query delivery status, leave th
 
 Identical activity retries reuse committed findings/actions for the same processing basis. Guard against a stale model result arriving after a newer submission. Out-of-order partner responses are retained or explicitly rejected according to the current request lifecycle, never silently attached to an unrelated request.
 
-## 5. Agent and approval controls
+## 5. Model and approval controls
 
 Permitted investigation tools retrieve only approved requirements, manifest/processing facts and authorised evidence. The model cannot choose an arbitrary airline scope, invoke a send action or mutate policy.
 

@@ -1,6 +1,6 @@
 # Altivane Aircraft Return Readiness Demonstrator - Product Requirements
 
-Version: 0.1 draft | Date: 10 September 2026 | Owner: Wesley Backelant
+Version: 0.2 draft | Date: 10 September 2026 | Owner: Wesley Backelant
 
 ## 1. Purpose
 
@@ -21,9 +21,12 @@ Altivane Aviation Capital is an entirely fictional aircraft lessor. This is not 
 | Agreed | Synthetic data, live demo and recorded backup. |
 | Confirmed constraint | Two participant preparation hours weekly; approximately 26 total across the programme. |
 | Confirmed constraint | Azure target Sweden Central, `swedencentral`; ceiling USD 500/month, not a spending target. |
-| Proposed | Durable Functions owns the case lifecycle; Agent Framework performs bounded, read-only investigation inside activities. |
-| Proposed | Blob Storage, SQL Database, Document Intelligence, Azure OpenAI, Entra ID and Application Insights form the initial shortlist. |
-| Unresolved | Repository, implementation language, exact hosting/backend/model/SKUs, network policy, subscription, quotas and regional prices. |
+| Agreed | .NET 10 isolated Azure Functions with Durable Functions owns the case lifecycle. |
+| Agreed | Azure SQL stores workflow/business/audit state; Blob Storage stores document content and versions. |
+| Agreed | Azure AI Foundry provides model governance and evaluation; a governed Azure OpenAI deployment performs bounded extraction/classification. |
+| Agreed | No Foundry Agent Service or Microsoft Agent Framework runtime in the core workflow; no autonomous agent may make authoritative decisions or take external action. |
+| Proposed | Document Intelligence, Entra ID and Application Insights complete the initial service shortlist. |
+| Unresolved | Exact hosting/backend/model/SKUs, network policy, subscription, quotas and regional prices. |
 | Not authorised | Azure provisioning, expenditure, real partner communications or access to customer systems. |
 
 Contracts and defaults below are proposed implementation requirements for review, not previously agreed customer facts. Implementers must surface material changes rather than silently substituting technologies, region or behaviour.
@@ -187,7 +190,7 @@ The PRD owns common contracts and AC identifiers. Four implementation briefs inh
 
 Order: contract review/schema creation first; generator and infrastructure feasibility can then progress independently; workflow consumes generator inputs; interface integrates with the API. Use contract-derived test doubles before integration but never present them as live model results.
 
-Before coding, choose a repository and supported implementation language. Before Azure deployment, resolve subscription, permissions, regional availability, model-processing geography, network requirements and a costed bill of materials; obtain explicit deployment approval.
+Before coding, preserve the selected repository and .NET implementation. Before Azure deployment, resolve hosting/backend, subscription, permissions, regional availability, model-processing geography, network requirements and a costed bill of materials; obtain explicit deployment approval.
 
 Completion means a traceable demonstration and reproducible deployment, with known limitations. If the technical spike overruns the allocated participant time, narrow the UI/integration scope before borrowing rehearsal time. Keep architecture and programme coverage even where no working agent is built.
 
@@ -199,7 +202,6 @@ Technical candidates and their limits:
 
 - [Durable Functions](https://learn.microsoft.com/en-us/azure/durable-task/durable-functions/durable-functions-overview)
 - [Orchestrator constraints](https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-code-constraints)
-- [Agent Framework workflows](https://learn.microsoft.com/en-us/agent-framework/concepts/workflows/)
 - [Document Intelligence Read](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/read?view=doc-intel-4.0.0)
 - [Blob versioning](https://learn.microsoft.com/en-us/azure/storage/blobs/versioning-overview)
 - [Foundry deployment types](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types)
