@@ -1,7 +1,11 @@
 # Implementation Brief - Terraform and Deployment
 
-Version: 0.1 draft | Date: 10 September 2026
+Version: 0.2 draft | Date: 10 September 2026
 Dependency: [Demo PRD](demo-prd.md) and the runtime contracts in [Workflow/API brief](workflow-evidence-api-brief.md).
+
+## 0. Technology decision
+
+Provision the selected .NET 10 isolated Azure Functions application with Azure SQL for workflow/business/audit state and Blob Storage for document content and versions. Use Azure AI Foundry for model governance/evaluation and a governed Azure OpenAI deployment for bounded extraction/classification. Do not provision Foundry Agent Service or Microsoft Agent Framework runtime infrastructure for the core workflow.
 
 ## 1. Outcome and authority
 
@@ -16,7 +20,7 @@ This is not infrastructure for a 1,200-aircraft production rollout. Production g
 | Required input | Why it blocks deployment |
 | --- | --- |
 | Subscription, tenant and resource naming/prefix | Establish destination and prevent accidental deployment into shared/customer environments. |
-| Repository, language/runtime and package versions | Establish compatible build and hosting requirements; do not scaffold competing language implementations. |
+| Package versions and Azure Functions hosting/runtime compatibility | Establish compatible build and hosting requirements; do not scaffold competing language implementations. |
 | Hosting plan and Durable backend | Confirm availability, identity integration, networking, persistence and costs together. |
 | Model name/version/deployment type and quota | Confirm actual access and processing geography; resource location alone is insufficient. |
 | SQL configuration and connection identity | Price the database and establish least-privilege runtime/migration access. |
