@@ -1,7 +1,11 @@
 # Implementation Brief - Reviewer Interface and Demonstration
 
-Version: 0.1 draft | Date: 10 September 2026
+Version: 0.2 draft | Date: 10 September 2026
 Dependencies: [Demo PRD](demo-prd.md), [Workflow/API brief](workflow-evidence-api-brief.md).
+
+## 0. Technology decision
+
+Implement the interface as a .NET 10-compatible web client hosted with the selected Azure Functions application. It consumes the deterministic API and does not host Foundry Agent Service or Microsoft Agent Framework runtime behavior. Azure AI Foundry/Azure OpenAI results are displayed as bounded, cited model output; all policy decisions and authorised actions remain server-side.
 
 ## 1. Outcome
 

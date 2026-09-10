@@ -1,7 +1,11 @@
 # Implementation Brief - Synthetic Data Generator
 
-Version: 0.1 draft | Date: 10 September 2026
+Version: 0.2 draft | Date: 10 September 2026
 Dependency: [Demo PRD](demo-prd.md), especially shared contracts and AC-01 through AC-11.
+
+## 0. Technology decision
+
+The generator remains a local deterministic .NET 10-compatible tool or library. It does not use Foundry Agent Service, Microsoft Agent Framework or model calls, and it must not generate findings, policy decisions or approvals.
 
 ## 1. Outcome
 
