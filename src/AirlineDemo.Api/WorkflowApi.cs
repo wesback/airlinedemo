@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 
@@ -94,12 +93,6 @@ internal sealed class WorkflowService
             return Results.Json(new SafeError("ACTION_FORBIDDEN", correlationId), statusCode: 403);
         }
 
-        var validationError = ValidateSubmission(request);
-        if (validationError is not null)
-        {
-            return Results.Json(new SafeError("INVALID_PAYLOAD", correlationId, validationError), statusCode: 400);
-        }
-
         var canonicalHash = CanonicalHash(request);
         var receiptKey = $"{request.Event.RunId}:{request.Event.EventId}";
         var existing = stateStore.Read(state =>
@@ -112,11 +105,36 @@ internal sealed class WorkflowService
             }
 
             return Results.Json(
-                new OperationAccepted(existing.OperationId, existing.CaseId),
+                new OperationAccepted(existing.OperationId, existing.CaseId, existing.ReceiptId),
                 statusCode: 202);
         }
 
+        var validationError = ValidateSubmission(request);
+        if (validationError is not null)
+        {
+            return Results.Json(new SafeError("INVALID_PAYLOAD", correlationId, validationError), statusCode: 400);
+        }
+
+        if (documentStorage is IManifestDocumentStorage manifestStorage)
+        {
+            var validationContext = new CaseContext(
+                request.Package.RunId,
+                request.Package.CaseId,
+                request.Package.AirlineId,
+                request.Package.AircraftId,
+                request.Package.LeaseId);
+            var storageError = await manifestStorage.ValidateManifestAsync(
+                validationContext, request.Package.Manifest, cancellationToken);
+            if (storageError is not null)
+            {
+                return Results.Json(
+                    new SafeError("INVALID_PAYLOAD", correlationId, storageError),
+                    statusCode: 400);
+            }
+        }
+
         var operationId = NewId("OP");
+        var receiptId = NewId("RECEIPT");
         var context = new CaseContext(
             request.Package.RunId,
             request.Package.CaseId,
@@ -140,8 +158,24 @@ internal sealed class WorkflowService
             "queued",
             null);
 
+        PersistedReceipt? replay = null;
+        var conflict = false;
         stateStore.Update(state =>
         {
+            if (state.Receipts.TryGetValue(receiptKey, out var receipt))
+            {
+                if (!StringComparer.Ordinal.Equals(receipt.CanonicalHash, canonicalHash))
+                {
+                    conflict = true;
+                }
+                else
+                {
+                    replay = receipt;
+                }
+
+                return;
+            }
+
             var caseKey = CaseKey(context);
             if (!state.Cases.TryGetValue(caseKey, out var existingCase))
             {
@@ -173,6 +207,7 @@ internal sealed class WorkflowService
             }
 
             state.Receipts.Add(receiptKey, new PersistedReceipt(
+                receiptId,
                 context.RunId,
                 request.Event.EventId,
                 canonicalHash,
@@ -180,8 +215,22 @@ internal sealed class WorkflowService
                 context.CaseId));
         });
 
+        if (conflict)
+        {
+            return Results.Json(new SafeError("EVENT_PAYLOAD_CONFLICT", correlationId), statusCode: 409);
+        }
+
+        if (replay is not null)
+        {
+            return Results.Json(
+                new OperationAccepted(replay.OperationId, replay.CaseId, replay.ReceiptId),
+                statusCode: 202);
+        }
+
         await Task.CompletedTask.WaitAsync(cancellationToken);
-        return Results.Json(new OperationAccepted(operationId, context.CaseId), statusCode: 202);
+        return Results.Json(
+            new OperationAccepted(operationId, context.CaseId, receiptId),
+            statusCode: 202);
     }
 
     public Task<IResult> GetOperationAsync(
@@ -315,12 +364,14 @@ internal sealed class WorkflowService
             request.Event.Type != "package.submitted" ||
             request.Event.Payload.ValueKind != JsonValueKind.Object ||
             !request.Event.Payload.TryGetProperty("packageId", out var packageId) ||
+            packageId.ValueKind != JsonValueKind.String ||
             packageId.GetString() != request.Package.PackageId ||
             request.Event.CaseId != request.Package.CaseId ||
             request.Event.RunId != request.Package.RunId ||
             request.Package.Manifest is null ||
             request.Package.Manifest.Count == 0 ||
             !IsValidId(request.Event.EventId) ||
+            !IsValidId(request.Event.CorrelationId) ||
             !IsValidId(request.Event.RunId) ||
             !IsValidId(request.Event.CaseId) ||
             !IsValidId(request.Event.AirlineId) ||
@@ -328,17 +379,34 @@ internal sealed class WorkflowService
             !IsValidId(request.Event.LeaseId) ||
             !IsValidId(request.Package.PackageId) ||
             request.Package.Manifest.Any(document =>
+                document is null ||
                 !IsValidId(document.DocumentId) ||
+                document.Version < 1 ||
                 !IsValidId(document.SourceRecordId) ||
                 document.SourceSystem is null ||
                 document.SourceSystem.Length is < 1 or > 128 ||
+                document.MediaType is null ||
+                document.MediaType.Length is < 1 or > 128 ||
                 document.FileName is null ||
                 document.FileName.Length is < 1 or > 255 ||
                 document.FileName.Contains('/') ||
                 document.FileName.Contains('\\') ||
                 document.Sha256 is null ||
                 document.Sha256.Length != 64 ||
-                document.Sha256.Any(character => !Uri.IsHexDigit(character))))
+                document.Sha256.Any(character => !Uri.IsHexDigit(character)) ||
+                document.IssuedOn == default ||
+                document.IssuedOn.Offset != TimeSpan.Zero) ||
+            request.Package.Manifest
+                .GroupBy(document => $"{document.DocumentId}:{document.Version}", StringComparer.Ordinal)
+                .Any(group => group.Count() > 1) ||
+            request.Event.OccurredAt == default ||
+            request.Event.ScenarioEffectiveAt == default ||
+            request.Package.SubmittedAt == default ||
+            request.Package.ScenarioEffectiveAt == default ||
+            request.Event.OccurredAt.Offset != TimeSpan.Zero ||
+            request.Event.ScenarioEffectiveAt.Offset != TimeSpan.Zero ||
+            request.Package.SubmittedAt.Offset != TimeSpan.Zero ||
+            request.Package.ScenarioEffectiveAt.Offset != TimeSpan.Zero)
         {
             return "The package submission does not match the published contract.";
         }
@@ -349,6 +417,7 @@ internal sealed class WorkflowService
     private static bool IsValidId(string? value) =>
         value is not null &&
         value.Length is > 0 and <= 128 &&
+        char.IsLetterOrDigit(value[0]) &&
         value.All(character =>
             char.IsLetterOrDigit(character) || character is '-' or '_' or '.');
 
@@ -381,11 +450,49 @@ internal sealed class WorkflowService
 
     private static string CanonicalHash(PackageSubmissionRequest request)
     {
-        var json = JsonSerializer.Serialize(request, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        var json = JsonSerializer.SerializeToUtf8Bytes(
+            request,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                WriteIndented = false
+            });
+        using var document = JsonDocument.Parse(json);
+        using var canonical = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(canonical))
         {
-            WriteIndented = false
-        });
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
+            WriteCanonicalJson(writer, document.RootElement);
+        }
+
+        return Convert.ToHexString(SHA256.HashData(canonical.ToArray()));
+    }
+
+    private static void WriteCanonicalJson(Utf8JsonWriter writer, JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in value.EnumerateObject().OrderBy(property => property.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteCanonicalJson(writer, property.Value);
+                }
+
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in value.EnumerateArray())
+                {
+                    WriteCanonicalJson(writer, item);
+                }
+
+                writer.WriteEndArray();
+                break;
+            default:
+                value.WriteTo(writer);
+                break;
+        }
     }
 
     private static string NewId(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
