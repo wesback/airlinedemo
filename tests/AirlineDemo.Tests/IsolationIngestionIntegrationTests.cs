@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using AirlineDemo.Api;
 using AirlineDemo.Generator;
@@ -127,6 +128,20 @@ public sealed class IsolationIngestionIntegrationTests
         Assert.All(
             state.RootElement.GetProperty("documents").EnumerateObject(),
             value => AssertSelectedScope(value.Value.GetProperty("context")));
+        var receipt = state.RootElement.GetProperty("receipts")
+            .EnumerateObject()
+            .Single()
+            .Value;
+        Assert.Equal("RUN-0001", receipt.GetProperty("runId").GetString());
+        Assert.Equal("load", receipt.GetProperty("operationType").GetString());
+        Assert.Equal(
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(
+                Path.Combine(fixture.OutputDirectory, "application-inputs", "package-001", "manifest.json")))),
+            receipt.GetProperty("selectedManifestSha256").GetString());
+        Assert.True(DateTimeOffset.TryParse(
+            receipt.GetProperty("timestamp").GetString(),
+            out _));
+        Assert.Equal(13, receipt.GetProperty("affectedRecordCount").GetInt32());
         Assert.DoesNotContain(
             "AIRLINE-0002",
             await File.ReadAllTextAsync(fixture.StatePath),

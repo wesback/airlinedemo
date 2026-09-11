@@ -55,6 +55,15 @@ public sealed record OperationAccepted(
     string CaseId,
     string ReceiptId);
 
+public sealed record RunResetRequest(
+    string? RunId,
+    string? Confirmation);
+
+public sealed record ResetAccepted(
+    string RunId,
+    string ReceiptId,
+    int AffectedRecordCount);
+
 public sealed record ProcessingAttemptStatus(
     string AttemptId,
     int AttemptNumber,
@@ -133,7 +142,11 @@ internal sealed record PersistedReceipt(
     string EventId,
     string CanonicalHash,
     string OperationId,
-    string CaseId);
+    string CaseId,
+    string OperationType = "load",
+    string SelectedManifestSha256 = "",
+    DateTimeOffset Timestamp = default,
+    int AffectedRecordCount = 0);
 
 internal sealed class PersistedState
 {
@@ -142,4 +155,6 @@ internal sealed class PersistedState
     public Dictionary<string, PersistedOperation> Operations { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedDocument> Documents { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedReceipt> Receipts { get; init; } = new(StringComparer.Ordinal);
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, PersistedReceipt>? AuditReceipts { get; set; }
 }

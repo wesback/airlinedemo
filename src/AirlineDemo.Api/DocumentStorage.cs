@@ -16,7 +16,17 @@ public interface IManifestDocumentStorage
         CancellationToken cancellationToken);
 }
 
-public sealed class FileDocumentStorage : IDocumentStorage, IManifestDocumentStorage
+public interface ISelectedManifestStorage
+{
+    Task<string?> GetSelectedManifestSha256Async(
+        CaseContext context,
+        CancellationToken cancellationToken);
+}
+
+public sealed class FileDocumentStorage :
+    IDocumentStorage,
+    IManifestDocumentStorage,
+    ISelectedManifestStorage
 {
     private readonly string rootDirectory;
     private readonly IReadOnlyList<SelectedFixtureEntry>? selectedFixtureEntries;
@@ -111,6 +121,38 @@ public sealed class FileDocumentStorage : IDocumentStorage, IManifestDocumentSto
             {
                 return $"The input file '{Path.GetRelativePath(caseDirectory, path)}' is not declared by the package.";
             }
+        }
+
+        return null;
+    }
+
+    public async Task<string?> GetSelectedManifestSha256Async(
+        CaseContext context,
+        CancellationToken cancellationToken)
+    {
+        if (selectedFixtureEntries is null)
+        {
+            return null;
+        }
+
+        var selectedDirectories = selectedFixtureEntries
+            .Where(entry =>
+                entry.Scope.RunId == context.RunId &&
+                (string.IsNullOrEmpty(context.CaseId) || entry.Scope.Matches(context)))
+            .Select(entry => Path.GetDirectoryName(entry.RelativePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        foreach (var directory in selectedDirectories)
+        {
+            var manifestPath = ResolveSelectedPath(Path.Combine(directory!, "manifest.json"));
+            if (manifestPath is null || !File.Exists(manifestPath))
+            {
+                continue;
+            }
+
+            await using var stream = File.OpenRead(manifestPath);
+            return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
         }
 
         return null;
