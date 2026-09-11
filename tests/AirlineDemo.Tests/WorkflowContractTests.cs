@@ -8,6 +8,8 @@ public sealed class WorkflowContractTests
     private static readonly string[] RequiredDefinitions =
     [
         "CaseContext",
+        "Asset",
+        "Requirement",
         "SubmissionPackage",
         "Document",
         "EvidenceRef",
@@ -89,6 +91,33 @@ public sealed class WorkflowContractTests
                   "airlineId": "AIRLINE-0001",
                   "aircraftId": "MOCK-AC-001",
                   "leaseId": "LEASE-0001"
+                }
+                """),
+            ("Asset", """
+                {
+                  "aircraftId": "MOCK-AC-001",
+                  "engineId": "MOCK-ENG-001",
+                  "components": [{
+                    "componentId": "COMP-0001",
+                    "serialNumber": "SERIAL-0001"
+                  }],
+                  "referenceSource": {
+                    "identity": "asset-register",
+                    "version": 1
+                  }
+                }
+                """),
+            ("Requirement", """
+                {
+                  "requirementId": "REQ-0001",
+                  "version": 1,
+                  "componentId": "COMP-0001",
+                  "evidenceKind": "maintenance-record",
+                  "description": "Installation record",
+                  "applicability": "fixture-setup",
+                  "approvedBy": "mock-setup",
+                  "approvedAt": "2026-09-10T08:00:00Z",
+                  "sourceRef": "CHECKLIST-0001"
                 }
                 """),
             ("Document", """

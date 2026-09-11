@@ -59,6 +59,124 @@
       },
       "additionalProperties": false
     },
+    "Asset": {
+      "type": "object",
+      "required": [
+        "aircraftId",
+        "engineId",
+        "components",
+        "referenceSource"
+      ],
+      "properties": {
+        "aircraftId": {
+          "$ref": "#/$defs/Id"
+        },
+        "engineId": {
+          "$ref": "#/$defs/Id"
+        },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "componentId",
+              "serialNumber"
+            ],
+            "properties": {
+              "componentId": {
+                "$ref": "#/$defs/Id"
+              },
+              "serialNumber": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "referenceSource": {
+          "type": "object",
+          "required": [
+            "identity",
+            "version"
+          ],
+          "properties": {
+            "identity": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Requirement": {
+      "type": "object",
+      "required": [
+        "requirementId",
+        "version",
+        "componentId",
+        "evidenceKind",
+        "description",
+        "applicability",
+        "approvedBy",
+        "approvedAt",
+        "sourceRef"
+      ],
+      "properties": {
+        "requirementId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "componentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "evidenceKind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "applicability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "approvedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "approvedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "sourceRef": {
+          "$ref": "#/$defs/Id"
+        },
+        "requiredFrom": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "requiredTo": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "additionalProperties": false
+    },
     "Document": {
       "type": "object",
       "required": [

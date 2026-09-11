@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/AirlineDemo.Api/AirlineDemo.Api.csproj" />
+    <ProjectReference Include="../../src/AirlineDemo.Generator/AirlineDemo.Generator.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="JsonSchema.Net" Version="8.0.0" />
