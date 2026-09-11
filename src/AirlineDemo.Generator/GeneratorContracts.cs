@@ -8,6 +8,10 @@ public static class WorkflowContract
 {
     public const string LiveMissingHistoryMutation = "live.missing-history";
     public const string LiveAmbiguousIdentityMutation = "live.ambiguous-identity";
+    public const string ApplicationInputArtifactClassification = "application-input";
+    public const string StagedResponseArtifactClassification = "staged-response";
+    public const string EvaluatorOnlyArtifactClassification = "evaluator-only";
+    public const string ReplayArtifactClassification = "replay-only";
 
     public static string Version => SharedWorkflowArtifacts.WorkflowSchemaVersion;
 
@@ -48,6 +52,17 @@ public sealed record CaseContext(
     string AirlineId,
     string AircraftId,
     string LeaseId);
+
+public sealed record ArtifactScope(
+    string RunId,
+    string CaseId,
+    string AirlineId,
+    string AircraftId,
+    string LeaseId)
+{
+    public static ArtifactScope FromCase(CaseContext context) =>
+        new(context.RunId, context.CaseId, context.AirlineId, context.AircraftId, context.LeaseId);
+}
 
 public sealed record AssetReference(string Identity, int Version);
 
@@ -112,7 +127,8 @@ public sealed record ManifestEntry(
     string RelativePath,
     string DocumentId,
     int Version,
-    string Sha256);
+    string Sha256,
+    ArtifactScope? Scope = null);
 
 public sealed record SelectedInitialInputManifest(IReadOnlyList<ManifestEntry> Entries);
 
@@ -135,6 +151,12 @@ public sealed record PathBoundaryDeclaration(
 
 public sealed record GeneratedFileHash(string RelativePath, string Sha256);
 
+public sealed record ReceiptArtifact(
+    string RelativePath,
+    string Sha256,
+    string Classification,
+    ArtifactScope Scope);
+
 public sealed record ReproducibilityReceipt(
     string ContractVersion,
     string TemplateVersion,
@@ -145,7 +167,8 @@ public sealed record ReproducibilityReceipt(
     string Profile,
     IReadOnlyDictionary<string, string> BuildDependencies,
     IReadOnlyList<GeneratedFileHash> GeneratedFiles,
-    IReadOnlyList<string> IntendedMutationIdentifiers);
+    IReadOnlyList<string> IntendedMutationIdentifiers,
+    IReadOnlyList<ReceiptArtifact>? ArtifactEvidence = null);
 
 public sealed record ComponentMovement(
     string ComponentId,
@@ -255,8 +278,13 @@ public static class GeneratorContractValidator
             ValidateEvent(envelope, package.Case, packageById, errors);
         }
 
-        ValidateBoundaries(package.PathBoundaries, errors);
-        ValidateReceipt(package.Receipt, package.Configuration, errors);
+        ValidateBoundaries(
+            package.PathBoundaries,
+            package.Case,
+            package.Configuration,
+            errors);
+        ValidateReceipt(package.Receipt, package.Configuration, package.Case, errors);
+        ValidateIsolationReceipt(package, errors);
         BaselineFixtureValidator.ValidateLiveMutationDeclarations(package, errors);
         if (package.Baseline is not null)
         {
@@ -551,6 +579,8 @@ public static class GeneratorContractValidator
 
     private static void ValidateBoundaries(
         PathBoundaryDeclaration? boundaries,
+        CaseContext? context,
+        GeneratorConfiguration? configuration,
         ICollection<string> errors)
     {
         if (boundaries is null)
@@ -630,12 +660,26 @@ public static class GeneratorContractValidator
             {
                 errors.Add($"application input manifest path '{path}' crosses a protected generator boundary.");
             }
+
+            if (entry.Scope is null)
+            {
+                if (StringComparer.Ordinal.Equals(configuration?.Profile, "isolation"))
+                {
+                    errors.Add(
+                        $"selectedInitialInputManifest entry '{path}' must record its isolation scope.");
+                }
+            }
+            else
+            {
+                ValidateArtifactScope(entry.Scope, $"manifest entry '{path}'.scope", context, errors);
+            }
         }
     }
 
     private static void ValidateReceipt(
         ReproducibilityReceipt? receipt,
         GeneratorConfiguration? configuration,
+        CaseContext? context,
         ICollection<string> errors)
     {
         if (receipt is null)
@@ -691,6 +735,125 @@ public static class GeneratorContractValidator
         if (receipt.IntendedMutationIdentifiers is null)
         {
             errors.Add("receipt.intendedMutationIdentifiers is required.");
+        }
+
+        foreach (var artifact in receipt.ArtifactEvidence ?? [])
+        {
+            if (artifact is null)
+            {
+                errors.Add("receipt.artifactEvidence cannot contain null values.");
+                continue;
+            }
+
+            var path = NormalizeRelativePath(artifact.RelativePath);
+            if (path is null)
+            {
+                errors.Add(
+                    $"receipt artifact '{artifact.RelativePath}' must be a safe relative path.");
+            }
+
+            if (string.IsNullOrWhiteSpace(artifact.Classification))
+            {
+                errors.Add($"receipt artifact '{artifact.RelativePath}' classification is required.");
+            }
+
+            ValidateSha256(
+                artifact.Sha256,
+                $"receipt artifact '{artifact.RelativePath}'",
+                errors);
+            ValidateArtifactScope(
+                artifact.Scope,
+                $"receipt artifact '{artifact.RelativePath}'.scope",
+                context,
+                errors,
+                allowDifferentScope: true);
+        }
+    }
+
+    private static void ValidateArtifactScope(
+        ArtifactScope? scope,
+        string owner,
+        CaseContext? context,
+        ICollection<string> errors,
+        bool allowDifferentScope = false)
+    {
+        if (scope is null)
+        {
+            errors.Add($"{owner} is required.");
+            return;
+        }
+
+        ValidateId(scope.RunId, $"{owner}.runId", errors);
+        ValidateId(scope.CaseId, $"{owner}.caseId", errors);
+        ValidateId(scope.AirlineId, $"{owner}.airlineId", errors);
+        ValidateId(scope.AircraftId, $"{owner}.aircraftId", errors);
+        ValidateId(scope.LeaseId, $"{owner}.leaseId", errors);
+        if (!allowDifferentScope &&
+            context is not null &&
+            (!StringComparer.Ordinal.Equals(scope.RunId, context.RunId) ||
+             !StringComparer.Ordinal.Equals(scope.CaseId, context.CaseId) ||
+             !StringComparer.Ordinal.Equals(scope.AirlineId, context.AirlineId) ||
+             !StringComparer.Ordinal.Equals(scope.AircraftId, context.AircraftId) ||
+             !StringComparer.Ordinal.Equals(scope.LeaseId, context.LeaseId)))
+        {
+            errors.Add($"{owner} scope IDs must match the selected initial case.");
+        }
+    }
+
+    private static void ValidateIsolationReceipt(
+        GeneratorContractPackage package,
+        ICollection<string> errors)
+    {
+        if (!StringComparer.Ordinal.Equals(package.Configuration?.Profile, "isolation"))
+        {
+            return;
+        }
+
+        const string isolationRoot = "evaluator-only/isolation/cross-scope-package/";
+        var caseContext = package.Case;
+        var crossScopeArtifacts = (package.Receipt?.ArtifactEvidence ?? [])
+            .Where(artifact => artifact.Scope is not null &&
+                caseContext is not null &&
+                (!StringComparer.Ordinal.Equals(artifact.Scope.RunId, caseContext.RunId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.CaseId, caseContext.CaseId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.AirlineId, caseContext.AirlineId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.AircraftId, caseContext.AircraftId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.LeaseId, caseContext.LeaseId)))
+            .ToArray();
+        if (crossScopeArtifacts.Length == 0)
+        {
+            errors.Add("isolation receipt must classify the cross-scope package artifacts.");
+        }
+
+        foreach (var artifact in crossScopeArtifacts)
+        {
+            var path = NormalizeRelativePath(artifact.RelativePath);
+            if (path is null ||
+                !path.StartsWith(isolationRoot, StringComparison.Ordinal) ||
+                !StringComparer.Ordinal.Equals(
+                    artifact.Classification,
+                    WorkflowContract.EvaluatorOnlyArtifactClassification))
+            {
+                errors.Add(
+                    $"isolation cross-scope artifact '{artifact.RelativePath}' must be evaluator-only.");
+            }
+        }
+
+        var classifiedPaths = crossScopeArtifacts
+            .Select(artifact => NormalizeRelativePath(artifact.RelativePath))
+            .Where(path => path is not null)
+            .Cast<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var generatedFile in package.Receipt?.GeneratedFiles ?? [])
+        {
+            var path = NormalizeRelativePath(generatedFile.RelativePath);
+            if (path is not null &&
+                path.Contains("cross-scope-package", StringComparison.Ordinal) &&
+                !classifiedPaths.Contains(path))
+            {
+                errors.Add(
+                    $"isolation cross-scope artifact '{path}' is omitted from evaluator-only artifact classification.");
+            }
         }
     }
 
@@ -1103,6 +1266,7 @@ public static class BaselineFixtureValidator
 
         ValidateLiveMutationFiles(package, root, generatedFiles, errors);
         ValidateStagedResponse(package, root, errors);
+        ValidateIsolationArtifacts(package, root, generatedFiles, errors);
     }
 
     internal static void ValidateLiveMutationDeclarations(
@@ -1267,6 +1431,100 @@ public static class BaselineFixtureValidator
         }
     }
 
+    private static void ValidateIsolationArtifacts(
+        GeneratorContractPackage package,
+        string root,
+        IReadOnlyList<string>? generatedFiles,
+        ICollection<string> errors)
+    {
+        if (!StringComparer.Ordinal.Equals(package.Configuration?.Profile, "isolation"))
+        {
+            return;
+        }
+
+        const string isolationRoot = "evaluator-only/isolation/cross-scope-package/";
+        var receiptArtifacts = package.Receipt?.ArtifactEvidence ?? [];
+        var crossScopeArtifacts = receiptArtifacts
+            .Where(artifact => artifact.Scope is not null &&
+                package.Case is not null &&
+                (!StringComparer.Ordinal.Equals(artifact.Scope.RunId, package.Case.RunId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.CaseId, package.Case.CaseId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.AirlineId, package.Case.AirlineId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.AircraftId, package.Case.AircraftId) ||
+                 !StringComparer.Ordinal.Equals(artifact.Scope.LeaseId, package.Case.LeaseId)))
+            .ToArray();
+
+        if (crossScopeArtifacts.Length == 0)
+        {
+            errors.Add("isolation receipt must classify the cross-scope package artifacts.");
+        }
+
+        foreach (var artifact in crossScopeArtifacts)
+        {
+            var path = NormalizeIsolationPath(artifact.RelativePath);
+            if (path is null ||
+                !path.StartsWith(isolationRoot, StringComparison.Ordinal) ||
+                !StringComparer.Ordinal.Equals(
+                    artifact.Classification,
+                    WorkflowContract.EvaluatorOnlyArtifactClassification))
+            {
+                errors.Add(
+                    $"isolation cross-scope artifact '{artifact.RelativePath}' must be evaluator-only.");
+                continue;
+            }
+
+            var fullPath = ResolveOutputPath(root, path);
+            if (fullPath is null || !File.Exists(fullPath))
+            {
+                errors.Add($"isolation cross-scope artifact '{path}' is missing.");
+                continue;
+            }
+
+            if (!StringComparer.OrdinalIgnoreCase.Equals(HashFile(fullPath), artifact.Sha256))
+            {
+                errors.Add($"isolation cross-scope artifact hash does not match '{path}'.");
+            }
+        }
+
+        var generatedIsolationPaths = (generatedFiles ??
+                package.Receipt?.GeneratedFiles?.Select(file => file.RelativePath).ToArray() ??
+                [])
+            .Select(NormalizeIsolationPath)
+            .Where(path => path is not null &&
+                path.Contains("cross-scope-package", StringComparison.Ordinal))
+            .Cast<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        var classifiedIsolationPaths = crossScopeArtifacts
+            .Select(artifact => NormalizeIsolationPath(artifact.RelativePath))
+            .Where(path => path is not null)
+            .Cast<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var path in generatedIsolationPaths)
+        {
+            if (!classifiedIsolationPaths.Contains(path))
+            {
+                errors.Add(
+                    $"isolation cross-scope artifact '{path}' is omitted from evaluator-only artifact classification.");
+            }
+        }
+    }
+
+    private static string? NormalizeIsolationPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path))
+        {
+            return null;
+        }
+
+        var normalized = path.Replace('\\', '/');
+        return normalized.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => segment is "." or "..")
+            ? null
+            : string.Join(
+                '/',
+                normalized.Split('/', StringSplitOptions.RemoveEmptyEntries));
+    }
+
     private static string? ResolveOutputPath(string root, string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath) || Path.IsPathRooted(relativePath))
@@ -1304,7 +1562,8 @@ public static class ReproducibilityReceiptFactory
         GeneratorConfiguration configuration,
         string templateVersion,
         IEnumerable<string> generatedFiles,
-        IEnumerable<string> intendedMutationIdentifiers)
+        IEnumerable<string> intendedMutationIdentifiers,
+        IEnumerable<ReceiptArtifact>? artifactEvidence = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(templateVersion);
@@ -1316,6 +1575,26 @@ public static class ReproducibilityReceiptFactory
             .Select(path => CreateFileHash(root, path))
             .OrderBy(file => file.RelativePath, StringComparer.Ordinal)
             .ToArray();
+        var hashesByPath = hashes.ToDictionary(
+            file => file.RelativePath,
+            file => file.Sha256,
+            StringComparer.Ordinal);
+        var evidence = artifactEvidence?
+            .Select(artifact =>
+            {
+                var path = NormalizePath(artifact.RelativePath);
+                if (!hashesByPath.TryGetValue(path, out var hash))
+                {
+                    throw new ArgumentException(
+                        $"Artifact evidence path '{path}' is not a generated file.",
+                        nameof(artifactEvidence));
+                }
+
+                return artifact with { RelativePath = path, Sha256 = hash };
+            })
+            .OrderBy(artifact => artifact.RelativePath, StringComparer.Ordinal)
+            .ToArray()
+            ?? [];
 
         return new ReproducibilityReceipt(
             WorkflowContract.Version,
@@ -1327,7 +1606,8 @@ public static class ReproducibilityReceiptFactory
             configuration.Profile,
             new Dictionary<string, string>(configuration.BuildDependencies, StringComparer.Ordinal),
             hashes,
-            intendedMutationIdentifiers.OrderBy(value => value, StringComparer.Ordinal).ToArray());
+            intendedMutationIdentifiers.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+            evidence);
     }
 
     private static GeneratedFileHash CreateFileHash(string root, string path)
