@@ -3,6 +3,21 @@ using System.Text.Json;
 
 namespace AirlineDemo.Api;
 
+public interface IPageInventoryStorage
+{
+    Task<IReadOnlyList<int>> GetPageInventoryAsync(
+        CaseContext context,
+        DocumentMetadata document,
+        CancellationToken cancellationToken);
+}
+
+public interface IApprovedRequirementStorage
+{
+    Task<IReadOnlyList<ApprovedRequirementVersion>> GetApprovedRequirementVersionsAsync(
+        CaseContext context,
+        CancellationToken cancellationToken);
+}
+
 public interface IDocumentStorage
 {
     Task<string?> ReadPagePreviewAsync(string storageLocator, int page, CancellationToken cancellationToken);
@@ -26,7 +41,9 @@ public interface ISelectedManifestStorage
 public sealed class FileDocumentStorage :
     IDocumentStorage,
     IManifestDocumentStorage,
-    ISelectedManifestStorage
+    ISelectedManifestStorage,
+    IPageInventoryStorage,
+    IApprovedRequirementStorage
 {
     private readonly string rootDirectory;
     private readonly IReadOnlyList<SelectedFixtureEntry>? selectedFixtureEntries;
@@ -156,6 +173,68 @@ public sealed class FileDocumentStorage :
         }
 
         return null;
+    }
+
+    public Task<IReadOnlyList<int>> GetPageInventoryAsync(
+        CaseContext context,
+        DocumentMetadata document,
+        CancellationToken cancellationToken)
+    {
+        var locator = $"{context.RunId}/{context.CaseId}/{document.DocumentId}/v{document.Version}";
+        var documentDirectory = ResolveStoragePath(locator);
+        if (documentDirectory is null)
+        {
+            return Task.FromResult<IReadOnlyList<int>>([]);
+        }
+
+        if (File.Exists(documentDirectory))
+        {
+            return Task.FromResult<IReadOnlyList<int>>([1]);
+        }
+
+        var pageFiles = Directory.Exists(documentDirectory)
+            ? Directory.EnumerateFiles(documentDirectory, "page-*.txt")
+                .Select(path => Path.GetFileNameWithoutExtension(path))
+                .Select(name => name["page-".Length..])
+                .Where(value => int.TryParse(value, out _))
+                .Select(int.Parse)
+                .OrderBy(page => page)
+                .ToArray()
+            : [];
+        if (pageFiles.Length > 0)
+        {
+            return Task.FromResult<IReadOnlyList<int>>(pageFiles);
+        }
+
+        IReadOnlyList<int> pages = File.Exists(Path.Combine(documentDirectory, document.FileName))
+            ? [1]
+            : [];
+        return Task.FromResult(pages);
+    }
+
+    public async Task<IReadOnlyList<ApprovedRequirementVersion>> GetApprovedRequirementVersionsAsync(
+        CaseContext context,
+        CancellationToken cancellationToken)
+    {
+        var path = ResolvePath("application-inputs/reference-data/requirements.json");
+        if (path is null || !File.Exists(path))
+        {
+            return [];
+        }
+
+        await using var stream = File.OpenRead(path);
+        var requirements = await JsonSerializer.DeserializeAsync<List<ApprovedRequirementVersion>>(
+            stream,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web),
+            cancellationToken: cancellationToken);
+        return requirements?
+            .Where(requirement => !string.IsNullOrWhiteSpace(requirement.RequirementId) &&
+                requirement.Version > 0)
+            .Select(requirement => new ApprovedRequirementVersion(
+                requirement.RequirementId,
+                requirement.Version))
+            .ToArray()
+            ?? [];
     }
 
     private async Task<string?> ValidateSelectedFixtureManifestAsync(

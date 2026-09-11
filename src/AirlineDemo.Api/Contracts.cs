@@ -107,6 +107,35 @@ public sealed record EvidencePreview(
 
 public sealed record EvidenceBounds(double X, double Y, double Width, double Height);
 
+public sealed record ApprovedRequirementVersion(
+    string RequirementId,
+    int Version);
+
+public sealed record EvidenceDocumentVersion(
+    string DocumentId,
+    int Version,
+    string Sha256);
+
+public sealed record ScopedExtractionRecord(
+    CaseContext Context,
+    string DocumentId,
+    int Version,
+    string Sha256,
+    string ParserVersion,
+    string ExtractorVersion,
+    IReadOnlyList<int> PageInventory,
+    string ProcessingState);
+
+public sealed record EvidenceBasis(
+    string BasisId,
+    CaseContext Context,
+    IReadOnlyList<EvidenceDocumentVersion> DocumentInventory,
+    IReadOnlyList<ApprovedRequirementVersion> ApprovedRequirementVersions,
+    long CaseRevision,
+    DateTimeOffset CreatedAt,
+    string ParserVersion,
+    string ExtractorVersion);
+
 public sealed record CallerScope(
     string RunId,
     string AirlineId,
@@ -154,6 +183,8 @@ internal sealed class PersistedState
     public Dictionary<string, PersistedPackage> Packages { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedOperation> Operations { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedDocument> Documents { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, ScopedExtractionRecord> ExtractionRecords { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, EvidenceBasis> EvidenceBases { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedReceipt> Receipts { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, PersistedReceipt>? AuditReceipts { get; set; }
