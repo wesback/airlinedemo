@@ -227,6 +227,26 @@ variable "azure_openai_deployment_type" {
   }
 }
 
+variable "azure_openai_model" {
+  description = "Exact Azure OpenAI model name confirmed by the deployment readiness gate."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.azure_openai_model)) > 0
+    error_message = "azure_openai_model must be explicitly supplied; Terraform must not select a model."
+  }
+}
+
+variable "azure_openai_model_version" {
+  description = "Exact Azure OpenAI model version confirmed by the deployment readiness gate."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.azure_openai_model_version)) > 0
+    error_message = "azure_openai_model_version must be explicitly supplied; Terraform must not select a default version."
+  }
+}
+
 variable "azure_openai_quota_tokens_minute" {
   description = "Azure OpenAI quota reserved by the approved preflight record."
   type        = number
@@ -235,5 +255,49 @@ variable "azure_openai_quota_tokens_minute" {
   validation {
     condition     = var.azure_openai_quota_tokens_minute == 30000
     error_message = "azure_openai_quota_tokens_minute must be 30000 for this configuration."
+  }
+}
+
+variable "sql_aad_admin_login" {
+  description = "Existing Entra administrator login supplied privately for the SQL server prerequisite."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(trimspace(var.sql_aad_admin_login)) > 0
+    error_message = "sql_aad_admin_login must be supplied by the separately owned identity prerequisite."
+  }
+}
+
+variable "sql_aad_admin_object_id" {
+  description = "Existing Entra administrator object ID supplied privately for the SQL server prerequisite."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F-]{36}$", var.sql_aad_admin_object_id))
+    error_message = "sql_aad_admin_object_id must be a GUID supplied by the separately owned identity prerequisite."
+  }
+}
+
+variable "cognitive_allowed_ip_ranges" {
+  description = "Explicit public firewall allow-list for Document Intelligence and Azure OpenAI. Empty denies public data-plane access."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for ip in var.cognitive_allowed_ip_ranges : can(cidrhost(ip, 0))])
+    error_message = "cognitive_allowed_ip_ranges must contain valid CIDR ranges."
+  }
+}
+
+variable "function_allowed_ip_ranges" {
+  description = "Explicit public firewall allow-list for the Function App. Empty denies public endpoint access."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for ip in var.function_allowed_ip_ranges : can(cidrhost(ip, 0))])
+    error_message = "function_allowed_ip_ranges must contain valid CIDR ranges."
   }
 }
