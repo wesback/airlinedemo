@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
@@ -105,6 +106,24 @@ public static class WorkflowApi
             CancellationToken cancellationToken) =>
             await service.GetEvidencePreviewAsync(
                 id, documentId, version, page, httpContext, cancellationToken));
+
+        app.MapPost("/api/cases/{id}/reviews", async (
+            string id,
+            ReviewCommand? command,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.SubmitReviewAsync(
+                id, command, httpContext, cancellationToken));
+
+        app.MapPost("/api/cases/{id}/review-tasks/{taskId}/complete", async (
+            string id,
+            string taskId,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.CompleteReviewTaskAsync(
+                id, taskId, httpContext, cancellationToken));
 
         return app;
     }
@@ -426,6 +445,28 @@ internal sealed class WorkflowService
                     basis.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var reviewDecisionKeys = state.ReviewDecisions?
+                .Where(entry => state.EvidenceBases.TryGetValue(
+                    entry.Value.BasisId, out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray() ?? [];
+            var findingDispositionKeys = state.FindingDispositions?
+                .Where(entry => state.EvidenceBases.TryGetValue(
+                    entry.Value.BasisId, out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray() ?? [];
+            var reviewTaskKeys = state.ReviewTasks?
+                .Where(entry => state.EvidenceBases.TryGetValue(
+                    entry.Value.BasisId, out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray() ?? [];
+            var auditEntryKeys = state.AuditEntries?
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray() ?? [];
             affectedRecordCount =
                 caseKeys.Length +
                 packageKeys.Length +
@@ -437,7 +478,11 @@ internal sealed class WorkflowService
                 investigationKeys.Length +
                 findingKeys.Length +
                 policyDecisionKeys.Length +
-                evidenceRequestKeys.Length;
+                evidenceRequestKeys.Length +
+                reviewDecisionKeys.Length +
+                findingDispositionKeys.Length +
+                reviewTaskKeys.Length +
+                auditEntryKeys.Length;
             foreach (var key in caseKeys)
             {
                 state.Cases.Remove(key);
@@ -491,6 +536,26 @@ internal sealed class WorkflowService
             foreach (var key in evidenceRequestKeys)
             {
                 state.EvidenceRequests.Remove(key);
+            }
+
+            foreach (var key in reviewDecisionKeys)
+            {
+                state.ReviewDecisions?.Remove(key);
+            }
+
+            foreach (var key in findingDispositionKeys)
+            {
+                state.FindingDispositions?.Remove(key);
+            }
+
+            foreach (var key in reviewTaskKeys)
+            {
+                state.ReviewTasks?.Remove(key);
+            }
+
+            foreach (var key in auditEntryKeys)
+            {
+                state.AuditEntries?.Remove(key);
             }
 
             state.Receipts.Add(
@@ -1117,6 +1182,220 @@ internal sealed class WorkflowService
             : Results.Ok(summary));
     }
 
+    public Task<IResult> SubmitReviewAsync(
+        string caseId,
+        ReviewCommand? command,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = NewCorrelationId();
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        if (caller is null)
+        {
+            return Task.FromResult<IResult>(Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", correlationId), statusCode: 401));
+        }
+
+        if (command is null ||
+            !IsValidId(command.FindingId) ||
+            !IsValidId(command.BasisId) ||
+            command.Decision is not
+                ("accept_evidence" or "dismiss_finding" or "needs_evidence") ||
+            string.IsNullOrWhiteSpace(command.Reason) ||
+            command.Reason.Length > 4000 ||
+            !TryParseExpectedRevision(httpContext.Request.Headers.IfMatch, out var expectedRevision))
+        {
+            return Task.FromResult<IResult>(Results.Json(
+                new SafeError("INVALID_PAYLOAD", correlationId), statusCode: 400));
+        }
+
+        ReviewDecision? review = null;
+        SafeError? failure = null;
+        var statusCode = 200;
+        stateStore.Update(state =>
+        {
+            var persistedCase = state.Cases.Values.SingleOrDefault(candidate =>
+                candidate.Context.CaseId == caseId &&
+                caller.Matches(candidate.Context));
+            if (persistedCase is null)
+            {
+                failure = new SafeError("CASE_NOT_FOUND", correlationId);
+                statusCode = 404;
+                return;
+            }
+
+            if (persistedCase.CaseRevision != expectedRevision)
+            {
+                failure = new SafeError("STALE_PRECONDITION", correlationId);
+                statusCode = 412;
+                return;
+            }
+
+            var basis = state.EvidenceBases.Values
+                .Where(candidate =>
+                    ScopeMatches(candidate.Context, persistedCase.Context))
+                .OrderByDescending(candidate => candidate.CaseRevision)
+                .ThenByDescending(candidate => candidate.CreatedAt)
+                .FirstOrDefault();
+            if (basis is null ||
+                !StringComparer.Ordinal.Equals(basis.BasisId, command.BasisId))
+            {
+                failure = new SafeError("STALE_PRECONDITION", correlationId);
+                statusCode = 412;
+                return;
+            }
+
+            var finding = state.Findings.Values.SingleOrDefault(candidate =>
+                StringComparer.Ordinal.Equals(candidate.FindingId, command.FindingId) &&
+                StringComparer.Ordinal.Equals(candidate.BasisId, basis.BasisId));
+            if (finding is null)
+            {
+                failure = new SafeError("CASE_NOT_FOUND", correlationId);
+                statusCode = 404;
+                return;
+            }
+
+            var reviewId = NewId("REVIEW");
+            var decidedAt = DateTimeOffset.UtcNow;
+            review = new ReviewDecision(
+                reviewId,
+                finding.FindingId,
+                basis.BasisId,
+                command.Decision,
+                caller.Subject,
+                command.Reason.Trim(),
+                decidedAt);
+            (state.ReviewDecisions ??= new(StringComparer.Ordinal)).Add(reviewId, review);
+            (state.FindingDispositions ??= new(StringComparer.Ordinal))[$"{basis.BasisId}:{finding.FindingId}"] =
+                new FindingDisposition(
+                    finding.FindingId,
+                    basis.BasisId,
+                    command.Decision switch
+                    {
+                        "accept_evidence" => "accepted",
+                        "dismiss_finding" => "dismissed",
+                        _ => "needs_evidence"
+                    },
+                    reviewId);
+            var auditId = NewId("AUDIT");
+            (state.AuditEntries ??= new(StringComparer.Ordinal)).Add(
+                auditId,
+                new AuditEntry(
+                    auditId,
+                    persistedCase.Context,
+                    "human_reviewer",
+                    caller.Subject,
+                    $"review.{command.Decision}",
+                    [finding.FindingId],
+                    basis.BasisId,
+                    decidedAt,
+                    correlationId));
+            var nextCase = persistedCase with
+            {
+                CaseRevision = checked(persistedCase.CaseRevision + 1),
+                Status = ReviewCaseStatus(state, basis.BasisId, command.Decision)
+            };
+            state.Cases[CaseKey(persistedCase.Context)] = nextCase;
+        });
+
+        return Task.FromResult<IResult>(failure is null
+            ? Results.Ok(review)
+            : Results.Json(failure, statusCode: statusCode));
+    }
+
+    public Task<IResult> CompleteReviewTaskAsync(
+        string caseId,
+        string taskId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = NewCorrelationId();
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        if (caller is null)
+        {
+            return Task.FromResult<IResult>(Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", correlationId), statusCode: 401));
+        }
+
+        if (!IsValidId(taskId) ||
+            !TryParseExpectedRevision(httpContext.Request.Headers.IfMatch, out var expectedRevision))
+        {
+            return Task.FromResult<IResult>(Results.Json(
+                new SafeError("INVALID_PAYLOAD", correlationId), statusCode: 400));
+        }
+
+        ReviewTask? completedTask = null;
+        SafeError? failure = null;
+        var statusCode = 200;
+        stateStore.Update(state =>
+        {
+            var persistedCase = state.Cases.Values.SingleOrDefault(candidate =>
+                candidate.Context.CaseId == caseId &&
+                caller.Matches(candidate.Context));
+            if (persistedCase is null)
+            {
+                failure = new SafeError("CASE_NOT_FOUND", correlationId);
+                statusCode = 404;
+                return;
+            }
+
+            if (persistedCase.CaseRevision != expectedRevision)
+            {
+                failure = new SafeError("STALE_PRECONDITION", correlationId);
+                statusCode = 412;
+                return;
+            }
+
+            if (state.ReviewTasks is null ||
+                !state.ReviewTasks.TryGetValue(taskId, out var task))
+            {
+                failure = new SafeError("CASE_NOT_FOUND", correlationId);
+                statusCode = 404;
+                return;
+            }
+
+            var basis = state.EvidenceBases.Values
+                .Where(candidate => ScopeMatches(candidate.Context, persistedCase.Context))
+                .OrderByDescending(candidate => candidate.CaseRevision)
+                .ThenByDescending(candidate => candidate.CreatedAt)
+                .FirstOrDefault();
+            if (basis is null ||
+                basis.BasisId != task.BasisId ||
+                !state.Findings.Values.Any(finding =>
+                    finding.FindingId == task.FindingId &&
+                    finding.BasisId == task.BasisId))
+            {
+                failure = new SafeError("STALE_PRECONDITION", correlationId);
+                statusCode = 412;
+                return;
+            }
+
+            if (task.Status == "completed")
+            {
+                completedTask = task;
+                return;
+            }
+
+            if (task.Status != "open")
+            {
+                failure = new SafeError("INVALID_PAYLOAD", correlationId);
+                statusCode = 400;
+                return;
+            }
+
+            completedTask = task with { Status = "completed" };
+            state.ReviewTasks[taskId] = completedTask;
+            state.Cases[CaseKey(persistedCase.Context)] = persistedCase with
+            {
+                CaseRevision = checked(persistedCase.CaseRevision + 1)
+            };
+        });
+
+        return Task.FromResult<IResult>(failure is null
+            ? Results.Ok(completedTask)
+            : Results.Json(failure, statusCode: statusCode));
+    }
+
     private async Task<InvestigationOutcome> InvestigateBasisAsync(
         EvidenceBasis basis,
         string correlationId,
@@ -1297,6 +1576,59 @@ internal sealed class WorkflowService
         left.AircraftId == right.AircraftId &&
         left.LeaseId == right.LeaseId;
 
+    private static bool TryParseExpectedRevision(
+        string? ifMatch,
+        out long expectedRevision)
+    {
+        expectedRevision = 0;
+        if (string.IsNullOrWhiteSpace(ifMatch) ||
+            StringComparer.Ordinal.Equals(ifMatch.Trim(), "*"))
+        {
+            return false;
+        }
+
+        var value = ifMatch.Trim();
+        if (value.StartsWith("W/", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value[2..].Trim();
+        }
+
+        if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+        {
+            value = value[1..^1];
+        }
+
+        return long.TryParse(
+            value,
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out expectedRevision) &&
+            expectedRevision >= 1;
+    }
+
+    private static string ReviewCaseStatus(
+        PersistedState state,
+        string basisId,
+        string decision)
+    {
+        if (decision != "accept_evidence")
+        {
+            return "awaiting_review";
+        }
+
+        var findings = state.Findings.Values
+            .Where(finding => finding.BasisId == basisId)
+            .ToArray();
+        var allAccepted = findings.Length > 0 &&
+            findings.All(finding =>
+                state.FindingDispositions is not null &&
+                state.FindingDispositions.TryGetValue(
+                    $"{basisId}:{finding.FindingId}",
+                    out var disposition) &&
+                disposition.Disposition == "accepted");
+        return allAccepted ? "accepted" : "ready_for_acceptance";
+    }
+
     private static string CaseKey(CaseContext context) =>
         CaseKey(new CallerScope(context.RunId, context.AirlineId, context.AircraftId, context.LeaseId),
             context.CaseId);
@@ -1422,7 +1754,24 @@ internal static class CallerScopeParser
                values.TryGetValue("aircraft", out var aircraft) &&
                values.TryGetValue("lease", out var lease) &&
                new[] { run, airline, aircraft, lease }.All(IsSafeId)
-            ? new CallerScope(run, airline, aircraft, lease)
+            ? CreateCallerScope(values, run, airline, aircraft, lease)
+            : null;
+    }
+
+    private static CallerScope? CreateCallerScope(
+        IReadOnlyDictionary<string, string> values,
+        string run,
+        string airline,
+        string aircraft,
+        string lease)
+    {
+        var subject = values.TryGetValue("subject", out var explicitSubject)
+            ? explicitSubject
+            : values.TryGetValue("sub", out var tokenSubject)
+                ? tokenSubject
+                : $"scope-{run}-{airline}-{aircraft}-{lease}";
+        return IsSafeId(subject)
+            ? new CallerScope(run, airline, aircraft, lease, subject)
             : null;
     }
 

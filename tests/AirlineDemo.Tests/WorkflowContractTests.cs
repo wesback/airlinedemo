@@ -22,6 +22,10 @@ public sealed class WorkflowContractTests
         "SafeError",
         "EvidenceBasis",
         "Finding",
+        "ReviewCommand",
+        "ReviewDecision",
+        "ReviewTask",
+        "AuditEntry",
         "InvestigationResult",
         "InvestigationOutcome"
     ];
@@ -72,7 +76,7 @@ public sealed class WorkflowContractTests
         AssertClosedEnum(definitions, "SafeError", "safeCode",
             "AUTHENTICATION_REQUIRED", "INVALID_AUTHENTICATION", "CASE_NOT_FOUND",
             "EVIDENCE_NOT_FOUND", "OPERATION_NOT_FOUND", "ACTION_FORBIDDEN",
-            "INVALID_PAYLOAD", "EVENT_PAYLOAD_CONFLICT",
+            "INVALID_PAYLOAD", "EVENT_PAYLOAD_CONFLICT", "STALE_PRECONDITION",
             "INVESTIGATION_BASIS_NOT_FOUND", "INVESTIGATION_CALL_LIMIT",
             "INVESTIGATION_CONTEXT_LIMIT", "INVESTIGATION_OUTPUT_INVALID",
             "INVESTIGATION_PAGE_LIMIT", "INVESTIGATION_RETRY_LIMIT",

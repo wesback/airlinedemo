@@ -399,7 +399,137 @@
           }
         }
       }
-    }
+    },
+    "/cases/{id}/reviews": {
+        "post": {
+          "tags": [
+            "Cases"
+          ],
+          "operationId": "submitReview",
+          "summary": "Record an authorised current-basis review decision",
+          "security": [
+            {
+              "WorkflowBearer": []
+            }
+          ],
+          "x-required-scopes": [
+            "case.review"
+          ],
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/ResourceId"
+            },
+            {
+              "name": "If-Match",
+              "in": "header",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "pattern": "^\\\"[1-9][0-9]*\\\"$"
+              },
+              "description": "The expected server-controlled case revision."
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewCommand"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "The immutable review decision and audit entry were committed.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReviewDecision"
+                  }
+                }
+              }
+            },
+            "400": {
+              "$ref": "#/components/responses/InvalidPayload"
+            },
+            "401": {
+              "$ref": "#/components/responses/AuthenticationRequired"
+            },
+            "404": {
+              "$ref": "#/components/responses/CaseNotFound"
+            },
+            "412": {
+              "$ref": "#/components/responses/StalePrecondition"
+            }
+          }
+        }
+      },
+      "/cases/{id}/review-tasks/{taskId}/complete": {
+        "post": {
+          "tags": [
+            "Cases"
+          ],
+          "operationId": "completeReviewTask",
+          "summary": "Complete a current scoped review task without accepting evidence",
+          "security": [
+            {
+              "WorkflowBearer": []
+            }
+          ],
+          "x-required-scopes": [
+            "case.review"
+          ],
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/ResourceId"
+            },
+            {
+              "name": "taskId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "$ref": "#/components/schemas/Id"
+              }
+            },
+            {
+              "name": "If-Match",
+              "in": "header",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "pattern": "^\\\"[1-9][0-9]*\\\"$"
+              },
+              "description": "The expected server-controlled case revision."
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "The task was completed; no evidence acceptance was created.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReviewTask"
+                  }
+                }
+              }
+            },
+            "400": {
+              "$ref": "#/components/responses/InvalidPayload"
+            },
+            "401": {
+              "$ref": "#/components/responses/AuthenticationRequired"
+            },
+            "404": {
+              "$ref": "#/components/responses/CaseNotFound"
+            },
+            "412": {
+              "$ref": "#/components/responses/StalePrecondition"
+            }
+          }
+        }
+      }
   },
   "components": {
     "securitySchemes": {
@@ -490,6 +620,16 @@
             }
           }
         }
+      },
+      "StalePrecondition": {
+        "description": "The case revision or evidence basis is no longer current.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -569,6 +709,18 @@
       },
       "EvidencePreview": {
         "$ref": "workflow.schema.json#/$defs/EvidencePreview"
+      },
+      "ReviewCommand": {
+        "$ref": "workflow.schema.json#/$defs/ReviewCommand"
+      },
+      "ReviewDecision": {
+        "$ref": "workflow.schema.json#/$defs/ReviewDecision"
+      },
+      "ReviewTask": {
+        "$ref": "workflow.schema.json#/$defs/ReviewTask"
+      },
+      "AuditEntry": {
+        "$ref": "workflow.schema.json#/$defs/AuditEntry"
       },
       "SafeError": {
         "$ref": "workflow.schema.json#/$defs/SafeError"
