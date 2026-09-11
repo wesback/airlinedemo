@@ -95,7 +95,8 @@ public sealed record CaseSummary(
     string LeaseId,
     long CaseRevision,
     string Status,
-    IReadOnlyList<PackageProcessingStatus> PackageProcessing);
+    IReadOnlyList<PackageProcessingStatus> PackageProcessing,
+    InvestigationOutcome? Investigation = null);
 
 public sealed record EvidencePreview(
     string DocumentId,
@@ -138,6 +139,70 @@ public sealed record EvidenceBasis(
     DateTimeOffset CreatedAt,
     string ParserVersion,
     string ExtractorVersion);
+
+public sealed record EvidenceRef(
+    string DocumentId,
+    int Version,
+    int Page,
+    EvidenceBounds? Bounds = null,
+    string? Quote = null);
+
+public sealed record Finding(
+    string FindingId,
+    string ComponentId,
+    string RequirementId,
+    string BasisId,
+    string Assessment,
+    string ReasonCode,
+    string Explanation,
+    IReadOnlyList<EvidenceRef> EvidenceRefs);
+
+public sealed record InvestigationResult(IReadOnlyList<Finding> Findings);
+
+public sealed record InvestigationDocumentContent(
+    CaseContext Context,
+    string DocumentId,
+    int Version,
+    int Page,
+    string Text);
+
+public sealed record InvestigationRequest(
+    EvidenceBasis EvidenceBasis,
+    IReadOnlyList<ApprovedRequirementVersion> ApprovedRequirements,
+    IReadOnlyList<InvestigationDocumentContent> Documents);
+
+public sealed record InvestigationOutcome(
+    string BasisId,
+    CaseContext Context,
+    string Status,
+    IReadOnlyList<Finding> Findings,
+    SafeError? Error,
+    string CorrelationId);
+
+public sealed record InvestigationLimits(
+    int MaxCalls = 3,
+    int MaxContextCharacters = 100_000,
+    int MaxPages = 100,
+    int MaxRetries = 2,
+    TimeSpan? Timeout = null)
+{
+    public TimeSpan EffectiveTimeout => Timeout ?? TimeSpan.FromSeconds(30);
+}
+
+public sealed class InvestigationCallException(string message) : Exception(message);
+
+public sealed record PolicyDecision(
+    string DecisionId,
+    string FindingId,
+    string BasisId,
+    string Outcome);
+
+public sealed record EvidenceRequest(
+    string RequestId,
+    string RequestKey,
+    string FindingId,
+    string BasisId,
+    string Status);
 
 public sealed record CallerScope(
     string RunId,
@@ -189,6 +254,9 @@ internal sealed class PersistedState
     public Dictionary<string, ScopedExtractionRecord> ExtractionRecords { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, ScopedExtractionRecord> ExtractionAttempts { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceBasis> EvidenceBases { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, InvestigationOutcome> Investigations { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, PolicyDecision> PolicyDecisions { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, EvidenceRequest> EvidenceRequests { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedReceipt> Receipts { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, PersistedReceipt>? AuditReceipts { get; set; }

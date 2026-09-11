@@ -19,7 +19,11 @@ public sealed class WorkflowContractTests
         "OperationStatus",
         "CaseSummary",
         "EvidencePreview",
-        "SafeError"
+        "SafeError",
+        "EvidenceBasis",
+        "Finding",
+        "InvestigationResult",
+        "InvestigationOutcome"
     ];
 
     [Fact]
@@ -68,7 +72,11 @@ public sealed class WorkflowContractTests
         AssertClosedEnum(definitions, "SafeError", "safeCode",
             "AUTHENTICATION_REQUIRED", "INVALID_AUTHENTICATION", "CASE_NOT_FOUND",
             "EVIDENCE_NOT_FOUND", "OPERATION_NOT_FOUND", "ACTION_FORBIDDEN",
-            "INVALID_PAYLOAD", "EVENT_PAYLOAD_CONFLICT");
+            "INVALID_PAYLOAD", "EVENT_PAYLOAD_CONFLICT",
+            "INVESTIGATION_BASIS_NOT_FOUND", "INVESTIGATION_CALL_LIMIT",
+            "INVESTIGATION_CONTEXT_LIMIT", "INVESTIGATION_OUTPUT_INVALID",
+            "INVESTIGATION_PAGE_LIMIT", "INVESTIGATION_RETRY_LIMIT",
+            "INVESTIGATION_TIMEOUT");
 
         Assert.DoesNotContain("package.received", EnumValues(definitions, "EventEnvelope", "type"));
         Assert.DoesNotContain("running", EnumValues(definitions, "OperationStatus", "status"));
