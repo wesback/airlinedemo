@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -295,6 +296,7 @@ public static class GeneratorContractValidator
         ValidateIsolationReceipt(package, errors);
         BaselineFixtureValidator.ValidateLiveMutationDeclarations(package, errors);
         BaselineFixtureValidator.ValidateProcessingFailureMutationDeclarations(package, errors);
+        BaselineFixtureValidator.ValidateDuplicateEventSequence(package, errors);
         if (package.Baseline is not null)
         {
             BaselineFixtureValidator.ValidateSemantic(package, errors);
@@ -962,6 +964,53 @@ public static class GeneratorContractValidator
         path.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase);
 }
 
+internal static class CanonicalJson
+{
+    public static string Serialize(JsonElement value)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            Write(writer, value);
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void Write(Utf8JsonWriter writer, JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in value.EnumerateObject()
+                             .OrderBy(property => property.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    Write(writer, property.Value);
+                }
+
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in value.EnumerateArray())
+                {
+                    Write(writer, item);
+                }
+
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.Undefined:
+                writer.WriteNullValue();
+                break;
+            default:
+                value.WriteTo(writer);
+                break;
+        }
+    }
+}
+
 public static class BaselineFixtureValidator
 {
     public static GeneratorValidationResult Validate(
@@ -979,6 +1028,7 @@ public static class BaselineFixtureValidator
             ValidateSemantic(package, errors);
             ValidateOutput(package, fixture.GeneratedFiles, package.Configuration.OutputDirectory, errors);
         }
+        ValidateDuplicateEventSequence(package, errors);
 
         return new GeneratorValidationResult(errors);
     }
@@ -992,6 +1042,7 @@ public static class BaselineFixtureValidator
         var errors = new List<string>();
         ValidateSemantic(package, errors);
         ValidateOutput(package, null, outputDirectory, errors);
+        ValidateDuplicateEventSequence(package, errors);
         return new GeneratorValidationResult(errors);
     }
 
@@ -1149,8 +1200,11 @@ public static class BaselineFixtureValidator
             errors.Add("baseline approved mock requirements are invalid.");
         }
 
-        var packageDocuments = package.SubmissionPackages?
-            .SelectMany(submissionPackage => submissionPackage.Manifest ?? [])
+        var initialPackage = package.SubmissionPackages?
+            .SingleOrDefault(submissionPackage =>
+                submissionPackage is not null &&
+                StringComparer.Ordinal.Equals(submissionPackage.PackageId, "PKG-0001"));
+        var packageDocuments = initialPackage?.Manifest?
             .ToArray() ?? [];
         if (packageDocuments.Length is < 8 or > 12)
         {
@@ -1205,8 +1259,11 @@ public static class BaselineFixtureValidator
     {
         var root = Path.GetFullPath(outputDirectory);
         var selected = package.PathBoundaries?.SelectedInitialInputManifest?.Entries ?? [];
-        var documents = package.SubmissionPackages?
-            .SelectMany(submissionPackage => submissionPackage.Manifest ?? [])
+        var initialPackage = package.SubmissionPackages?
+            .SingleOrDefault(submissionPackage =>
+                submissionPackage is not null &&
+                StringComparer.Ordinal.Equals(submissionPackage.PackageId, "PKG-0001"));
+        var documents = initialPackage?.Manifest?
             .Where(document => document is not null)
             .ToDictionary(document => (document.DocumentId, document.Version))
             ?? new Dictionary<(string DocumentId, int Version), Document>();
@@ -1326,6 +1383,98 @@ public static class BaselineFixtureValidator
         {
             errors.Add(
                 "processing-failure mutation identifiers require the processing-failure profile.");
+        }
+    }
+
+    internal static void ValidateDuplicateEventSequence(
+        GeneratorContractPackage package,
+        ICollection<string> errors)
+    {
+        if (package.Configuration?.Profile != "duplicate-events")
+        {
+            return;
+        }
+
+        var events = package.Events ?? [];
+        if (events.Count != 3)
+        {
+            errors.Add("duplicate-events profile must contain exactly three replay envelopes.");
+            return;
+        }
+
+        var first = events[0];
+        var duplicate = events[1];
+        var conflict = events[2];
+        var declaredPackageIds = (package.SubmissionPackages ?? [])
+            .Where(submissionPackage => submissionPackage is not null)
+            .Select(submissionPackage => submissionPackage.PackageId)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var envelope in events)
+        {
+            if (string.IsNullOrWhiteSpace(envelope.RunId) ||
+                string.IsNullOrWhiteSpace(envelope.CaseId) ||
+                string.IsNullOrWhiteSpace(envelope.AirlineId) ||
+                string.IsNullOrWhiteSpace(envelope.AircraftId) ||
+                string.IsNullOrWhiteSpace(envelope.LeaseId))
+            {
+                errors.Add(
+                    $"duplicate-events envelope '{envelope.EventId}' is missing required scope IDs.");
+            }
+
+            if (string.IsNullOrWhiteSpace(envelope.CorrelationId))
+            {
+                errors.Add(
+                    $"duplicate-events envelope '{envelope.EventId}' is missing a correlation ID.");
+            }
+
+            if (envelope.Payload.ValueKind != JsonValueKind.Object ||
+                !envelope.Payload.TryGetProperty("packageId", out var packageId) ||
+                packageId.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(packageId.GetString()) ||
+                !declaredPackageIds.Contains(packageId.GetString()!))
+            {
+                errors.Add(
+                    $"duplicate-events envelope '{envelope.EventId}' is missing a declared package reference.");
+            }
+        }
+
+        var firstKey = (first.RunId, first.EventId);
+        if ((duplicate.RunId, duplicate.EventId) != firstKey)
+        {
+            errors.Add(
+                "duplicate-events replay envelopes must reuse the same (runId,eventId) key.");
+        }
+
+        if (!StringComparer.Ordinal.Equals(
+                CanonicalJson.Serialize(first.Payload),
+                CanonicalJson.Serialize(duplicate.Payload)))
+        {
+            errors.Add("duplicate-events identical pair must have identical canonical payloads.");
+        }
+
+        if ((conflict.RunId, conflict.EventId) != firstKey)
+        {
+            errors.Add(
+                "duplicate-events conflicting envelope must reuse the same (runId,eventId) key.");
+        }
+
+        if (StringComparer.Ordinal.Equals(
+                CanonicalJson.Serialize(first.Payload),
+                CanonicalJson.Serialize(conflict.Payload)))
+        {
+            errors.Add(
+                "duplicate-events conflicting envelope must have a different canonical payload.");
+        }
+
+        if (events.Select(envelope => envelope.OccurredAt).Distinct().Count() != events.Count)
+        {
+            errors.Add("duplicate-events envelopes must have distinct occurredAt timestamps.");
+        }
+
+        if (events.Select(envelope => envelope.ScenarioEffectiveAt).Distinct().Count() != events.Count)
+        {
+            errors.Add(
+                "duplicate-events envelopes must have distinct scenarioEffectiveAt timestamps.");
         }
     }
 

@@ -126,20 +126,20 @@ public static class FixtureGenerator
             scenarioStart.AddHours(13),
             scenarioStart.AddHours(9),
             documents);
-        using var payload = JsonDocument.Parse("""{"packageId":"PKG-0001"}""");
-        var eventEnvelope = new EventEnvelope(
-            WorkflowContract.Version,
-            "EVT-0001",
-            "package.submitted",
-            caseContext.RunId,
-            caseContext.CaseId,
-            caseContext.AirlineId,
-            caseContext.AircraftId,
-            caseContext.LeaseId,
-            scenarioStart.AddHours(13),
-            scenarioStart.AddHours(9),
-            "CORR-0001",
-            payload.RootElement.Clone());
+        var stagedResponsePackage = WriteStagedResponsePackage(
+            outputDirectory,
+            caseContext,
+            scenarioStart,
+            baseline);
+        var events = CreateEvents(
+            caseContext,
+            scenarioStart,
+            StringComparer.Ordinal.Equals(configuration.Profile, "duplicate-events"));
+        var declaredPackages = StringComparer.Ordinal.Equals(
+                configuration.Profile,
+                "duplicate-events")
+            ? new[] { submissionPackage, stagedResponsePackage }
+            : new[] { submissionPackage };
         var selectedEntries = documents
             .Zip(documentPaths)
             .Select(pair => new ManifestEntry(
@@ -173,12 +173,7 @@ public static class FixtureGenerator
             "application-inputs/reference-data/baseline-facts.json",
             baseline);
         WriteJson(outputDirectory, "application-inputs/package-001/manifest.json", submissionPackage);
-        WriteJson(outputDirectory, "replay-only/events.json", new[] { eventEnvelope });
-        WriteStagedResponsePackage(
-            outputDirectory,
-            caseContext,
-            scenarioStart,
-            baseline);
+        WriteJson(outputDirectory, "replay-only/events.json", events);
         if (StringComparer.Ordinal.Equals(configuration.Profile, "isolation"))
         {
             WriteIsolationPackage(outputDirectory, scenarioStart, isolationScope);
@@ -244,8 +239,8 @@ public static class FixtureGenerator
             asset,
             requirements,
             documents,
-            [submissionPackage],
-            [eventEnvelope],
+            declaredPackages,
+            events,
             boundaries,
             receipt)
         {
@@ -517,6 +512,48 @@ public static class FixtureGenerator
         return definitions;
     }
 
+    private static IReadOnlyList<EventEnvelope> CreateEvents(
+        CaseContext caseContext,
+        DateTimeOffset scenarioStart,
+        bool duplicateEvents)
+    {
+        static JsonElement CreatePayload(string packageId)
+        {
+            using var payload = JsonDocument.Parse($$"""{"packageId":"{{packageId}}"}""");
+            return payload.RootElement.Clone();
+        }
+
+        EventEnvelope CreateEnvelope(
+            string packageId,
+            int timestampOffsetSeconds) =>
+            new(
+                WorkflowContract.Version,
+                "EVT-0001",
+                "package.submitted",
+                caseContext.RunId,
+                caseContext.CaseId,
+                caseContext.AirlineId,
+                caseContext.AircraftId,
+                caseContext.LeaseId,
+                scenarioStart.AddHours(13).AddSeconds(timestampOffsetSeconds),
+                scenarioStart.AddHours(9).AddSeconds(timestampOffsetSeconds),
+                "CORR-0001",
+                CreatePayload(packageId));
+
+        var first = CreateEnvelope("PKG-0001", 0);
+        if (!duplicateEvents)
+        {
+            return [first];
+        }
+
+        return
+        [
+            first,
+            CreateEnvelope("PKG-0001", 1),
+            CreateEnvelope("PKG-0002", 2)
+        ];
+    }
+
     private static object CreateMutationMetadata(
         string mutationIdentifier,
         IReadOnlyList<Document> documents) =>
@@ -638,7 +675,7 @@ public static class FixtureGenerator
             });
     }
 
-    private static void WriteStagedResponsePackage(
+    private static SubmissionPackage WriteStagedResponsePackage(
         string outputDirectory,
         CaseContext caseContext,
         DateTimeOffset scenarioStart,
@@ -679,6 +716,7 @@ public static class FixtureGenerator
             outputDirectory,
             "staged-responses/package-002/manifest.json",
             responsePackage);
+        return responsePackage;
     }
 
     private sealed record DocumentDefinition(
