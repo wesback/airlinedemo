@@ -137,6 +137,30 @@ public sealed record ReproducibilityReceipt(
     IReadOnlyList<GeneratedFileHash> GeneratedFiles,
     IReadOnlyList<string> IntendedMutationIdentifiers);
 
+public sealed record ComponentMovement(
+    string ComponentId,
+    string SerialNumber,
+    string AircraftId,
+    string Action,
+    DateTimeOffset OccurredAt,
+    long FlightHours,
+    long Cycles);
+
+public sealed record UsageCounter(
+    string ComponentId,
+    DateTimeOffset AsOf,
+    long FlightHours,
+    long Cycles);
+
+public sealed record BaselineFixture(
+    string LessorName,
+    string AircraftId,
+    string EngineId,
+    DateOnly PlannedReturnDate,
+    IReadOnlyList<ComponentMovement> ComponentMovements,
+    IReadOnlyList<UsageCounter> UsageCounters,
+    IReadOnlyList<Requirement> ApprovedRequirements);
+
 public sealed record GeneratorContractPackage(
     string ContractVersion,
     GeneratorConfiguration Configuration,
@@ -147,7 +171,11 @@ public sealed record GeneratorContractPackage(
     IReadOnlyList<SubmissionPackage> SubmissionPackages,
     IReadOnlyList<EventEnvelope> Events,
     PathBoundaryDeclaration PathBoundaries,
-    ReproducibilityReceipt Receipt);
+    ReproducibilityReceipt Receipt)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BaselineFixture? Baseline { get; init; }
+}
 
 public sealed record GeneratorValidationResult(IReadOnlyList<string> Errors)
 {
@@ -219,6 +247,10 @@ public static class GeneratorContractValidator
 
         ValidateBoundaries(package.PathBoundaries, errors);
         ValidateReceipt(package.Receipt, package.Configuration, errors);
+        if (package.Baseline is not null)
+        {
+            BaselineFixtureValidator.ValidateSemantic(package, errors);
+        }
         return new GeneratorValidationResult(errors);
     }
 
@@ -745,6 +777,349 @@ public static class GeneratorContractValidator
     private static bool IsUnderRoot(string path, string root) =>
         StringComparer.OrdinalIgnoreCase.Equals(path, root) ||
         path.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase);
+}
+
+public static class BaselineFixtureValidator
+{
+    public static GeneratorValidationResult Validate(
+        GeneratedFixture fixture)
+    {
+        ArgumentNullException.ThrowIfNull(fixture);
+        var errors = new List<string>();
+        var package = fixture.ContractPackage;
+        if (package.Baseline is null)
+        {
+            errors.Add("baseline fixture data is required.");
+        }
+        else
+        {
+            ValidateSemantic(package, errors);
+            ValidateOutput(package, fixture.GeneratedFiles, package.Configuration.OutputDirectory, errors);
+        }
+
+        return new GeneratorValidationResult(errors);
+    }
+
+    public static GeneratorValidationResult ValidateFiles(
+        GeneratorContractPackage package,
+        string outputDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
+        var errors = new List<string>();
+        ValidateSemantic(package, errors);
+        ValidateOutput(package, null, outputDirectory, errors);
+        return new GeneratorValidationResult(errors);
+    }
+
+    public static void ValidateOrThrow(GeneratedFixture fixture) =>
+        Validate(fixture).ThrowIfInvalid();
+
+    internal static void ValidateSemantic(
+        GeneratorContractPackage package,
+        ICollection<string> errors)
+    {
+        var baseline = package.Baseline;
+        if (baseline is null)
+        {
+            errors.Add("baseline fixture data is required.");
+            return;
+        }
+
+        var scenarioStart = new DateTimeOffset(
+            package.Configuration.ScenarioDate.ToDateTime(TimeOnly.MinValue),
+            TimeSpan.Zero);
+        if (!StringComparer.Ordinal.Equals(baseline.LessorName, "Altivane Aviation Capital"))
+        {
+            errors.Add("baseline lessor must be Altivane Aviation Capital.");
+        }
+
+        if (!StringComparer.Ordinal.Equals(baseline.AircraftId, "MOCK-AC-001") ||
+            !StringComparer.Ordinal.Equals(baseline.EngineId, "MOCK-ENG-001"))
+        {
+            errors.Add("baseline aircraft and engine reference IDs are invalid.");
+        }
+
+        if (package.Asset is null ||
+            !StringComparer.Ordinal.Equals(package.Asset.AircraftId, baseline.AircraftId) ||
+            !StringComparer.Ordinal.Equals(package.Asset.EngineId, baseline.EngineId))
+        {
+            errors.Add("baseline asset relationships are inconsistent.");
+        }
+
+        var components = package.Asset?.Components ?? [];
+        if (components.Count != 2 ||
+            components.Any(component => component is null) ||
+            components.Select(component => component.ComponentId).Distinct(StringComparer.Ordinal).Count() != 2)
+        {
+            errors.Add("baseline must contain exactly two distinct components.");
+        }
+
+        var componentIds = components
+            .Where(component => component is not null)
+            .Select(component => component.ComponentId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (!componentIds.SetEquals(["COMP-0001", "COMP-0002"]) ||
+            !components.Any(component =>
+                component is not null &&
+                component.ComponentId == "COMP-0001" &&
+                component.SerialNumber == "SERIAL-0001") ||
+            !components.Any(component =>
+                component is not null &&
+                component.ComponentId == "COMP-0002" &&
+                component.SerialNumber == "SERIAL-0002"))
+        {
+            errors.Add("baseline component identities are invalid.");
+        }
+        var componentSerials = components
+            .Where(component => component is not null)
+            .GroupBy(component => component.ComponentId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().SerialNumber, StringComparer.Ordinal);
+        var movements = baseline.ComponentMovements ?? [];
+        var counters = baseline.UsageCounters ?? [];
+        foreach (var movement in movements)
+        {
+            if (movement is null ||
+                !componentIds.Contains(movement.ComponentId) ||
+                !StringComparer.Ordinal.Equals(movement.AircraftId, baseline.AircraftId) ||
+                !componentSerials.TryGetValue(movement.ComponentId, out var serialNumber) ||
+                !StringComparer.Ordinal.Equals(movement.SerialNumber, serialNumber) ||
+                string.IsNullOrWhiteSpace(movement.SerialNumber) ||
+                movement.FlightHours < 0 ||
+                movement.Cycles < 0 ||
+                movement.OccurredAt.Offset != TimeSpan.Zero ||
+                movement.OccurredAt > new DateTimeOffset(
+                    package.Configuration.ScenarioDate.ToDateTime(TimeOnly.MinValue),
+                    TimeSpan.Zero) ||
+                movement.Action is not ("installed" or "removed"))
+            {
+                errors.Add("baseline contains an invalid component movement relationship or value.");
+            }
+        }
+
+        foreach (var componentId in componentIds)
+        {
+            var componentMovements = movements
+                .Where(movement => movement is not null &&
+                                   StringComparer.Ordinal.Equals(movement.ComponentId, componentId))
+                .OrderBy(movement => movement.OccurredAt)
+                .ToArray();
+            for (var index = 1; index < componentMovements.Length; index++)
+            {
+                if (componentMovements[index].OccurredAt <= componentMovements[index - 1].OccurredAt ||
+                    componentMovements[index].FlightHours < componentMovements[index - 1].FlightHours ||
+                    componentMovements[index].Cycles < componentMovements[index - 1].Cycles ||
+                    StringComparer.Ordinal.Equals(
+                        componentMovements[index].Action,
+                        componentMovements[index - 1].Action))
+                {
+                    errors.Add($"baseline movement chronology or usage is invalid for component '{componentId}'.");
+                }
+            }
+            if (componentMovements.Length == 0 ||
+                !StringComparer.Ordinal.Equals(componentMovements[0].Action, "installed"))
+            {
+                errors.Add($"baseline component movement history is invalid for component '{componentId}'.");
+            }
+
+            var componentCounters = counters
+                .Where(counter => counter is not null &&
+                                  StringComparer.Ordinal.Equals(counter.ComponentId, componentId))
+                .OrderBy(counter => counter.AsOf)
+                .ToArray();
+            for (var index = 0; index < componentCounters.Length; index++)
+            {
+                var counter = componentCounters[index];
+                if (counter.AsOf.Offset != TimeSpan.Zero ||
+                    counter.FlightHours < 0 ||
+                    counter.Cycles < 0 ||
+                    (index > 0 &&
+                     (counter.AsOf <= componentCounters[index - 1].AsOf ||
+                      counter.FlightHours < componentCounters[index - 1].FlightHours ||
+                      counter.Cycles < componentCounters[index - 1].Cycles)))
+                {
+                    errors.Add($"baseline usage counters are invalid for component '{componentId}'.");
+                }
+            }
+
+            if (componentCounters.Length == 0)
+            {
+                errors.Add($"baseline has no usage counter for component '{componentId}'.");
+            }
+        }
+
+        if (counters.Any(counter => counter is null || !componentIds.Contains(counter.ComponentId)))
+        {
+            errors.Add("baseline usage counters reference an unknown component.");
+        }
+
+        var approvedRequirements = baseline.ApprovedRequirements ?? [];
+        if (approvedRequirements.Count == 0 ||
+            approvedRequirements.Any(requirement => requirement is null ||
+                !componentIds.Contains(requirement.ComponentId) ||
+                !StringComparer.Ordinal.Equals(requirement.ApprovedBy, "fixture-setup") ||
+                requirement.ApprovedAt.Offset != TimeSpan.Zero ||
+                requirement.ApprovedAt > scenarioStart ||
+                (requirement.RequiredFrom is not null &&
+                 requirement.ApprovedAt > requirement.RequiredFrom)))
+        {
+            errors.Add("baseline approved mock requirements are invalid.");
+        }
+
+        var packageDocuments = package.SubmissionPackages?
+            .SelectMany(submissionPackage => submissionPackage.Manifest ?? [])
+            .ToArray() ?? [];
+        if (packageDocuments.Length is < 8 or > 12)
+        {
+            errors.Add("baseline submission package must contain between 8 and 12 documents.");
+        }
+
+        if (packageDocuments.Any(document =>
+                document is null ||
+                document.IssuedOn.Offset != TimeSpan.Zero ||
+                document.IssuedOn > scenarioStart) ||
+            package.SubmissionPackages?.Any(submissionPackage =>
+                submissionPackage.SubmittedAt < submissionPackage.ScenarioEffectiveAt ||
+                submissionPackage.ScenarioEffectiveAt < scenarioStart) == true)
+        {
+            errors.Add("baseline document or package chronology is invalid.");
+        }
+
+        var documentIds = package.Documents?
+            .Select(document => document.DocumentId)
+            .ToHashSet(StringComparer.Ordinal) ?? [];
+        if (packageDocuments.Any(document => document is null || !documentIds.Contains(document.DocumentId)))
+        {
+            errors.Add("baseline submission package contains an unresolved document reference.");
+        }
+
+        if (package.Configuration.Profile == "baseline" &&
+            ((package.Receipt?.IntendedMutationIdentifiers?.Count > 0) ||
+             package.Events?.Any(envelope =>
+                 envelope.Payload.TryGetProperty("finding", out _) ||
+                 envelope.Payload.TryGetProperty("policyDecision", out _) ||
+                 envelope.Payload.TryGetProperty("approval", out _)) == true))
+        {
+            errors.Add("baseline must not contain intentional mutation metadata or generated workflow outcomes.");
+        }
+
+        var requirementDocumentIds = package.Documents?
+            .Select(document => document.DocumentId)
+            .ToHashSet(StringComparer.Ordinal) ?? [];
+        if (approvedRequirements.Any(requirement =>
+                requirement is null ||
+                !requirementDocumentIds.Contains(requirement.SourceRef)))
+        {
+            errors.Add("baseline requirement contains an unresolved document reference.");
+        }
+    }
+
+    private static void ValidateOutput(
+        GeneratorContractPackage package,
+        IReadOnlyList<string>? generatedFiles,
+        string outputDirectory,
+        ICollection<string> errors)
+    {
+        var root = Path.GetFullPath(outputDirectory);
+        var selected = package.PathBoundaries?.SelectedInitialInputManifest?.Entries ?? [];
+        var documents = package.SubmissionPackages?
+            .SelectMany(submissionPackage => submissionPackage.Manifest ?? [])
+            .Where(document => document is not null)
+            .ToDictionary(document => (document.DocumentId, document.Version))
+            ?? new Dictionary<(string DocumentId, int Version), Document>();
+
+        foreach (var entry in selected)
+        {
+            var fullPath = ResolveOutputPath(root, entry.RelativePath);
+            if (fullPath is null || !File.Exists(fullPath))
+            {
+                errors.Add($"baseline manifest file '{entry.RelativePath}' is missing or outside the output directory.");
+                continue;
+            }
+
+            var hash = HashFile(fullPath);
+            if (!StringComparer.OrdinalIgnoreCase.Equals(hash, entry.Sha256))
+            {
+                errors.Add($"baseline manifest hash does not match '{entry.RelativePath}'.");
+            }
+
+            if (!documents.TryGetValue((entry.DocumentId, entry.Version), out var document) ||
+                !StringComparer.OrdinalIgnoreCase.Equals(document.Sha256, entry.Sha256) ||
+                !StringComparer.Ordinal.Equals(document.FileName, Path.GetFileName(fullPath)))
+            {
+                errors.Add($"baseline manifest entry '{entry.RelativePath}' does not resolve to its document.");
+            }
+        }
+
+        var manifestPath = ResolveOutputPath(root, "application-inputs/package-001/manifest.json");
+        if (manifestPath is null || !File.Exists(manifestPath))
+        {
+            errors.Add("baseline submission-package manifest file is missing.");
+        }
+        else
+        {
+            try
+            {
+                var manifest = JsonSerializer.Deserialize<SubmissionPackage>(
+                    File.ReadAllText(manifestPath),
+                    GeneratorContractJson.Options);
+                if (manifest is null ||
+                    !StringComparer.Ordinal.Equals(manifest.PackageId, "PKG-0001") ||
+                    manifest.Manifest.Count != documents.Count ||
+                    manifest.Manifest.Any(document =>
+                        !documents.TryGetValue((document.DocumentId, document.Version), out var expected) ||
+                        !StringComparer.Ordinal.Equals(document.Sha256, expected.Sha256)))
+                {
+                    errors.Add("baseline submission-package manifest does not match the generated documents.");
+                }
+            }
+            catch (JsonException)
+            {
+                errors.Add("baseline submission-package manifest is not valid JSON.");
+            }
+        }
+
+        if (generatedFiles is not null)
+        {
+            foreach (var generatedFile in generatedFiles)
+            {
+                if (ResolveOutputPath(root, generatedFile) is null)
+                {
+                    errors.Add($"generated file '{generatedFile}' is outside the output directory.");
+                }
+            }
+        }
+    }
+
+    private static string? ResolveOutputPath(string root, string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) || Path.IsPathRooted(relativePath))
+        {
+            return null;
+        }
+
+        var normalized = relativePath.Replace('\\', '/');
+        if (normalized.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => segment is "." or ".."))
+        {
+            return null;
+        }
+
+        var fullPath = Path.GetFullPath(
+            Path.Combine(root, normalized.Replace('/', Path.DirectorySeparatorChar)));
+        var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
+            ? fullPath
+            : null;
+    }
+
+    private static string HashFile(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
 }
 
 public static class ReproducibilityReceiptFactory
