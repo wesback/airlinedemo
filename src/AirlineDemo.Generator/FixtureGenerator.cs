@@ -26,6 +26,8 @@ public static class FixtureGenerator
                     ? WorkflowContract.LiveMutationIdentifiers
                     : configuration.Profile == "processing-failure"
                         ? WorkflowContract.ProcessingFailureMutationIdentifiers
+                    : configuration.Profile == "contradiction"
+                        ? WorkflowContract.ContradictionMutationIdentifiers
                     : []))
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
@@ -82,6 +84,10 @@ public static class FixtureGenerator
         DeleteIfPresent(outputDirectory, "application-inputs/package-001/011-corrupt-document.pdf");
         DeleteIfPresent(
             outputDirectory,
+            "application-inputs/package-002/011-component-a-removal-history-v2.pdf");
+        DeleteIfPresent(outputDirectory, "application-inputs/package-002/manifest.json");
+        DeleteIfPresent(
+            outputDirectory,
             "evaluator-only/isolation/cross-scope-package/001-aircraft-record.pdf");
         DeleteIfPresent(
             outputDirectory,
@@ -106,8 +112,8 @@ public static class FixtureGenerator
 
         var documents = documentDefinitions
             .Select((definition, index) => new Document(
-                $"DOC-{index + 1:0000}",
-                1,
+                definition.DocumentId ?? $"DOC-{index + 1:0000}",
+                definition.Version,
                 "fixture-generator",
                 definition.SourceRecordId,
                 Path.GetFileName(definition.RelativePath),
@@ -115,6 +121,7 @@ public static class FixtureGenerator
                 HashFile(outputDirectory, definition.RelativePath),
                 definition.IssuedOn))
             .ToArray();
+        var initialDocuments = documents.Where(document => document.Version == 1).ToArray();
         var submissionPackage = new SubmissionPackage(
             WorkflowContract.Version,
             "PKG-0001",
@@ -125,7 +132,7 @@ public static class FixtureGenerator
             caseContext.LeaseId,
             scenarioStart.AddHours(13),
             scenarioStart.AddHours(9),
-            documents);
+            initialDocuments);
         var stagedResponsePackage = WriteStagedResponsePackage(
             outputDirectory,
             caseContext,
@@ -134,14 +141,24 @@ public static class FixtureGenerator
         var events = CreateEvents(
             caseContext,
             scenarioStart,
-            StringComparer.Ordinal.Equals(configuration.Profile, "duplicate-events"));
+            StringComparer.Ordinal.Equals(configuration.Profile, "duplicate-events"),
+            StringComparer.Ordinal.Equals(configuration.Profile, "contradiction"));
         var declaredPackages = StringComparer.Ordinal.Equals(
                 configuration.Profile,
                 "duplicate-events")
             ? new[] { submissionPackage, stagedResponsePackage }
             : new[] { submissionPackage };
-        var selectedEntries = documents
-            .Zip(documentPaths)
+        var contradictionPackage = StringComparer.Ordinal.Equals(
+                configuration.Profile,
+                "contradiction")
+            ? CreateContradictionPackage(caseContext, scenarioStart, documents)
+            : null;
+        if (contradictionPackage is not null)
+        {
+            declaredPackages = declaredPackages.Append(contradictionPackage).ToArray();
+        }
+        var selectedEntries = initialDocuments
+            .Zip(documentPaths.Where((_, index) => documentDefinitions[index].Version == 1))
             .Select(pair => new ManifestEntry(
                 pair.Second,
                 pair.First.DocumentId,
@@ -173,6 +190,13 @@ public static class FixtureGenerator
             "application-inputs/reference-data/baseline-facts.json",
             baseline);
         WriteJson(outputDirectory, "application-inputs/package-001/manifest.json", submissionPackage);
+        if (contradictionPackage is not null)
+        {
+            WriteJson(
+                outputDirectory,
+                "application-inputs/package-002/manifest.json",
+                contradictionPackage);
+        }
         WriteJson(outputDirectory, "replay-only/events.json", events);
         if (StringComparer.Ordinal.Equals(configuration.Profile, "isolation"))
         {
@@ -190,7 +214,11 @@ public static class FixtureGenerator
                     profile = configuration.Profile,
                     intendedMutations = mutations,
                     mutationDetails = mutations
-                        .Select(mutation => CreateMutationMetadata(mutation, documents))
+                        .Select(mutation => CreateMutationMetadata(
+                            mutation,
+                            documents,
+                            caseScope,
+                            scenarioStart))
                         .ToArray()
                 });
         }
@@ -208,6 +236,12 @@ public static class FixtureGenerator
                 "staged-responses/package-002/response.pdf",
                 "staged-responses/package-002/manifest.json"
             ])
+            .Concat(contradictionPackage is not null
+                ?
+                [
+                    "application-inputs/package-002/manifest.json"
+                ]
+                : [])
             .Concat(StringComparer.Ordinal.Equals(configuration.Profile, "isolation")
                 ?
                 [
@@ -464,6 +498,18 @@ public static class FixtureGenerator
                 "Reference source: asset-register v1\nAircraft: MOCK-AC-001\nEngine: MOCK-ENG-001\nComponents: COMP-0001, COMP-0002")
         };
 
+        if (mutations.Contains(WorkflowContract.ContradictionLaterVersionMutation))
+        {
+            definitions.Add(
+                new DocumentDefinition(
+                    "application-inputs/package-002/011-component-a-removal-history-v2.pdf",
+                    "SOURCE-REMOVAL-0001",
+                    scenarioStart.AddDays(1),
+                    $"Component: COMP-0001\nSerial: SERIAL-0001\nAction: removed\nAircraft: MOCK-AC-001\nRemoval date: {scenarioStart.AddDays(-421):yyyy-MM-dd}\nFlight hours: 700\nCycles: 150",
+                    DocumentId: "DOC-0004",
+                    Version: 2));
+        }
+
         if (mutations.Contains(WorkflowContract.ProcessingFailureCorruptDocumentMutation))
         {
             definitions.Add(
@@ -515,7 +561,8 @@ public static class FixtureGenerator
     private static IReadOnlyList<EventEnvelope> CreateEvents(
         CaseContext caseContext,
         DateTimeOffset scenarioStart,
-        bool duplicateEvents)
+        bool duplicateEvents,
+        bool contradictionEvents)
     {
         static JsonElement CreatePayload(string packageId)
         {
@@ -525,23 +572,35 @@ public static class FixtureGenerator
 
         EventEnvelope CreateEnvelope(
             string packageId,
-            int timestampOffsetSeconds) =>
+            TimeSpan timestampOffset,
+            string eventId = "EVT-0001",
+            string correlationId = "CORR-0001") =>
             new(
                 WorkflowContract.Version,
-                "EVT-0001",
+                eventId,
                 "package.submitted",
                 caseContext.RunId,
                 caseContext.CaseId,
                 caseContext.AirlineId,
                 caseContext.AircraftId,
                 caseContext.LeaseId,
-                scenarioStart.AddHours(13).AddSeconds(timestampOffsetSeconds),
-                scenarioStart.AddHours(9).AddSeconds(timestampOffsetSeconds),
-                "CORR-0001",
+                scenarioStart.AddHours(13).Add(timestampOffset),
+                scenarioStart.AddHours(9).Add(timestampOffset),
+                correlationId,
                 CreatePayload(packageId));
 
-        var first = CreateEnvelope("PKG-0001", 0);
-        if (!duplicateEvents)
+        var first = CreateEnvelope("PKG-0001", TimeSpan.Zero);
+        if (duplicateEvents)
+        {
+            return
+            [
+                first,
+                CreateEnvelope("PKG-0001", TimeSpan.FromSeconds(1)),
+                CreateEnvelope("PKG-0002", TimeSpan.FromSeconds(2))
+            ];
+        }
+
+        if (!contradictionEvents)
         {
             return [first];
         }
@@ -549,14 +608,19 @@ public static class FixtureGenerator
         return
         [
             first,
-            CreateEnvelope("PKG-0001", 1),
-            CreateEnvelope("PKG-0002", 2)
+            CreateEnvelope(
+                "PKG-0003",
+                TimeSpan.FromDays(1),
+                "EVT-0002",
+                "CORR-0002")
         ];
     }
 
     private static object CreateMutationMetadata(
         string mutationIdentifier,
-        IReadOnlyList<Document> documents) =>
+        IReadOnlyList<Document> documents,
+        ArtifactScope scope,
+        DateTimeOffset scenarioStart) =>
         mutationIdentifier switch
         {
             WorkflowContract.LiveMissingHistoryMutation => new
@@ -575,6 +639,12 @@ public static class FixtureGenerator
             },
             WorkflowContract.ProcessingFailureCorruptDocumentMutation =>
                 CreateProcessingFailureMetadata(mutationIdentifier, documents),
+            WorkflowContract.ContradictionLaterVersionMutation =>
+                CreateContradictionMetadata(
+                    mutationIdentifier,
+                    documents,
+                    scope,
+                    scenarioStart),
             _ => throw new ArgumentException(
                 $"Unsupported fixture mutation '{mutationIdentifier}'.",
                 nameof(mutationIdentifier))
@@ -594,6 +664,58 @@ public static class FixtureGenerator
             relativePath = "application-inputs/package-001/011-corrupt-document.pdf",
             sha256 = document.Sha256
         };
+    }
+
+    private static object CreateContradictionMetadata(
+        string mutationIdentifier,
+        IReadOnlyList<Document> documents,
+        ArtifactScope scope,
+        DateTimeOffset scenarioStart)
+    {
+        var earlier = documents.Single(document =>
+            document.DocumentId == "DOC-0004" && document.Version == 1);
+        var later = documents.Single(document =>
+            document.DocumentId == "DOC-0004" && document.Version == 2);
+        return new
+        {
+            identifier = mutationIdentifier,
+            mutation = "later-document-version-conflicts-with-reviewed-basis",
+            scope,
+            documentId = later.DocumentId,
+            sourceRecordId = later.SourceRecordId,
+            earlierVersion = earlier.Version,
+            earlierSha256 = earlier.Sha256,
+            laterVersion = later.Version,
+            laterSha256 = later.Sha256,
+            relativePath = "application-inputs/package-002/011-component-a-removal-history-v2.pdf",
+            packageId = "PKG-0003",
+            conflict = new
+            {
+                field = "removalDate",
+                earlierValue = scenarioStart.AddDays(-420).ToString("yyyy-MM-dd"),
+                laterValue = scenarioStart.AddDays(-421).ToString("yyyy-MM-dd")
+            }
+        };
+    }
+
+    private static SubmissionPackage CreateContradictionPackage(
+        CaseContext caseContext,
+        DateTimeOffset scenarioStart,
+        IReadOnlyList<Document> documents)
+    {
+        var laterDocument = documents.Single(document =>
+            document.DocumentId == "DOC-0004" && document.Version == 2);
+        return new SubmissionPackage(
+            WorkflowContract.Version,
+            "PKG-0003",
+            caseContext.RunId,
+            caseContext.CaseId,
+            caseContext.AirlineId,
+            caseContext.AircraftId,
+            caseContext.LeaseId,
+            scenarioStart.AddDays(1).AddHours(13),
+            scenarioStart.AddDays(1),
+            [laterDocument]);
     }
 
     private static IReadOnlyList<ReceiptArtifact> CreateReceiptArtifacts(
@@ -726,7 +848,9 @@ public static class FixtureGenerator
         string Content,
         string? PdfTitle = null,
         string? PdfAlternateText = null,
-        bool IsCorrupt = false);
+        bool IsCorrupt = false,
+        string? DocumentId = null,
+        int Version = 1);
 
     private static void WriteJson(string root, string relativePath, object value) =>
         WriteText(root, relativePath, JsonSerializer.Serialize(value, GeneratorContractJson.Options));
