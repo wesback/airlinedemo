@@ -34,6 +34,18 @@ public static class WorkflowApi
             CancellationToken cancellationToken) =>
             await service.SubmitPackageAsync(request, httpContext, cancellationToken));
 
+        app.MapDelete("/api/demo/runs/{runId}", async (
+            string runId,
+            HttpRequest httpRequest,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.ResetRunAsync(
+                runId,
+                await httpRequest.ReadFromJsonAsync<RunResetRequest>(cancellationToken),
+                httpContext,
+                cancellationToken));
+
         app.MapGet("/api/operations/{id}", async (
             string id,
             HttpContext httpContext,
@@ -124,7 +136,11 @@ internal sealed class WorkflowService
         var canonicalHash = CanonicalHash(request);
         var receiptKey = $"{request.Event.RunId}:{request.Event.EventId}";
         var existing = stateStore.Read(state =>
-            state.Receipts.TryGetValue(receiptKey, out var receipt) ? receipt : null);
+            state.Receipts.TryGetValue(receiptKey, out var receipt) &&
+            (receipt.OperationType != "load" ||
+                state.Operations.ContainsKey(receipt.OperationId))
+                ? receipt
+                : null);
         if (existing is not null)
         {
             if (!StringComparer.Ordinal.Equals(existing.CanonicalHash, canonicalHash))
@@ -161,6 +177,15 @@ internal sealed class WorkflowService
             }
         }
 
+        var manifestSha256 = await GetSelectedManifestSha256Async(
+            new CaseContext(
+                request.Package.RunId,
+                request.Package.CaseId,
+                request.Package.AirlineId,
+                request.Package.AircraftId,
+                request.Package.LeaseId),
+            request.Package.Manifest,
+            cancellationToken);
         var operationId = NewId("OP");
         var receiptId = NewId("RECEIPT");
         var context = new CaseContext(
@@ -196,19 +221,30 @@ internal sealed class WorkflowService
                 {
                     conflict = true;
                 }
-                else
+                else if (state.Operations.ContainsKey(receipt.OperationId))
                 {
                     replay = receipt;
                 }
+                else
+                {
+                    state.AuditReceipts ??= new(StringComparer.Ordinal);
+                    state.AuditReceipts[$"{receipt.RunId}:{receipt.ReceiptId}"] = receipt;
+                    state.Receipts.Remove(receiptKey);
+                }
 
-                return;
+                if (conflict || replay is not null)
+                {
+                    return;
+                }
             }
 
             var caseKey = CaseKey(context);
+            var createdCase = false;
             if (!state.Cases.TryGetValue(caseKey, out var existingCase))
             {
                 existingCase = new PersistedCase(context, 1, "active", [], []);
                 state.Cases.Add(caseKey, existingCase);
+                createdCase = true;
             }
             else if (!ScopeMatches(existingCase.Context, context))
             {
@@ -240,7 +276,11 @@ internal sealed class WorkflowService
                 request.Event.EventId,
                 canonicalHash,
                 operationId,
-                context.CaseId));
+                context.CaseId,
+                "load",
+                manifestSha256,
+                DateTimeOffset.UtcNow,
+                (createdCase ? 1 : 0) + 2 + request.Package.Manifest.Count));
         });
 
         if (conflict)
@@ -259,6 +299,123 @@ internal sealed class WorkflowService
         return Results.Json(
             new OperationAccepted(operationId, context.CaseId, receiptId),
             statusCode: 202);
+    }
+
+    public async Task<IResult> ResetRunAsync(
+        string? routeRunId,
+        RunResetRequest? request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = NewCorrelationId();
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        if (caller is null)
+        {
+            return Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", correlationId), statusCode: 401);
+        }
+
+        var requestedRunId = request?.RunId;
+        if (routeRunId is null ||
+            requestedRunId is null ||
+            !StringComparer.Ordinal.Equals(routeRunId, requestedRunId) ||
+            !IsValidId(routeRunId) ||
+            !StringComparer.Ordinal.Equals(caller.RunId, routeRunId))
+        {
+            return Results.Json(
+                new SafeError("ACTION_FORBIDDEN", correlationId), statusCode: 403);
+        }
+
+        if (!StringComparer.Ordinal.Equals(request?.Confirmation, "RESET"))
+        {
+            return Results.Json(
+                new SafeError(
+                    "INVALID_PAYLOAD",
+                    correlationId,
+                    "An explicit RESET confirmation is required."),
+                statusCode: 400);
+        }
+
+        var runId = routeRunId;
+        var manifestSha256 = stateStore.Read(state =>
+            state.Receipts.Values
+                .Where(receipt =>
+                    receipt.RunId == runId &&
+                    receipt.OperationType == "load" &&
+                    !string.IsNullOrWhiteSpace(receipt.SelectedManifestSha256))
+                .OrderByDescending(receipt => receipt.Timestamp)
+                .Select(receipt => receipt.SelectedManifestSha256)
+                .FirstOrDefault());
+        if (manifestSha256 is null)
+        {
+            manifestSha256 = await GetSelectedManifestSha256Async(
+                new CaseContext(runId, string.Empty, string.Empty, string.Empty, string.Empty),
+                [],
+                cancellationToken);
+        }
+
+        manifestSha256 ??= ManifestHash([]);
+        var receiptId = NewId("RECEIPT");
+        var affectedRecordCount = 0;
+        stateStore.Update(state =>
+        {
+            var caseKeys = state.Cases
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var packageKeys = state.Packages
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var operationKeys = state.Operations
+                .Where(entry => entry.Value.Status.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var documentKeys = state.Documents
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            affectedRecordCount =
+                caseKeys.Length +
+                packageKeys.Length +
+                operationKeys.Length +
+                documentKeys.Length;
+            foreach (var key in caseKeys)
+            {
+                state.Cases.Remove(key);
+            }
+
+            foreach (var key in packageKeys)
+            {
+                state.Packages.Remove(key);
+            }
+
+            foreach (var key in operationKeys)
+            {
+                state.Operations.Remove(key);
+            }
+
+            foreach (var key in documentKeys)
+            {
+                state.Documents.Remove(key);
+            }
+
+            state.Receipts.Add(
+                $"reset:{runId}:{receiptId}",
+                new PersistedReceipt(
+                    receiptId,
+                    runId,
+                    $"RESET-{Guid.NewGuid():N}",
+                    string.Empty,
+                    string.Empty,
+                    string.Empty,
+                    "reset",
+                    manifestSha256,
+                    DateTimeOffset.UtcNow,
+                    affectedRecordCount));
+        });
+
+        return Results.Ok(new ResetAccepted(runId, receiptId, affectedRecordCount));
     }
 
     public Task<IResult> GetOperationAsync(
@@ -717,6 +874,35 @@ internal sealed class WorkflowService
 
     private static string DocumentKey(CaseContext context, string documentId, int version) =>
         $"{context.RunId}:{context.AirlineId}:{context.AircraftId}:{context.LeaseId}:{context.CaseId}:{documentId}:v{version}";
+
+    private async Task<string> GetSelectedManifestSha256Async(
+        CaseContext context,
+        IReadOnlyList<DocumentMetadata> manifest,
+        CancellationToken cancellationToken)
+    {
+        if (documentStorage is ISelectedManifestStorage selectedManifestStorage)
+        {
+            var selectedHash = await selectedManifestStorage.GetSelectedManifestSha256Async(
+                context, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(selectedHash))
+            {
+                return selectedHash;
+            }
+        }
+
+        return ManifestHash(manifest);
+    }
+
+    private static string ManifestHash(IReadOnlyList<DocumentMetadata> manifest)
+    {
+        var json = JsonSerializer.SerializeToUtf8Bytes(
+            manifest,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                WriteIndented = false
+            });
+        return Convert.ToHexString(SHA256.HashData(json));
+    }
 
     private static string CanonicalHash(PackageSubmissionRequest request)
     {

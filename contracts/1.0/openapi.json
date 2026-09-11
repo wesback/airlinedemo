@@ -23,6 +23,9 @@
     },
     {
       "name": "Evidence"
+    },
+    {
+      "name": "Runs"
     }
   ],
   "paths": {
@@ -79,6 +82,65 @@
           },
           "409": {
             "$ref": "#/components/responses/EventPayloadConflict"
+          }
+        }
+      }
+    },
+    "/demo/runs/{runId}": {
+      "delete": {
+        "tags": [
+          "Runs"
+        ],
+        "operationId": "resetDemoRun",
+        "summary": "Reset one confirmed demonstration run",
+        "description": "The authenticated caller must own the named run and explicitly confirm with RESET. Only application-owned records for that run are removed; the reset receipt is retained.",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "workflow.write"
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunResetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The named run was reset and a receipt was persisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidPayload"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/ActionForbidden"
           }
         }
       }
@@ -454,6 +516,44 @@
       },
       "OperationAccepted": {
         "$ref": "workflow.schema.json#/$defs/OperationAccepted"
+      },
+      "RunResetRequest": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "confirmation": {
+            "type": "string",
+            "const": "RESET"
+          }
+        },
+        "required": [
+          "runId",
+          "confirmation"
+        ],
+        "additionalProperties": false
+      },
+      "ResetAccepted": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "receiptId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "affectedRecordCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "runId",
+          "receiptId",
+          "affectedRecordCount"
+        ],
+        "additionalProperties": false
       },
       "OperationStatus": {
         "$ref": "workflow.schema.json#/$defs/OperationStatus"
