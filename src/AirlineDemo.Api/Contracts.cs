@@ -156,9 +156,17 @@ public sealed record Finding(
     string Assessment,
     string ReasonCode,
     string Explanation,
-    IReadOnlyList<EvidenceRef> EvidenceRefs);
+    IReadOnlyList<EvidenceRef> EvidenceRefs)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? UnsupportedProperties { get; init; }
+}
 
-public sealed record InvestigationResult(IReadOnlyList<Finding> Findings);
+public sealed record InvestigationResult(IReadOnlyList<Finding> Findings)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? UnsupportedProperties { get; init; }
+}
 
 public sealed record InvestigationDocumentContent(
     CaseContext Context,

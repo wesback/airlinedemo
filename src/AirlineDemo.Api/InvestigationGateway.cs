@@ -175,6 +175,11 @@ public sealed class BoundedInvestigationGateway
             return "The investigation result must contain findings.";
         }
 
+        if (result.UnsupportedProperties is { Count: > 0 })
+        {
+            return "The investigation result contains unsupported workflow output.";
+        }
+
         var inventory = request.EvidenceBasis.DocumentInventory
             .Select(document => DocumentKey(document.DocumentId, document.Version))
             .ToHashSet(StringComparer.Ordinal);
@@ -196,6 +201,7 @@ public sealed class BoundedInvestigationGateway
         foreach (var finding in result.Findings)
         {
             if (finding is null ||
+                finding.UnsupportedProperties is { Count: > 0 } ||
                 string.IsNullOrWhiteSpace(finding.FindingId) ||
                 !findingIds.Add(finding.FindingId) ||
                 string.IsNullOrWhiteSpace(finding.ComponentId) ||
