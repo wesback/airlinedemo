@@ -9,7 +9,9 @@ public static class WorkflowApi
     public static WebApplication Create(
         string stateDirectory,
         IDocumentStorage? documentStorage = null,
-        bool useDevelopmentErrors = false)
+        bool useDevelopmentErrors = false,
+        IInvestigationModel? investigationModel = null,
+        InvestigationLimits? investigationLimits = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -19,7 +21,12 @@ public static class WorkflowApi
         var storage = documentStorage ?? new FileDocumentStorage(Path.Combine(stateDirectory, "documents"));
         builder.Services.AddSingleton(stateStore);
         builder.Services.AddSingleton(storage);
-        builder.Services.AddSingleton<WorkflowService>();
+        builder.Services.AddSingleton(new WorkflowService(
+            stateStore,
+            storage,
+            investigationModel is null
+                ? null
+                : new BoundedInvestigationGateway(investigationModel, investigationLimits)));
 
         var app = builder.Build();
         if (useDevelopmentErrors)
@@ -110,11 +117,16 @@ internal sealed class WorkflowService
 
     private readonly JsonStateStore stateStore;
     private readonly IDocumentStorage documentStorage;
+    private readonly BoundedInvestigationGateway? investigationGateway;
 
-    public WorkflowService(JsonStateStore stateStore, IDocumentStorage documentStorage)
+    public WorkflowService(
+        JsonStateStore stateStore,
+        IDocumentStorage documentStorage,
+        BoundedInvestigationGateway? investigationGateway = null)
     {
         this.stateStore = stateStore;
         this.documentStorage = documentStorage;
+        this.investigationGateway = investigationGateway;
     }
 
     public async Task<IResult> SubmitPackageAsync(
@@ -390,6 +402,22 @@ internal sealed class WorkflowService
                 .Where(entry => entry.Value.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var investigationKeys = state.Investigations
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var policyDecisionKeys = state.PolicyDecisions
+                .Where(entry => state.EvidenceBases.TryGetValue(
+                    entry.Value.BasisId, out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var evidenceRequestKeys = state.EvidenceRequests
+                .Where(entry => state.EvidenceBases.TryGetValue(
+                    entry.Value.BasisId, out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
             affectedRecordCount =
                 caseKeys.Length +
                 packageKeys.Length +
@@ -397,7 +425,10 @@ internal sealed class WorkflowService
                 documentKeys.Length +
                 extractionKeys.Length +
                 extractionAttemptKeys.Length +
-                evidenceBasisKeys.Length;
+                evidenceBasisKeys.Length +
+                investigationKeys.Length +
+                policyDecisionKeys.Length +
+                evidenceRequestKeys.Length;
             foreach (var key in caseKeys)
             {
                 state.Cases.Remove(key);
@@ -431,6 +462,21 @@ internal sealed class WorkflowService
             foreach (var key in evidenceBasisKeys)
             {
                 state.EvidenceBases.Remove(key);
+            }
+
+            foreach (var key in investigationKeys)
+            {
+                state.Investigations.Remove(key);
+            }
+
+            foreach (var key in policyDecisionKeys)
+            {
+                state.PolicyDecisions.Remove(key);
+            }
+
+            foreach (var key in evidenceRequestKeys)
+            {
+                state.EvidenceRequests.Remove(key);
             }
 
             state.Receipts.Add(
@@ -816,6 +862,34 @@ internal sealed class WorkflowService
             }
         });
 
+        if (processingError is null && investigationGateway is not null)
+        {
+            var basis = stateStore.Read(state =>
+                state.EvidenceBases.TryGetValue($"BASIS-{package.OperationId}", out var value)
+                    ? value
+                    : null);
+            var investigation = basis is null
+                ? new InvestigationOutcome(
+                    $"BASIS-{package.OperationId}",
+                    package.Context,
+                    "blocked",
+                    [],
+                    new SafeError("INVESTIGATION_BASIS_NOT_FOUND", correlationId),
+                    correlationId)
+                : await InvestigateBasisAsync(basis, correlationId, cancellationToken);
+
+            stateStore.Update(state =>
+            {
+                state.Investigations[investigation.BasisId] = investigation;
+                if (investigation.Status == "blocked" &&
+                    state.Cases.TryGetValue(CaseKey(package.Context), out var persistedCase))
+                {
+                    state.Cases[CaseKey(package.Context)] =
+                        persistedCase with { Status = "blocked" };
+                }
+            });
+        }
+
         return Results.Json(
             new OperationAccepted(operationId, package.Context.CaseId, receipt.ReceiptId),
             statusCode: 202);
@@ -1000,6 +1074,10 @@ internal sealed class WorkflowService
                     package.ProcessingStatus,
                     package.Error))
                 .ToArray();
+            var investigation = state.Investigations.Values
+                .Where(candidate => ScopeMatches(candidate.Context, persistedCase.Context))
+                .OrderByDescending(candidate => candidate.BasisId, StringComparer.Ordinal)
+                .FirstOrDefault();
             return new CaseSummary(
                 persistedCase.Context.CaseId,
                 persistedCase.Context.RunId,
@@ -1008,12 +1086,60 @@ internal sealed class WorkflowService
                 persistedCase.Context.LeaseId,
                 persistedCase.CaseRevision,
                 persistedCase.Status,
-                packages);
+                packages,
+                investigation);
         });
 
         return Task.FromResult<IResult>(summary is null
             ? Results.Json(new SafeError("CASE_NOT_FOUND", NewCorrelationId()), statusCode: 404)
             : Results.Ok(summary));
+    }
+
+    private async Task<InvestigationOutcome> InvestigateBasisAsync(
+        EvidenceBasis basis,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var pageSources = stateStore.Read(state =>
+            basis.DocumentInventory
+                .Select(document =>
+                {
+                    var key = DocumentKey(
+                        basis.Context, document.DocumentId, document.Version);
+                    return state.ExtractionRecords.TryGetValue(key, out var extraction) &&
+                        ScopeMatches(extraction.Context, basis.Context) &&
+                        extraction.ProcessingState == "complete"
+                        ? (Document: document, Pages: extraction.PageInventory)
+                        : (Document: document, Pages: (IReadOnlyList<int>)[]);
+                })
+                .ToArray());
+        var content = new List<InvestigationDocumentContent>();
+        foreach (var source in pageSources)
+        {
+            foreach (var page in source.Pages)
+            {
+                var locator =
+                    $"{basis.Context.RunId}/{basis.Context.CaseId}/" +
+                    $"{source.Document.DocumentId}/v{source.Document.Version}";
+                var text = await documentStorage.ReadPagePreviewAsync(
+                    locator, page, cancellationToken);
+                if (text is not null)
+                {
+                    content.Add(new InvestigationDocumentContent(
+                        basis.Context,
+                        source.Document.DocumentId,
+                        source.Document.Version,
+                        page,
+                        text));
+                }
+            }
+        }
+
+        return await investigationGateway!.InvestigateAsync(
+            basis,
+            content,
+            correlationId,
+            cancellationToken);
     }
 
     public async Task<IResult> GetEvidencePreviewAsync(

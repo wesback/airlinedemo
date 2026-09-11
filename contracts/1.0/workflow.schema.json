@@ -283,6 +283,201 @@
       },
       "additionalProperties": false
     },
+    "ApprovedRequirementVersion": {
+      "type": "object",
+      "required": [
+        "requirementId",
+        "version"
+      ],
+      "properties": {
+        "requirementId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceDocumentVersion": {
+      "type": "object",
+      "required": [
+        "documentId",
+        "version",
+        "sha256"
+      ],
+      "properties": {
+        "documentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceBasis": {
+      "type": "object",
+      "required": [
+        "basisId",
+        "context",
+        "documentInventory",
+        "approvedRequirementVersions",
+        "caseRevision",
+        "createdAt",
+        "parserVersion",
+        "extractorVersion"
+      ],
+      "properties": {
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "context": {
+          "$ref": "#/$defs/CaseContext"
+        },
+        "documentInventory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceDocumentVersion"
+          }
+        },
+        "approvedRequirementVersions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovedRequirementVersion"
+          }
+        },
+        "caseRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "parserVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "extractorVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "Finding": {
+      "type": "object",
+      "required": [
+        "findingId",
+        "componentId",
+        "requirementId",
+        "basisId",
+        "assessment",
+        "reasonCode",
+        "explanation",
+        "evidenceRefs"
+      ],
+      "properties": {
+        "findingId": {
+          "$ref": "#/$defs/Id"
+        },
+        "componentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "requirementId": {
+          "$ref": "#/$defs/Id"
+        },
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "assessment": {
+          "type": "string",
+          "enum": [
+            "satisfied",
+            "missing",
+            "ambiguous",
+            "conflicting",
+            "blocked"
+          ]
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/Id"
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "InvestigationResult": {
+      "type": "object",
+      "required": [
+        "findings"
+      ],
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "InvestigationOutcome": {
+      "type": "object",
+      "required": [
+        "basisId",
+        "context",
+        "status",
+        "findings",
+        "correlationId"
+      ],
+      "properties": {
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "context": {
+          "$ref": "#/$defs/CaseContext"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "blocked"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          }
+        },
+        "error": {
+          "$ref": "#/$defs/SafeError"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
     "SubmissionPackage": {
       "type": "object",
       "required": [
@@ -612,6 +807,9 @@
           "items": {
             "$ref": "#/$defs/PackageProcessingStatus"
           }
+        },
+        "investigation": {
+          "$ref": "#/$defs/InvestigationOutcome"
         }
       },
       "additionalProperties": false
@@ -713,7 +911,14 @@
             "OPERATION_NOT_FOUND",
             "ACTION_FORBIDDEN",
             "INVALID_PAYLOAD",
-            "EVENT_PAYLOAD_CONFLICT"
+            "EVENT_PAYLOAD_CONFLICT",
+            "INVESTIGATION_BASIS_NOT_FOUND",
+            "INVESTIGATION_CALL_LIMIT",
+            "INVESTIGATION_CONTEXT_LIMIT",
+            "INVESTIGATION_OUTPUT_INVALID",
+            "INVESTIGATION_PAGE_LIMIT",
+            "INVESTIGATION_RETRY_LIMIT",
+            "INVESTIGATION_TIMEOUT"
           ]
         },
         "correlationId": {
