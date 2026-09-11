@@ -110,7 +110,8 @@ public sealed record EvidenceBounds(double X, double Y, double Width, double Hei
 
 public sealed record ApprovedRequirementVersion(
     string RequirementId,
-    int Version);
+    int Version,
+    string? ComponentId = null);
 
 public sealed record EvidenceDocumentVersion(
     string DocumentId,
@@ -255,6 +256,7 @@ internal sealed class PersistedState
     public Dictionary<string, ScopedExtractionRecord> ExtractionAttempts { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceBasis> EvidenceBases { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, InvestigationOutcome> Investigations { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, Finding> Findings { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PolicyDecision> PolicyDecisions { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceRequest> EvidenceRequests { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedReceipt> Receipts { get; init; } = new(StringComparer.Ordinal);

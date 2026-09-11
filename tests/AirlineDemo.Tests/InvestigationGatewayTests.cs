@@ -226,6 +226,17 @@ public sealed class InvestigationGatewayTests
                 Assert.Equal(
                     investigation.GetProperty("correlationId").GetString(),
                     investigation.GetProperty("error").GetProperty("correlationId").GetString());
+                Assert.Contains(
+                    "retry",
+                    investigation.GetProperty("error").GetProperty("message").GetString() ??
+                        string.Empty,
+                    StringComparison.OrdinalIgnoreCase);
+                Assert.Empty(investigation.GetProperty("findings").EnumerateArray());
+                Assert.Empty(state.RootElement.GetProperty("findings").EnumerateObject());
+                Assert.DoesNotContain(
+                    investigation.GetProperty("findings").EnumerateArray(),
+                    finding => finding.GetProperty("assessment").GetString() is
+                        "satisfied" or "missing" or "ambiguous" or "conflicting");
                 Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
                 Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
 

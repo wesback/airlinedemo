@@ -296,6 +296,9 @@
         "version": {
           "type": "integer",
           "minimum": 1
+        },
+        "componentId": {
+          "$ref": "#/$defs/Id"
         }
       },
       "additionalProperties": false

@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AirlineDemo.Api;
 
@@ -66,6 +68,18 @@ public sealed class FileDocumentStorage :
         if (page < 1 || documentDirectory is null)
         {
             return null;
+        }
+
+        if (File.Exists(documentDirectory))
+        {
+            if (page != 1)
+            {
+                return null;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(documentDirectory, cancellationToken);
+            ValidatePdfDocument(bytes);
+            return ExtractPdfText(bytes);
         }
 
         var pagePath = Path.Combine(documentDirectory, $"page-{page}.txt");
@@ -222,6 +236,11 @@ public sealed class FileDocumentStorage :
         CancellationToken cancellationToken)
     {
         var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+        ValidatePdfDocument(bytes);
+    }
+
+    private static void ValidatePdfDocument(byte[] bytes)
+    {
         var content = System.Text.Encoding.ASCII.GetString(bytes);
         if (!content.StartsWith("%PDF-", StringComparison.Ordinal) ||
             !content.Contains("%%EOF", StringComparison.Ordinal))
@@ -229,6 +248,23 @@ public sealed class FileDocumentStorage :
             throw new InvalidDataException("The declared document is not a readable PDF.");
         }
     }
+
+    private static string ExtractPdfText(byte[] bytes)
+    {
+        var content = Encoding.ASCII.GetString(bytes);
+        var lines = Regex.Matches(
+                content,
+                @"\((?<text>(?:\\.|[^\\)])*)\)\s*Tj",
+                RegexOptions.CultureInvariant)
+            .Select(match => UnescapePdfString(match.Groups["text"].Value));
+        return string.Join('\n', lines);
+    }
+
+    private static string UnescapePdfString(string value) =>
+        value
+            .Replace("\\(", "(", StringComparison.Ordinal)
+            .Replace("\\)", ")", StringComparison.Ordinal)
+            .Replace("\\\\", "\\", StringComparison.Ordinal);
 
     public async Task<IReadOnlyList<ApprovedRequirementVersion>> GetApprovedRequirementVersionsAsync(
         CaseContext context,
@@ -250,7 +286,8 @@ public sealed class FileDocumentStorage :
                 requirement.Version > 0)
             .Select(requirement => new ApprovedRequirementVersion(
                 requirement.RequirementId,
-                requirement.Version))
+                requirement.Version,
+                requirement.ComponentId))
             .ToArray()
             ?? [];
     }

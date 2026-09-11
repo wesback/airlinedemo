@@ -406,6 +406,14 @@ internal sealed class WorkflowService
                 .Where(entry => entry.Value.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var findingKeys = state.Findings
+                .Where(entry =>
+                    state.EvidenceBases.TryGetValue(
+                        entry.Value.BasisId,
+                        out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
             var policyDecisionKeys = state.PolicyDecisions
                 .Where(entry => state.EvidenceBases.TryGetValue(
                     entry.Value.BasisId, out var basis) &&
@@ -427,6 +435,7 @@ internal sealed class WorkflowService
                 extractionAttemptKeys.Length +
                 evidenceBasisKeys.Length +
                 investigationKeys.Length +
+                findingKeys.Length +
                 policyDecisionKeys.Length +
                 evidenceRequestKeys.Length;
             foreach (var key in caseKeys)
@@ -467,6 +476,11 @@ internal sealed class WorkflowService
             foreach (var key in investigationKeys)
             {
                 state.Investigations.Remove(key);
+            }
+
+            foreach (var key in findingKeys)
+            {
+                state.Findings.Remove(key);
             }
 
             foreach (var key in policyDecisionKeys)
@@ -881,6 +895,14 @@ internal sealed class WorkflowService
             stateStore.Update(state =>
             {
                 state.Investigations[investigation.BasisId] = investigation;
+                if (investigation.Status == "complete")
+                {
+                    var derivedFindings = FindingDerivation.Derive(basis!, investigation);
+                    foreach (var finding in derivedFindings)
+                    {
+                        state.Findings[FindingKey(finding)] = finding;
+                    }
+                }
                 if (investigation.Status == "blocked" &&
                     state.Cases.TryGetValue(CaseKey(package.Context), out var persistedCase))
                 {
@@ -1287,6 +1309,9 @@ internal sealed class WorkflowService
 
     private static string DocumentKey(CaseContext context, string documentId, int version) =>
         $"{context.RunId}:{context.AirlineId}:{context.AircraftId}:{context.LeaseId}:{context.CaseId}:{documentId}:v{version}";
+
+    private static string FindingKey(Finding finding) =>
+        $"{finding.BasisId}:{finding.FindingId}";
 
     private async Task<string> GetSelectedManifestSha256Async(
         CaseContext context,

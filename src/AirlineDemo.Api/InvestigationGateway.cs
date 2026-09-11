@@ -119,7 +119,8 @@ public sealed class BoundedInvestigationGateway
                     return Blocked(
                         evidenceBasis,
                         "INVESTIGATION_OUTPUT_INVALID",
-                        correlationId);
+                        correlationId,
+                        validationError);
                 }
 
                 return new InvestigationOutcome(
@@ -152,12 +153,17 @@ public sealed class BoundedInvestigationGateway
                     return Blocked(
                         evidenceBasis,
                         "INVESTIGATION_RETRY_LIMIT",
-                        correlationId);
+                        correlationId,
+                        "The investigation provider failed after the configured retry limit.");
                 }
             }
         }
 
-        return Blocked(evidenceBasis, "INVESTIGATION_RETRY_LIMIT", correlationId);
+        return Blocked(
+            evidenceBasis,
+            "INVESTIGATION_RETRY_LIMIT",
+            correlationId,
+            "The investigation provider failed after the configured retry limit.");
     }
 
     public static string? Validate(
@@ -182,6 +188,9 @@ public sealed class BoundedInvestigationGateway
             .Select(requirement => RequirementKey(
                 requirement.RequirementId, requirement.Version))
             .ToHashSet(StringComparer.Ordinal);
+        var requirementsById = request.ApprovedRequirements
+            .GroupBy(requirement => requirement.RequirementId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
         var findingIds = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var finding in result.Findings)
@@ -194,12 +203,18 @@ public sealed class BoundedInvestigationGateway
                 !requirementKeys.Contains(
                     RequirementKey(finding.RequirementId, ResolveRequirementVersion(
                         request, finding.RequirementId))) ||
+                !RequirementComponentMatches(
+                    requirementsById,
+                    finding.RequirementId,
+                    finding.ComponentId) ||
                 !StringComparer.Ordinal.Equals(
                     finding.BasisId, request.EvidenceBasis.BasisId) ||
                 !ClosedAssessments.Contains(finding.Assessment) ||
                 string.IsNullOrWhiteSpace(finding.ReasonCode) ||
                 string.IsNullOrWhiteSpace(finding.Explanation) ||
-                finding.EvidenceRefs is null)
+                finding.EvidenceRefs is null ||
+                RequiresEvidence(finding.Assessment) &&
+                finding.EvidenceRefs.Count == 0)
             {
                 return "The investigation result contains an unsupported finding.";
             }
@@ -234,16 +249,35 @@ public sealed class BoundedInvestigationGateway
         return versions.Length == 1 ? versions[0] : 0;
     }
 
+    private static bool RequirementComponentMatches(
+        IReadOnlyDictionary<string, ApprovedRequirementVersion[]> requirementsById,
+        string requirementId,
+        string componentId)
+    {
+        if (!requirementsById.TryGetValue(requirementId, out var requirements) ||
+            requirements.Length != 1)
+        {
+            return false;
+        }
+
+        return requirements[0].ComponentId is null ||
+            StringComparer.Ordinal.Equals(requirements[0].ComponentId, componentId);
+    }
+
+    private static bool RequiresEvidence(string assessment) =>
+        assessment is "satisfied" or "ambiguous" or "conflicting";
+
     private static InvestigationOutcome Blocked(
         EvidenceBasis evidenceBasis,
         string safeCode,
-        string correlationId) =>
+        string correlationId,
+        string? message = null) =>
         new(
             evidenceBasis.BasisId,
             evidenceBasis.Context,
             "blocked",
             [],
-            new SafeError(safeCode, correlationId),
+            new SafeError(safeCode, correlationId, message),
             correlationId);
 
     private static void ValidateLimits(InvestigationLimits limits)
