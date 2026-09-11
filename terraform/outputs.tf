@@ -89,6 +89,56 @@ output "fixture_retention_days" {
 }
 
 output "application_deployment" {
-  description = "Non-secret application deployment settings. No resource endpoints or credentials are included."
+  description = "Non-secret application deployment settings. No resource endpoints or credentials are included in secret form; approved public endpoints are included separately."
   value       = local.application_deployment
+}
+
+output "function_app_id" {
+  description = "Non-secret resource identifier for the Flex Consumption Function App."
+  value       = module.functions.function_app_id
+}
+
+output "function_app_endpoint" {
+  description = "HTTPS endpoint for the Flex Consumption Function App."
+  value       = module.functions.function_app_endpoint
+}
+
+output "sql_server_id" {
+  description = "Non-secret resource identifier for the Azure SQL logical server."
+  value       = module.sql.sql_server_id
+}
+
+output "sql_server_fully_qualified_domain_name" {
+  description = "Public Azure SQL server endpoint; access remains firewall restricted."
+  value       = module.sql.sql_server_fully_qualified_domain_name
+}
+
+output "sql_database_id" {
+  description = "Non-secret resource identifier for the workflow database."
+  value       = module.sql.sql_database_id
+}
+
+output "document_intelligence_id" {
+  description = "Non-secret resource identifier for Document Intelligence."
+  value       = module.document_intelligence.account_id
+}
+
+output "document_intelligence_endpoint" {
+  description = "Public Document Intelligence endpoint; access remains firewall restricted."
+  value       = module.document_intelligence.endpoint
+}
+
+output "azure_openai_id" {
+  description = "Non-secret resource identifier for the Azure OpenAI account."
+  value       = module.ai.account_id
+}
+
+output "azure_openai_endpoint" {
+  description = "Public Azure OpenAI endpoint; access remains firewall restricted."
+  value       = module.ai.endpoint
+}
+
+output "azure_openai_deployment_id" {
+  description = "Non-secret resource identifier for the approved Azure OpenAI deployment."
+  value       = module.ai.deployment_id
 }

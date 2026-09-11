@@ -153,6 +153,14 @@ public sealed class TerraformConfigurationTests
             StringComparison.Ordinal);
         Assert.Contains("source = \"./modules/observability\"", configuration,
             StringComparison.Ordinal);
+        Assert.Contains("source = \"./modules/functions\"", configuration,
+            StringComparison.Ordinal);
+        Assert.Contains("source = \"./modules/sql\"", configuration,
+            StringComparison.Ordinal);
+        Assert.Contains("source = \"./modules/document-intelligence\"", configuration,
+            StringComparison.Ordinal);
+        Assert.Contains("source = \"./modules/ai\"", configuration,
+            StringComparison.Ordinal);
 
         var resourceTypes = Regex.Matches(
                 configuration,
@@ -161,15 +169,23 @@ public sealed class TerraformConfigurationTests
             .ToArray();
         var approvedResourceTypes = new HashSet<string>(
             [
-                "azurerm_application_insights",
-                "azurerm_log_analytics_workspace",
-                "azurerm_resource_group",
-                "azurerm_storage_account",
-                "azurerm_storage_management_policy"
+            "azurerm_cognitive_account",
+            "azurerm_cognitive_deployment",
+            "azurerm_function_app_flex_consumption",
+            "azurerm_application_insights",
+            "azurerm_log_analytics_workspace",
+            "azurerm_mssql_database",
+            "azurerm_mssql_firewall_rule",
+            "azurerm_mssql_server",
+            "azurerm_resource_group",
+            "azurerm_service_plan",
+            "azurerm_storage_account",
+            "azurerm_storage_container",
+            "azurerm_storage_management_policy"
             ],
             StringComparer.Ordinal);
 
-        Assert.Equal(6, resourceTypes.Length);
+        Assert.Equal(15, resourceTypes.Length);
         Assert.Empty(resourceTypes.Except(approvedResourceTypes, StringComparer.Ordinal));
         Assert.Equal(
             approvedResourceTypes.Count,
@@ -182,7 +198,7 @@ public sealed class TerraformConfigurationTests
             .ToArray();
 
         Assert.Equal(
-            ["demo_boundary", "observability"],
+            ["ai", "demo_boundary", "document_intelligence", "functions", "observability", "sql"],
             moduleNames.Order(StringComparer.Ordinal).ToArray());
 
         var declarationHeaders = string.Join(
@@ -208,6 +224,129 @@ public sealed class TerraformConfigurationTests
             Assert.DoesNotContain(prohibitedInfrastructure, declarationHeaders,
                 StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    [Fact]
+    public void TerraformWorkloadModules_ConfigureApprovedFunctionsSqlAndAiBoundaries()
+    {
+        var root = LoadText("terraform", "main.tf");
+        var functions = LoadText("terraform", "modules", "functions", "main.tf");
+        var sql = LoadText("terraform", "modules", "sql", "main.tf");
+        var documentIntelligence = LoadText(
+            "terraform", "modules", "document-intelligence", "main.tf");
+        var ai = LoadText("terraform", "modules", "ai", "main.tf");
+
+        Assert.Contains("module \"functions\"", root, StringComparison.Ordinal);
+        Assert.Contains("sku_name            = \"FC1\"", functions, StringComparison.Ordinal);
+        Assert.Contains("azurerm_function_app_flex_consumption", functions,
+            StringComparison.Ordinal);
+        Assert.Matches(@"runtime_name\s*=\s*var\.function_worker_model", functions);
+        Assert.Matches(@"runtime_version\s*=\s*""10\.0""", functions);
+        Assert.Matches(@"FUNCTIONS_EXTENSION_VERSION\s*=\s*""~4""", functions);
+        Assert.Matches(@"FUNCTIONS_WORKER_RUNTIME\s*=\s*var\.function_worker_model",
+            functions);
+        Assert.Contains("azurerm_mssql_server", sql, StringComparison.Ordinal);
+        Assert.Contains("sku_name                    = \"GP_S_Gen5_2\"", sql,
+            StringComparison.Ordinal);
+        Assert.Contains("min_capacity                = 0.5", sql, StringComparison.Ordinal);
+        Assert.Contains("auto_pause_delay_in_minutes = 60", sql, StringComparison.Ordinal);
+        Assert.Contains("azurerm_mssql_firewall_rule", sql, StringComparison.Ordinal);
+        Assert.Contains("kind                = \"FormRecognizer\"", documentIntelligence,
+            StringComparison.Ordinal);
+        Assert.Contains("kind                = \"OpenAI\"", ai, StringComparison.Ordinal);
+        Assert.Contains("azurerm_cognitive_deployment", ai, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TerraformAiModule_RequiresTheApprovedModelVersionDeploymentTypeAndQuota()
+    {
+        var rootVariables = LoadText("terraform", "variables.tf");
+        var aiVariables = LoadText("terraform", "modules", "ai", "variables.tf");
+        var ai = LoadText("terraform", "modules", "ai", "main.tf");
+
+        Assert.Contains("variable \"azure_openai_model\"", rootVariables,
+            StringComparison.Ordinal);
+        Assert.Contains("variable \"azure_openai_model_version\"", rootVariables,
+            StringComparison.Ordinal);
+        Assert.Contains("variable \"azure_openai_deployment_type\"", rootVariables,
+            StringComparison.Ordinal);
+        Assert.Contains("variable \"azure_openai_quota_tokens_minute\"", rootVariables,
+            StringComparison.Ordinal);
+        Assert.Contains("condition     = var.azure_openai_deployment_type == \"Standard\"",
+            rootVariables, StringComparison.Ordinal);
+        Assert.Contains("condition     = var.azure_openai_quota_tokens_minute == 30000",
+            rootVariables, StringComparison.Ordinal);
+        Assert.Contains("version = var.model_version", ai, StringComparison.Ordinal);
+        Assert.Contains("name     = var.deployment_type", ai, StringComparison.Ordinal);
+        Assert.Contains("capacity = var.quota_tokens_per_minute / 1000", ai,
+            StringComparison.Ordinal);
+        Assert.Contains("variable \"model_name\"", aiVariables, StringComparison.Ordinal);
+        Assert.Contains("variable \"model_version\"", aiVariables, StringComparison.Ordinal);
+        Assert.DoesNotContain("default     = \"gpt-", aiVariables,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TerraformWorkloadModules_UseTheTaggedDemoGroupAndNonSecretOutputs()
+    {
+        var root = LoadText("terraform", "main.tf");
+        var outputs = LoadText("terraform", "outputs.tf");
+        var moduleFiles = new[]
+        {
+            LoadText("terraform", "modules", "functions", "main.tf"),
+            LoadText("terraform", "modules", "sql", "main.tf"),
+            LoadText("terraform", "modules", "document-intelligence", "main.tf"),
+            LoadText("terraform", "modules", "ai", "main.tf")
+        };
+
+        Assert.Contains("resource_group_name = module.demo_boundary.resource_group_name",
+            root, StringComparison.Ordinal);
+        Assert.All(moduleFiles, module => Assert.Contains("tags = var.tags", module,
+            StringComparison.Ordinal));
+        Assert.Contains("function_app_endpoint", outputs, StringComparison.Ordinal);
+        Assert.Contains("sql_server_fully_qualified_domain_name", outputs,
+            StringComparison.Ordinal);
+        Assert.Contains("document_intelligence_endpoint", outputs,
+            StringComparison.Ordinal);
+        Assert.Contains("azure_openai_endpoint", outputs, StringComparison.Ordinal);
+        Assert.DoesNotContain("primary_access_key", outputs, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("connection_string", outputs, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", outputs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TerraformWorkloadModules_UsePublicFirewallRestrictedEndpointsWithoutNetworkInfrastructure()
+    {
+        var functions = LoadText("terraform", "modules", "functions", "main.tf");
+        var configuration = string.Join(
+            Environment.NewLine,
+            new[]
+            {
+                functions,
+                LoadText("terraform", "modules", "sql", "main.tf"),
+                LoadText("terraform", "modules", "document-intelligence", "main.tf"),
+                LoadText("terraform", "modules", "ai", "main.tf")
+            });
+
+        Assert.Matches(@"public_network_access_enabled\s*=\s*true", functions);
+        Assert.Matches(@"ip_restriction_default_action\s*=\s*""Deny""", functions);
+        Assert.Matches(@"scm_ip_restriction_default_action\s*=\s*""Deny""", functions);
+        Assert.Contains("dynamic \"ip_restriction\"", functions, StringComparison.Ordinal);
+        Assert.Contains("allowed_ip_ranges", functions, StringComparison.Ordinal);
+        Assert.Matches(@"public_network_access_enabled\s*=\s*true", configuration);
+        Assert.Contains("default_action = \"Deny\"", configuration,
+            StringComparison.Ordinal);
+        Assert.Contains("start_ip_address = \"0.0.0.0\"", configuration,
+            StringComparison.Ordinal);
+        Assert.Contains("end_ip_address   = \"0.0.0.0\"", configuration,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("azurerm_virtual_network", configuration,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("azurerm_private_endpoint", configuration,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("virtual_network_subnet_id", configuration,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("local-exec", configuration, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string LoadText(params string[] relativePath)
