@@ -213,11 +213,52 @@ public sealed record EvidenceRequest(
     string BasisId,
     string Status);
 
+public sealed record ReviewCommand(
+    string FindingId,
+    string BasisId,
+    string Decision,
+    string Reason);
+
+public sealed record ReviewDecision(
+    string ReviewId,
+    string FindingId,
+    string BasisId,
+    string Decision,
+    string ReviewerSubject,
+    string Reason,
+    DateTimeOffset DecidedAt);
+
+public sealed record FindingDisposition(
+    string FindingId,
+    string BasisId,
+    string Disposition,
+    string ReviewId);
+
+public sealed record ReviewTask(
+    string TaskId,
+    string FindingId,
+    string BasisId,
+    string ReasonCode,
+    string Status,
+    string? AssignedReviewerSubject = null);
+
+public sealed record AuditEntry(
+    string AuditId,
+    CaseContext Context,
+    string ActorType,
+    string ActorId,
+    string Action,
+    IReadOnlyList<string> AffectedIds,
+    string? BasisId,
+    DateTimeOffset RecordedAt,
+    string CorrelationId);
+
 public sealed record CallerScope(
     string RunId,
     string AirlineId,
     string AircraftId,
-    string LeaseId);
+    string LeaseId,
+    string Subject = "");
 
 internal sealed record PersistedCase(
     CaseContext Context,
@@ -267,6 +308,14 @@ internal sealed class PersistedState
     public Dictionary<string, Finding> Findings { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PolicyDecision> PolicyDecisions { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceRequest> EvidenceRequests { get; init; } = new(StringComparer.Ordinal);
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Dictionary<string, ReviewDecision>? ReviewDecisions { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Dictionary<string, FindingDisposition>? FindingDispositions { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Dictionary<string, ReviewTask>? ReviewTasks { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Dictionary<string, AuditEntry>? AuditEntries { get; set; }
     public Dictionary<string, PersistedReceipt> Receipts { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, PersistedReceipt>? AuditReceipts { get; set; }

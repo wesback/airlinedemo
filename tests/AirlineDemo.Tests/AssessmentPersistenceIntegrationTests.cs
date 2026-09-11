@@ -16,6 +16,282 @@ namespace AirlineDemo.Tests;
 
 public sealed class AssessmentPersistenceIntegrationTests
 {
+    [Theory]
+    [InlineData("accept_evidence", "accepted")]
+    [InlineData("dismiss_finding", "dismissed")]
+    [InlineData("needs_evidence", "needs_evidence")]
+    public async Task AuthorisedCurrentBasisReview_PersistsServerActorTimeDispositionAndAudit(
+        string decisionName,
+        string expectedDisposition)
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+
+        using var beforeReview = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var basis = beforeReview.RootElement.GetProperty("evidenceBases")
+            .EnumerateObject().Single().Value;
+        var finding = beforeReview.RootElement.GetProperty("findings")
+            .EnumerateObject().Select(entry => entry.Value)
+            .First(candidate => candidate.GetProperty("assessment").GetString() == "satisfied");
+        var basisId = basis.GetProperty("basisId").GetString()!;
+        var findingId = finding.GetProperty("findingId").GetString()!;
+        var reviewClient = new HttpClient { BaseAddress = server.Client.BaseAddress };
+        reviewClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue(
+                "Bearer",
+                "run=RUN-0001;airline=AIRLINE-0001;aircraft=MOCK-AC-001;" +
+                "lease=LEASE-0001;subject=reviewer-0001");
+        reviewClient.DefaultRequestHeaders.TryAddWithoutValidation("If-Match", "\"1\"");
+
+        var response = await reviewClient.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews",
+            new ReviewCommand(
+                findingId,
+                basisId,
+                decisionName,
+                "Reviewed the cited supplied evidence."));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var decision = await response.Content.ReadFromJsonAsync<ReviewDecision>();
+        Assert.NotNull(decision);
+        Assert.Equal(findingId, decision!.FindingId);
+        Assert.Equal(basisId, decision.BasisId);
+        Assert.Equal(decisionName, decision.Decision);
+        Assert.Equal("reviewer-0001", decision.ReviewerSubject);
+        Assert.Equal("Reviewed the cited supplied evidence.", decision.Reason);
+        Assert.Equal(TimeSpan.Zero, decision.DecidedAt.Offset);
+
+        using var afterReview = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var state = afterReview.RootElement;
+        Assert.Single(state.GetProperty("reviewDecisions").EnumerateObject());
+        Assert.Single(state.GetProperty("findingDispositions").EnumerateObject());
+        Assert.Single(state.GetProperty("auditEntries").EnumerateObject());
+        var audit = state.GetProperty("auditEntries").EnumerateObject().Single().Value;
+        Assert.Equal("human_reviewer", audit.GetProperty("actorType").GetString());
+        Assert.Equal("reviewer-0001", audit.GetProperty("actorId").GetString());
+        Assert.Equal(basisId, audit.GetProperty("basisId").GetString());
+        Assert.Equal(findingId, audit.GetProperty("affectedIds")[0].GetString());
+        Assert.Equal(decision.DecidedAt, audit.GetProperty("recordedAt").GetDateTimeOffset());
+        Assert.Equal(expectedDisposition, state.GetProperty("findingDispositions")
+            .EnumerateObject().Single().Value.GetProperty("disposition").GetString());
+        Assert.Equal(2, state.GetProperty("cases").EnumerateObject().Single().Value
+            .GetProperty("caseRevision").GetInt64());
+        reviewClient.Dispose();
+    }
+
+    [Fact]
+    public async Task InvalidOrUnauthorisedReviewCommands_CreateNoReviewOrCaseMutation()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+
+        using var before = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var basisId = before.RootElement.GetProperty("evidenceBases")
+            .EnumerateObject().Single().Value.GetProperty("basisId").GetString()!;
+        var findingId = before.RootElement.GetProperty("findings")
+            .EnumerateObject().First().Value.GetProperty("findingId").GetString()!;
+        var command = new ReviewCommand(
+            findingId, basisId, "accept_evidence", "A deliberate review reason.");
+
+        using var unauthenticated = new HttpClient { BaseAddress = server.Client.BaseAddress };
+        var unauthenticatedResponse = await unauthenticated.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews", command);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticatedResponse.StatusCode);
+
+        using var outsideScope = new HttpClient { BaseAddress = server.Client.BaseAddress };
+        outsideScope.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            "run=RUN-0001;airline=OTHER-AIRLINE;aircraft=MOCK-AC-001;lease=LEASE-0001;" +
+            "subject=reviewer-0001");
+        outsideScope.DefaultRequestHeaders.TryAddWithoutValidation("If-Match", "\"1\"");
+        var outsideResponse = await outsideScope.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews", command);
+        Assert.Equal(HttpStatusCode.NotFound, outsideResponse.StatusCode);
+
+        server.Client.DefaultRequestHeaders.TryAddWithoutValidation("If-Match", "\"1\"");
+        var unsupportedResponse = await server.Client.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews",
+            command with { Decision = "approve" });
+        Assert.Equal(HttpStatusCode.BadRequest, unsupportedResponse.StatusCode);
+        var missingReasonResponse = await server.Client.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews",
+            command with { Reason = " " });
+        Assert.Equal(HttpStatusCode.BadRequest, missingReasonResponse.StatusCode);
+        server.Client.DefaultRequestHeaders.Remove("If-Match");
+        server.Client.DefaultRequestHeaders.TryAddWithoutValidation("If-Match", "\"99\"");
+        var staleResponse = await server.Client.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews", command);
+        Assert.Equal(HttpStatusCode.PreconditionFailed, staleResponse.StatusCode);
+
+        var after = await File.ReadAllTextAsync(fixture.StatePath);
+        Assert.Equal(before.RootElement.GetRawText(), JsonDocument.Parse(after)
+            .RootElement.GetRawText());
+    }
+
+    [Fact]
+    public async Task ConcurrentReviewsWithSameExpectedRevision_CommitExactlyOneDecision()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+
+        using var stateBefore = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var basisId = stateBefore.RootElement.GetProperty("evidenceBases")
+            .EnumerateObject().Single().Value.GetProperty("basisId").GetString()!;
+        var findingId = stateBefore.RootElement.GetProperty("findings")
+            .EnumerateObject().First().Value.GetProperty("findingId").GetString()!;
+        var command = new ReviewCommand(
+            findingId, basisId, "needs_evidence", "Two reviewers checked the current basis.");
+        using var first = CreateReviewClient(server.Client.BaseAddress!, "reviewer-001");
+        using var second = CreateReviewClient(server.Client.BaseAddress!, "reviewer-002");
+        var firstRequest = first.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews", command);
+        var secondRequest = second.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews", command);
+        var responses = await Task.WhenAll(firstRequest, secondRequest);
+
+        Assert.Equal(
+            [HttpStatusCode.OK, HttpStatusCode.PreconditionFailed],
+            responses.Select(response => response.StatusCode).OrderBy(status => status).ToArray());
+        using var stateAfter = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(stateAfter.RootElement.GetProperty("reviewDecisions").EnumerateObject());
+        Assert.Single(stateAfter.RootElement.GetProperty("auditEntries").EnumerateObject());
+        Assert.Equal(2, stateAfter.RootElement.GetProperty("cases").EnumerateObject().Single()
+            .Value.GetProperty("caseRevision").GetInt64());
+    }
+
+    [Fact]
+    public async Task SatisfiedFindingAndCompletedReviewTask_RequireAuthorisedReviewCommand()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest();
+        string basisId;
+        string findingId;
+
+        await using (var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel()))
+        {
+            var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+            var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+            Assert.NotNull(operation);
+            await server.Client.PostAsync(
+                $"/api/operations/{operation!.OperationId}/process", null);
+            using var state = JsonDocument.Parse(
+                await File.ReadAllTextAsync(fixture.StatePath));
+            var finding = state.RootElement.GetProperty("findings")
+                .EnumerateObject().Select(entry => entry.Value)
+                .First(candidate => candidate.GetProperty("assessment").GetString() == "satisfied");
+            basisId = finding.GetProperty("basisId").GetString()!;
+            findingId = finding.GetProperty("findingId").GetString()!;
+            Assert.False(state.RootElement.TryGetProperty("reviewDecisions", out _));
+            Assert.NotEqual("accepted", state.RootElement.GetProperty("cases")
+                .EnumerateObject().Single().Value.GetProperty("status").GetString());
+        }
+
+        var stateNode = JsonNode.Parse(await File.ReadAllTextAsync(fixture.StatePath))!.AsObject();
+        stateNode["reviewTasks"] = new JsonObject
+        {
+            ["TASK-0001"] = new JsonObject
+            {
+                ["taskId"] = "TASK-0001",
+                ["findingId"] = findingId,
+                ["basisId"] = basisId,
+                ["reasonCode"] = "manual-review",
+                ["status"] = "open"
+            }
+        };
+        await File.WriteAllTextAsync(fixture.StatePath, stateNode.ToJsonString());
+
+        await using var restarted = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        using var reviewClient = CreateReviewClient(
+            restarted.Client.BaseAddress!,
+            "reviewer-0001");
+        var taskResponse = await reviewClient.PostAsync(
+            "/api/cases/CASE-RUN-0001/review-tasks/TASK-0001/complete",
+            null);
+        Assert.Equal(HttpStatusCode.OK, taskResponse.StatusCode);
+        var completedTask = await taskResponse.Content.ReadFromJsonAsync<ReviewTask>();
+        Assert.NotNull(completedTask);
+        Assert.Equal("completed", completedTask!.Status);
+
+        using var completedState = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Equal("completed", completedState.RootElement.GetProperty("reviewTasks")
+            .GetProperty("TASK-0001").GetProperty("status").GetString());
+        Assert.False(completedState.RootElement.TryGetProperty("reviewDecisions", out _));
+        Assert.False(completedState.RootElement.TryGetProperty("findingDispositions", out _));
+        Assert.False(completedState.RootElement.TryGetProperty("auditEntries", out _));
+        Assert.NotEqual("accepted", completedState.RootElement.GetProperty("cases")
+            .EnumerateObject().Single().Value.GetProperty("status").GetString());
+        Assert.Equal(2, completedState.RootElement.GetProperty("cases")
+            .EnumerateObject().Single().Value.GetProperty("caseRevision").GetInt64());
+
+        reviewClient.DefaultRequestHeaders.Remove("If-Match");
+        reviewClient.DefaultRequestHeaders.TryAddWithoutValidation("If-Match", "\"2\"");
+        var reviewResponse = await reviewClient.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews",
+            new ReviewCommand(
+                findingId,
+                basisId,
+                "accept_evidence",
+                "Accepted the current evidence basis after task completion."));
+        Assert.Equal(HttpStatusCode.OK, reviewResponse.StatusCode);
+        var reviewDecision = await reviewResponse.Content.ReadFromJsonAsync<ReviewDecision>();
+        Assert.NotNull(reviewDecision);
+        Assert.Equal("accept_evidence", reviewDecision!.Decision);
+        Assert.Equal("reviewer-0001", reviewDecision.ReviewerSubject);
+        Assert.Equal(findingId, reviewDecision.FindingId);
+        Assert.Equal(basisId, reviewDecision.BasisId);
+
+        using var acceptedState = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(acceptedState.RootElement.GetProperty("reviewDecisions").EnumerateObject());
+        var disposition = acceptedState.RootElement.GetProperty("findingDispositions")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("accepted", disposition.GetProperty("disposition").GetString());
+        Assert.Single(acceptedState.RootElement.GetProperty("auditEntries").EnumerateObject());
+    }
+
+    private static HttpClient CreateReviewClient(Uri baseAddress, string subject)
+    {
+        var client = new HttpClient { BaseAddress = baseAddress };
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            $"run=RUN-0001;airline=AIRLINE-0001;aircraft=MOCK-AC-001;" +
+            $"lease=LEASE-0001;subject={subject}");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("If-Match", "\"1\"");
+        return client;
+    }
+
     private static JsonElement JsonValue(string json)
     {
         using var document = JsonDocument.Parse(json);

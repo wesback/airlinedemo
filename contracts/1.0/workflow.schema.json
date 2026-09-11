@@ -428,6 +428,166 @@
       },
       "additionalProperties": false
     },
+    "ReviewCommand": {
+      "type": "object",
+      "required": [
+        "findingId",
+        "basisId",
+        "decision",
+        "reason"
+      ],
+      "properties": {
+        "findingId": {
+          "$ref": "#/$defs/Id"
+        },
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "accept_evidence",
+            "dismiss_finding",
+            "needs_evidence"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReviewDecision": {
+      "type": "object",
+      "required": [
+        "reviewId",
+        "findingId",
+        "basisId",
+        "decision",
+        "reviewerSubject",
+        "reason",
+        "decidedAt"
+      ],
+      "properties": {
+        "reviewId": {
+          "$ref": "#/$defs/Id"
+        },
+        "findingId": {
+          "$ref": "#/$defs/Id"
+        },
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "accept_evidence",
+            "dismiss_finding",
+            "needs_evidence"
+          ]
+        },
+        "reviewerSubject": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "decidedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReviewTask": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "findingId",
+        "basisId",
+        "reasonCode",
+        "status"
+      ],
+      "properties": {
+        "taskId": {
+          "$ref": "#/$defs/Id"
+        },
+        "findingId": {
+          "$ref": "#/$defs/Id"
+        },
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "completed"
+          ]
+        },
+        "assignedReviewerSubject": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AuditEntry": {
+      "type": "object",
+      "required": [
+        "auditId",
+        "context",
+        "actorType",
+        "actorId",
+        "action",
+        "affectedIds",
+        "recordedAt",
+        "correlationId"
+      ],
+      "properties": {
+        "auditId": {
+          "$ref": "#/$defs/Id"
+        },
+        "context": {
+          "$ref": "#/$defs/CaseContext"
+        },
+        "actorType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "actorId": {
+          "$ref": "#/$defs/Id"
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "affectedIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Id"
+          }
+        },
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "recordedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
     "InvestigationResult": {
       "type": "object",
       "required": [
@@ -915,6 +1075,7 @@
             "ACTION_FORBIDDEN",
             "INVALID_PAYLOAD",
             "EVENT_PAYLOAD_CONFLICT",
+            "STALE_PRECONDITION",
             "INVESTIGATION_BASIS_NOT_FOUND",
             "INVESTIGATION_CALL_LIMIT",
             "INVESTIGATION_CONTEXT_LIMIT",
