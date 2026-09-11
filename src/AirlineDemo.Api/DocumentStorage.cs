@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace AirlineDemo.Api;
 
@@ -18,11 +19,15 @@ public interface IManifestDocumentStorage
 public sealed class FileDocumentStorage : IDocumentStorage, IManifestDocumentStorage
 {
     private readonly string rootDirectory;
+    private readonly IReadOnlyList<SelectedFixtureEntry>? selectedFixtureEntries;
+    private readonly string? selectedFixtureManifestError;
 
     public FileDocumentStorage(string rootDirectory)
     {
         this.rootDirectory = Path.GetFullPath(rootDirectory);
         Directory.CreateDirectory(this.rootDirectory);
+        (selectedFixtureEntries, selectedFixtureManifestError) =
+            LoadSelectedFixtureManifest(this.rootDirectory);
     }
 
     public async Task<string?> ReadPagePreviewAsync(
@@ -30,7 +35,7 @@ public sealed class FileDocumentStorage : IDocumentStorage, IManifestDocumentSto
         int page,
         CancellationToken cancellationToken)
     {
-        var documentDirectory = ResolvePath(storageLocator);
+        var documentDirectory = ResolveStoragePath(storageLocator);
         if (page < 1 || documentDirectory is null)
         {
             return null;
@@ -50,6 +55,20 @@ public sealed class FileDocumentStorage : IDocumentStorage, IManifestDocumentSto
         IReadOnlyList<DocumentMetadata> manifest,
         CancellationToken cancellationToken)
     {
+        if (selectedFixtureManifestError is not null)
+        {
+            return selectedFixtureManifestError;
+        }
+
+        if (selectedFixtureEntries is not null)
+        {
+            return await ValidateSelectedFixtureManifestAsync(
+                context,
+                manifest,
+                selectedFixtureEntries,
+                cancellationToken);
+        }
+
         var caseDirectory = ResolvePath(
             Path.Combine(context.RunId, context.CaseId));
         if (caseDirectory is null || !Directory.Exists(caseDirectory))
@@ -97,6 +116,176 @@ public sealed class FileDocumentStorage : IDocumentStorage, IManifestDocumentSto
         return null;
     }
 
+    private async Task<string?> ValidateSelectedFixtureManifestAsync(
+        CaseContext context,
+        IReadOnlyList<DocumentMetadata> manifest,
+        IReadOnlyList<SelectedFixtureEntry> selectedEntries,
+        CancellationToken cancellationToken)
+    {
+        var scopedEntries = selectedEntries
+            .Where(entry => entry.Scope.Matches(context))
+            .ToArray();
+        if (scopedEntries.Length != selectedEntries.Count)
+        {
+            return "The selected initial input manifest is outside the requested case scope.";
+        }
+
+        var duplicateEntry = selectedEntries
+            .GroupBy(entry => $"{entry.DocumentId}:{entry.Version}", StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateEntry is not null)
+        {
+            return "The selected initial input manifest contains duplicate documents.";
+        }
+
+        var duplicatePath = selectedEntries
+            .GroupBy(entry => entry.RelativePath, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicatePath is not null)
+        {
+            return "The selected initial input manifest contains duplicate paths.";
+        }
+
+        var selectedByDocument = selectedEntries.ToDictionary(
+            entry => $"{entry.DocumentId}:{entry.Version}",
+            StringComparer.Ordinal);
+        var packageKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var document in manifest)
+        {
+            if (document is null)
+            {
+                return "The package manifest contains a null document.";
+            }
+
+            var key = $"{document.DocumentId}:{document.Version}";
+            if (!packageKeys.Add(key) ||
+                !selectedByDocument.TryGetValue(key, out var selectedEntry))
+            {
+                return $"The document '{document.DocumentId}' is not declared by the selected initial input manifest.";
+            }
+
+            if (!StringComparer.Ordinal.Equals(
+                    Path.GetFileName(selectedEntry.RelativePath),
+                    document.FileName) ||
+                !StringComparer.OrdinalIgnoreCase.Equals(
+                    selectedEntry.Sha256,
+                    document.Sha256))
+            {
+                return $"The declared file '{document.FileName}' does not match the selected initial input manifest.";
+            }
+
+            var selectedPath = ResolveSelectedPath(selectedEntry.RelativePath);
+            if (selectedPath is null || Directory.Exists(selectedPath))
+            {
+                return $"The selected input '{selectedEntry.RelativePath}' is not a file.";
+            }
+
+            if (!File.Exists(selectedPath))
+            {
+                return $"The declared file '{document.FileName}' is not present in authorised input storage.";
+            }
+
+            await using var stream = File.OpenRead(selectedPath);
+            var actualHash = Convert.ToHexString(
+                await SHA256.HashDataAsync(stream, cancellationToken));
+            if (!StringComparer.OrdinalIgnoreCase.Equals(actualHash, selectedEntry.Sha256))
+            {
+                return $"The selected input '{selectedEntry.RelativePath}' does not match its SHA-256 hash.";
+            }
+        }
+
+        if (packageKeys.Count != selectedEntries.Count)
+        {
+            return "The package manifest does not declare every selected initial input.";
+        }
+
+        var packageDirectories = selectedEntries
+            .Select(entry => Path.GetDirectoryName(entry.RelativePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var declaredPaths = selectedEntries
+            .Select(entry => ResolveSelectedPath(entry.RelativePath))
+            .Where(path => path is not null)
+            .Select(path => Path.GetFullPath(path!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var directory in packageDirectories)
+        {
+            var packageDirectory = ResolveSelectedPath(directory!);
+            if (packageDirectory is null || !Directory.Exists(packageDirectory))
+            {
+                return $"The selected input directory '{directory}' does not exist.";
+            }
+
+            if (Directory.EnumerateDirectories(
+                    packageDirectory,
+                    "*",
+                    SearchOption.AllDirectories).Any())
+            {
+                return "Recursive directory loading is not permitted for selected package inputs.";
+            }
+
+            foreach (var path in Directory.EnumerateFiles(
+                         packageDirectory,
+                         "*",
+                         SearchOption.AllDirectories))
+            {
+                if (Path.GetFileName(path).Equals("manifest.json", StringComparison.OrdinalIgnoreCase) &&
+                    StringComparer.OrdinalIgnoreCase.Equals(
+                        Path.GetDirectoryName(path),
+                        packageDirectory))
+                {
+                    continue;
+                }
+
+                if (!declaredPaths.Contains(Path.GetFullPath(path)))
+                {
+                    return $"The input file '{Path.GetRelativePath(packageDirectory, path)}' is not declared by the selected initial input manifest.";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private string? ResolveStoragePath(string storageLocator)
+    {
+        if (selectedFixtureEntries is null)
+        {
+            return ResolvePath(storageLocator);
+        }
+
+        var parts = storageLocator.Split(
+            new[] { '/', '\\' },
+            StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 4 ||
+            !int.TryParse(parts[3].TrimStart('v'), out var version))
+        {
+            return null;
+        }
+
+        var entry = selectedFixtureEntries.SingleOrDefault(candidate =>
+            candidate.Scope.RunId == parts[0] &&
+            candidate.Scope.CaseId == parts[1] &&
+            candidate.DocumentId == parts[2] &&
+            candidate.Version == version);
+        return entry is null ? null : ResolveSelectedPath(entry.RelativePath);
+    }
+
+    private string? ResolveSelectedPath(string relativePath)
+    {
+        var normalized = relativePath.Replace('\\', '/');
+        if (Path.IsPathRooted(relativePath) ||
+            normalized.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Any(segment => segment is "." or "..") ||
+            !normalized.StartsWith("application-inputs/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return ResolvePath(normalized.Replace('/', Path.DirectorySeparatorChar));
+    }
+
     private string? ResolvePath(string relativePath)
     {
         if (Path.IsPathRooted(relativePath))
@@ -112,4 +301,72 @@ public sealed class FileDocumentStorage : IDocumentStorage, IManifestDocumentSto
             ? fullPath
             : null;
     }
+
+    private static (IReadOnlyList<SelectedFixtureEntry>? Entries, string? Error)
+        LoadSelectedFixtureManifest(string rootDirectory)
+    {
+        var contractPath = Path.Combine(rootDirectory, "generator-contract.json");
+        if (!File.Exists(contractPath))
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(contractPath));
+            var entries = document.RootElement
+                .GetProperty("pathBoundaries")
+                .GetProperty("selectedInitialInputManifest")
+                .GetProperty("entries")
+                .EnumerateArray()
+                .Select(ParseSelectedFixtureEntry)
+                .ToArray();
+            return (entries, null);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or
+            KeyNotFoundException or
+            InvalidOperationException or
+            FormatException or
+            InvalidDataException)
+        {
+            return (null, "The selected initial input manifest is invalid.");
+        }
+    }
+
+    private static SelectedFixtureEntry ParseSelectedFixtureEntry(JsonElement value)
+    {
+        var scope = value.GetProperty("scope");
+        return new SelectedFixtureEntry(
+            value.GetProperty("relativePath").GetString()
+                ?? throw new InvalidDataException(),
+            value.GetProperty("documentId").GetString()
+                ?? throw new InvalidDataException(),
+            value.GetProperty("version").GetInt32(),
+            value.GetProperty("sha256").GetString()
+                ?? throw new InvalidDataException(),
+            new CaseContext(
+                scope.GetProperty("runId").GetString() ?? throw new InvalidDataException(),
+                scope.GetProperty("caseId").GetString() ?? throw new InvalidDataException(),
+                scope.GetProperty("airlineId").GetString() ?? throw new InvalidDataException(),
+                scope.GetProperty("aircraftId").GetString() ?? throw new InvalidDataException(),
+                scope.GetProperty("leaseId").GetString() ?? throw new InvalidDataException()));
+    }
+
+    private sealed record SelectedFixtureEntry(
+        string RelativePath,
+        string DocumentId,
+        int Version,
+        string Sha256,
+        CaseContext Scope);
+}
+
+internal static class CaseContextExtensions
+{
+    public static bool Matches(this CaseContext left, CaseContext right) =>
+        left.RunId == right.RunId &&
+        left.CaseId == right.CaseId &&
+        left.AirlineId == right.AirlineId &&
+        left.AircraftId == right.AircraftId &&
+        left.LeaseId == right.LeaseId;
 }
