@@ -1,15 +1,15 @@
 # Implementation Brief - Reviewer Interface and Demonstration
 
-Version: 0.2 draft | Date: 10 September 2026
+Version: 0.1 draft | Date: 10 September 2026
 Dependencies: [Demo PRD](demo-prd.md), [Workflow/API brief](workflow-evidence-api-brief.md).
 
-## 0. Technology decision
-
-Implement the interface as a .NET 10-compatible web client hosted with the selected Azure Functions application. It consumes the deterministic API and does not host Foundry Agent Service or Microsoft Agent Framework runtime behavior. Azure AI Foundry/Azure OpenAI results are displayed as bounded, cited model output; all policy decisions and authorised actions remain server-side.
+Visual source: [Frontend theme specification](frontend-theme.md), based on the supplied Altivane Aviation Capital design and logo.
 
 ## 1. Outcome
 
 A small, credible interface lets executives see useful automation and its limits in approximately three minutes. It is a case-readiness view, not a generic chatbot or enterprise portal replacement.
+
+Apply the Altivane visual language: deep navy, aviation green, pale mint highlights, generous white space, thin linework and restrained cards. Keep the interface calm and evidence-led rather than decorative.
 
 Demonstrate one automatic request and one internally reviewed ambiguity. The interface must never invent findings, calculate authority locally or hide a failed/pending backend operation.
 
