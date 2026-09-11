@@ -366,6 +366,35 @@
       },
       "additionalProperties": false
     },
+    "ProcessingAttemptStatus": {
+      "type": "object",
+      "required": [
+        "attemptId",
+        "attemptNumber",
+        "status"
+      ],
+      "properties": {
+        "attemptId": {
+          "$ref": "#/$defs/Id"
+        },
+        "attemptNumber": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "processing",
+            "complete",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/SafeError"
+        }
+      },
+      "additionalProperties": false
+    },
     "OperationStatus": {
       "type": "object",
       "required": [
@@ -407,6 +436,12 @@
         },
         "error": {
           "$ref": "#/$defs/SafeError"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProcessingAttemptStatus"
+          }
         }
       },
       "additionalProperties": false

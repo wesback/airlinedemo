@@ -41,6 +41,34 @@ public static class WorkflowApi
             CancellationToken cancellationToken) =>
             await service.GetOperationAsync(id, httpContext, cancellationToken));
 
+        app.MapPost("/api/operations/{id}/process", async (
+            string id,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.ProcessOperationAsync(id, false, false, httpContext, cancellationToken));
+
+        app.MapPost("/api/operations/{id}/retry", async (
+            string id,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.ProcessOperationAsync(id, true, true, httpContext, cancellationToken));
+
+        app.MapPost("/api/packages/{id}/process", async (
+            string id,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.ProcessPackageAsync(id, false, false, httpContext, cancellationToken));
+
+        app.MapPost("/api/packages/{id}/retry", async (
+            string id,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.ProcessPackageAsync(id, true, true, httpContext, cancellationToken));
+
         app.MapGet("/api/cases/{id}", async (
             string id,
             HttpContext httpContext,
@@ -254,6 +282,248 @@ internal sealed class WorkflowService
         }
 
         return Task.FromResult<IResult>(Results.Ok(operation));
+    }
+
+    public async Task<IResult> ProcessOperationAsync(
+        string operationId,
+        bool isRetry,
+        bool startOnly,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        var correlationId = NewCorrelationId();
+        if (caller is null)
+        {
+            return Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", correlationId), statusCode: 401);
+        }
+
+        PersistedPackage? package = null;
+        string? attemptId = null;
+        PersistedReceipt? receipt = null;
+        SafeError? startError = null;
+        stateStore.Update(state =>
+        {
+            if (!state.Operations.TryGetValue(operationId, out var operation) ||
+                !caller.Matches(operation.Status))
+            {
+                startError = new SafeError("OPERATION_NOT_FOUND", correlationId);
+                return;
+            }
+
+            package = state.Packages.Values.SingleOrDefault(
+                candidate => candidate.OperationId == operationId &&
+                    caller.Matches(candidate.Context));
+            receipt = state.Receipts.Values.SingleOrDefault(
+                candidate => candidate.OperationId == operationId &&
+                    caller.RunId == candidate.RunId &&
+                    caller.Matches(operation.Status));
+            if (package is null || receipt is null)
+            {
+                startError = new SafeError("OPERATION_NOT_FOUND", correlationId);
+                return;
+            }
+
+            if (operation.Status.Status == "failed" && !isRetry)
+            {
+                startError = new SafeError(
+                    "INVALID_PAYLOAD",
+                    correlationId,
+                    "A failed package requires an explicit retry.");
+                return;
+            }
+
+            if (isRetry && operation.Status.Status != "failed")
+            {
+                startError = new SafeError(
+                    "INVALID_PAYLOAD",
+                    correlationId,
+                    "Only a failed package can be retried.");
+                return;
+            }
+
+            if (operation.Status.Status == "complete")
+            {
+                attemptId = string.Empty;
+                return;
+            }
+
+            var attempts = (operation.Status.Attempts ?? [])
+                .Select(attempt => attempt)
+                .ToList();
+            var currentAttempt = attempts.LastOrDefault();
+            if (operation.Status.Status != "processing" ||
+                currentAttempt is null ||
+                currentAttempt.Status != "processing")
+            {
+                attemptId = NewId("ATTEMPT");
+                attempts.Add(new ProcessingAttemptStatus(
+                    attemptId,
+                    attempts.Count + 1,
+                    "processing"));
+            }
+            else
+            {
+                attemptId = currentAttempt.AttemptId;
+            }
+
+            var processingStatus = operation.Status with
+            {
+                Status = "processing",
+                Error = null,
+                Attempts = attempts
+            };
+            state.Operations[operationId] = operation with { Status = processingStatus };
+            state.Packages[PackageKey(package.Context, package.Package.PackageId)] =
+                package with { ProcessingStatus = "processing", Error = null };
+            var caseKey = CaseKey(package.Context);
+            if (state.Cases.TryGetValue(caseKey, out var persistedCase))
+            {
+                state.Cases[caseKey] = persistedCase with { Status = "active" };
+            }
+        });
+
+        if (startError is not null)
+        {
+            return Results.Json(
+                startError,
+                statusCode: startError.SafeCode == "OPERATION_NOT_FOUND" ? 404 : 409);
+        }
+
+        if (package is null || receipt is null || attemptId is null)
+        {
+            return Results.Json(
+                new SafeError("OPERATION_NOT_FOUND", correlationId), statusCode: 404);
+        }
+
+        if (stateStore.Read(state =>
+            state.Operations.TryGetValue(operationId, out var operation) &&
+            operation.Status.Status == "complete"))
+        {
+            return Results.Json(
+                new OperationAccepted(operationId, package.Context.CaseId, receipt.ReceiptId),
+                statusCode: 202);
+        }
+
+        if (startOnly)
+        {
+            return Results.Json(
+                new OperationAccepted(operationId, package.Context.CaseId, receipt.ReceiptId),
+                statusCode: 202);
+        }
+
+        string? validationError = null;
+        try
+        {
+            if (documentStorage is IManifestDocumentStorage manifestStorage)
+            {
+                validationError = await manifestStorage.ValidateManifestAsync(
+                    package.Context, package.Package.Manifest, cancellationToken);
+            }
+            else
+            {
+                validationError = "Package storage cannot account for declared files.";
+            }
+        }
+        catch (FileNotFoundException)
+        {
+            validationError = "A declared file could not be read.";
+        }
+        catch (DirectoryNotFoundException)
+        {
+            validationError = "A declared file could not be read.";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            validationError = "A declared file could not be read.";
+        }
+        catch (IOException)
+        {
+            validationError = "A declared file could not be read.";
+        }
+        catch (CryptographicException)
+        {
+            validationError = "A declared file could not be verified.";
+        }
+
+        SafeError? processingError = validationError is null
+            ? null
+            : new SafeError("INVALID_PAYLOAD", correlationId);
+        stateStore.Update(state =>
+        {
+            if (!state.Operations.TryGetValue(operationId, out var operation) ||
+                !state.Packages.TryGetValue(
+                    PackageKey(package.Context, package.Package.PackageId), out var persistedPackage))
+            {
+                return;
+            }
+
+            var attempts = (operation.Status.Attempts ?? []).ToList();
+            var index = attempts.FindIndex(attempt => attempt.AttemptId == attemptId);
+            if (index < 0)
+            {
+                return;
+            }
+
+            attempts[index] = attempts[index] with
+            {
+                Status = processingError is null ? "complete" : "failed",
+                Error = processingError
+            };
+            var finalStatus = operation.Status with
+            {
+                Status = processingError is null ? "complete" : "failed",
+                Error = processingError,
+                Attempts = attempts
+            };
+            state.Operations[operationId] = operation with { Status = finalStatus };
+            state.Packages[PackageKey(package.Context, package.Package.PackageId)] =
+                persistedPackage with
+                {
+                    ProcessingStatus = finalStatus.Status,
+                    Error = processingError
+                };
+
+            var caseKey = CaseKey(package.Context);
+            if (state.Cases.TryGetValue(caseKey, out var persistedCase))
+            {
+                state.Cases[caseKey] = persistedCase with
+                {
+                    Status = processingError is null ? "active" : "blocked"
+                };
+            }
+        });
+
+        return Results.Json(
+            new OperationAccepted(operationId, package.Context.CaseId, receipt.ReceiptId),
+            statusCode: 202);
+    }
+
+    public async Task<IResult> ProcessPackageAsync(
+        string packageId,
+        bool isRetry,
+        bool startOnly,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        if (caller is null)
+        {
+            return Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", NewCorrelationId()), statusCode: 401);
+        }
+
+        var operationId = stateStore.Read(state =>
+            state.Packages.Values
+                .Where(package => package.Package.PackageId == packageId)
+                .Where(package => caller.Matches(package.Context))
+                .Select(package => package.OperationId)
+                .FirstOrDefault());
+        return operationId is null
+            ? Results.Json(new SafeError("OPERATION_NOT_FOUND", NewCorrelationId()), statusCode: 404)
+            : await ProcessOperationAsync(
+                operationId, isRetry, startOnly, httpContext, cancellationToken);
     }
 
     public Task<IResult> GetCaseAsync(

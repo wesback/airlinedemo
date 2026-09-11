@@ -252,6 +252,17 @@ public sealed class ScopedStateIntegrationTests
         };
         state["operations"]!.AsObject()[operationId]!["status"]!["status"] = "failed";
         state["operations"]!.AsObject()[operationId]!["status"]!["error"] = safeError.DeepClone();
+        state["operations"]!.AsObject()[operationId]!["status"]!["attempts"] =
+            new JsonArray
+            {
+                new JsonObject
+                {
+                    ["attemptId"] = "ATTEMPT-FAILED",
+                    ["attemptNumber"] = 1,
+                    ["status"] = "failed",
+                    ["error"] = safeError.DeepClone()
+                }
+            };
         var package = state["packages"]!.AsObject().Single().Value!.AsObject();
         package["processingStatus"] = "failed";
         package["error"] = safeError.DeepClone();
@@ -272,6 +283,9 @@ public sealed class ScopedStateIntegrationTests
         var persistedOperation = await operationResponse.Content.ReadFromJsonAsync<OperationStatus>();
         Assert.NotNull(persistedOperation);
         Assert.Equal("INVALID_PAYLOAD", persistedOperation.Error!.SafeCode);
+        Assert.Single(persistedOperation.Attempts!);
+        Assert.Equal("ATTEMPT-FAILED", persistedOperation.Attempts![0].AttemptId);
+        Assert.Equal("failed", persistedOperation.Attempts![0].Status);
         Assert.DoesNotContain("documentContent",
             await operationResponse.Content.ReadAsStringAsync(),
             StringComparison.OrdinalIgnoreCase);
