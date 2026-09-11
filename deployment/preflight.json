@@ -1,0 +1,88 @@
+{
+  "recordVersion": "1.0",
+  "purpose": "Non-secret deployment preflight for the AirlineDemo Sweden Central demonstrator.",
+  "authorization": {
+    "provisioningAuthorized": false,
+    "spendingAuthorized": false,
+    "note": "This record captures approved inputs and a readiness gate. It does not authorize provisioning or spending."
+  },
+  "destination": {
+    "region": "swedencentral",
+    "resourceGroupName": "rg-airlinedemo-swc-demo",
+    "deploymentName": "airlinedemo-swc-demo",
+    "subscription": {
+      "committed": false,
+      "handling": "private deployment input",
+      "note": "The subscription identifier is privately held and must be supplied at deployment time; it is not committed here."
+    },
+    "tenant": {
+      "committed": false,
+      "handling": "private deployment input",
+      "note": "The tenant identifier is privately held and must be supplied at deployment time; it is not committed here."
+    }
+  },
+  "application": {
+    "runtime": "Azure Functions v4",
+    "workerModel": "dotnet-isolated",
+    "targetFramework": "net10.0",
+    "hosting": {
+      "plan": "Flex Consumption"
+    },
+    "durableFunctions": {
+      "backend": "Azure Storage",
+      "storageAccountKind": "StorageV2",
+      "packageLock": "packages.lock.json"
+    }
+  },
+  "database": {
+    "engine": "Azure SQL",
+    "sku": "Serverless General Purpose",
+    "authentication": "system-assigned managed identity",
+    "endpoint": {
+      "type": "public",
+      "access": "firewall-restricted"
+    }
+  },
+  "retention": {
+    "applicationInsightsAndLogAnalyticsDays": 90,
+    "evidenceBlobVersionsDays": 90,
+    "fixtureDataDays": 90,
+    "dataClass": "synthetic demonstrator data only"
+  },
+  "azureOpenAI": {
+    "model": null,
+    "modelVersion": null,
+    "modelSelection": "deployment-time confirmation required",
+    "deploymentType": "Standard",
+    "quotaTpm": 30000,
+    "quotaDescription": "approximately 30K tokens per minute"
+  },
+  "readinessGate": {
+    "mustPassBefore": "terraform apply",
+    "status": "confirmation-required",
+    "checks": [
+      {
+        "id": "sweden-central-availability",
+        "requirement": "Explicitly confirm that the selected Azure Functions, Azure SQL, Storage, monitoring, and Azure OpenAI configuration is available in Sweden Central.",
+        "confirmed": false
+      },
+      {
+        "id": "azure-openai-model-version",
+        "requirement": "Explicitly confirm the exact Azure OpenAI model name and version selected for Sweden Central before Terraform apply, then pin that selection for the deployment.",
+        "confirmed": false
+      },
+      {
+        "id": "azure-openai-deployment-type",
+        "requirement": "Explicitly confirm that the Azure OpenAI deployment type is Standard.",
+        "confirmed": false
+      },
+      {
+        "id": "azure-openai-quota",
+        "requirement": "Explicitly confirm approximately 30K TPM quota for the selected model deployment.",
+        "confirmed": false
+      }
+    ],
+    "substitutionPolicy": "The swedencentral region and the exact model/version confirmed by this gate must not be silently substituted. A failed check requires an explicit changed decision.",
+    "authorization": "Passing this gate authorizes neither provisioning nor spending."
+  }
+}
