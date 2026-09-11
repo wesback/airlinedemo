@@ -17,6 +17,186 @@ namespace AirlineDemo.Tests;
 public sealed class AssessmentPersistenceIntegrationTests
 {
     [Fact]
+    public async Task ValidBaselineInvestigation_PersistsTraceableFindingsWithoutActionsOrAcceptance()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var basis = state.RootElement.GetProperty("evidenceBases")
+            .EnumerateObject().Single().Value;
+        var findings = state.RootElement.GetProperty("findings")
+            .EnumerateObject().Select(entry => entry.Value).ToArray();
+        Assert.Equal(4, findings.Length);
+        var documentInventory = basis.GetProperty("documentInventory")
+            .EnumerateArray()
+            .Select(document => (
+                DocumentId: document.GetProperty("documentId").GetString()!,
+                Version: document.GetProperty("version").GetInt32()))
+            .ToHashSet();
+        var extractionRecords = state.RootElement.GetProperty("extractionRecords")
+            .EnumerateObject()
+            .Select(entry => entry.Value)
+            .ToArray();
+        var expectedFindings = new Dictionary<string, (string ComponentId, string ReasonCode)>
+        {
+            ["REQ-0001"] = ("COMP-0001", "installation-record"),
+            ["REQ-0002"] = ("COMP-0001", "removal-history"),
+            ["REQ-0003"] = ("COMP-0002", "installation-record"),
+            ["REQ-0004"] = ("COMP-0002", "removal-history")
+        };
+        Assert.All(findings, finding =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(finding.GetProperty("findingId").GetString()));
+            var requirementId = finding.GetProperty("requirementId").GetString()!;
+            Assert.True(expectedFindings.TryGetValue(requirementId, out var expected));
+            Assert.Equal(
+                expected.ComponentId,
+                finding.GetProperty("componentId").GetString());
+            Assert.Equal(
+                expected.ReasonCode,
+                finding.GetProperty("reasonCode").GetString());
+            Assert.Equal(
+                basis.GetProperty("basisId").GetString(),
+                finding.GetProperty("basisId").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(finding.GetProperty("explanation").GetString()));
+            Assert.NotEmpty(finding.GetProperty("evidenceRefs").EnumerateArray());
+            Assert.All(finding.GetProperty("evidenceRefs").EnumerateArray(), evidence =>
+            {
+                var documentId = evidence.GetProperty("documentId").GetString()!;
+                var version = evidence.GetProperty("version").GetInt32();
+                var page = evidence.GetProperty("page").GetInt32();
+                Assert.Contains((documentId, version), documentInventory);
+                var extraction = extractionRecords.Single(record =>
+                    record.GetProperty("documentId").GetString() == documentId &&
+                    record.GetProperty("version").GetInt32() == version);
+                Assert.Equal("complete", extraction.GetProperty("processingState").GetString());
+                Assert.Contains(
+                    page,
+                    extraction.GetProperty("pageInventory").EnumerateArray()
+                        .Select(value => value.GetInt32()));
+            });
+        });
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.DoesNotContain(
+            state.RootElement.GetProperty("investigations").EnumerateObject()
+                .Single().Value.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("assessment").GetString() == "blocked");
+
+        var summary = await server.Client.GetFromJsonAsync<CaseSummary>(
+            "/api/cases/CASE-RUN-0001");
+        Assert.NotNull(summary);
+        Assert.NotEqual("accepted", summary!.Status);
+    }
+
+    [Fact]
+    public async Task LiveMissingRemovalHistory_PersistsMissingFindingWithoutAbsentCitation()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var finding = state.RootElement.GetProperty("findings")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Single(candidate => candidate.GetProperty("requirementId").GetString() == "REQ-0002");
+        Assert.Equal("missing", finding.GetProperty("assessment").GetString());
+        Assert.Equal("COMP-0001", finding.GetProperty("componentId").GetString());
+        Assert.Equal("removal-history", finding.GetProperty("reasonCode").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(finding.GetProperty("explanation").GetString()));
+        Assert.Equal("BASIS-" + operation.OperationId, finding.GetProperty("basisId").GetString());
+        Assert.Empty(finding.GetProperty("evidenceRefs").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LiveAmbiguousIdentity_PersistsAmbiguousFindingWithoutExternalOrReviewAction()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var finding = state.RootElement.GetProperty("findings")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Single(candidate => candidate.GetProperty("requirementId").GetString() == "REQ-0003");
+        Assert.Equal("ambiguous", finding.GetProperty("assessment").GetString());
+        Assert.Equal("COMP-0002", finding.GetProperty("componentId").GetString());
+        Assert.Equal("identity_ambiguous", finding.GetProperty("reasonCode").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(finding.GetProperty("explanation").GetString()));
+        Assert.Equal(
+            "BASIS-" + operation.OperationId,
+            finding.GetProperty("basisId").GetString());
+        Assert.Contains(
+            finding.GetProperty("evidenceRefs").EnumerateArray(),
+            evidence => evidence.GetProperty("documentId").GetString() == "DOC-0004");
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.False(state.RootElement.TryGetProperty("reviewDecisions", out _));
+    }
+
+    [Fact]
+    public async Task InvalidInvestigationOutput_PersistsOnlyBlockedOutcomeAndValidationFailure()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.InvalidFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var investigation = state.RootElement.GetProperty("investigations")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("blocked", investigation.GetProperty("status").GetString());
+        Assert.Equal(
+            "INVESTIGATION_OUTPUT_INVALID",
+            investigation.GetProperty("error").GetProperty("safeCode").GetString());
+        Assert.Contains(
+            "unsupported finding",
+            investigation.GetProperty("error").GetProperty("message").GetString(),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(investigation.GetProperty("findings").EnumerateArray());
+        Assert.Empty(state.RootElement.GetProperty("findings").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.DoesNotContain(
+            investigation.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("assessment").GetString() is
+                "satisfied" or "missing" or "ambiguous" or "conflicting");
+    }
+
+    [Fact]
     public async Task BaselinePackageProcessing_PersistsScopedExtractionsAndImmutableEvidenceBases()
     {
         using var fixture = new BaselineFixture();
@@ -518,11 +698,14 @@ public sealed class AssessmentPersistenceIntegrationTests
             $"RUN-0001:AIRLINE-0001:MOCK-AC-001:LEASE-0001:CASE-RUN-0001:" +
             $"{document.DocumentId}:v{document.Version}";
 
-        public async Task<ApiServer> StartAsync(IDocumentStorage? storage = null)
+        public async Task<ApiServer> StartAsync(
+            IDocumentStorage? storage = null,
+            IInvestigationModel? investigationModel = null)
         {
             var app = WorkflowApi.Create(
                 Path.Combine(directory, "state"),
-                storage ?? new FileDocumentStorage(OutputDirectory));
+                storage ?? new FileDocumentStorage(OutputDirectory),
+                investigationModel: investigationModel);
             server = new ApiServer(app);
             await server.App.StartAsync();
             server.Client = new HttpClient { BaseAddress = server.BaseAddress };
@@ -538,6 +721,110 @@ public sealed class AssessmentPersistenceIntegrationTests
             {
                 Directory.Delete(directory, recursive: true);
             }
+        }
+
+        public sealed class FixtureFindingModel : IInvestigationModel
+        {
+            public Task<InvestigationResult> InvestigateAsync(
+                InvestigationRequest request,
+                CancellationToken cancellationToken)
+            {
+                var findings = new List<Finding>();
+                AddFinding(
+                    request,
+                    findings,
+                    "REQ-0001",
+                    "COMP-0001",
+                    "installation-record",
+                    "Component A installation evidence is present.",
+                    document => document.Text.Contains("Component: COMP-0001", StringComparison.Ordinal) &&
+                        document.Text.Contains("Action: installed", StringComparison.Ordinal));
+                AddFinding(
+                    request,
+                    findings,
+                    "REQ-0002",
+                    "COMP-0001",
+                    "removal-history",
+                    "Component A removal history is present.",
+                    document => document.Text.Contains("Component: COMP-0001", StringComparison.Ordinal) &&
+                        document.Text.Contains("Action: removed", StringComparison.Ordinal));
+                AddFinding(
+                    request,
+                    findings,
+                    "REQ-0003",
+                    "COMP-0002",
+                    request.Documents.Any(document =>
+                        document.Text.Contains("identity unresolved", StringComparison.Ordinal))
+                        ? "identity_ambiguous"
+                        : "installation-record",
+                    request.Documents.Any(document =>
+                        document.Text.Contains("identity unresolved", StringComparison.Ordinal))
+                        ? "Component B identity has multiple unresolved candidates."
+                        : "Component B installation evidence is present.",
+                    document => document.Text.Contains("identity unresolved", StringComparison.Ordinal) ||
+                        document.Text.Contains("Component: COMP-0002", StringComparison.Ordinal) &&
+                        document.Text.Contains("Action: installed", StringComparison.Ordinal));
+                AddFinding(
+                    request,
+                    findings,
+                    "REQ-0004",
+                    "COMP-0002",
+                    "removal-history",
+                    "Component B removal history is present.",
+                    document => document.Text.Contains("Component: COMP-0002", StringComparison.Ordinal) &&
+                        document.Text.Contains("Action: removed", StringComparison.Ordinal));
+
+                return Task.FromResult(new InvestigationResult(findings));
+            }
+
+            private static void AddFinding(
+                InvestigationRequest request,
+                ICollection<Finding> findings,
+                string requirementId,
+                string componentId,
+                string reasonCode,
+                string explanation,
+                Func<InvestigationDocumentContent, bool> evidenceMatch)
+            {
+                var evidence = request.Documents.FirstOrDefault(evidenceMatch);
+                var assessment = evidence is null
+                    ? "missing"
+                    : reasonCode == "identity_ambiguous"
+                        ? "ambiguous"
+                        : "satisfied";
+                findings.Add(new Finding(
+                    $"FIND-{requirementId}",
+                    componentId,
+                    requirementId,
+                    request.EvidenceBasis.BasisId,
+                    assessment,
+                    reasonCode,
+                    assessment == "missing"
+                        ? $"No supplied evidence supports {requirementId}."
+                        : explanation,
+                    evidence is null
+                        ? []
+                        : [new EvidenceRef(evidence.DocumentId, evidence.Version, evidence.Page)]));
+            }
+        }
+
+        public sealed class InvalidFindingModel : IInvestigationModel
+        {
+            public Task<InvestigationResult> InvestigateAsync(
+                InvestigationRequest request,
+                CancellationToken cancellationToken) =>
+                Task.FromResult(new InvestigationResult(
+                [
+                    new Finding(
+                        "FIND-INVALID",
+                        "COMP-0001",
+                        "REQ-0001",
+                        request.EvidenceBasis.BasisId,
+                        "unsupported",
+                        "unsupported",
+                        "This assessment is not part of the closed contract.",
+                        [])
+                ]));
         }
     }
 
