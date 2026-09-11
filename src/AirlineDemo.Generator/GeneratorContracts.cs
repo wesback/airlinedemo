@@ -6,6 +6,9 @@ namespace AirlineDemo.Generator;
 
 public static class WorkflowContract
 {
+    public const string LiveMissingHistoryMutation = "live.missing-history";
+    public const string LiveAmbiguousIdentityMutation = "live.ambiguous-identity";
+
     public static string Version => SharedWorkflowArtifacts.WorkflowSchemaVersion;
 
     public static IReadOnlySet<string> EventTypes => SharedWorkflowArtifacts.EventTypes;
@@ -20,6 +23,13 @@ public static class WorkflowContract
             "contradiction",
             "document-instructions",
             "isolation"
+        };
+
+    public static readonly IReadOnlySet<string> LiveMutationIdentifiers =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            LiveMissingHistoryMutation,
+            LiveAmbiguousIdentityMutation
         };
 }
 
@@ -247,6 +257,7 @@ public static class GeneratorContractValidator
 
         ValidateBoundaries(package.PathBoundaries, errors);
         ValidateReceipt(package.Receipt, package.Configuration, errors);
+        BaselineFixtureValidator.ValidateLiveMutationDeclarations(package, errors);
         if (package.Baseline is not null)
         {
             BaselineFixtureValidator.ValidateSemantic(package, errors);
@@ -1088,6 +1099,171 @@ public static class BaselineFixtureValidator
                     errors.Add($"generated file '{generatedFile}' is outside the output directory.");
                 }
             }
+        }
+
+        ValidateLiveMutationFiles(package, root, generatedFiles, errors);
+        ValidateStagedResponse(package, root, errors);
+    }
+
+    internal static void ValidateLiveMutationDeclarations(
+        GeneratorContractPackage package,
+        ICollection<string> errors)
+    {
+        var mutations = package.Receipt?.IntendedMutationIdentifiers ?? [];
+        if (mutations.Distinct(StringComparer.Ordinal).Count() != mutations.Count)
+        {
+            errors.Add("fixture mutation identifiers must be unique.");
+        }
+
+        if (package.Configuration?.Profile == "live")
+        {
+            foreach (var mutation in mutations)
+            {
+                if (!WorkflowContract.LiveMutationIdentifiers.Contains(mutation))
+                {
+                    errors.Add($"live fixture contains an undeclared mutation '{mutation}'.");
+                }
+            }
+        }
+        else if (mutations.Any(mutation => WorkflowContract.LiveMutationIdentifiers.Contains(mutation)))
+        {
+            errors.Add("live mutation identifiers require the live profile.");
+        }
+    }
+
+    private static void ValidateLiveMutationFiles(
+        GeneratorContractPackage package,
+        string root,
+        IReadOnlyList<string>? generatedFiles,
+        ICollection<string> errors)
+    {
+        if (package.Configuration?.Profile != "live")
+        {
+            return;
+        }
+
+        var mutations = package.Receipt?.IntendedMutationIdentifiers ?? [];
+        var missingHistoryPath = ResolveOutputPath(
+            root,
+            "application-inputs/package-001/004-component-a-removal-history.pdf");
+        var hasMissingHistory = !File.Exists(missingHistoryPath);
+        if (hasMissingHistory != mutations.Contains(WorkflowContract.LiveMissingHistoryMutation))
+        {
+            errors.Add(
+                "live component A removal-history defect must match its declared mutation.");
+        }
+
+        var normalIdentityPath = ResolveOutputPath(
+            root,
+            "application-inputs/package-001/005-component-b-installation.pdf");
+        var ambiguousIdentityPath = ResolveOutputPath(
+            root,
+            "application-inputs/package-001/005-component-b-identity-scan.pdf");
+        var hasAmbiguousIdentity = File.Exists(ambiguousIdentityPath);
+        if (hasAmbiguousIdentity != mutations.Contains(WorkflowContract.LiveAmbiguousIdentityMutation))
+        {
+            errors.Add(
+                "live component B identity defect must match its declared mutation.");
+        }
+
+        if (!hasAmbiguousIdentity && !File.Exists(normalIdentityPath))
+        {
+            errors.Add("live component B identity record is missing without a declared mutation.");
+        }
+
+        if (hasAmbiguousIdentity)
+        {
+            var scanText = File.ReadAllText(ambiguousIdentityPath!, System.Text.Encoding.ASCII);
+            if (scanText.Contains("SERIAL-0002", StringComparison.Ordinal))
+            {
+                errors.Add("live component B identity scan leaks the clean serial.");
+            }
+
+            var scanDocument = package.Documents?.SingleOrDefault(document =>
+                document is not null &&
+                StringComparer.Ordinal.Equals(document.SourceRecordId, "SOURCE-SCAN-0002"));
+            if (scanDocument is null ||
+                !StringComparer.Ordinal.Equals(
+                    scanDocument.FileName,
+                    "005-component-b-identity-scan.pdf") ||
+                scanDocument.FileName.Contains("SERIAL-0002", StringComparison.Ordinal))
+            {
+                errors.Add("live component B identity scan metadata or filename is invalid.");
+            }
+
+            if (!scanText.Contains("/Title (Component B identity scan)", StringComparison.Ordinal) ||
+                !scanText.Contains("/Subject (Component B identity scan:", StringComparison.Ordinal) ||
+                !scanText.Contains("/Alt (Component B identity scan:", StringComparison.Ordinal))
+            {
+                errors.Add("live component B identity scan must provide safe metadata and alternate text.");
+            }
+
+            var candidateCount = scanText
+                .Split("Candidate serial:", StringSplitOptions.None)
+                .Length - 1;
+            if (candidateCount < 2)
+            {
+                errors.Add("live component B identity scan must contain at least two candidates.");
+            }
+        }
+
+        if (generatedFiles is not null)
+        {
+            foreach (var generatedFile in generatedFiles.Where(path =>
+                         path.StartsWith("staged-responses/", StringComparison.Ordinal) ||
+                         path.StartsWith("replay-only/", StringComparison.Ordinal)))
+            {
+                var path = ResolveOutputPath(root, generatedFile);
+                if (path is not null &&
+                    File.Exists(path) &&
+                    File.ReadAllText(path).Contains("SERIAL-0002", StringComparison.Ordinal))
+                {
+                    errors.Add(
+                        $"live generator output '{generatedFile}' leaks the clean component B serial.");
+                }
+            }
+        }
+    }
+
+    private static void ValidateStagedResponse(
+        GeneratorContractPackage package,
+        string root,
+        ICollection<string> errors)
+    {
+        var manifestPath = ResolveOutputPath(
+            root,
+            "staged-responses/package-002/manifest.json");
+        var responsePath = ResolveOutputPath(
+            root,
+            "staged-responses/package-002/response.pdf");
+        if (manifestPath is null ||
+            responsePath is null ||
+            !File.Exists(manifestPath) ||
+            !File.Exists(responsePath))
+        {
+            errors.Add("staged partner-response package is incomplete.");
+            return;
+        }
+
+        try
+        {
+            var manifestJson = File.ReadAllText(manifestPath);
+            var responseText = File.ReadAllText(responsePath);
+            if (manifestJson.Contains("requestId", StringComparison.OrdinalIgnoreCase) ||
+                responseText.Contains("requestId", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add("staged partner-response package must not contain a fabricated request ID.");
+            }
+
+            if (manifestJson.Contains("evaluator-only", StringComparison.OrdinalIgnoreCase) ||
+                responseText.Contains("evaluator-only", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add("staged partner-response manifest must not reference evaluator-only data.");
+            }
+        }
+        catch (IOException)
+        {
+            errors.Add("staged partner-response manifest could not be read.");
         }
     }
 

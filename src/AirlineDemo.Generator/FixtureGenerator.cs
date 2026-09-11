@@ -21,7 +21,10 @@ public static class FixtureGenerator
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(templateVersion);
 
-        var mutations = (intendedMutationIdentifiers ?? [])
+        var mutations = (intendedMutationIdentifiers ??
+                (configuration.Profile == "live"
+                    ? WorkflowContract.LiveMutationIdentifiers
+                    : []))
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
         var outputDirectory = Path.GetFullPath(configuration.OutputDirectory);
@@ -60,12 +63,21 @@ public static class FixtureGenerator
             configuration,
             scenarioStart,
             plannedReturnDate,
-            baseline);
+            baseline,
+            mutations.ToHashSet(StringComparer.Ordinal));
         var documentPaths = new List<string>();
 
+        DeleteIfPresent(outputDirectory, "application-inputs/package-001/004-component-a-removal-history.pdf");
+        DeleteIfPresent(outputDirectory, "application-inputs/package-001/005-component-b-installation.pdf");
+        DeleteIfPresent(outputDirectory, "application-inputs/package-001/005-component-b-identity-scan.pdf");
         foreach (var definition in documentDefinitions)
         {
-            WriteRenderedDocument(outputDirectory, definition.RelativePath, definition.Content);
+            WriteRenderedDocument(
+                outputDirectory,
+                definition.RelativePath,
+                definition.Content,
+                definition.PdfTitle,
+                definition.PdfAlternateText);
             documentPaths.Add(definition.RelativePath);
         }
 
@@ -138,6 +150,11 @@ public static class FixtureGenerator
             baseline);
         WriteJson(outputDirectory, "application-inputs/package-001/manifest.json", submissionPackage);
         WriteJson(outputDirectory, "replay-only/events.json", new[] { eventEnvelope });
+        WriteStagedResponsePackage(
+            outputDirectory,
+            caseContext,
+            scenarioStart,
+            baseline);
         if (mutations.Length > 0)
         {
             WriteJson(
@@ -148,7 +165,10 @@ public static class FixtureGenerator
                     contractVersion = WorkflowContract.Version,
                     fixtureVersion = configuration.FixtureVersion,
                     profile = configuration.Profile,
-                    intendedMutations = mutations
+                    intendedMutations = mutations,
+                    mutationDetails = mutations
+                        .Select(CreateMutationMetadata)
+                        .ToArray()
                 });
         }
 
@@ -161,7 +181,9 @@ public static class FixtureGenerator
                 "application-inputs/reference-data/lessor.json",
                 "application-inputs/reference-data/baseline-facts.json",
                 "application-inputs/package-001/manifest.json",
-                "replay-only/events.json"
+                "replay-only/events.json",
+                "staged-responses/package-002/response.pdf",
+                "staged-responses/package-002/manifest.json"
             ])
             .Concat(mutations.Length > 0
                 ? ["evaluator-only/scenario-metadata.json"]
@@ -326,15 +348,16 @@ public static class FixtureGenerator
         GeneratorConfiguration configuration,
         DateTimeOffset scenarioStart,
         DateOnly plannedReturnDate,
-        BaselineFixture baseline)
+        BaselineFixture baseline,
+        IReadOnlySet<string> mutations)
     {
         var date = configuration.ScenarioDate.ToString("yyyy-MM-dd");
         var returnDate = plannedReturnDate.ToString("yyyy-MM-dd");
         var usage = baseline.UsageCounters
             .Where(counter => counter.AsOf == scenarioStart)
             .ToDictionary(counter => counter.ComponentId, StringComparer.Ordinal);
-        return
-        [
+        var definitions = new List<DocumentDefinition>
+        {
             new(
                 "application-inputs/package-001/001-installed-components.pdf",
                 "SOURCE-INVENTORY-0001",
@@ -401,14 +424,117 @@ public static class FixtureGenerator
                 "SOURCE-ASSET-0001",
                 scenarioStart.AddDays(-1),
                 "Reference source: asset-register v1\nAircraft: MOCK-AC-001\nEngine: MOCK-ENG-001\nComponents: COMP-0001, COMP-0002")
-        ];
+        };
+
+        if (mutations.Contains(WorkflowContract.LiveMissingHistoryMutation))
+        {
+            definitions.RemoveAll(definition =>
+                definition.RelativePath.EndsWith(
+                    "004-component-a-removal-history.pdf",
+                    StringComparison.Ordinal));
+        }
+
+        if (mutations.Contains(WorkflowContract.LiveAmbiguousIdentityMutation))
+        {
+            var index = definitions.FindIndex(definition =>
+                definition.RelativePath.EndsWith(
+                    "005-component-b-installation.pdf",
+                    StringComparison.Ordinal));
+            if (index < 0)
+            {
+                throw new InvalidOperationException("The component B identity scan source document is missing.");
+            }
+
+            definitions[index] = new DocumentDefinition(
+                "application-inputs/package-001/005-component-b-identity-scan.pdf",
+                "SOURCE-SCAN-0002",
+                scenarioStart.AddDays(-299),
+                string.Join(
+                    "\n",
+                    "Component B identity scan",
+                    "Aircraft: MOCK-AC-001",
+                    "Candidate serial: SN-B-2041",
+                    "Candidate serial: SN-B-2047",
+                    "Scan interpretation: identity unresolved"),
+                "Component B identity scan",
+                "Component B identity scan: two plausible serial candidates; identity unresolved.");
+        }
+
+        return definitions;
+    }
+
+    private static object CreateMutationMetadata(string mutationIdentifier) =>
+        mutationIdentifier switch
+        {
+            WorkflowContract.LiveMissingHistoryMutation => new
+            {
+                identifier = mutationIdentifier,
+                componentId = "COMP-0001",
+                mutation = "omitted-removal-history-record",
+                sourceRecordId = "SOURCE-REMOVAL-0001"
+            },
+            WorkflowContract.LiveAmbiguousIdentityMutation => new
+            {
+                identifier = mutationIdentifier,
+                componentId = "COMP-0002",
+                mutation = "ambiguous-identity-scan",
+                candidates = new[] { "SN-B-2041", "SN-B-2047" }
+            },
+            _ => throw new ArgumentException(
+                $"Unsupported live mutation '{mutationIdentifier}'.",
+                nameof(mutationIdentifier))
+        };
+
+    private static void WriteStagedResponsePackage(
+        string outputDirectory,
+        CaseContext caseContext,
+        DateTimeOffset scenarioStart,
+        BaselineFixture baseline)
+    {
+        const string responsePath = "staged-responses/package-002/response.pdf";
+        var responseContent = string.Join(
+            "\n",
+            "Altivane Aviation Capital - staged partner response",
+            $"Aircraft: {caseContext.AircraftId}",
+            "Component: COMP-0001",
+            "Removal history record supplied for later request replay",
+            $"Record date: {baseline.ComponentMovements.Single(movement => movement.ComponentId == "COMP-0001" && movement.Action == "removed").OccurredAt:yyyy-MM-dd}",
+            $"Scenario date: {scenarioStart:yyyy-MM-dd}");
+        WriteRenderedDocument(outputDirectory, responsePath, responseContent);
+        var responseHash = HashFile(outputDirectory, responsePath);
+        var responseDocument = new Document(
+            "DOC-RESP-0001",
+            1,
+            "mock-partner",
+            "PARTNER-RESP-0001",
+            "response.pdf",
+            "application/pdf",
+            responseHash,
+            scenarioStart.AddDays(1));
+        var responsePackage = new SubmissionPackage(
+            WorkflowContract.Version,
+            "PKG-0002",
+            caseContext.RunId,
+            caseContext.CaseId,
+            caseContext.AirlineId,
+            caseContext.AircraftId,
+            caseContext.LeaseId,
+            scenarioStart.AddDays(1),
+            scenarioStart.AddDays(1),
+            [responseDocument]);
+        WriteJson(
+            outputDirectory,
+            "staged-responses/package-002/manifest.json",
+            responsePackage);
     }
 
     private sealed record DocumentDefinition(
         string RelativePath,
         string SourceRecordId,
         DateTimeOffset IssuedOn,
-        string Content);
+        string Content,
+        string? PdfTitle = null,
+        string? PdfAlternateText = null);
 
     private static void WriteJson(string root, string relativePath, object value) =>
         WriteText(root, relativePath, JsonSerializer.Serialize(value, GeneratorContractJson.Options));
@@ -420,14 +546,25 @@ public static class FixtureGenerator
         File.WriteAllText(fullPath, content);
     }
 
-    private static void WriteRenderedDocument(string root, string relativePath, string content)
+    private static void DeleteIfPresent(string root, string relativePath)
+    {
+        var fullPath = ResolvePath(root, relativePath);
+        if (File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
+        }
+    }
+
+    private static void WriteRenderedDocument(
+        string root,
+        string relativePath,
+        string content,
+        string? pdfTitle = null,
+        string? pdfAlternateText = null)
     {
         var lines = content.Split('\n')
             .Select(line => line.TrimEnd('\r'))
-            .Select(line => line
-                .Replace("\\", "\\\\", StringComparison.Ordinal)
-                .Replace("(", "\\(", StringComparison.Ordinal)
-                .Replace(")", "\\)", StringComparison.Ordinal));
+            .Select(EscapePdfString);
         var stream = new StringBuilder("BT\n/F1 10 Tf\n50 780 Td\n");
         foreach (var line in lines)
         {
@@ -435,13 +572,29 @@ public static class FixtureGenerator
         }
 
         stream.Append("ET");
+        var pageAlternateText = pdfAlternateText is null
+            ? null
+            : $"/Alt ({EscapePdfString(pdfAlternateText)}) ";
+        var metadata = new StringBuilder("<< /Producer (airline-demo fixture generator)");
+        if (!string.IsNullOrWhiteSpace(pdfTitle))
+        {
+            metadata.Append(" /Title (").Append(EscapePdfString(pdfTitle)).Append(')');
+        }
+
+        if (!string.IsNullOrWhiteSpace(pdfAlternateText))
+        {
+            metadata.Append(" /Subject (").Append(EscapePdfString(pdfAlternateText)).Append(')');
+        }
+
+        metadata.Append(" >>");
         var objects = new[]
         {
             "<< /Type /Catalog /Pages 2 0 R >>",
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            $"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] {pageAlternateText}/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-            $"<< /Length {Encoding.ASCII.GetByteCount(stream.ToString())} >>\nstream\n{stream}\nendstream"
+            $"<< /Length {Encoding.ASCII.GetByteCount(stream.ToString())} >>\nstream\n{stream}\nendstream",
+            metadata.ToString()
         };
         var document = new StringBuilder("%PDF-1.4\n");
         var offsets = new List<int> { 0 };
@@ -462,13 +615,19 @@ public static class FixtureGenerator
         }
 
         document.Append("trailer\n<< /Size ").Append(objects.Length + 1)
-            .Append(" /Root 1 0 R >>\nstartxref\n")
+            .Append(" /Root 1 0 R /Info 6 0 R >>\nstartxref\n")
             .Append(xrefOffset)
             .Append("\n%%EOF\n");
         var fullPath = ResolvePath(root, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllBytes(fullPath, Encoding.ASCII.GetBytes(document.ToString()));
     }
+
+    private static string EscapePdfString(string value) =>
+        value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("(", "\\(", StringComparison.Ordinal)
+            .Replace(")", "\\)", StringComparison.Ordinal);
 
     private static string HashFile(string root, string relativePath)
     {
