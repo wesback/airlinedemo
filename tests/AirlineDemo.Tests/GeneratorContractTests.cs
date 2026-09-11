@@ -220,11 +220,11 @@ public sealed class GeneratorContractTests
         try
         {
             var first = FixtureGenerator.Generate(
-                CreateConfiguration(firstDirectory),
+                CreateConfiguration(firstDirectory) with { Profile = "live" },
                 "template-2026-09-10",
                 ["live.missing-history"]);
             var second = FixtureGenerator.Generate(
-                CreateConfiguration(secondDirectory),
+                CreateConfiguration(secondDirectory) with { Profile = "live" },
                 "template-2026-09-10",
                 ["live.missing-history"]);
 
