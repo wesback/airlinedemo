@@ -175,7 +175,7 @@ public sealed class FileDocumentStorage :
         return null;
     }
 
-    public Task<IReadOnlyList<int>> GetPageInventoryAsync(
+    public async Task<IReadOnlyList<int>> GetPageInventoryAsync(
         CaseContext context,
         DocumentMetadata document,
         CancellationToken cancellationToken)
@@ -184,12 +184,17 @@ public sealed class FileDocumentStorage :
         var documentDirectory = ResolveStoragePath(locator);
         if (documentDirectory is null)
         {
-            return Task.FromResult<IReadOnlyList<int>>([]);
+            return [];
         }
 
         if (File.Exists(documentDirectory))
         {
-            return Task.FromResult<IReadOnlyList<int>>([1]);
+            if (selectedFixtureEntries is not null)
+            {
+                await ValidatePdfDocumentAsync(documentDirectory, cancellationToken);
+            }
+
+            return [1];
         }
 
         var pageFiles = Directory.Exists(documentDirectory)
@@ -203,13 +208,26 @@ public sealed class FileDocumentStorage :
             : [];
         if (pageFiles.Length > 0)
         {
-            return Task.FromResult<IReadOnlyList<int>>(pageFiles);
+            return pageFiles;
         }
 
         IReadOnlyList<int> pages = File.Exists(Path.Combine(documentDirectory, document.FileName))
             ? [1]
             : [];
-        return Task.FromResult(pages);
+        return pages;
+    }
+
+    private static async Task ValidatePdfDocumentAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+        var content = System.Text.Encoding.ASCII.GetString(bytes);
+        if (!content.StartsWith("%PDF-", StringComparison.Ordinal) ||
+            !content.Contains("%%EOF", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("The declared document is not a readable PDF.");
+        }
     }
 
     public async Task<IReadOnlyList<ApprovedRequirementVersion>> GetApprovedRequirementVersionsAsync(

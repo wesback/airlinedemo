@@ -124,7 +124,10 @@ public sealed record ScopedExtractionRecord(
     string ParserVersion,
     string ExtractorVersion,
     IReadOnlyList<int> PageInventory,
-    string ProcessingState);
+    string ProcessingState,
+    string? AttemptId = null,
+    int AttemptNumber = 0,
+    SafeError? Error = null);
 
 public sealed record EvidenceBasis(
     string BasisId,
@@ -184,6 +187,7 @@ internal sealed class PersistedState
     public Dictionary<string, PersistedOperation> Operations { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedDocument> Documents { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, ScopedExtractionRecord> ExtractionRecords { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, ScopedExtractionRecord> ExtractionAttempts { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceBasis> EvidenceBases { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PersistedReceipt> Receipts { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

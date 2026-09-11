@@ -382,6 +382,10 @@ internal sealed class WorkflowService
                 .Where(entry => entry.Value.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var extractionAttemptKeys = state.ExtractionAttempts
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
             var evidenceBasisKeys = state.EvidenceBases
                 .Where(entry => entry.Value.Context.RunId == runId)
                 .Select(entry => entry.Key)
@@ -392,6 +396,7 @@ internal sealed class WorkflowService
                 operationKeys.Length +
                 documentKeys.Length +
                 extractionKeys.Length +
+                extractionAttemptKeys.Length +
                 evidenceBasisKeys.Length;
             foreach (var key in caseKeys)
             {
@@ -416,6 +421,11 @@ internal sealed class WorkflowService
             foreach (var key in extractionKeys)
             {
                 state.ExtractionRecords.Remove(key);
+            }
+
+            foreach (var key in extractionAttemptKeys)
+            {
+                state.ExtractionAttempts.Remove(key);
             }
 
             foreach (var key in evidenceBasisKeys)
@@ -481,6 +491,7 @@ internal sealed class WorkflowService
 
         PersistedPackage? package = null;
         string? attemptId = null;
+        var attemptNumber = 0;
         PersistedReceipt? receipt = null;
         SafeError? startError = null;
         stateStore.Update(state =>
@@ -538,14 +549,16 @@ internal sealed class WorkflowService
                 currentAttempt.Status != "processing")
             {
                 attemptId = NewId("ATTEMPT");
+                attemptNumber = attempts.Count + 1;
                 attempts.Add(new ProcessingAttemptStatus(
                     attemptId,
-                    attempts.Count + 1,
+                    attemptNumber,
                     "processing"));
             }
             else
             {
                 attemptId = currentAttempt.AttemptId;
+                attemptNumber = currentAttempt.AttemptNumber;
             }
 
             var processingStatus = operation.Status with
@@ -628,18 +641,45 @@ internal sealed class WorkflowService
         }
 
         var extractionRecords = new List<ScopedExtractionRecord>();
+        var newExtractionRecords = new List<ScopedExtractionRecord>();
+        var hadPreexistingExtractionRecords = stateStore.Read(state =>
+            package.Package.Manifest.Any(document => state.ExtractionRecords.ContainsKey(
+                DocumentKey(package.Context, document.DocumentId, document.Version))));
         IReadOnlyList<ApprovedRequirementVersion> approvedRequirements = [];
         if (validationError is null)
         {
-            try
+            foreach (var document in package.Package.Manifest)
             {
-                foreach (var document in package.Package.Manifest)
+                var existingRecord = stateStore.Read(state =>
+                    state.ExtractionRecords.TryGetValue(
+                        DocumentKey(package.Context, document.DocumentId, document.Version),
+                        out var record)
+                        ? record
+                        : null);
+                if (existingRecord is not null &&
+                    existingRecord.ProcessingState == "complete" &&
+                    StringComparer.OrdinalIgnoreCase.Equals(
+                        existingRecord.Sha256,
+                        document.Sha256) &&
+                    ScopeMatches(existingRecord.Context, package.Context))
+                {
+                    extractionRecords.Add(existingRecord);
+                    continue;
+                }
+
+                try
                 {
                     var pageInventory = documentStorage is IPageInventoryStorage pageStorage
                         ? await pageStorage.GetPageInventoryAsync(
                             package.Context, document, cancellationToken)
                         : [1];
-                    extractionRecords.Add(new ScopedExtractionRecord(
+                    if (pageInventory.Count == 0)
+                    {
+                        throw new InvalidDataException(
+                            "The declared document has no readable pages.");
+                    }
+
+                    var record = new ScopedExtractionRecord(
                         package.Context,
                         document.DocumentId,
                         document.Version,
@@ -647,32 +687,63 @@ internal sealed class WorkflowService
                         ParserVersion,
                         ExtractorVersion,
                         pageInventory,
-                        "complete"));
+                        "complete",
+                        attemptId,
+                        attemptNumber);
+                    extractionRecords.Add(record);
+                    newExtractionRecords.Add(record);
                 }
-
-                if (documentStorage is IApprovedRequirementStorage requirementStorage)
+                catch (FileNotFoundException)
                 {
-                    approvedRequirements =
-                        await requirementStorage.GetApprovedRequirementVersionsAsync(
-                            package.Context, cancellationToken);
+                    var record = CreateFailedExtractionRecord(
+                        package.Context, document, attemptId, attemptNumber, correlationId);
+                    extractionRecords.Add(record);
+                    newExtractionRecords.Add(record);
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    var record = CreateFailedExtractionRecord(
+                        package.Context, document, attemptId, attemptNumber, correlationId);
+                    extractionRecords.Add(record);
+                    newExtractionRecords.Add(record);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    var record = CreateFailedExtractionRecord(
+                        package.Context, document, attemptId, attemptNumber, correlationId);
+                    extractionRecords.Add(record);
+                    newExtractionRecords.Add(record);
+                }
+                catch (IOException)
+                {
+                    var record = CreateFailedExtractionRecord(
+                        package.Context, document, attemptId, attemptNumber, correlationId);
+                    extractionRecords.Add(record);
+                    newExtractionRecords.Add(record);
+                }
+                catch (InvalidDataException)
+                {
+                    var record = CreateFailedExtractionRecord(
+                        package.Context, document, attemptId, attemptNumber, correlationId);
+                    extractionRecords.Add(record);
+                    newExtractionRecords.Add(record);
                 }
             }
-            catch (FileNotFoundException)
+
+            var failedRecord = extractionRecords.FirstOrDefault(
+                record => record.ProcessingState == "failed");
+            if (failedRecord is not null)
             {
-                validationError = "A declared file could not be read.";
+                validationError = "One or more declared documents could not be extracted.";
             }
-            catch (DirectoryNotFoundException)
-            {
-                validationError = "A declared file could not be read.";
-            }
-            catch (UnauthorizedAccessException)
-            {
-                validationError = "A declared file could not be read.";
-            }
-            catch (IOException)
-            {
-                validationError = "A declared file could not be read.";
-            }
+        }
+
+        if (validationError is null &&
+            documentStorage is IApprovedRequirementStorage requirementStorage)
+        {
+            approvedRequirements =
+                await requirementStorage.GetApprovedRequirementVersionsAsync(
+                    package.Context, cancellationToken);
         }
 
         SafeError? processingError = validationError is null
@@ -694,6 +765,11 @@ internal sealed class WorkflowService
                 return;
             }
 
+            PersistExtractionAttempts(
+                state,
+                package,
+                hadPreexistingExtractionRecords,
+                newExtractionRecords);
             attempts[index] = attempts[index] with
             {
                 Status = processingError is null ? "complete" : "failed",
@@ -788,7 +864,7 @@ internal sealed class WorkflowService
                 record.DocumentId != document.DocumentId ||
                 record.Version != document.Version ||
                 !StringComparer.OrdinalIgnoreCase.Equals(record.Sha256, document.Sha256) ||
-                record.ProcessingState is not ("complete" or "failed"))
+                record.ProcessingState != "complete")
             {
                 return "Every declared document must have a matching terminal extraction record.";
             }
@@ -817,6 +893,56 @@ internal sealed class WorkflowService
 
         return null;
     }
+
+    private static void PersistExtractionAttempts(
+        PersistedState state,
+        PersistedPackage package,
+        bool hadPreexistingExtractionRecords,
+        IReadOnlyList<ScopedExtractionRecord> records)
+    {
+        if (hadPreexistingExtractionRecords &&
+            !package.Package.Manifest.Any(document =>
+                state.ExtractionRecords.TryGetValue(
+                    DocumentKey(package.Context, document.DocumentId, document.Version),
+                    out var existing) &&
+                existing.AttemptId is not null))
+        {
+            return;
+        }
+
+        foreach (var record in records)
+        {
+            var key = DocumentKey(package.Context, record.DocumentId, record.Version);
+            if (state.ExtractionRecords.TryGetValue(key, out var existing) &&
+                existing.AttemptId is null)
+            {
+                continue;
+            }
+
+            state.ExtractionRecords[key] = record;
+            state.ExtractionAttempts[
+                $"{key}:attempt-{record.AttemptNumber}"] = record;
+        }
+    }
+
+    private static ScopedExtractionRecord CreateFailedExtractionRecord(
+        CaseContext context,
+        DocumentMetadata document,
+        string attemptId,
+        int attemptNumber,
+        string correlationId) =>
+        new(
+            context,
+            document.DocumentId,
+            document.Version,
+            document.Sha256,
+            ParserVersion,
+            ExtractorVersion,
+            [],
+            "failed",
+            attemptId,
+            attemptNumber,
+            new SafeError("INVALID_PAYLOAD", correlationId));
 
     public async Task<IResult> ProcessPackageAsync(
         string packageId,
