@@ -197,6 +197,10 @@ public sealed class WorkflowContractTests
                 {
                   "operationId": "OP-0001",
                   "caseId": "CASE-0001",
+                  "runId": "RUN-0001",
+                  "airlineId": "AIRLINE-0001",
+                  "aircraftId": "MOCK-AC-001",
+                  "leaseId": "LEASE-0001",
                   "status": "processing"
                 }
                 """),
@@ -208,7 +212,8 @@ public sealed class WorkflowContractTests
                   "aircraftId": "MOCK-AC-001",
                   "leaseId": "LEASE-0001",
                   "caseRevision": 1,
-                  "status": "awaiting_review"
+                  "status": "awaiting_review",
+                  "packageProcessing": []
                 }
                 """),
             ("EvidencePreview", """
@@ -366,12 +371,25 @@ public sealed class WorkflowContractTests
     public void OpenApi_DeclaresOperationCaseAndEvidenceLookupContracts()
     {
         using var contract = LoadJson("contracts", "1.0", "openapi.json");
+        using var schema = LoadJson("contracts", "1.0", "workflow.schema.json");
         var paths = contract.RootElement.GetProperty("paths");
 
         AssertOperation(paths, "/operations/{id}", "getOperation", "workflow.read", "200", "404");
         AssertOperation(paths, "/cases/{id}", "getCase", "case.read", "200", "404");
         AssertOperation(paths, "/cases/{id}/evidence/{documentId}", "previewEvidence",
             "evidence.read", "200", "404");
+
+        var evidenceParameters = paths.GetProperty("/cases/{id}/evidence/{documentId}")
+            .GetProperty("get").GetProperty("parameters").EnumerateArray();
+        Assert.Contains(evidenceParameters, parameter =>
+            parameter.TryGetProperty("name", out var name) &&
+            name.GetString() == "version" &&
+            parameter.GetProperty("required").GetBoolean());
+        Assert.True(schema.RootElement.GetProperty("$defs")
+            .GetProperty("CaseSummary").GetProperty("properties")
+            .TryGetProperty("packageProcessing", out _));
+        Assert.True(schema.RootElement.GetProperty("$defs")
+            .TryGetProperty("PackageProcessingStatus", out _));
     }
 
     [Fact]

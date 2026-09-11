@@ -367,6 +367,10 @@
       "required": [
         "operationId",
         "caseId",
+        "runId",
+        "airlineId",
+        "aircraftId",
+        "leaseId",
         "status"
       ],
       "properties": {
@@ -374,6 +378,18 @@
           "$ref": "#/$defs/Id"
         },
         "caseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "runId": {
+          "$ref": "#/$defs/Id"
+        },
+        "airlineId": {
+          "$ref": "#/$defs/Id"
+        },
+        "aircraftId": {
+          "$ref": "#/$defs/Id"
+        },
+        "leaseId": {
           "$ref": "#/$defs/Id"
         },
         "status": {
@@ -400,7 +416,8 @@
         "aircraftId",
         "leaseId",
         "caseRevision",
-        "status"
+        "status",
+        "packageProcessing"
       ],
       "properties": {
         "caseId": {
@@ -432,6 +449,41 @@
             "accepted",
             "blocked"
           ]
+        },
+        "packageProcessing": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PackageProcessingStatus"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackageProcessingStatus": {
+      "type": "object",
+      "required": [
+        "packageId",
+        "operationId",
+        "status"
+      ],
+      "properties": {
+        "packageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "operationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "processing",
+            "complete",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/SafeError"
         }
       },
       "additionalProperties": false
