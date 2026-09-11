@@ -1,0 +1,292 @@
+{
+  "recordVersion": "1.0",
+  "recordType": "sweden-central-monthly-cost-estimate",
+  "status": "planning-only",
+  "asOf": "2026-09-11",
+  "region": "swedencentral",
+  "currency": "USD",
+  "purpose": "Budget evidence for the bounded synthetic AirlineDemo rehearsal configuration.",
+  "basedOn": "deployment/preflight.json",
+  "authorization": {
+    "configurationApproval": "budget-review-ready-with-conditions",
+    "provisioningAuthorized": false,
+    "spendingAuthorized": false,
+    "deploymentApplied": false,
+    "note": "This record estimates a bounded configuration and does not authorize provisioning, spending, alerts, or an applied deployment."
+  },
+  "pricingBasis": {
+    "method": "PAYG list-price planning rates in USD, before tax, credits, negotiated discounts and currency conversion.",
+    "regionRule": "Use Sweden Central regional meters where published. Where a service publishes a global or dynamic rate card, the cited Microsoft pricing page is the source and the recorded rate is a conservative planning allowance.",
+    "snapshot": "deployment/pricing-sweden-central-2026-09-11.json",
+    "snapshotCapturedAt": "2026-09-11T19:36:34Z",
+    "retailPricesApiFilter": "armRegionName eq 'swedencentral'",
+    "reconciliationRule": "Every regional meter used by the estimate is identified by meterId/skuId in the dated snapshot. A line-item planning allowance may exceed the returned tier rate only where the formula says so; an unavailable or changed meter blocks apply and requires a refreshed estimate.",
+    "validationBeforeApply": "Confirm the exact Azure OpenAI model/version, Document Intelligence availability, and all selected meters in the Azure pricing calculator or Retail Prices API immediately before any apply. A rate above a recorded allowance requires a revised estimate and approval.",
+    "sources": [
+      {
+        "service": "Azure Functions Flex Consumption",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/functions/",
+        "note": "Documents on-demand and always-ready billing and the monthly execution and GB-s free grants."
+      },
+      {
+        "service": "Azure Storage",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/storage/blobs/",
+        "note": "Hot LRS block blob capacity and transaction pricing."
+      },
+      {
+        "service": "Azure SQL Database",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/azure-sql-database/single/",
+        "note": "General Purpose serverless compute, storage and backup pricing."
+      },
+      {
+        "service": "Azure AI Document Intelligence",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/document-intelligence/",
+        "note": "Read/page-metered pricing; regional availability remains a preflight check."
+      },
+      {
+        "service": "Azure OpenAI",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/azure-openai/",
+        "note": "Input and output token meters. The model/version is intentionally not selected in the preflight record."
+      },
+      {
+        "service": "Azure Monitor",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/monitor/",
+        "note": "Analytics log ingestion and retention pricing."
+      },
+      {
+        "service": "Azure bandwidth",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/bandwidth/",
+        "note": "Internet egress pricing; ingress is assumed free."
+      },
+      {
+        "service": "Azure Retail Prices API",
+        "url": "https://prices.azure.com/api/retail/prices",
+        "note": "Use armRegionName=swedencentral and the selected service/SKU filters to refresh regional meters."
+      }
+    ]
+  },
+  "usageAssumptions": {
+    "rehearsalsPerMonth": 12,
+    "rehearsalPattern": "Two five-run consecutive rehearsal blocks satisfy the parent readiness bar; two additional runs cover setup and fallback rehearsal.",
+    "documentsPerPackage": 12,
+    "pagesPerDocument": 4,
+    "pagesPerPackage": 48,
+    "headlinePathsPerRun": 2,
+    "maxDocumentRetries": 1,
+    "maxPackageAttemptsPerDocument": 2,
+    "worstCaseDocumentIntelligencePages": 1152,
+    "documentIntelligencePageLimitPerPackage": 48,
+    "model": {
+      "deploymentType": "Standard",
+      "modelAndVersion": "deployment-time confirmation required",
+      "quotaTokensPerMinute": 30000,
+      "applicationRateLimitTokensPerMinute": 25000,
+      "inputTokensPerRun": 100000,
+      "outputTokensPerRun": 25000,
+      "monthlyInputTokens": 1200000,
+      "monthlyOutputTokens": 300000,
+      "maxModelAttemptsPerDocument": 2
+    },
+    "retentionDays": {
+      "evidenceBlobVersions": 90,
+      "applicationInsightsAndLogAnalytics": 90,
+      "syntheticFixtureData": 90
+    },
+    "storage": {
+      "averageDocumentSizeMb": 0.5,
+      "retainedEvidenceGbRounded": 1,
+      "retainedEvidenceVersionsPerDocument": 2,
+      "durableBackendGbRounded": 2,
+      "remoteStateGbRounded": 1
+    },
+    "database": {
+      "sku": "Serverless General Purpose",
+      "minimumComputeVcores": 0.5,
+      "activeHoursPerMonth": 24,
+      "dataGbRounded": 5,
+      "backupGbRounded": 5,
+      "autoPauseHours": 1
+    },
+    "monitoring": {
+      "analyticsLogIngestionGbPerMonth": 1,
+      "retentionDays": 90
+    },
+    "networking": {
+      "internetEgressGbPerMonth": 1,
+      "privateNetworkResources": 0
+    }
+  },
+  "lineItems": [
+    {
+      "id": "functions-hosting",
+      "service": "Azure Functions Flex Consumption hosting",
+      "configuration": "On-demand only, 512 MB instances, zero always-ready instances; Azure monthly grants are applied.",
+      "quantity": 120000,
+      "unit": "GB-s",
+      "billableQuantityAfterGrant": 20000,
+      "unitRateUsd": 0.000016,
+      "costFormula": "20000 GB-s x 0.000016 USD/GB-s = 0.32 USD after the 100000 GB-s grant.",
+      "subtotalUsd": 0.32,
+      "sourceService": "Azure Functions Flex Consumption",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/functions/",
+      "pricingEvidence": ["functions-flex-consumption"]
+    },
+    {
+      "id": "durable-backend",
+      "service": "Azure Storage Durable backend",
+      "configuration": "StorageV2, Hot LRS, 2 GB retained and 50000 storage transactions per month.",
+      "quantity": 2,
+      "unit": "GB-month plus transactions",
+      "unitRateUsd": 0.0184,
+      "costFormula": "2 GB-month x 0.0184 USD + 50000 writes / 10000 x 0.05 USD + 50000 reads / 10000 x 0.004 USD = 0.2884 USD, rounded up = 0.29 USD.",
+      "subtotalUsd": 0.29,
+      "sourceService": "Azure Storage",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/storage/blobs/",
+      "pricingEvidence": ["storage-hot-lrs-data", "storage-hot-lrs-write", "storage-hot-lrs-read"]
+    },
+    {
+      "id": "azure-sql",
+      "service": "Azure SQL Database",
+      "configuration": "Serverless General Purpose, 0.5 vCore minimum, one-hour auto-pause, 5 GB data, 5 GB backup.",
+      "quantity": 24,
+      "unit": "vCore-hours plus data and backup",
+      "unitRateUsd": 0.42,
+      "costFormula": "12 vCore-hours (24 hours x 0.5 vCore) x 0.573934 USD + 5 GB data x 0.13685 USD + 5 GB backup x 0.119 USD + 1M IO x 0.238 USD = 8.404458 USD, rounded up = 8.41 USD.",
+      "subtotalUsd": 8.41,
+      "sourceService": "Azure SQL Database",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/azure-sql-database/single/",
+      "pricingEvidence": ["sql-serverless-compute", "sql-general-purpose-data", "sql-pitr-backup", "sql-general-purpose-io"]
+    },
+    {
+      "id": "document-intelligence",
+      "service": "Azure AI Document Intelligence Read",
+      "configuration": "Standard page-metered processing; worst case is every declared page processed twice.",
+      "quantity": 1152,
+      "unit": "pages",
+      "unitRateUsd": 0.0015,
+      "costFormula": "1152 pages x 0.0015 USD/page = 1.728 USD, rounded up = 1.73 USD.",
+      "subtotalUsd": 1.73,
+      "sourceService": "Azure AI Document Intelligence",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/document-intelligence/",
+      "pricingEvidence": ["document-intelligence-read"]
+    },
+    {
+      "id": "azure-openai",
+      "service": "Azure OpenAI Standard deployment",
+      "configuration": "Model/version remains the preflight confirmation gate; estimate uses a conservative rate envelope of 5 USD per million input tokens and 15 USD per million output tokens.",
+      "quantity": 1200000,
+      "unit": "input tokens plus output tokens",
+      "unitRateUsd": 5.00,
+      "costFormula": "(1200000 input tokens x 5 USD/million) + (300000 output tokens x 15 USD/million) = 10.50 USD.",
+      "subtotalUsd": 10.50,
+      "sourceService": "Azure OpenAI",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/azure-openai/",
+      "pricingEvidence": ["azure-openai-input-candidate", "azure-openai-output-candidate"],
+      "rateReconciliation": "The snapshot candidate is gpt-4.1-mini regional at 0.484 USD/million input tokens and 1.936 USD/million output tokens. Because the approved preflight does not select a model/version, the estimate reserves the higher 5 USD/million input and 15 USD/million output envelope; selecting a meter above that envelope blocks apply."
+    },
+    {
+      "id": "evidence-storage",
+      "service": "Evidence blob storage and versions",
+      "configuration": "Hot LRS evidence, two retained versions per document, 90-day lifecycle; rounded to 1 GB retained.",
+      "quantity": 1,
+      "unit": "GB-month plus transactions",
+      "unitRateUsd": 0.0184,
+      "costFormula": "1 GB-month x 0.0184 USD + 50000 writes / 10000 x 0.05 USD + 50000 reads / 10000 x 0.004 USD = 0.2884 USD, rounded up = 0.29 USD; versions are included in the 1 GB retained allowance.",
+      "subtotalUsd": 0.29,
+      "sourceService": "Azure Storage",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/storage/blobs/",
+      "pricingEvidence": ["storage-hot-lrs-data", "storage-hot-lrs-write", "storage-hot-lrs-read"]
+    },
+    {
+      "id": "monitoring",
+      "service": "Application Insights and Log Analytics",
+      "configuration": "Analytics ingestion capped at 1 GB/month with 90-day retention; diagnostic volume is sampled and bounded.",
+      "quantity": 1,
+      "unit": "GB ingested",
+      "unitRateUsd": 2.99,
+      "costFormula": "1 GB ingestion x 2.99 USD (the 5 GB tier rate) + 3 GB retained (1 GB/month x 90 days) x 0.10 USD = 3.29 USD, plus a bounded 0.03 USD rounding allowance = 3.32 USD.",
+      "subtotalUsd": 3.32,
+      "sourceService": "Azure Monitor",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/monitor/",
+      "pricingEvidence": ["log-analytics-ingestion", "application-insights-retention"]
+    },
+    {
+      "id": "networking",
+      "service": "Networking and internet egress",
+      "configuration": "Public, firewall-restricted SQL endpoint from the approved preflight; no private network resources; 1 GB egress allowance.",
+      "quantity": 1,
+      "unit": "GB egress",
+      "unitRateUsd": 0.08,
+      "costFormula": "1 GB internet egress is below the 100 GB tier; the snapshot returns 0 USD at tier 0 and 0.08 USD/GB from 100 GB. The estimate conservatively reserves 0.08 USD.",
+      "subtotalUsd": 0.08,
+      "sourceService": "Azure bandwidth",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/bandwidth/",
+      "pricingEvidence": ["network-internet-egress"]
+    },
+    {
+      "id": "remote-terraform-state",
+      "service": "Externally owned remote Terraform state",
+      "configuration": "Protected Hot LRS state storage, locking and 10000 state operations; remains outside the disposable demo resource group.",
+      "quantity": 1,
+      "unit": "GB-month plus operations",
+      "unitRateUsd": 0.50,
+      "costFormula": "1 GB-month x 0.0184 USD + 10000 writes / 10000 x 0.05 USD = 0.0684 USD, rounded up = 0.07 USD.",
+      "subtotalUsd": 0.07,
+      "sourceService": "Azure Storage",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/storage/blobs/",
+      "pricingEvidence": ["storage-hot-lrs-data", "storage-hot-lrs-write"]
+    }
+  ],
+  "totals": {
+    "monthlyEstimateUsd": 25.01,
+    "contingencyUsd": 50.00,
+    "totalWithContingencyUsd": 75.01,
+    "planningCeilingUsd": 500.00,
+    "headroomUsd": 424.99,
+    "withinPlanningCeiling": true,
+    "contingencyBasis": "Fixed 50 USD allowance for regional meter changes, small transaction-volume variance and one approved rehearsal-month overrun; it is not permission to spend it."
+  },
+  "residualCharges": {
+    "whenComputeIsStopped": [
+      "Flex Consumption execution compute falls to zero when no functions execute, but the Durable/host StorageV2 account remains billable for retained data and transactions.",
+      "An auto-paused SQL serverless database stops compute billing while paused, but database storage and retained backup storage continue.",
+      "Application Insights and Log Analytics continue to incur ingestion and retained-log charges while data remains in the workspace.",
+      "The protected remote Terraform state backend continues to incur storage and operation charges because it is externally owned and not destroyed with the demo."
+    ],
+    "retention": "Evidence blob versions, synthetic fixtures and monitoring logs are retained for 90 days unless an approved cleanup action removes them earlier.",
+    "minimumOrResidualItems": [
+      "Retained evidence and versions",
+      "SQL database data and backup storage",
+      "Application Insights and Log Analytics retention",
+      "Durable host/storage data",
+      "Protected remote Terraform state"
+    ]
+  },
+  "ownership": {
+    "disposableDemoResources": [
+      "rg-airlinedemo-swc-demo",
+      "Flex Consumption Function App and its host storage",
+      "Demo evidence storage and its retained versions",
+      "Demo Azure SQL logical server and database",
+      "Demo Document Intelligence resource",
+      "Demo Azure OpenAI resource/deployment when created under the demo resource group",
+      "Demo Application Insights and Log Analytics workspace"
+    ],
+    "externallyOwnedBackendResources": [
+      "The protected remote Terraform state storage account and lock data",
+      "The subscription and tenant supplied as private deployment inputs",
+      "Any shared organizational network or policy-managed resource not created by this deployment"
+    ],
+    "teardownRule": "Only disposable demo resources may be removed by demo teardown. The operator must preserve externally owned backend resources and separately confirm their owner and residual cost."
+  },
+  "approvalRecord": {
+    "decision": "bounded-configuration-ready-for-budget-review",
+    "conditions": [
+      "The exact Azure OpenAI model/version, Standard deployment availability and 30000 TPM quota remain unconfirmed preflight checks.",
+      "Document Intelligence regional availability and the selected page meter must be confirmed before apply.",
+      "Refresh the cited rates immediately before apply; any rate that exceeds its recorded allowance requires a new estimate.",
+      "Budget notifications and operator actions are defined in deployment/budget-response-procedure.md but are not enabled by this record."
+    ],
+    "notAnAuthorization": true
+  }
+}
