@@ -11,6 +11,8 @@ public static class WorkflowContract
     public const string LiveAmbiguousIdentityMutation = "live.ambiguous-identity";
     public const string ProcessingFailureCorruptDocumentMutation =
         "processing-failure.corrupt-document";
+    public const string ContradictionLaterVersionMutation =
+        "contradiction.later-version-conflict";
     public const string ApplicationInputArtifactClassification = "application-input";
     public const string StagedResponseArtifactClassification = "staged-response";
     public const string EvaluatorOnlyArtifactClassification = "evaluator-only";
@@ -43,6 +45,12 @@ public static class WorkflowContract
         new HashSet<string>(StringComparer.Ordinal)
         {
             ProcessingFailureCorruptDocumentMutation
+        };
+
+    public static readonly IReadOnlySet<string> ContradictionMutationIdentifiers =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            ContradictionLaterVersionMutation
         };
 }
 
@@ -296,6 +304,7 @@ public static class GeneratorContractValidator
         ValidateIsolationReceipt(package, errors);
         BaselineFixtureValidator.ValidateLiveMutationDeclarations(package, errors);
         BaselineFixtureValidator.ValidateProcessingFailureMutationDeclarations(package, errors);
+        BaselineFixtureValidator.ValidateContradictionMutationDeclarations(package, errors);
         BaselineFixtureValidator.ValidateDuplicateEventSequence(package, errors);
         if (package.Baseline is not null)
         {
@@ -1332,6 +1341,7 @@ public static class BaselineFixtureValidator
 
         ValidateLiveMutationFiles(package, root, generatedFiles, errors);
         ValidateProcessingFailureFiles(package, root, generatedFiles, errors);
+        ValidateContradictionFiles(package, root, generatedFiles, errors);
         ValidateStagedResponse(package, root, errors);
         ValidateIsolationArtifacts(package, root, generatedFiles, errors);
     }
@@ -1383,6 +1393,34 @@ public static class BaselineFixtureValidator
         {
             errors.Add(
                 "processing-failure mutation identifiers require the processing-failure profile.");
+        }
+    }
+
+    internal static void ValidateContradictionMutationDeclarations(
+        GeneratorContractPackage package,
+        ICollection<string> errors)
+    {
+        var mutations = package.Receipt?.IntendedMutationIdentifiers ?? [];
+        if (package.Configuration?.Profile == "contradiction")
+        {
+            if (!mutations.Contains(WorkflowContract.ContradictionLaterVersionMutation))
+            {
+                errors.Add("contradiction later-version conflict mutation is not declared.");
+            }
+
+            foreach (var mutation in mutations)
+            {
+                if (!WorkflowContract.ContradictionMutationIdentifiers.Contains(mutation))
+                {
+                    errors.Add($"contradiction fixture contains an undeclared mutation '{mutation}'.");
+                }
+            }
+        }
+        else if (mutations.Any(mutation =>
+                     WorkflowContract.ContradictionMutationIdentifiers.Contains(mutation)))
+        {
+            errors.Add(
+                "contradiction mutation identifiers require the contradiction profile.");
         }
     }
 
@@ -1707,6 +1745,202 @@ public static class BaselineFixtureValidator
             errors.Add("processing-failure corrupt document is missing from generated files.");
         }
     }
+
+    private static void ValidateContradictionFiles(
+        GeneratorContractPackage package,
+        string root,
+        IReadOnlyList<string>? generatedFiles,
+        ICollection<string> errors)
+    {
+        if (package.Configuration?.Profile != "contradiction")
+        {
+            return;
+        }
+
+        const string mutation = WorkflowContract.ContradictionLaterVersionMutation;
+        const string laterPath =
+            "application-inputs/package-002/011-component-a-removal-history-v2.pdf";
+        var mutations = package.Receipt?.IntendedMutationIdentifiers ?? [];
+        if (!mutations.Contains(mutation))
+        {
+            errors.Add("contradiction later-version conflict is not declared.");
+        }
+
+        var initialPackage = package.SubmissionPackages?.SingleOrDefault(submissionPackage =>
+            submissionPackage is not null && submissionPackage.PackageId == "PKG-0001");
+        var laterPackage = package.SubmissionPackages?.SingleOrDefault(submissionPackage =>
+            submissionPackage is not null && submissionPackage.PackageId == "PKG-0003");
+        var earlier = initialPackage?.Manifest?.SingleOrDefault(document =>
+            document is not null && document.DocumentId == "DOC-0004");
+        var later = laterPackage?.Manifest?.SingleOrDefault(document =>
+            document is not null && document.DocumentId == "DOC-0004");
+        var allVersions = package.Documents?
+            .Where(document => document is not null && document.DocumentId == "DOC-0004")
+            .OrderBy(document => document.Version)
+            .ToArray() ?? [];
+
+        if (initialPackage is null || laterPackage is null || earlier is null || later is null)
+        {
+            errors.Add(
+                "contradiction must declare initial and later packages for the versioned document.");
+        }
+        else
+        {
+            if (laterPackage.RunId != package.Case.RunId ||
+                laterPackage.CaseId != package.Case.CaseId ||
+                laterPackage.AirlineId != package.Case.AirlineId ||
+                laterPackage.AircraftId != package.Case.AircraftId ||
+                laterPackage.LeaseId != package.Case.LeaseId)
+            {
+                errors.Add("contradiction later package must remain in the case scope.");
+            }
+
+            if (earlier.Version != 1 || later.Version != 2 ||
+                allVersions.Length != 2 ||
+                earlier.SourceRecordId != later.SourceRecordId ||
+                earlier.SourceSystem != later.SourceSystem ||
+                earlier.Sha256.Equals(later.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(
+                    "contradiction document versions must preserve the source record and differ in content.");
+            }
+
+            if (later.IssuedOn <= earlier.IssuedOn ||
+                laterPackage.ScenarioEffectiveAt <= initialPackage.ScenarioEffectiveAt ||
+                laterPackage.SubmittedAt <= initialPackage.SubmittedAt)
+            {
+                errors.Add("contradiction later document and package chronology is invalid.");
+            }
+
+            if (laterPackage.Manifest.Count != 1)
+            {
+                errors.Add("contradiction later package must contain exactly one document version.");
+            }
+        }
+
+        var laterFile = ResolveOutputPath(root, laterPath);
+        if (later is not null &&
+            (laterFile is null || !File.Exists(laterFile) ||
+             !StringComparer.OrdinalIgnoreCase.Equals(HashFile(laterFile), later.Sha256)))
+        {
+            errors.Add("contradiction later document hash does not match the rendered artifact.");
+        }
+
+        if (generatedFiles is not null &&
+            !generatedFiles.Contains(laterPath, StringComparer.Ordinal))
+        {
+            errors.Add("contradiction later document is missing from generated files.");
+        }
+
+        var selected = package.PathBoundaries?.SelectedInitialInputManifest.Entries ?? [];
+        if (selected.Any(entry => entry.DocumentId == "DOC-0004" && entry.Version == 2))
+        {
+            errors.Add("contradiction later evidence must not be selected in the initial manifest.");
+        }
+
+        var metadataPath = ResolveOutputPath(root, "evaluator-only/scenario-metadata.json");
+        if (metadataPath is null || !File.Exists(metadataPath))
+        {
+            errors.Add("contradiction must be declared in evaluator-only metadata.");
+            return;
+        }
+
+        try
+        {
+            using var metadata = JsonDocument.Parse(File.ReadAllText(metadataPath));
+            var metadataRoot = metadata.RootElement;
+            var declared = metadataRoot.TryGetProperty("intendedMutations", out var declaredMutations) &&
+                declaredMutations.ValueKind == JsonValueKind.Array &&
+                declaredMutations.EnumerateArray().Any(value =>
+                    value.ValueKind == JsonValueKind.String && value.GetString() == mutation);
+            if (!declared)
+            {
+                errors.Add("contradiction is not declared in evaluator-only metadata.");
+            }
+
+            var detail = metadataRoot.TryGetProperty("mutationDetails", out var details) &&
+                details.ValueKind == JsonValueKind.Array
+                    ? details.EnumerateArray().SingleOrDefault(value =>
+                        value.ValueKind == JsonValueKind.Object &&
+                        value.TryGetProperty("identifier", out var identifier) &&
+                        identifier.GetString() == mutation)
+                    : default;
+            var hasDetail = detail.ValueKind == JsonValueKind.Object;
+            if (!hasDetail)
+            {
+                errors.Add("contradiction evaluator-only metadata lacks its mutation detail.");
+                return;
+            }
+
+            var scopeMatches = detail.TryGetProperty("scope", out var scope) &&
+                scope.ValueKind == JsonValueKind.Object &&
+                scope.TryGetProperty("runId", out var runId) &&
+                scope.TryGetProperty("caseId", out var caseId) &&
+                scope.TryGetProperty("airlineId", out var airlineId) &&
+                scope.TryGetProperty("aircraftId", out var aircraftId) &&
+                scope.TryGetProperty("leaseId", out var leaseId) &&
+                runId.GetString() == package.Case.RunId &&
+                caseId.GetString() == package.Case.CaseId &&
+                airlineId.GetString() == package.Case.AirlineId &&
+                aircraftId.GetString() == package.Case.AircraftId &&
+                leaseId.GetString() == package.Case.LeaseId;
+            if (!scopeMatches)
+            {
+                errors.Add("contradiction metadata conflict scope must match the case scope.");
+            }
+
+            var expectedEarlierConflictDate = package.Configuration.ScenarioDate
+                .AddDays(-420)
+                .ToString("yyyy-MM-dd");
+            var expectedLaterConflictDate = package.Configuration.ScenarioDate
+                .AddDays(-421)
+                .ToString("yyyy-MM-dd");
+            var detailMatches = later is not null &&
+                GetOptionalString(detail, "mutation") ==
+                    "later-document-version-conflicts-with-reviewed-basis" &&
+                GetOptionalString(detail, "documentId") == later.DocumentId &&
+                GetOptionalString(detail, "sourceRecordId") == later.SourceRecordId &&
+                GetOptionalInt32(detail, "earlierVersion") == earlier?.Version &&
+                GetOptionalInt32(detail, "laterVersion") == later.Version &&
+                GetOptionalString(detail, "earlierSha256")
+                    ?.Equals(earlier?.Sha256, StringComparison.OrdinalIgnoreCase) == true &&
+                GetOptionalString(detail, "laterSha256")
+                    ?.Equals(later.Sha256, StringComparison.OrdinalIgnoreCase) == true &&
+                GetOptionalString(detail, "relativePath") == laterPath &&
+                GetOptionalString(detail, "packageId") == laterPackage?.PackageId &&
+                detail.TryGetProperty("conflict", out var conflict) &&
+                conflict.ValueKind == JsonValueKind.Object &&
+                GetOptionalString(conflict, "field") == "removalDate" &&
+                GetOptionalString(conflict, "earlierValue") == expectedEarlierConflictDate &&
+                GetOptionalString(conflict, "laterValue") == expectedLaterConflictDate;
+            if (!detailMatches)
+            {
+                errors.Add(
+                    "contradiction evaluator-only metadata does not identify both document versions.");
+            }
+        }
+        catch (JsonException)
+        {
+            errors.Add("contradiction evaluator-only metadata is not valid JSON.");
+        }
+        catch (IOException)
+        {
+            errors.Add("contradiction evaluator-only metadata could not be read.");
+        }
+    }
+
+    private static string? GetOptionalString(JsonElement value, string propertyName) =>
+        value.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+
+    private static int? GetOptionalInt32(JsonElement value, string propertyName) =>
+        value.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == JsonValueKind.Number &&
+        property.TryGetInt32(out var number)
+            ? number
+            : null;
 
     private static void ValidateStagedResponse(
         GeneratorContractPackage package,
