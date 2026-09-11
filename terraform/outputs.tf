@@ -13,6 +13,41 @@ output "region" {
   value       = var.region
 }
 
+output "resource_group_id" {
+  description = "Non-secret resource identifier for the dedicated demo resource group."
+  value       = module.demo_boundary.resource_group_id
+}
+
+output "runtime_host_storage_account_id" {
+  description = "Non-secret resource identifier for Durable Functions host/task-hub storage."
+  value       = module.demo_boundary.runtime_host_storage_account_id
+}
+
+output "runtime_host_storage_account_name" {
+  description = "Non-secret name of the Durable Functions host/task-hub storage account."
+  value       = module.demo_boundary.runtime_host_storage_account_name
+}
+
+output "evidence_storage_account_id" {
+  description = "Non-secret resource identifier for private evidence storage."
+  value       = module.demo_boundary.evidence_storage_account_id
+}
+
+output "evidence_storage_account_name" {
+  description = "Non-secret name of private evidence storage."
+  value       = module.demo_boundary.evidence_storage_account_name
+}
+
+output "application_insights_id" {
+  description = "Non-secret Application Insights resource identifier."
+  value       = module.observability.application_insights_id
+}
+
+output "log_analytics_workspace_id" {
+  description = "Non-secret Log Analytics workspace resource identifier."
+  value       = module.observability.log_analytics_workspace_id
+}
+
 output "function_runtime" {
   description = "Approved Azure Functions runtime boundary."
   value       = var.function_runtime
