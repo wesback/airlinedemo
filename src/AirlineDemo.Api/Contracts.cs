@@ -55,6 +55,12 @@ public sealed record OperationAccepted(
     string CaseId,
     string ReceiptId);
 
+public sealed record ProcessingAttemptStatus(
+    string AttemptId,
+    int AttemptNumber,
+    string Status,
+    SafeError? Error = null);
+
 public sealed record OperationStatus(
     string OperationId,
     string CaseId,
@@ -63,7 +69,8 @@ public sealed record OperationStatus(
     string AircraftId,
     string LeaseId,
     string Status,
-    SafeError? Error = null);
+    SafeError? Error = null,
+    IReadOnlyList<ProcessingAttemptStatus>? Attempts = null);
 
 public sealed record PackageProcessingStatus(
     string PackageId,

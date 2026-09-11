@@ -4,7 +4,7 @@
   "info": {
     "title": "AirlineDemo Workflow API",
     "version": "1.0",
-    "description": "Scoped, versioned contract for workflow fixture generation and consumers. This document defines the boundary only; it does not promise persistence or processing behavior."
+    "description": "Scoped, versioned contract for workflow fixture generation and consumers. Package processing is persisted and exposes explicit completion, failure, retry, and recovery state."
   },
   "servers": [
     {
@@ -128,6 +128,100 @@
           }
         }
       }
+    },
+    "/operations/{id}/process": {
+      "post": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "processOperation",
+        "summary": "Process a queued package or resume processing",
+        "description": "Moves the operation to processing and accounts for every manifest-declared file. The same operation and submission receipt are retained across completion or failure.",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "workflow.write"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Processing was recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/OperationNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidPayload"
+          }
+        }
+      }
+    },
+    "/operations/{id}/retry": {
+      "post": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "retryOperation",
+        "summary": "Retry a failed package operation",
+        "description": "Creates a new processing attempt for a failed operation while preserving its prior attempt, package record, and submission receipt.",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "workflow.write"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Retry was recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/OperationNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidPayload"
+          }
+        }
+      }
+    },
+    "/packages/{id}/process": {
+      "$ref": "#/paths/~1operations~1{id}~1process"
+    },
+    "/packages/{id}/retry": {
+      "$ref": "#/paths/~1operations~1{id}~1retry"
     },
     "/cases/{id}": {
       "get": {
@@ -363,6 +457,9 @@
       },
       "OperationStatus": {
         "$ref": "workflow.schema.json#/$defs/OperationStatus"
+      },
+      "ProcessingAttemptStatus": {
+        "$ref": "workflow.schema.json#/$defs/ProcessingAttemptStatus"
       },
       "CaseSummary": {
         "$ref": "workflow.schema.json#/$defs/CaseSummary"
