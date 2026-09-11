@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AirlineDemo.Api/AirlineDemo.Api.csproj" />
+    <Project Path="src/AirlineDemo.Generator/AirlineDemo.Generator.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AirlineDemo.Tests/AirlineDemo.Tests.csproj" />
