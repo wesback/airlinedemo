@@ -191,7 +191,11 @@ public sealed class WorkflowContractTests
                 }
                 """),
             ("OperationAccepted", """
-                { "operationId": "OP-0001", "caseId": "CASE-0001" }
+                {
+                  "operationId": "OP-0001",
+                  "caseId": "CASE-0001",
+                  "receiptId": "RECEIPT-0001"
+                }
                 """),
             ("OperationStatus", """
                 {
@@ -356,6 +360,7 @@ public sealed class WorkflowContractTests
             .EnumerateArray().Select(value => value.GetString());
         Assert.Contains("operationId", acceptedFields);
         Assert.Contains("caseId", acceptedFields);
+        Assert.Contains("receiptId", acceptedFields);
 
         var conflict = post.GetProperty("responses").GetProperty("409");
         var conflictResponse = contract.RootElement.GetProperty("components")

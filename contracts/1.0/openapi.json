@@ -62,7 +62,8 @@
                 },
                 "example": {
                   "operationId": "OP-0001",
-                  "caseId": "CASE-0001"
+                  "caseId": "CASE-0001",
+                  "receiptId": "RECEIPT-0001"
                 }
               }
             }

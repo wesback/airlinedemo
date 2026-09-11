@@ -50,7 +50,10 @@ public sealed record PackageSubmissionRequest(EventEnvelope Event, SubmissionPac
 
 public sealed record SafeError(string SafeCode, string CorrelationId, string? Message = null);
 
-public sealed record OperationAccepted(string OperationId, string CaseId);
+public sealed record OperationAccepted(
+    string OperationId,
+    string CaseId,
+    string ReceiptId);
 
 public sealed record OperationStatus(
     string OperationId,
@@ -118,6 +121,7 @@ internal sealed record PersistedDocument(
     string StorageLocator);
 
 internal sealed record PersistedReceipt(
+    string ReceiptId,
     string RunId,
     string EventId,
     string CanonicalHash,

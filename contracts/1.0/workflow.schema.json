@@ -350,13 +350,17 @@
       "type": "object",
       "required": [
         "operationId",
-        "caseId"
+        "caseId",
+        "receiptId"
       ],
       "properties": {
         "operationId": {
           "$ref": "#/$defs/Id"
         },
         "caseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "receiptId": {
           "$ref": "#/$defs/Id"
         }
       },
