@@ -2,3 +2,8 @@
 bin/
 obj/
 *.user
+
+# Terraform working directory and local state
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
