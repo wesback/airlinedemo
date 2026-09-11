@@ -1,0 +1,368 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "AirlineDemo Workflow API",
+    "version": "1.0",
+    "description": "Scoped, versioned contract for workflow fixture generation and consumers. This document defines the boundary only; it does not promise persistence or processing behavior."
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Packages"
+    },
+    {
+      "name": "Operations"
+    },
+    {
+      "name": "Cases"
+    },
+    {
+      "name": "Evidence"
+    }
+  ],
+  "paths": {
+    "/packages": {
+      "post": {
+        "tags": [
+          "Packages"
+        ],
+        "operationId": "submitPackage",
+        "summary": "Submit a versioned package event",
+        "description": "The caller must be authenticated and scoped to the package case. Replaying an event with an unchanged canonical payload is idempotent; reusing its event ID with a changed canonical payload is a conflict.",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "workflow.write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackageSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Submission accepted for processing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAccepted"
+                },
+                "example": {
+                  "operationId": "OP-0001",
+                  "caseId": "CASE-0001"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidPayload"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/ActionForbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/EventPayloadConflict"
+          }
+        }
+      }
+    },
+    "/operations/{id}": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "getOperation",
+        "summary": "Look up a submission operation",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "workflow.read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current operation status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidPayload"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/ActionForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/OperationNotFound"
+          }
+        }
+      }
+    },
+    "/cases/{id}": {
+      "get": {
+        "tags": [
+          "Cases"
+        ],
+        "operationId": "getCase",
+        "summary": "Look up a scoped case",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "case.read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped case summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/ActionForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/CaseNotFound"
+          }
+        }
+      }
+    },
+    "/cases/{id}/evidence/{documentId}": {
+      "get": {
+        "tags": [
+          "Evidence"
+        ],
+        "operationId": "previewEvidence",
+        "summary": "Preview a permitted evidence page",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "evidence.read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          },
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorised page preview without a blob locator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidencePreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidPayload"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/ActionForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/EvidenceNotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "WorkflowBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "An authenticated caller whose token is checked against the resource's airline/aircraft/lease scope."
+      }
+    },
+    "parameters": {
+      "ResourceId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      }
+    },
+    "responses": {
+      "AuthenticationRequired": {
+        "description": "Authentication is missing or invalid.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
+      },
+      "ActionForbidden": {
+        "description": "The authenticated caller cannot perform this action in its visible scope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
+      },
+      "InvalidPayload": {
+        "description": "The request payload or parameter is invalid.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
+      },
+      "CaseNotFound": {
+        "description": "The case is not accessible in the caller's scope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
+      },
+      "EvidenceNotFound": {
+        "description": "The evidence is not accessible in the caller's scope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
+      },
+      "OperationNotFound": {
+        "description": "The operation is not accessible in the caller's scope.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
+      },
+      "EventPayloadConflict": {
+        "description": "The event ID has already been used with a different canonical payload.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SafeError"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Id": {
+        "$ref": "workflow.schema.json#/$defs/Id"
+      },
+      "CaseContext": {
+        "$ref": "workflow.schema.json#/$defs/CaseContext"
+      },
+      "Document": {
+        "$ref": "workflow.schema.json#/$defs/Document"
+      },
+      "EvidenceRef": {
+        "$ref": "workflow.schema.json#/$defs/EvidenceRef"
+      },
+      "SubmissionPackage": {
+        "$ref": "workflow.schema.json#/$defs/SubmissionPackage"
+      },
+      "EventEnvelope": {
+        "$ref": "workflow.schema.json#/$defs/EventEnvelope"
+      },
+      "PackageSubmissionRequest": {
+        "$ref": "workflow.schema.json#/$defs/PackageSubmissionRequest"
+      },
+      "OperationAccepted": {
+        "$ref": "workflow.schema.json#/$defs/OperationAccepted"
+      },
+      "OperationStatus": {
+        "$ref": "workflow.schema.json#/$defs/OperationStatus"
+      },
+      "CaseSummary": {
+        "$ref": "workflow.schema.json#/$defs/CaseSummary"
+      },
+      "EvidencePreview": {
+        "$ref": "workflow.schema.json#/$defs/EvidencePreview"
+      },
+      "SafeError": {
+        "$ref": "workflow.schema.json#/$defs/SafeError"
+      }
+    }
+  }
+}

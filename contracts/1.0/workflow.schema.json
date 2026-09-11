@@ -1,0 +1,521 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airlinedemo.example/contracts/workflow/1.0/workflow.schema.json",
+  "title": "AirlineDemo workflow contract",
+  "description": "Versioned integration objects shared by fixture generators and workflow consumers.",
+  "type": "object",
+  "required": [
+    "schemaVersion"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "SchemaVersion": {
+      "type": "string",
+      "enum": [
+        "1.0"
+      ]
+    },
+    "Id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "UtcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "CaseContext": {
+      "type": "object",
+      "required": [
+        "runId",
+        "caseId",
+        "airlineId",
+        "aircraftId",
+        "leaseId"
+      ],
+      "properties": {
+        "runId": {
+          "$ref": "#/$defs/Id"
+        },
+        "caseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "airlineId": {
+          "$ref": "#/$defs/Id"
+        },
+        "aircraftId": {
+          "$ref": "#/$defs/Id"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Document": {
+      "type": "object",
+      "required": [
+        "documentId",
+        "version",
+        "sourceSystem",
+        "sourceRecordId",
+        "fileName",
+        "mediaType",
+        "sha256",
+        "issuedOn"
+      ],
+      "properties": {
+        "documentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sourceSystem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sourceRecordId": {
+          "$ref": "#/$defs/Id"
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^\\\\/]+$"
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        },
+        "issuedOn": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceBounds": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceRef": {
+      "type": "object",
+      "required": [
+        "documentId",
+        "version",
+        "page"
+      ],
+      "properties": {
+        "documentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bounds": {
+          "$ref": "#/$defs/EvidenceBounds"
+        },
+        "quote": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "additionalProperties": false
+    },
+    "SubmissionPackage": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "packageId",
+        "runId",
+        "caseId",
+        "airlineId",
+        "aircraftId",
+        "leaseId",
+        "submittedAt",
+        "scenarioEffectiveAt",
+        "manifest"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "packageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "runId": {
+          "$ref": "#/$defs/Id"
+        },
+        "caseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "airlineId": {
+          "$ref": "#/$defs/Id"
+        },
+        "aircraftId": {
+          "$ref": "#/$defs/Id"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "submittedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "scenarioEffectiveAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "manifest": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Document"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackageSubmittedPayload": {
+      "type": "object",
+      "required": [
+        "packageId"
+      ],
+      "properties": {
+        "packageId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PartnerResponseReceivedPayload": {
+      "type": "object",
+      "required": [
+        "packageId",
+        "requestId"
+      ],
+      "properties": {
+        "packageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EventEnvelope": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "eventId",
+        "type",
+        "runId",
+        "caseId",
+        "airlineId",
+        "aircraftId",
+        "leaseId",
+        "occurredAt",
+        "scenarioEffectiveAt",
+        "correlationId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "eventId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "package.submitted",
+            "partner.response.received"
+          ]
+        },
+        "runId": {
+          "$ref": "#/$defs/Id"
+        },
+        "caseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "airlineId": {
+          "$ref": "#/$defs/Id"
+        },
+        "aircraftId": {
+          "$ref": "#/$defs/Id"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "scenarioEffectiveAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PackageSubmittedPayload"
+            },
+            {
+              "$ref": "#/$defs/PartnerResponseReceivedPayload"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "package.submitted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/PackageSubmittedPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "partner.response.received"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/PartnerResponseReceivedPayload"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "OperationAccepted": {
+      "type": "object",
+      "required": [
+        "operationId",
+        "caseId"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "caseId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperationStatus": {
+      "type": "object",
+      "required": [
+        "operationId",
+        "caseId",
+        "status"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "caseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "processing",
+            "complete",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/SafeError"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CaseSummary": {
+      "type": "object",
+      "required": [
+        "caseId",
+        "runId",
+        "airlineId",
+        "aircraftId",
+        "leaseId",
+        "caseRevision",
+        "status"
+      ],
+      "properties": {
+        "caseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "runId": {
+          "$ref": "#/$defs/Id"
+        },
+        "airlineId": {
+          "$ref": "#/$defs/Id"
+        },
+        "aircraftId": {
+          "$ref": "#/$defs/Id"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/Id"
+        },
+        "caseRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "awaiting_external",
+            "awaiting_review",
+            "ready_for_acceptance",
+            "accepted",
+            "blocked"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "EvidencePreview": {
+      "type": "object",
+      "required": [
+        "documentId",
+        "version",
+        "page",
+        "mediaType",
+        "textExcerpt"
+      ],
+      "properties": {
+        "documentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "textExcerpt": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "bounds": {
+          "$ref": "#/$defs/EvidenceBounds"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackageSubmissionRequest": {
+      "type": "object",
+      "required": [
+        "event",
+        "package"
+      ],
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/EventEnvelope"
+        },
+        "package": {
+          "$ref": "#/$defs/SubmissionPackage"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SafeError": {
+      "type": "object",
+      "required": [
+        "safeCode",
+        "correlationId"
+      ],
+      "properties": {
+        "safeCode": {
+          "type": "string",
+          "enum": [
+            "AUTHENTICATION_REQUIRED",
+            "INVALID_AUTHENTICATION",
+            "CASE_NOT_FOUND",
+            "EVIDENCE_NOT_FOUND",
+            "OPERATION_NOT_FOUND",
+            "ACTION_FORBIDDEN",
+            "INVALID_PAYLOAD",
+            "EVENT_PAYLOAD_CONFLICT"
+          ]
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
