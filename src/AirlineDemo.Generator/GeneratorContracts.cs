@@ -8,6 +8,8 @@ public static class WorkflowContract
 {
     public const string LiveMissingHistoryMutation = "live.missing-history";
     public const string LiveAmbiguousIdentityMutation = "live.ambiguous-identity";
+    public const string ProcessingFailureCorruptDocumentMutation =
+        "processing-failure.corrupt-document";
     public const string ApplicationInputArtifactClassification = "application-input";
     public const string StagedResponseArtifactClassification = "staged-response";
     public const string EvaluatorOnlyArtifactClassification = "evaluator-only";
@@ -34,6 +36,12 @@ public static class WorkflowContract
         {
             LiveMissingHistoryMutation,
             LiveAmbiguousIdentityMutation
+        };
+
+    public static readonly IReadOnlySet<string> ProcessingFailureMutationIdentifiers =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            ProcessingFailureCorruptDocumentMutation
         };
 }
 
@@ -286,6 +294,7 @@ public static class GeneratorContractValidator
         ValidateReceipt(package.Receipt, package.Configuration, package.Case, errors);
         ValidateIsolationReceipt(package, errors);
         BaselineFixtureValidator.ValidateLiveMutationDeclarations(package, errors);
+        BaselineFixtureValidator.ValidateProcessingFailureMutationDeclarations(package, errors);
         if (package.Baseline is not null)
         {
             BaselineFixtureValidator.ValidateSemantic(package, errors);
@@ -1265,6 +1274,7 @@ public static class BaselineFixtureValidator
         }
 
         ValidateLiveMutationFiles(package, root, generatedFiles, errors);
+        ValidateProcessingFailureFiles(package, root, generatedFiles, errors);
         ValidateStagedResponse(package, root, errors);
         ValidateIsolationArtifacts(package, root, generatedFiles, errors);
     }
@@ -1292,6 +1302,30 @@ public static class BaselineFixtureValidator
         else if (mutations.Any(mutation => WorkflowContract.LiveMutationIdentifiers.Contains(mutation)))
         {
             errors.Add("live mutation identifiers require the live profile.");
+        }
+    }
+
+    internal static void ValidateProcessingFailureMutationDeclarations(
+        GeneratorContractPackage package,
+        ICollection<string> errors)
+    {
+        var mutations = package.Receipt?.IntendedMutationIdentifiers ?? [];
+        if (package.Configuration?.Profile == "processing-failure")
+        {
+            foreach (var mutation in mutations)
+            {
+                if (!WorkflowContract.ProcessingFailureMutationIdentifiers.Contains(mutation))
+                {
+                    errors.Add(
+                        $"processing-failure fixture contains an undeclared mutation '{mutation}'.");
+                }
+            }
+        }
+        else if (mutations.Any(mutation =>
+                     WorkflowContract.ProcessingFailureMutationIdentifiers.Contains(mutation)))
+        {
+            errors.Add(
+                "processing-failure mutation identifiers require the processing-failure profile.");
         }
     }
 
@@ -1386,6 +1420,142 @@ public static class BaselineFixtureValidator
                         $"live generator output '{generatedFile}' leaks the clean component B serial.");
                 }
             }
+        }
+    }
+
+    private static void ValidateProcessingFailureFiles(
+        GeneratorContractPackage package,
+        string root,
+        IReadOnlyList<string>? generatedFiles,
+        ICollection<string> errors)
+    {
+        if (package.Configuration?.Profile != "processing-failure")
+        {
+            return;
+        }
+
+        const string mutation = WorkflowContract.ProcessingFailureCorruptDocumentMutation;
+        const string corruptPath = "application-inputs/package-001/011-corrupt-document.pdf";
+        var mutations = package.Receipt?.IntendedMutationIdentifiers ?? [];
+        var corruptFile = ResolveOutputPath(root, corruptPath);
+        if (!mutations.Contains(mutation))
+        {
+            errors.Add("processing-failure corrupt document mutation is not declared.");
+        }
+
+        if (corruptFile is null || !File.Exists(corruptFile))
+        {
+            errors.Add("processing-failure corrupt document artifact is missing.");
+        }
+
+        var corruptDocument = package.Documents?.SingleOrDefault(document =>
+            document is not null &&
+            StringComparer.Ordinal.Equals(document.SourceRecordId, "SOURCE-CORRUPT-0001"));
+        var submittedManifest = package.SubmissionPackages?
+            .SingleOrDefault(submissionPackage =>
+                submissionPackage is not null &&
+                StringComparer.Ordinal.Equals(submissionPackage.PackageId, "PKG-0001"))
+            ?.Manifest?
+            .Where(document => document is not null)
+            .ToArray() ?? [];
+        if (corruptDocument is null)
+        {
+            errors.Add("processing-failure corrupt document metadata is missing.");
+        }
+        else
+        {
+            var manifestDocument = submittedManifest.SingleOrDefault(document =>
+                StringComparer.Ordinal.Equals(document.DocumentId, corruptDocument.DocumentId) &&
+                document.Version == corruptDocument.Version);
+            if (manifestDocument is null)
+            {
+                errors.Add(
+                    "processing-failure corrupt document is absent from the submitted manifest.");
+            }
+            else if (!StringComparer.OrdinalIgnoreCase.Equals(
+                         manifestDocument.Sha256,
+                         corruptDocument.Sha256))
+            {
+                errors.Add("processing-failure corrupt document manifest hash does not match its document.");
+            }
+
+            if (corruptFile is not null && File.Exists(corruptFile))
+            {
+                var actualHash = HashFile(corruptFile);
+                if (!StringComparer.OrdinalIgnoreCase.Equals(actualHash, corruptDocument.Sha256))
+                {
+                    errors.Add(
+                        "processing-failure corrupt document hash does not match the rendered artifact.");
+                }
+            }
+        }
+
+        var metadataPath = ResolveOutputPath(root, "evaluator-only/scenario-metadata.json");
+        if (metadataPath is null || !File.Exists(metadataPath))
+        {
+            errors.Add("processing-failure mutation must be declared in evaluator-only metadata.");
+        }
+        else
+        {
+            try
+            {
+                using var metadata = JsonDocument.Parse(File.ReadAllText(metadataPath));
+                var rootElement = metadata.RootElement;
+                var hasMutationDeclaration = rootElement.TryGetProperty(
+                    "intendedMutations",
+                    out var intendedMutations) &&
+                    intendedMutations.ValueKind == JsonValueKind.Array &&
+                    intendedMutations.EnumerateArray()
+                        .Any(value => value.ValueKind == JsonValueKind.String &&
+                                      value.GetString() == mutation);
+                if (!hasMutationDeclaration)
+                {
+                    errors.Add(
+                        "processing-failure mutation is not declared in evaluator-only metadata.");
+                }
+
+                var hasMatchingDetail = false;
+                if (rootElement.TryGetProperty("mutationDetails", out var mutationDetails) &&
+                    mutationDetails.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var detail in mutationDetails.EnumerateArray())
+                    {
+                        if (detail.ValueKind != JsonValueKind.Object ||
+                            !detail.TryGetProperty("identifier", out var identifier) ||
+                            identifier.GetString() != mutation)
+                        {
+                            continue;
+                        }
+
+                        hasMatchingDetail = corruptDocument is not null &&
+                            detail.TryGetProperty("documentId", out var documentId) &&
+                            detail.TryGetProperty("relativePath", out var relativePath) &&
+                            detail.TryGetProperty("sha256", out var sha256) &&
+                            documentId.GetString() == corruptDocument.DocumentId &&
+                            relativePath.GetString() == corruptPath &&
+                            StringComparer.OrdinalIgnoreCase.Equals(
+                                sha256.GetString(),
+                                corruptDocument.Sha256);
+                        break;
+                    }
+                }
+
+                if (!hasMatchingDetail)
+                {
+                    errors.Add(
+                        "processing-failure evaluator-only metadata does not identify the corrupt document and hash.");
+                }
+            }
+            catch (JsonException)
+            {
+                errors.Add("processing-failure evaluator-only metadata is not valid JSON.");
+            }
+        }
+
+        if (generatedFiles is not null &&
+            !generatedFiles.Contains(corruptPath, StringComparer.Ordinal))
+        {
+            errors.Add("processing-failure corrupt document is missing from generated files.");
         }
     }
 

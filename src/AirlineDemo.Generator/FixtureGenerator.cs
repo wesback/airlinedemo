@@ -24,6 +24,8 @@ public static class FixtureGenerator
         var mutations = (intendedMutationIdentifiers ??
                 (configuration.Profile == "live"
                     ? WorkflowContract.LiveMutationIdentifiers
+                    : configuration.Profile == "processing-failure"
+                        ? WorkflowContract.ProcessingFailureMutationIdentifiers
                     : []))
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
@@ -77,6 +79,7 @@ public static class FixtureGenerator
         DeleteIfPresent(outputDirectory, "application-inputs/package-001/004-component-a-removal-history.pdf");
         DeleteIfPresent(outputDirectory, "application-inputs/package-001/005-component-b-installation.pdf");
         DeleteIfPresent(outputDirectory, "application-inputs/package-001/005-component-b-identity-scan.pdf");
+        DeleteIfPresent(outputDirectory, "application-inputs/package-001/011-corrupt-document.pdf");
         DeleteIfPresent(
             outputDirectory,
             "evaluator-only/isolation/cross-scope-package/001-aircraft-record.pdf");
@@ -85,12 +88,19 @@ public static class FixtureGenerator
             "evaluator-only/isolation/cross-scope-package/manifest.json");
         foreach (var definition in documentDefinitions)
         {
-            WriteRenderedDocument(
-                outputDirectory,
-                definition.RelativePath,
-                definition.Content,
-                definition.PdfTitle,
-                definition.PdfAlternateText);
+            if (definition.IsCorrupt)
+            {
+                WriteCorruptDocument(outputDirectory, definition.RelativePath);
+            }
+            else
+            {
+                WriteRenderedDocument(
+                    outputDirectory,
+                    definition.RelativePath,
+                    definition.Content,
+                    definition.PdfTitle,
+                    definition.PdfAlternateText);
+            }
             documentPaths.Add(definition.RelativePath);
         }
 
@@ -185,7 +195,7 @@ public static class FixtureGenerator
                     profile = configuration.Profile,
                     intendedMutations = mutations,
                     mutationDetails = mutations
-                        .Select(CreateMutationMetadata)
+                        .Select(mutation => CreateMutationMetadata(mutation, documents))
                         .ToArray()
                 });
         }
@@ -459,6 +469,17 @@ public static class FixtureGenerator
                 "Reference source: asset-register v1\nAircraft: MOCK-AC-001\nEngine: MOCK-ENG-001\nComponents: COMP-0001, COMP-0002")
         };
 
+        if (mutations.Contains(WorkflowContract.ProcessingFailureCorruptDocumentMutation))
+        {
+            definitions.Add(
+                new DocumentDefinition(
+                    "application-inputs/package-001/011-corrupt-document.pdf",
+                    "SOURCE-CORRUPT-0001",
+                    scenarioStart,
+                    string.Empty,
+                    IsCorrupt: true));
+        }
+
         if (mutations.Contains(WorkflowContract.LiveMissingHistoryMutation))
         {
             definitions.RemoveAll(definition =>
@@ -496,7 +517,9 @@ public static class FixtureGenerator
         return definitions;
     }
 
-    private static object CreateMutationMetadata(string mutationIdentifier) =>
+    private static object CreateMutationMetadata(
+        string mutationIdentifier,
+        IReadOnlyList<Document> documents) =>
         mutationIdentifier switch
         {
             WorkflowContract.LiveMissingHistoryMutation => new
@@ -513,10 +536,28 @@ public static class FixtureGenerator
                 mutation = "ambiguous-identity-scan",
                 candidates = new[] { "SN-B-2041", "SN-B-2047" }
             },
+            WorkflowContract.ProcessingFailureCorruptDocumentMutation =>
+                CreateProcessingFailureMetadata(mutationIdentifier, documents),
             _ => throw new ArgumentException(
-                $"Unsupported live mutation '{mutationIdentifier}'.",
+                $"Unsupported fixture mutation '{mutationIdentifier}'.",
                 nameof(mutationIdentifier))
         };
+
+    private static object CreateProcessingFailureMetadata(
+        string mutationIdentifier,
+        IReadOnlyList<Document> documents)
+    {
+        var document = documents.Single(document =>
+            StringComparer.Ordinal.Equals(document.SourceRecordId, "SOURCE-CORRUPT-0001"));
+        return new
+        {
+            identifier = mutationIdentifier,
+            mutation = "corrupt-document",
+            documentId = document.DocumentId,
+            relativePath = "application-inputs/package-001/011-corrupt-document.pdf",
+            sha256 = document.Sha256
+        };
+    }
 
     private static IReadOnlyList<ReceiptArtifact> CreateReceiptArtifacts(
         string outputDirectory,
@@ -646,7 +687,8 @@ public static class FixtureGenerator
         DateTimeOffset IssuedOn,
         string Content,
         string? PdfTitle = null,
-        string? PdfAlternateText = null);
+        string? PdfAlternateText = null,
+        bool IsCorrupt = false);
 
     private static void WriteJson(string root, string relativePath, object value) =>
         WriteText(root, relativePath, JsonSerializer.Serialize(value, GeneratorContractJson.Options));
@@ -733,6 +775,15 @@ public static class FixtureGenerator
         var fullPath = ResolvePath(root, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllBytes(fullPath, Encoding.ASCII.GetBytes(document.ToString()));
+    }
+
+    private static void WriteCorruptDocument(string root, string relativePath)
+    {
+        var fullPath = ResolvePath(root, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllBytes(
+            fullPath,
+            Encoding.ASCII.GetBytes("corrupt document fixture: truncated before a PDF header"));
     }
 
     private static string EscapePdfString(string value) =>
