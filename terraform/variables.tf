@@ -18,6 +18,39 @@ variable "resource_group_name" {
   }
 }
 
+variable "environment" {
+  description = "Lifecycle environment tag for resources owned by this deployment."
+  type        = string
+  default     = "demo"
+
+  validation {
+    condition     = var.environment == "demo"
+    error_message = "environment must remain demo for this deployment."
+  }
+}
+
+variable "owner" {
+  description = "Owning team tag for resources in the disposable demo boundary."
+  type        = string
+  default     = "airlinedemo"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9 ._-]{1,62}[A-Za-z0-9]$", var.owner))
+    error_message = "owner must be 3-64 characters and use only letters, numbers, spaces, dots, underscores, and hyphens."
+  }
+}
+
+variable "cost_center" {
+  description = "Cost allocation tag for resources in the disposable demo boundary."
+  type        = string
+  default     = "airlinedemo-demo"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9 ._-]{1,62}[A-Za-z0-9]$", var.cost_center))
+    error_message = "cost_center must be 3-64 characters and use only letters, numbers, spaces, dots, underscores, and hyphens."
+  }
+}
+
 variable "region" {
   description = "Azure deployment region. Changing the default is an explicit deployment decision."
   type        = string

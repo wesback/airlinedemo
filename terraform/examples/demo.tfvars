@@ -4,6 +4,9 @@
 deployment_name     = "airlinedemo-swc-demo"
 resource_group_name = "rg-airlinedemo-swc-demo"
 region              = "swedencentral"
+environment         = "demo"
+owner               = "airlinedemo"
+cost_center         = "airlinedemo-demo"
 
 # These values mirror the approved non-secret application boundary.
 function_runtime                 = "Azure Functions v4"
