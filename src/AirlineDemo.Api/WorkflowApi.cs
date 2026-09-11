@@ -105,6 +105,9 @@ public static class WorkflowApi
 
 internal sealed class WorkflowService
 {
+    private const string ParserVersion = "deterministic-pdf-parser/1.0";
+    private const string ExtractorVersion = "deterministic-text-extractor/1.0";
+
     private readonly JsonStateStore stateStore;
     private readonly IDocumentStorage documentStorage;
 
@@ -375,11 +378,21 @@ internal sealed class WorkflowService
                 .Where(entry => entry.Value.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var extractionKeys = state.ExtractionRecords
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var evidenceBasisKeys = state.EvidenceBases
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
             affectedRecordCount =
                 caseKeys.Length +
                 packageKeys.Length +
                 operationKeys.Length +
-                documentKeys.Length;
+                documentKeys.Length +
+                extractionKeys.Length +
+                evidenceBasisKeys.Length;
             foreach (var key in caseKeys)
             {
                 state.Cases.Remove(key);
@@ -398,6 +411,16 @@ internal sealed class WorkflowService
             foreach (var key in documentKeys)
             {
                 state.Documents.Remove(key);
+            }
+
+            foreach (var key in extractionKeys)
+            {
+                state.ExtractionRecords.Remove(key);
+            }
+
+            foreach (var key in evidenceBasisKeys)
+            {
+                state.EvidenceBases.Remove(key);
             }
 
             state.Receipts.Add(
@@ -604,6 +627,54 @@ internal sealed class WorkflowService
             validationError = "A declared file could not be verified.";
         }
 
+        var extractionRecords = new List<ScopedExtractionRecord>();
+        IReadOnlyList<ApprovedRequirementVersion> approvedRequirements = [];
+        if (validationError is null)
+        {
+            try
+            {
+                foreach (var document in package.Package.Manifest)
+                {
+                    var pageInventory = documentStorage is IPageInventoryStorage pageStorage
+                        ? await pageStorage.GetPageInventoryAsync(
+                            package.Context, document, cancellationToken)
+                        : [1];
+                    extractionRecords.Add(new ScopedExtractionRecord(
+                        package.Context,
+                        document.DocumentId,
+                        document.Version,
+                        document.Sha256,
+                        ParserVersion,
+                        ExtractorVersion,
+                        pageInventory,
+                        "complete"));
+                }
+
+                if (documentStorage is IApprovedRequirementStorage requirementStorage)
+                {
+                    approvedRequirements =
+                        await requirementStorage.GetApprovedRequirementVersionsAsync(
+                            package.Context, cancellationToken);
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                validationError = "A declared file could not be read.";
+            }
+            catch (DirectoryNotFoundException)
+            {
+                validationError = "A declared file could not be read.";
+            }
+            catch (UnauthorizedAccessException)
+            {
+                validationError = "A declared file could not be read.";
+            }
+            catch (IOException)
+            {
+                validationError = "A declared file could not be read.";
+            }
+        }
+
         SafeError? processingError = validationError is null
             ? null
             : new SafeError("INVALID_PAYLOAD", correlationId);
@@ -628,6 +699,23 @@ internal sealed class WorkflowService
                 Status = processingError is null ? "complete" : "failed",
                 Error = processingError
             };
+            if (processingError is null)
+            {
+                var assessmentError = PersistAssessment(
+                    state,
+                    package,
+                    extractionRecords,
+                    approvedRequirements);
+                if (assessmentError is not null)
+                {
+                    processingError = new SafeError("INVALID_PAYLOAD", correlationId);
+                    attempts[index] = attempts[index] with
+                    {
+                        Status = "failed",
+                        Error = processingError
+                    };
+                }
+            }
             var finalStatus = operation.Status with
             {
                 Status = processingError is null ? "complete" : "failed",
@@ -655,6 +743,79 @@ internal sealed class WorkflowService
         return Results.Json(
             new OperationAccepted(operationId, package.Context.CaseId, receipt.ReceiptId),
             statusCode: 202);
+    }
+
+    private static string? PersistAssessment(
+        PersistedState state,
+        PersistedPackage package,
+        IReadOnlyList<ScopedExtractionRecord> records,
+        IReadOnlyList<ApprovedRequirementVersion> approvedRequirements)
+    {
+        if (!state.Cases.TryGetValue(CaseKey(package.Context), out var persistedCase))
+        {
+            return "The package case is not persisted.";
+        }
+
+        var expectedKeys = package.Package.Manifest
+            .Select(document => DocumentKey(package.Context, document.DocumentId, document.Version))
+            .ToArray();
+        var existingRecords = expectedKeys
+            .Where(state.ExtractionRecords.ContainsKey)
+            .Select(key => state.ExtractionRecords[key])
+            .ToArray();
+        if (existingRecords.Length > 0)
+        {
+            if (existingRecords.Length != expectedKeys.Length)
+            {
+                return "Every declared document must have a terminal extraction record.";
+            }
+        }
+        else
+        {
+            foreach (var record in records)
+            {
+                state.ExtractionRecords.Add(
+                    DocumentKey(package.Context, record.DocumentId, record.Version),
+                    record);
+            }
+        }
+
+        foreach (var document in package.Package.Manifest)
+        {
+            var key = DocumentKey(package.Context, document.DocumentId, document.Version);
+            if (!state.ExtractionRecords.TryGetValue(key, out var record) ||
+                !ScopeMatches(record.Context, package.Context) ||
+                record.DocumentId != document.DocumentId ||
+                record.Version != document.Version ||
+                !StringComparer.OrdinalIgnoreCase.Equals(record.Sha256, document.Sha256) ||
+                record.ProcessingState is not ("complete" or "failed"))
+            {
+                return "Every declared document must have a matching terminal extraction record.";
+            }
+        }
+
+        var basisId = $"BASIS-{package.OperationId}";
+        if (!state.EvidenceBases.ContainsKey(basisId))
+        {
+            state.EvidenceBases.Add(
+                basisId,
+                new EvidenceBasis(
+                    basisId,
+                    package.Context,
+                    package.Package.Manifest
+                        .Select(document => new EvidenceDocumentVersion(
+                            document.DocumentId,
+                            document.Version,
+                            document.Sha256))
+                        .ToArray(),
+                    approvedRequirements.ToArray(),
+                    persistedCase.CaseRevision,
+                    DateTimeOffset.UtcNow,
+                    ParserVersion,
+                    ExtractorVersion));
+        }
+
+        return null;
     }
 
     public async Task<IResult> ProcessPackageAsync(
