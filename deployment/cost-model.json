@@ -24,9 +24,14 @@
     "validationBeforeApply": "Confirm the exact Azure OpenAI model/version, Document Intelligence availability, and all selected meters in the Azure pricing calculator or Retail Prices API immediately before any apply. A rate above a recorded allowance requires a revised estimate and approval.",
     "sources": [
       {
-        "service": "Azure Functions Flex Consumption",
-        "url": "https://azure.microsoft.com/en-us/pricing/details/functions/",
-        "note": "Documents on-demand and always-ready billing and the monthly execution and GB-s free grants."
+        "service": "Azure Container Apps",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/container-apps/",
+        "note": "Consumption plan vCPU-second and GiB-second pricing; scale-to-zero removes replica compute while idle."
+      },
+      {
+        "service": "Azure Container Registry",
+        "url": "https://azure.microsoft.com/en-us/pricing/details/container-registry/",
+        "note": "Basic registry daily service charge, image storage and registry operations."
       },
       {
         "service": "Azure Storage",
@@ -96,8 +101,26 @@
       "averageDocumentSizeMb": 0.5,
       "retainedEvidenceGbRounded": 1,
       "retainedEvidenceVersionsPerDocument": 2,
-      "durableBackendGbRounded": 2,
       "remoteStateGbRounded": 1
+    },
+    "containerApps": {
+      "plan": "Consumption",
+      "scaleToZero": true,
+      "minReplicas": 0,
+      "maxReplicas": 1,
+      "vcpuPerReplica": 0.5,
+      "memoryGiBPerReplica": 1,
+      "activeHoursPerRehearsal": 2,
+      "activeHoursPerMonth": 24,
+      "estimatedVcpuSecondsPerMonth": 43200,
+      "estimatedGiBSecondsPerMonth": 86400
+    },
+    "containerRegistry": {
+      "sku": "Basic",
+      "registries": 1,
+      "retainedImageGb": 1,
+      "imagePullsPerMonth": 120,
+      "imageRetentionDays": 30
     },
     "database": {
       "sku": "Serverless General Purpose",
@@ -118,31 +141,30 @@
   },
   "lineItems": [
     {
-      "id": "functions-hosting",
-      "service": "Azure Functions Flex Consumption hosting",
-      "configuration": "On-demand only, 512 MB instances, zero always-ready instances; Azure monthly grants are applied.",
-      "quantity": 120000,
-      "unit": "GB-s",
-      "billableQuantityAfterGrant": 20000,
-      "unitRateUsd": 0.000016,
-      "costFormula": "20000 GB-s x 0.000016 USD/GB-s = 0.32 USD after the 100000 GB-s grant.",
-      "subtotalUsd": 0.32,
-      "sourceService": "Azure Functions Flex Consumption",
-      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/functions/",
-      "pricingEvidence": ["functions-flex-consumption"]
+      "id": "container-apps-hosting",
+      "service": "Azure Container Apps consumption hosting",
+      "configuration": "Consumption plan, scale-to-zero, zero minimum replicas, one maximum replica, 0.5 vCPU and 1 GiB per replica.",
+      "quantity": 43200,
+      "unit": "vCPU-seconds plus GiB-seconds",
+      "unitRateUsd": 0.000024,
+      "costFormula": "43200 vCPU-seconds x 0.000024 USD + 86400 GiB-seconds x 0.000003 USD = 1.296 USD, rounded up = 1.30 USD.",
+      "subtotalUsd": 1.30,
+      "sourceService": "Azure Container Apps",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/container-apps/",
+      "pricingEvidence": ["container-apps-vcpu-consumption", "container-apps-memory-consumption"]
     },
     {
-      "id": "durable-backend",
-      "service": "Azure Storage Durable backend",
-      "configuration": "StorageV2, Hot LRS, 2 GB retained and 50000 storage transactions per month.",
-      "quantity": 2,
-      "unit": "GB-month plus transactions",
-      "unitRateUsd": 0.0184,
-      "costFormula": "2 GB-month x 0.0184 USD + 50000 writes / 10000 x 0.05 USD + 50000 reads / 10000 x 0.004 USD = 0.2884 USD, rounded up = 0.29 USD.",
-      "subtotalUsd": 0.29,
-      "sourceService": "Azure Storage",
-      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/storage/blobs/",
-      "pricingEvidence": ["storage-hot-lrs-data", "storage-hot-lrs-write", "storage-hot-lrs-read"]
+      "id": "container-registry",
+      "service": "Azure Container Registry",
+      "configuration": "One Basic registry, one retained application image GB and 120 image pulls per month; images are retained for 30 days.",
+      "quantity": 1,
+      "unit": "registry-month plus image storage and operations",
+      "unitRateUsd": 5.02,
+      "costFormula": "1 Basic registry x 5.01 USD/month + 1 GB image storage x 0.01 USD = 5.02 USD; image pulls remain within the Basic allowance.",
+      "subtotalUsd": 5.02,
+      "sourceService": "Azure Container Registry",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/container-registry/",
+      "pricingEvidence": ["container-registry-basic", "container-registry-storage"]
     },
     {
       "id": "azure-sql",
@@ -238,17 +260,17 @@
     }
   ],
   "totals": {
-    "monthlyEstimateUsd": 25.01,
+    "monthlyEstimateUsd": 30.72,
     "contingencyUsd": 50.00,
-    "totalWithContingencyUsd": 75.01,
+    "totalWithContingencyUsd": 80.72,
     "planningCeilingUsd": 500.00,
-    "headroomUsd": 424.99,
+    "headroomUsd": 419.28,
     "withinPlanningCeiling": true,
     "contingencyBasis": "Fixed 50 USD allowance for regional meter changes, small transaction-volume variance and one approved rehearsal-month overrun; it is not permission to spend it."
   },
   "residualCharges": {
     "whenComputeIsStopped": [
-      "Flex Consumption execution compute falls to zero when no functions execute, but the Durable/host StorageV2 account remains billable for retained data and transactions.",
+      "Container Apps replica compute falls to zero at scale-to-zero, but the Container Apps environment and container registry can retain billable state and images.",
       "An auto-paused SQL serverless database stops compute billing while paused, but database storage and retained backup storage continue.",
       "Application Insights and Log Analytics continue to incur ingestion and retained-log charges while data remains in the workspace.",
       "The protected remote Terraform state backend continues to incur storage and operation charges because it is externally owned and not destroyed with the demo."
@@ -258,14 +280,15 @@
       "Retained evidence and versions",
       "SQL database data and backup storage",
       "Application Insights and Log Analytics retention",
-      "Durable host/storage data",
+      "Container Apps environment and retained container images",
       "Protected remote Terraform state"
     ]
   },
   "ownership": {
     "disposableDemoResources": [
       "rg-airlinedemo-swc-demo",
-      "Flex Consumption Function App and its host storage",
+      "Container Apps environment and application",
+      "Azure Container Registry and retained application images",
       "Demo evidence storage and its retained versions",
       "Demo Azure SQL logical server and database",
       "Demo Document Intelligence resource",
