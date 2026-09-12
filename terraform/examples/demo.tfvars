@@ -9,12 +9,11 @@ owner               = "airlinedemo"
 cost_center         = "airlinedemo-demo"
 
 # These values mirror the approved non-secret application boundary.
-function_runtime                 = "Azure Functions v4"
-function_worker_model            = "dotnet-isolated"
 target_framework                 = "net10.0"
-hosting_plan                     = "Flex Consumption"
-durable_backend                  = "Azure Storage"
-durable_storage_kind             = "StorageV2"
+container_image                  = "acrairlinedemoswcdemo.azurecr.io/airlinedemo:net10.0"
+container_port                   = 8080
+container_min_replicas           = 0
+container_max_replicas           = 1
 sql_engine                       = "Azure SQL"
 sql_sku                          = "Serverless General Purpose"
 sql_authentication               = "system-assigned managed identity"
@@ -40,6 +39,6 @@ azure_openai_quota_tokens_minute = 30000
 # operator ranges for a disposable synthetic-data rehearsal.
 # cognitive_allowed_ip_ranges = ["203.0.113.10/32"]
 
-# Keep the public Functions endpoint deny-by-default. Add only approved
-# operator ranges for a disposable synthetic-data rehearsal.
-# function_allowed_ip_ranges = ["203.0.113.10/32"]
+# Keep public Container Apps ingress restricted to approved operator ranges
+# for a disposable synthetic-data rehearsal.
+container_allowed_source_ranges = ["203.0.113.10/32"]
