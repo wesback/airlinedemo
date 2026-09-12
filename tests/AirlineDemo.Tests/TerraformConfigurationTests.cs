@@ -143,8 +143,11 @@ public sealed class TerraformConfigurationTests
     [Fact]
     public void TerraformConfiguration_UsesOnlyApprovedBoundedResources()
     {
-        var terraformDirectory = new DirectoryInfo(FindRepositoryRoot())
-            .EnumerateFiles("*.tf", SearchOption.AllDirectories);
+        var terraformRoot = new DirectoryInfo(Path.Combine(FindRepositoryRoot(), "terraform"));
+        var terraformDirectory = terraformRoot
+            .EnumerateFiles("*.tf", SearchOption.TopDirectoryOnly)
+            .Concat(new DirectoryInfo(Path.Combine(terraformRoot.FullName, "modules"))
+                .EnumerateFiles("*.tf", SearchOption.AllDirectories));
         var configuration = string.Join(
             Environment.NewLine,
             terraformDirectory.Select(file => File.ReadAllText(file.FullName)));
@@ -224,6 +227,160 @@ public sealed class TerraformConfigurationTests
             Assert.DoesNotContain(prohibitedInfrastructure, declarationHeaders,
                 StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    [Fact]
+    public void TerraformBootstrap_IsolatedFromTheDisposableWorkloadRoot()
+    {
+        var bootstrapFiles = new DirectoryInfo(
+                Path.Combine(FindRepositoryRoot(), "terraform", "bootstrap"))
+            .EnumerateFiles("*.tf", SearchOption.TopDirectoryOnly)
+            .ToArray();
+        var bootstrap = string.Join(
+            Environment.NewLine,
+            bootstrapFiles.Select(file => File.ReadAllText(file.FullName)));
+        var workloadRoot = string.Join(
+            Environment.NewLine,
+            new DirectoryInfo(Path.Combine(FindRepositoryRoot(), "terraform"))
+                .EnumerateFiles("*.tf", SearchOption.TopDirectoryOnly)
+                .Select(file => File.ReadAllText(file.FullName)));
+
+        var resourceTypes = Regex.Matches(
+                bootstrap,
+                @"resource\s+""(?<type>[^""]+)""\s+""[^""]+""")
+            .Select(match => match.Groups["type"].Value)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                "azurerm_resource_group",
+                "azurerm_role_assignment",
+                "azurerm_storage_account",
+                "azurerm_storage_container"
+            ],
+            resourceTypes);
+        Assert.DoesNotContain("module ", bootstrap, StringComparison.Ordinal);
+        Assert.DoesNotContain("terraform/bootstrap", workloadRoot,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source = \"./bootstrap\"", workloadRoot,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rg-airlinedemo-swc-demo", bootstrap,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("var.resource_group_name", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("azurerm_resource_group.state", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("var.state_resource_group_name", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("azurerm_storage_account.state", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("azurerm_storage_container.state", bootstrap,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TerraformBootstrap_UsesPrivateStorageAndAnExplicitDenyByDefaultFirewall()
+    {
+        var bootstrap = LoadTerraformBootstrapConfiguration();
+        var variables = LoadText("terraform", "bootstrap", "variables.tf");
+
+        Assert.Contains("account_kind                    = \"StorageV2\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("min_tls_version                 = \"TLS1_2\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("https_traffic_only_enabled      = true", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("allow_nested_items_to_be_public = false", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("shared_access_key_enabled       = false", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("container_access_type = \"private\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("default_action = \"Deny\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("ip_rules       = var.approved_operator_ip_ranges", bootstrap,
+            StringComparison.Ordinal);
+        Assert.Contains("bypass         = []", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("variable \"approved_operator_ip_ranges\"", variables,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("default     =", variables[variables.IndexOf(
+                "variable \"approved_operator_ip_ranges\"", StringComparison.Ordinal)..]
+            .Split("variable \"", StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault() ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TerraformBootstrap_GrantsOnlyContainerScopedBlobDataContributor()
+    {
+        var bootstrap = LoadTerraformBootstrapConfiguration();
+        var roleStart = bootstrap.IndexOf(
+            "resource \"azurerm_role_assignment\"",
+            StringComparison.Ordinal);
+        Assert.True(roleStart >= 0);
+        var role = bootstrap[roleStart..];
+
+        Assert.Contains("role_definition_name = \"Storage Blob Data Contributor\"", role,
+            StringComparison.Ordinal);
+        Assert.Contains("principal_id         = var.deployment_principal_object_id", role,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "scope                = azurerm_storage_container.state.resource_manager_id",
+            role, StringComparison.Ordinal);
+        Assert.DoesNotContain("role_definition_name = \"Owner\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("role_definition_name = \"Contributor\"", bootstrap,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("azurerm_resource_group.state.id", role,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("azurerm_storage_account.state.id", role,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("subscription_id", role, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TerraformRoot_UsesEntraAuthenticatedAzureBlobBackendWithoutCommittedSecrets()
+    {
+        var backend = LoadText("terraform", "backend.tf");
+        var terraformRoot = new DirectoryInfo(Path.Combine(FindRepositoryRoot(), "terraform"));
+        var stateFiles = terraformRoot
+            .EnumerateFiles("*.tfstate*", SearchOption.AllDirectories)
+            .ToArray();
+
+        Assert.Contains("backend \"azurerm\"", backend, StringComparison.Ordinal);
+        Assert.Contains("use_azuread_auth = true", backend, StringComparison.Ordinal);
+        Assert.Contains("container_name       = \"tfstate\"", backend,
+            StringComparison.Ordinal);
+        Assert.Contains("key                  = \"airlinedemo.tfstate\"", backend,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("access_key", backend, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sas_token", backend, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("connection_string", backend, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(stateFiles);
+        Assert.DoesNotContain("backend \"azurerm\"", LoadTerraformBootstrapConfiguration(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TerraformBootstrapInstructions_DocumentIndependentApprovalOwnershipAndCleanup()
+    {
+        var instructions = LoadText("terraform", "bootstrap", "README.md");
+
+        Assert.Contains("independent", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approval", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("terraform init", instructions, StringComparison.Ordinal);
+        Assert.Contains("terraform plan", instructions, StringComparison.Ordinal);
+        Assert.Contains("Owner:", instructions, StringComparison.Ordinal);
+        Assert.Contains("Cost allocation:", instructions, StringComparison.Ordinal);
+        Assert.Contains("Retention:", instructions, StringComparison.Ordinal);
+        Assert.Contains("Separate cleanup path:", instructions, StringComparison.Ordinal);
+        Assert.Contains("90 days", instructions, StringComparison.Ordinal);
+        Assert.Contains("never be part of", instructions, StringComparison.Ordinal);
+        Assert.Contains("disposable demo teardown", instructions, StringComparison.Ordinal);
+        Assert.Contains("Storage Blob Data Contributor", instructions,
+            StringComparison.Ordinal);
+        Assert.Contains("Entra authentication", instructions, StringComparison.Ordinal);
+        Assert.Contains("native lease locking", instructions, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -364,6 +521,17 @@ public sealed class TerraformConfigurationTests
         }
 
         throw new FileNotFoundException($"Could not find {Path.Combine(relativePath)}.");
+    }
+
+    private static string LoadTerraformBootstrapConfiguration()
+    {
+        var bootstrapDirectory = new DirectoryInfo(Path.Combine(
+            FindRepositoryRoot(), "terraform", "bootstrap"));
+        return string.Join(
+            Environment.NewLine,
+            bootstrapDirectory
+                .EnumerateFiles("*.tf", SearchOption.TopDirectoryOnly)
+                .Select(file => File.ReadAllText(file.FullName)));
     }
 
     private static string FindRepositoryRoot()

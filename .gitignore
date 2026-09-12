@@ -9,3 +9,6 @@ test-results/
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.*
+terraform/bootstrap/.terraform/
+terraform/bootstrap/*.tfstate
+terraform/bootstrap/*.tfstate.*

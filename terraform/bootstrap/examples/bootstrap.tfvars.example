@@ -1,0 +1,11 @@
+# Replace the object ID and operator range with owner-approved values before
+# applying this independent bootstrap configuration.
+state_resource_group_name  = "rg-airlinedemo-state"
+state_storage_account_name = "stairlinedemostate"
+state_container_name       = "tfstate"
+region                     = "swedencentral"
+
+approved_operator_ip_ranges  = ["203.0.113.10/32"]
+deployment_principal_object_id = "00000000-0000-4000-8000-000000000000"
+owner                         = "airlinedemo-platform"
+cost_center                   = "airlinedemo-platform"
