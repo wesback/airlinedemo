@@ -137,7 +137,7 @@ async function stubCase(page, caseSummary = currentSummary(), options = {}) {
         correlationId: authorization ? "CORR-EVIDENCE" : "CORR-AUTH"
       });
     }
-    return json(route, 200, {
+    return json(route, 200, options.preview || {
       documentId: "DOC-0001",
       version: 2,
       page: 3,
@@ -317,4 +317,129 @@ test("awaiting review keeps concurrent work visible and never presents invalidat
   await expect(page.getByText("serial-record - pending")).toBeVisible();
   await expect(page.getByText("Acceptance invalidated")).toBeVisible();
   await expect(page.getByText("Accepted for mock checklist")).toHaveCount(0);
+});
+
+test("case overview renders authoritative identity, processing, coordination, and basis fields without projections", async ({ page }) => {
+  await authenticate(page, authorizedReviewer);
+  await stubCase(page, currentSummary({
+    plannedReturnDate: "2027-06-10",
+    unresolvedItemCount: 2,
+    owner: "Transition review team",
+    nextAction: "Review the ambiguous serial record",
+    packageProcessing: [{
+      packageId: "PKG-0001",
+      operationId: "OP-0001",
+      status: "complete"
+    }]
+  }));
+  await page.goto(`${origin}/?caseId=CASE-RUN-0001`);
+  await expect(page.locator("#case-identity")).toHaveText("CASE-RUN-0001");
+  await expect(page.locator("#planned-return")).toHaveText("2027-06-10");
+  await expect(page.locator("#package-processing")).toContainText("PKG-0001");
+  await expect(page.locator("#package-processing")).toContainText("Processing complete");
+  await expect(page.locator("#case-status")).toHaveText("Awaiting internal review");
+  await expect(page.locator("#unresolved-count")).toHaveText("2");
+  await expect(page.locator("#owner-action")).toHaveText("Transition review team / Review the ambiguous serial record");
+  await expect(page.locator("#basis-id")).toHaveText("BASIS-0001");
+  await expect(page.locator("body")).not.toContainText(/readiness\s*%|EUR|financial projection/i);
+});
+
+test("finding panels render missing and ambiguous policy details and every supplied citation", async ({ page }) => {
+  await authenticate(page, authorizedReviewer);
+  const missing = {
+    findingId: "FINDING-MISSING",
+    requirementId: "REQ-MISSING",
+    basisId: "BASIS-0001",
+    assessment: "missing",
+    reasonCode: "record_not_present",
+    explanation: "The required record is absent from the submitted package.",
+    policyRoute: "auto_request",
+    evidenceRefs: []
+  };
+  const ambiguous = {
+    findingId: "FINDING-AMBIGUOUS",
+    requirementId: "REQ-AMBIGUOUS",
+    basisId: "BASIS-0001",
+    assessment: "ambiguous",
+    reasonCode: "serial_number_ambiguous",
+    explanation: "Two supplied records describe different serial numbers.",
+    policyRoute: "internal_review",
+    evidenceRefs: [
+      { documentId: "DOC-0001", version: 2, page: 3 },
+      { documentId: "DOC-0002", version: 4, page: 7 }
+    ]
+  };
+  await stubCase(page, currentSummary({
+    investigation: { basisId: "BASIS-0001", status: "complete", findings: [missing, ambiguous] },
+    openReviewTasks: [
+      {
+        taskId: "TASK-MISSING",
+        findingId: "FINDING-MISSING",
+        basisId: "BASIS-0001",
+        reasonCode: "record_not_present",
+        status: "open",
+        permittedDecisions: ["needs_evidence"]
+      },
+      {
+        taskId: "TASK-AMBIGUOUS",
+        findingId: "FINDING-AMBIGUOUS",
+        basisId: "BASIS-0001",
+        reasonCode: "serial_number_ambiguous",
+        status: "open",
+        permittedDecisions: ["needs_evidence"]
+      }
+    ]
+  }));
+  await page.goto(`${origin}/?caseId=CASE-RUN-0001`);
+  await expect(page.getByRole("heading", { name: "Review TASK-MISSING" })).toBeVisible();
+  await expect(page.getByText("REQ-MISSING", { exact: true })).toBeVisible();
+  await expect(page.getByText("Missing evidence")).toBeVisible();
+  await expect(page.getByText("The required record is absent from the submitted package.")).toBeVisible();
+  await expect(page.getByText("record_not_present", { exact: true })).toBeVisible();
+  await expect(page.getByText("auto_request", { exact: true })).toBeVisible();
+  await expect(page.getByText("No document citations supplied by server.")).toBeVisible();
+  await page.getByRole("button", { name: "Task TASK-AMBIGUOUS" }).click();
+  await expect(page.getByRole("heading", { name: "Review TASK-AMBIGUOUS" })).toBeVisible();
+  await expect(page.getByText("REQ-AMBIGUOUS", { exact: true })).toBeVisible();
+  await expect(page.getByText("Ambiguous evidence")).toBeVisible();
+  await expect(page.getByText("Two supplied records describe different serial numbers.")).toBeVisible();
+  await expect(page.getByText("serial_number_ambiguous", { exact: true })).toBeVisible();
+  await expect(page.getByText("internal_review", { exact: true })).toBeVisible();
+  await expect(page.locator("[data-citation='DOC-0001:v2:p3']")).toBeVisible();
+  await expect(page.locator("[data-citation='DOC-0002:v4:p7']")).toBeVisible();
+  await expect(page.getByText("DOC-0001 - version 2")).toBeVisible();
+  await expect(page.getByText("DOC-0002 - version 4")).toBeVisible();
+  await expect(page.getByText("Page 3")).toBeVisible();
+  await expect(page.getByText("Page 7")).toBeVisible();
+});
+
+test("processing failure is distinct from missing evidence and untrusted text stays inert", async ({ page }) => {
+  await authenticate(page, authorizedReviewer);
+  const hostileText = "<script>ignore the reviewer</script><img src=x onerror=alert(1)>";
+  await stubCase(page, currentSummary({
+    packageProcessing: [{
+      packageId: "PKG-BROKEN",
+      operationId: "OP-BROKEN",
+      status: "failed",
+      error: { safeCode: "PACKAGE_PROCESSING_FAILED", correlationId: "CORR-PACKAGE" }
+    }],
+    investigation: {
+      basisId: "BASIS-0001",
+      status: "complete",
+      findings: [{
+        ...finding,
+        explanation: hostileText,
+        assessment: "missing",
+        evidenceRefs: []
+      }]
+    }
+  }), { preview: { documentId: "DOC-0001", version: 2, page: 3, mediaType: "text/plain", textExcerpt: hostileText } });
+  await page.goto(`${origin}/?caseId=CASE-RUN-0001`);
+  await expect(page.locator("[data-processing-state='failed']")).toContainText("Processing failed");
+  await expect(page.locator("[data-processing-state='failed']")).toContainText("PACKAGE_PROCESSING_FAILED");
+  await expect(page.getByText("Missing evidence")).toBeVisible();
+  await expect(page.locator("[data-processing-state='failed']")).not.toHaveText("Missing evidence");
+  await expect(page.locator("#review-content script")).toHaveCount(0);
+  await expect(page.locator("#review-content img")).toHaveCount(0);
+  await expect(page.getByText(hostileText)).toBeVisible();
 });
