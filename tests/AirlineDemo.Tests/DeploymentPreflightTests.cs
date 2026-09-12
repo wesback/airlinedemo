@@ -5,7 +5,7 @@ namespace AirlineDemo.Tests;
 public sealed class DeploymentPreflightTests
 {
     [Fact]
-    public void PreflightRecord_PublishesNonSecretDestinationAndHostingBaseline()
+    public void PreflightRecord_PublishesNonSecretContainerAppsAndRegistryBaseline()
     {
         using var preflight = LoadJson("deployment", "preflight.json");
         var root = preflight.RootElement;
@@ -17,18 +17,31 @@ public sealed class DeploymentPreflightTests
         Assert.False(destination.GetProperty("subscription").GetProperty("committed").GetBoolean());
         Assert.False(destination.GetProperty("tenant").GetProperty("committed").GetBoolean());
 
+        Assert.Equal("planning-only", root.GetProperty("status").GetString());
+        var authorization = root.GetProperty("authorization");
+        Assert.False(authorization.GetProperty("provisioningAuthorized").GetBoolean());
+        Assert.False(authorization.GetProperty("spendingAuthorized").GetBoolean());
+
         var application = root.GetProperty("application");
-        Assert.Equal("Azure Functions v4", application.GetProperty("runtime").GetString());
-        Assert.Equal("dotnet-isolated", application.GetProperty("workerModel").GetString());
+        Assert.Equal("ASP.NET Core", application.GetProperty("runtime").GetString());
         Assert.Equal("net10.0", application.GetProperty("targetFramework").GetString());
-        Assert.Equal("Flex Consumption",
-            application.GetProperty("hosting").GetProperty("plan").GetString());
-        Assert.Equal("Azure Storage",
-            application.GetProperty("durableFunctions").GetProperty("backend").GetString());
-        Assert.Equal("StorageV2",
-            application.GetProperty("durableFunctions").GetProperty("storageAccountKind").GetString());
-        Assert.Equal("packages.lock.json",
-            application.GetProperty("durableFunctions").GetProperty("packageLock").GetString());
+        var image = application.GetProperty("containerImage");
+        Assert.Equal("mcr.microsoft.com/dotnet/aspnet:10.0", image.GetProperty("baseImage").GetString());
+        Assert.Equal("acrairlinedemoswcdemo.azurecr.io/airlinedemo:net10.0",
+            image.GetProperty("applicationImage").GetString());
+
+        var hosting = application.GetProperty("hosting");
+        Assert.Equal("Azure Container Apps", hosting.GetProperty("service").GetString());
+        Assert.Equal("Consumption", hosting.GetProperty("plan").GetString());
+        Assert.True(hosting.GetProperty("scaleToZero").GetBoolean());
+        Assert.Equal(0, hosting.GetProperty("minReplicas").GetInt32());
+        Assert.Equal(1, hosting.GetProperty("maxReplicas").GetInt32());
+
+        var registry = application.GetProperty("containerRegistry");
+        Assert.Equal("Azure Container Registry", registry.GetProperty("service").GetString());
+        Assert.Equal("Basic", registry.GetProperty("sku").GetString());
+        Assert.False(application.TryGetProperty("workerModel", out _));
+        Assert.False(application.TryGetProperty("durableFunctions", out _));
     }
 
     [Fact]
@@ -71,19 +84,25 @@ public sealed class DeploymentPreflightTests
     }
 
     [Fact]
-    public void PackageLock_ContainsCompatibleWorkerAndDurableTaskPackages()
+    public void PackageLock_ContainsTheContainerImageHostingContract()
     {
         using var lockFile = LoadJson("packages.lock.json");
         var packages = lockFile.RootElement.GetProperty("packages");
 
         Assert.Equal("net10.0", lockFile.RootElement.GetProperty("targetFramework").GetString());
-        Assert.Equal("2.52.0", packages.GetProperty("Microsoft.Azure.Functions.Worker")
-            .GetProperty("version").GetString());
-        Assert.Equal("2.1.0", packages.GetProperty("Microsoft.Azure.Functions.Worker.Sdk")
-            .GetProperty("version").GetString());
-        Assert.Equal("1.19.0",
-            packages.GetProperty("Microsoft.Azure.Functions.Worker.Extensions.DurableTask")
-                .GetProperty("version").GetString());
+        Assert.Equal(JsonValueKind.Object, packages.ValueKind);
+        Assert.Empty(packages.EnumerateObject());
+        Assert.Equal("ASP.NET Core .NET 10 container image",
+            lockFile.RootElement.GetProperty("runtime").GetString());
+        Assert.Equal("mcr.microsoft.com/dotnet/aspnet:10.0",
+            lockFile.RootElement.GetProperty("containerImage").GetString());
+        var compatibility = lockFile.RootElement.GetProperty("compatibility");
+        Assert.Equal("Azure Container Apps", compatibility.GetProperty("hostingService").GetString());
+        Assert.Equal("Consumption", compatibility.GetProperty("hostingPlan").GetString());
+        Assert.True(compatibility.GetProperty("scaleToZero").GetBoolean());
+        Assert.Equal("Azure Container Registry",
+            compatibility.GetProperty("containerRegistry").GetString());
+        Assert.Equal("Basic", compatibility.GetProperty("containerRegistrySku").GetString());
     }
 
     private static JsonDocument LoadJson(params string[] relativePath)

@@ -1,24 +1,16 @@
 {
   "lockVersion": 1,
   "targetFramework": "net10.0",
-  "runtime": "Azure Functions v4 isolated worker",
-  "packages": {
-    "Microsoft.Azure.Functions.Worker": {
-      "version": "2.52.0",
-      "role": "isolated worker"
-    },
-    "Microsoft.Azure.Functions.Worker.Sdk": {
-      "version": "2.1.0",
-      "role": "isolated worker SDK"
-    },
-    "Microsoft.Azure.Functions.Worker.Extensions.DurableTask": {
-      "version": "1.19.0",
-      "role": "Durable Functions Azure Storage backend"
-    }
-  },
+  "runtime": "ASP.NET Core .NET 10 container image",
+  "containerImage": "mcr.microsoft.com/dotnet/aspnet:10.0",
+  "packages": {},
   "compatibility": {
-    "hostingPlan": "Flex Consumption",
-    "durableBackend": "Azure Storage",
-    "note": "Versions are an explicit compatibility baseline for the downstream Functions project; update this lock deliberately with the project package references."
-  }
+    "hostingService": "Azure Container Apps",
+    "hostingPlan": "Consumption",
+    "scaleToZero": true,
+    "containerRegistry": "Azure Container Registry",
+    "containerRegistrySku": "Basic",
+    "applicationImage": "acrairlinedemoswcdemo.azurecr.io/airlinedemo:net10.0"
+  },
+  "note": "This is a non-secret planning lock for the existing ASP.NET Core application image; it does not authorize provisioning or spending."
 }

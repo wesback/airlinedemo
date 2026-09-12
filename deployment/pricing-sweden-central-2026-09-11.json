@@ -13,24 +13,56 @@
   },
   "meters": [
     {
-      "id": "functions-flex-consumption",
-      "lineItemId": "functions-hosting",
-      "service": "Azure Functions Flex Consumption",
+      "id": "container-apps-vcpu-consumption",
+      "lineItemId": "container-apps-hosting",
+      "service": "Azure Container Apps",
       "sourceType": "Azure pricing page",
-      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/functions/",
-      "apiCheck": {
-        "query": "https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20%27Azure%20App%20Service%27%20and%20armRegionName%20eq%20%27swedencentral%27",
-        "returnedMatchingItems": 0,
-        "interpretation": "Flex Consumption is not published as a matching Retail Prices API item in this snapshot; the pricing page rate is used as the documented global Flex Consumption rate and is checked again before apply."
-      },
-      "meterName": "Flex Consumption execution",
-      "unitOfMeasure": "GB-s",
-      "retailPrice": 0.000016,
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/container-apps/",
+      "meterName": "Consumption vCPU usage",
+      "unitOfMeasure": "1 vCPU-second",
+      "retailPrice": 0.000024,
+      "tierMinimumUnits": 0
+    },
+    {
+      "id": "container-apps-memory-consumption",
+      "lineItemId": "container-apps-hosting",
+      "service": "Azure Container Apps",
+      "sourceType": "Azure pricing page",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/container-apps/",
+      "meterName": "Consumption memory usage",
+      "unitOfMeasure": "1 GiB-second",
+      "retailPrice": 0.000003,
+      "tierMinimumUnits": 0
+    },
+    {
+      "id": "container-registry-basic",
+      "lineItemId": "container-registry",
+      "service": "Container Registry",
+      "sourceType": "Azure pricing page",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/container-registry/",
+      "productName": "Azure Container Registry",
+      "skuName": "Basic",
+      "meterName": "Basic registry",
+      "unitOfMeasure": "1 registry/month",
+      "retailPrice": 5.01,
+      "tierMinimumUnits": 0
+    },
+    {
+      "id": "container-registry-storage",
+      "lineItemId": "container-registry",
+      "service": "Container Registry",
+      "sourceType": "Azure pricing page",
+      "sourceUrl": "https://azure.microsoft.com/en-us/pricing/details/container-registry/",
+      "productName": "Azure Container Registry",
+      "skuName": "Basic",
+      "meterName": "Image storage",
+      "unitOfMeasure": "1 GB/month",
+      "retailPrice": 0.01,
       "tierMinimumUnits": 0
     },
     {
       "id": "storage-hot-lrs-data",
-      "lineItemId": "durable-backend",
+      "lineItemId": "evidence-storage",
       "alsoUsedBy": ["evidence-storage", "remote-terraform-state"],
       "service": "Storage",
       "productName": "Blob Storage",
@@ -45,7 +77,7 @@
     },
     {
       "id": "storage-hot-lrs-write",
-      "lineItemId": "durable-backend",
+      "lineItemId": "evidence-storage",
       "alsoUsedBy": ["evidence-storage", "remote-terraform-state"],
       "service": "Storage",
       "productName": "Blob Storage",
@@ -60,7 +92,7 @@
     },
     {
       "id": "storage-hot-lrs-read",
-      "lineItemId": "durable-backend",
+      "lineItemId": "evidence-storage",
       "alsoUsedBy": ["evidence-storage"],
       "service": "Storage",
       "productName": "Blob Storage",
