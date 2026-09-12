@@ -89,6 +89,61 @@
         }
       }
     },
+    "/partner-responses": {
+      "post": {
+        "tags": [
+          "Mock inbox"
+        ],
+        "operationId": "submitPartnerResponse",
+        "summary": "Ingest a scoped mock-partner response package",
+        "description": "Only the restricted mock-partner identity may submit a response. The request must be active and belong to the authenticated case scope. A response marks the request responded and queues a new reassessment; it does not close or accept the case.",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "partner.response.write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackageSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Response accepted and reassessment queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidPayload"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "403": {
+            "$ref": "#/components/responses/ActionForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/CaseNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/EventPayloadConflict"
+          }
+        }
+      }
+    },
     "/demo/runs/{runId}": {
       "delete": {
         "tags": [
