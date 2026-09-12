@@ -397,6 +397,245 @@ public sealed class AssessmentPersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task LaterRelevantBasis_InvalidatesPriorAcceptanceWithoutRewritingReviewHistory()
+    {
+        using var fixture = new BaselineFixture();
+        var initial = fixture.GenerateRequest(profile: "live");
+
+        await using (var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.SingleFindingModel(
+                "REQ-0001",
+                "COMP-0001",
+                "satisfied")))
+        {
+            var accepted = await server.Client.PostAsJsonAsync("/api/packages", initial);
+            var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+            Assert.NotNull(operation);
+            await server.Client.PostAsync(
+                $"/api/operations/{operation!.OperationId}/process", null);
+
+            using var beforeReview = JsonDocument.Parse(
+                await File.ReadAllTextAsync(fixture.StatePath));
+            var finding = beforeReview.RootElement.GetProperty("findings")
+                .EnumerateObject().Single().Value;
+            var basisId = finding.GetProperty("basisId").GetString()!;
+            var findingId = finding.GetProperty("findingId").GetString()!;
+            using var reviewer = CreateReviewClient(
+                server.Client.BaseAddress!,
+                "reviewer-0001");
+            var reviewResponse = await reviewer.PostAsJsonAsync(
+                "/api/cases/CASE-RUN-0001/reviews",
+                new ReviewCommand(
+                    findingId,
+                    basisId,
+                    "accept_evidence",
+                    "Accepted the current evidence basis."));
+            Assert.Equal(HttpStatusCode.OK, reviewResponse.StatusCode);
+            using var acceptedState = JsonDocument.Parse(
+                await File.ReadAllTextAsync(fixture.StatePath));
+            var priorReview = acceptedState.RootElement.GetProperty("reviewDecisions")
+                .EnumerateObject().Single().Value.GetRawText();
+
+            var later = fixture.GenerateRequest(
+                packageId: "PKG-0003",
+                eventId: "EVT-0002",
+                correlationId: "CORR-0002",
+                profile: "live");
+            var laterAccepted = await server.Client.PostAsJsonAsync("/api/packages", later);
+            var laterOperation =
+                await laterAccepted.Content.ReadFromJsonAsync<OperationAccepted>();
+            Assert.NotNull(laterOperation);
+            await server.Client.PostAsync(
+                $"/api/operations/{laterOperation!.OperationId}/process", null);
+
+            using var state = JsonDocument.Parse(
+                await File.ReadAllTextAsync(fixture.StatePath));
+            Assert.Single(state.RootElement.GetProperty("reviewDecisions").EnumerateObject());
+            Assert.Equal(
+                priorReview,
+                state.RootElement.GetProperty("reviewDecisions")
+                    .EnumerateObject().Single().Value.GetRawText());
+            var priorDisposition = state.RootElement.GetProperty("findingDispositions")
+                .EnumerateObject().Single().Value;
+            Assert.Equal(basisId, priorDisposition.GetProperty("basisId").GetString());
+            Assert.Equal("accepted", priorDisposition.GetProperty("disposition").GetString());
+            Assert.Single(
+                state.RootElement.GetProperty("acceptanceInvalidations").EnumerateObject());
+            var invalidation = state.RootElement.GetProperty("acceptanceInvalidations")
+                .EnumerateObject().Single().Value;
+            Assert.Equal(basisId, invalidation.GetProperty("priorBasisId").GetString());
+            Assert.Equal(
+                $"BASIS-{laterOperation.OperationId}",
+                invalidation.GetProperty("currentBasisId").GetString());
+            Assert.Equal(
+                "acceptance_invalidated",
+                invalidation.GetProperty("reasonCode").GetString());
+            var task = state.RootElement.GetProperty("reviewTasks")
+                .EnumerateObject().Single().Value;
+            Assert.Equal(findingId, task.GetProperty("findingId").GetString());
+            Assert.Equal(
+                $"BASIS-{laterOperation.OperationId}",
+                task.GetProperty("basisId").GetString());
+            Assert.Equal("open", task.GetProperty("status").GetString());
+            Assert.NotEqual(
+                "accepted",
+                state.RootElement.GetProperty("cases").EnumerateObject().Single()
+                    .Value.GetProperty("status").GetString());
+
+            var summary = await server.Client.GetFromJsonAsync<CaseSummary>(
+                "/api/cases/CASE-RUN-0001");
+            Assert.NotNull(summary);
+            Assert.Equal("awaiting_review", summary!.Status);
+            Assert.NotEqual("ready_for_acceptance", summary.Status);
+        }
+
+        await using var restarted = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.SingleFindingModel(
+                "REQ-0001",
+                "COMP-0001",
+                "satisfied"));
+        var restartedSummary = await restarted.Client.GetFromJsonAsync<CaseSummary>(
+            "/api/cases/CASE-RUN-0001");
+        Assert.NotNull(restartedSummary);
+        Assert.Equal("awaiting_review", restartedSummary!.Status);
+        Assert.Single(restartedSummary.OpenReviewTasks!);
+        using var restartedState = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(restartedState.RootElement.GetProperty("reviewDecisions")
+            .EnumerateObject());
+        Assert.Single(restartedState.RootElement.GetProperty("acceptanceInvalidations")
+            .EnumerateObject());
+
+        var derived = await restarted.Client.PostAsync(
+            "/api/cases/CASE-RUN-0001/review-tasks/derive", null);
+        Assert.Equal(HttpStatusCode.OK, derived.StatusCode);
+        using var afterDerive = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(afterDerive.RootElement.GetProperty("reviewTasks")
+            .EnumerateObject());
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("ambiguous")]
+    [InlineData("conflicting")]
+    [InlineData("blocked")]
+    public async Task LaterChangedAssessment_RequiresNewAuthorisedDecision(
+        string laterAssessment)
+    {
+        using var fixture = new BaselineFixture();
+        var initial = fixture.GenerateRequest(profile: "live");
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.ChangingFindingModel(laterAssessment));
+
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", initial);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+        using var beforeReview = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var initialFinding = beforeReview.RootElement.GetProperty("findings")
+            .EnumerateObject().Single().Value;
+        var findingId = initialFinding.GetProperty("findingId").GetString()!;
+        var initialBasisId = initialFinding.GetProperty("basisId").GetString()!;
+        using var reviewer = CreateReviewClient(
+            server.Client.BaseAddress!,
+            "reviewer-0001");
+        var review = await reviewer.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews",
+            new ReviewCommand(
+                findingId,
+                initialBasisId,
+                "accept_evidence",
+                "Accepted the initial evidence basis."));
+        Assert.Equal(HttpStatusCode.OK, review.StatusCode);
+
+        var later = fixture.GenerateRequest(
+            packageId: "PKG-0003",
+            eventId: "EVT-0002",
+            correlationId: "CORR-0002",
+            profile: "live");
+        var laterAccepted = await server.Client.PostAsJsonAsync("/api/packages", later);
+        var laterOperation =
+            await laterAccepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(laterOperation);
+        await server.Client.PostAsync(
+            $"/api/operations/{laterOperation!.OperationId}/process", null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var currentBasisId = $"BASIS-{laterOperation.OperationId}";
+        var currentFinding = state.RootElement.GetProperty("findings")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Single(finding => finding.GetProperty("basisId").GetString() == currentBasisId);
+        Assert.Equal(laterAssessment, currentFinding.GetProperty("assessment").GetString());
+        var tasks = state.RootElement.GetProperty("reviewTasks")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Where(task => task.GetProperty("basisId").GetString() == currentBasisId)
+            .ToArray();
+        Assert.Single(tasks);
+        Assert.Equal("open", tasks[0].GetProperty("status").GetString());
+        Assert.Equal("acceptance_invalidated", tasks[0].GetProperty("reasonCode").GetString());
+        Assert.Single(state.RootElement.GetProperty("reviewDecisions").EnumerateObject());
+        Assert.DoesNotContain(
+            state.RootElement.GetProperty("findingDispositions").EnumerateObject(),
+            entry => entry.Name == $"{currentBasisId}:{findingId}" &&
+                entry.Value.GetProperty("disposition").GetString() == "accepted");
+        Assert.NotEqual(
+            "accepted",
+            state.RootElement.GetProperty("cases").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        Assert.NotEqual(
+            "ready_for_acceptance",
+            state.RootElement.GetProperty("cases").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        var reassessmentSummary = await server.Client.GetFromJsonAsync<CaseSummary>(
+            "/api/cases/CASE-RUN-0001");
+        Assert.NotNull(reassessmentSummary);
+        Assert.NotEqual("accepted", reassessmentSummary!.Status);
+        Assert.NotEqual("ready_for_acceptance", reassessmentSummary.Status);
+
+        reviewer.DefaultRequestHeaders.Remove("If-Match");
+        reviewer.DefaultRequestHeaders.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{state.RootElement.GetProperty("cases").EnumerateObject().Single().Value
+                .GetProperty("caseRevision").GetInt64()}\"");
+        var currentReview = await reviewer.PostAsJsonAsync(
+            "/api/cases/CASE-RUN-0001/reviews",
+            new ReviewCommand(
+                findingId,
+                currentBasisId,
+                "accept_evidence",
+                "Accepted the reassessed current evidence basis."));
+        Assert.Equal(HttpStatusCode.OK, currentReview.StatusCode);
+        using var afterReview = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var decisions = afterReview.RootElement.GetProperty("reviewDecisions")
+            .EnumerateObject().Select(entry => entry.Value).ToArray();
+        Assert.Equal(2, decisions.Length);
+        Assert.Contains(
+            decisions,
+            decision => decision.GetProperty("basisId").GetString() == initialBasisId &&
+                decision.GetProperty("decision").GetString() == "accept_evidence");
+        Assert.Contains(
+            decisions,
+            decision => decision.GetProperty("basisId").GetString() == currentBasisId &&
+                decision.GetProperty("findingId").GetString() == findingId &&
+                decision.GetProperty("decision").GetString() == "accept_evidence");
+        Assert.Single(afterReview.RootElement.GetProperty("acceptanceInvalidations")
+            .EnumerateObject());
+        Assert.Equal(
+            "accepted",
+            afterReview.RootElement.GetProperty("findingDispositions")
+                .GetProperty($"{currentBasisId}:{findingId}")
+                .GetProperty("disposition").GetString());
+        Assert.Equal(
+            "accepted",
+            afterReview.RootElement.GetProperty("cases").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task CaseSummary_DerivesPrecedenceWhileReturningBothKindsOfOutstandingWork()
     {
         using var fixture = new BaselineFixture();
@@ -1661,6 +1900,24 @@ public sealed class AssessmentPersistenceIntegrationTests
         Assert.Equal("DELIVERY-IN-FLIGHT", reconciliation.GetProperty("attemptId").GetString());
         Assert.Equal("basis_superseded", reconciliation.GetProperty("reason").GetString());
         Assert.Equal("open", reconciliation.GetProperty("status").GetString());
+        var reconciliationTasks = state.RootElement.GetProperty("reviewTasks")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Where(task => task.GetProperty("basisId").GetString() ==
+                $"BASIS-{laterOperation.OperationId}")
+            .ToArray();
+        Assert.Single(reconciliationTasks);
+        Assert.Equal(
+            reconciliation.GetProperty("reason").GetString(),
+            reconciliationTasks[0].GetProperty("reasonCode").GetString());
+        Assert.Equal("open", reconciliationTasks[0].GetProperty("status").GetString());
+        Assert.Equal("FIND-REQ-0002", reconciliationTasks[0].GetProperty("findingId").GetString());
+        var affectedFindingId = reconciliationTasks[0].GetProperty("findingId").GetString()!;
+        var affectedFinding = state.RootElement.GetProperty("findings")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Single(finding => finding.GetProperty("basisId").GetString() ==
+                $"BASIS-{laterOperation.OperationId}" &&
+                finding.GetProperty("findingId").GetString() == affectedFindingId);
+        Assert.Equal(affectedFindingId, affectedFinding.GetProperty("findingId").GetString());
         Assert.Contains(
             state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
             entry => entry.Value.GetProperty("decisionId").GetString() ==
@@ -1715,6 +1972,12 @@ public sealed class AssessmentPersistenceIntegrationTests
                 .EnumerateObject()
                 .Single(entry => entry.Value.GetProperty("requestId").GetString() == requestId)
                 .Value.GetProperty("status").GetString());
+        var affectedRequest = state.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject()
+            .Single(entry => entry.Value.GetProperty("requestId").GetString() == requestId)
+            .Value;
+        Assert.NotEqual("satisfied", affectedRequest.GetProperty("status").GetString());
+        Assert.NotEqual("cancelled", affectedRequest.GetProperty("status").GetString());
         Assert.Equal(
             "obsolete",
             state.RootElement.GetProperty("dispatchOutbox")
@@ -1725,11 +1988,43 @@ public sealed class AssessmentPersistenceIntegrationTests
             "delivery_unknown",
             state.RootElement.GetProperty("deliveryAttempts")
                 .GetProperty("DELIVERY-IN-FLIGHT").GetProperty("status").GetString());
+        Assert.True(
+            !state.RootElement.TryGetProperty("findingDispositions", out var dispositions) ||
+            !dispositions.EnumerateObject().Any(entry =>
+                entry.Value.GetProperty("findingId").GetString() == affectedFindingId &&
+                entry.Value.GetProperty("disposition").GetString() is
+                    "accepted" or "satisfied" or "cancelled"));
+        Assert.NotEqual("accepted", affectedFinding.GetProperty("assessment").GetString());
+        Assert.NotEqual("cancelled", affectedFinding.GetProperty("assessment").GetString());
         Assert.Empty(state.RootElement.GetProperty("mockInbox").EnumerateObject());
         Assert.Contains(
             state.RootElement.GetProperty("auditEntries").EnumerateObject(),
             entry => entry.Value.GetProperty("action").GetString() ==
                 "dispatch.reconciliation_required");
+        var auditActions = state.RootElement.GetProperty("auditEntries")
+            .EnumerateObject()
+            .Select(entry => entry.Value.GetProperty("action").GetString())
+            .ToArray();
+        Assert.True(
+            Array.IndexOf(auditActions, "policy.auto_request") >= 0 &&
+            Array.IndexOf(auditActions, "dispatch.reconciliation_required") >
+                Array.IndexOf(auditActions, "policy.auto_request"));
+
+        await restarted.DisposeAsync();
+        await using var secondRestart = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.ContradictionModel());
+        var restartedSummary = await secondRestart.Client.GetFromJsonAsync<CaseSummary>(
+            "/api/cases/CASE-RUN-0001");
+        Assert.NotNull(restartedSummary);
+        Assert.Equal("awaiting_review", restartedSummary!.Status);
+        Assert.Single(restartedSummary.OpenReviewTasks!);
+        var deriveAfterRestart = await secondRestart.Client.PostAsync(
+            "/api/cases/CASE-RUN-0001/review-tasks/derive", null);
+        Assert.Equal(HttpStatusCode.OK, deriveAfterRestart.StatusCode);
+        using var afterSecondRestart = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(afterSecondRestart.RootElement.GetProperty("reviewTasks")
+            .EnumerateObject());
     }
 
     [Fact]
@@ -2640,6 +2935,44 @@ public sealed class AssessmentPersistenceIntegrationTests
                 ]));
             }
 
+        }
+
+        public sealed class ChangingFindingModel(string laterAssessment) : IInvestigationModel
+        {
+            private int invocationCount;
+
+            public Task<InvestigationResult> InvestigateAsync(
+                InvestigationRequest request,
+                CancellationToken cancellationToken)
+            {
+                var assessment = Interlocked.Increment(ref invocationCount) == 1
+                    ? "satisfied"
+                    : laterAssessment;
+                var evidence = request.Documents.FirstOrDefault();
+                var evidenceRefs = assessment is "satisfied" or "ambiguous" or "conflicting"
+                    ? [new EvidenceRef(evidence!.DocumentId, evidence.Version, evidence.Page)]
+                    : Array.Empty<EvidenceRef>();
+                var reasonCode = assessment switch
+                {
+                    "ambiguous" => "identity_ambiguous",
+                    "conflicting" => "conflicting_evidence",
+                    "blocked" => "investigation_blocked",
+                    "missing" => "records_gap",
+                    _ => "evidence_located"
+                };
+                return Task.FromResult(new InvestigationResult(
+                [
+                    new Finding(
+                        "FIND-REQ-0001",
+                        "COMP-0001",
+                        "REQ-0001",
+                        request.EvidenceBasis.BasisId,
+                        assessment,
+                        reasonCode,
+                        $"The finding is {assessment} for this evidence basis.",
+                        evidenceRefs)
+                ]));
+            }
         }
 
         public sealed class ContradictionModel : IInvestigationModel

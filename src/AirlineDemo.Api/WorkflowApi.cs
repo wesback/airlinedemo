@@ -790,6 +790,13 @@ internal sealed class WorkflowService
                     basis.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray() ?? [];
+            var acceptanceInvalidationKeys = state.AcceptanceInvalidations?
+                .Where(entry =>
+                    state.EvidenceBases.TryGetValue(
+                        entry.Value.CurrentBasisId, out var currentBasis) &&
+                    currentBasis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray() ?? [];
             var findingDispositionKeys = state.FindingDispositions?
                 .Where(entry => state.EvidenceBases.TryGetValue(
                     entry.Value.BasisId, out var basis) &&
@@ -825,6 +832,7 @@ internal sealed class WorkflowService
                 deliveryAttemptKeys.Length +
                 reconciliationKeys.Length +
                 reviewDecisionKeys.Length +
+                acceptanceInvalidationKeys.Length +
                 findingDispositionKeys.Length +
                 reviewTaskKeys.Length +
                 auditEntryKeys.Length;
@@ -916,6 +924,11 @@ internal sealed class WorkflowService
             foreach (var key in reviewDecisionKeys)
             {
                 state.ReviewDecisions?.Remove(key);
+            }
+
+            foreach (var key in acceptanceInvalidationKeys)
+            {
+                state.AcceptanceInvalidations?.Remove(key);
             }
 
             foreach (var key in findingDispositionKeys)
@@ -1351,6 +1364,11 @@ internal sealed class WorkflowService
                     {
                         state.Findings[FindingKey(finding)] = finding;
                     }
+                    InvalidateSupersededAcceptances(
+                        state,
+                        basis!,
+                        derivedFindings,
+                        correlationId);
                     PersistPolicyDecisions(
                         state,
                         basis!,
@@ -1616,7 +1634,7 @@ internal sealed class WorkflowService
     {
         var eligibleFindings = findings
             .Where(finding => finding.BasisId == basis.BasisId)
-            .Where(finding => finding.Assessment is "ambiguous" or "conflicting")
+            .Where(finding => finding.Assessment is "ambiguous" or "conflicting" or "blocked")
             .OrderBy(finding => finding.FindingId, StringComparer.Ordinal)
             .ToArray();
         if (eligibleFindings.Length == 0)
@@ -1624,28 +1642,17 @@ internal sealed class WorkflowService
             return;
         }
 
-        var tasks = state.ReviewTasks ??= new(StringComparer.Ordinal);
         var persistedCase = state.Cases.TryGetValue(CaseKey(basis.Context), out var currentCase)
             ? currentCase
             : null;
         var created = false;
         foreach (var finding in eligibleFindings)
         {
-            if (tasks.Values.Any(task =>
-                    task.BasisId == basis.BasisId &&
-                    task.FindingId == finding.FindingId))
-            {
-                continue;
-            }
-
-            var task = new ReviewTask(
-                NewId("TASK"),
+            created |= EnsureReviewTask(
+                state,
                 finding.FindingId,
                 basis.BasisId,
-                finding.ReasonCode,
-                "open");
-            tasks[task.TaskId] = task;
-            created = true;
+                finding.ReasonCode);
         }
 
         if (persistedCase is not null)
@@ -1658,6 +1665,104 @@ internal sealed class WorkflowService
                 };
             }
         }
+    }
+
+    private static void InvalidateSupersededAcceptances(
+        PersistedState state,
+        EvidenceBasis currentBasis,
+        IReadOnlyList<Finding> currentFindings,
+        string correlationId)
+    {
+        if (state.ReviewDecisions is null ||
+            state.FindingDispositions is null)
+        {
+            return;
+        }
+
+        var acceptedDispositions = state.FindingDispositions.Values
+            .Where(disposition => disposition.Disposition == "accepted")
+            .ToArray();
+        if (acceptedDispositions.Length == 0)
+        {
+            return;
+        }
+
+        var invalidations = state.AcceptanceInvalidations ??=
+            new(StringComparer.Ordinal);
+        foreach (var finding in currentFindings)
+        {
+            foreach (var disposition in acceptedDispositions.Where(disposition =>
+                         disposition.FindingId == finding.FindingId &&
+                         disposition.BasisId != currentBasis.BasisId &&
+                         state.ReviewDecisions.ContainsKey(disposition.ReviewId)))
+            {
+                var review = state.ReviewDecisions[disposition.ReviewId];
+                var invalidationKey = $"{review.ReviewId}:{currentBasis.BasisId}";
+                if (invalidations.ContainsKey(invalidationKey))
+                {
+                    continue;
+                }
+
+                var invalidation = new AcceptanceInvalidation(
+                    NewId("INVALIDATION"),
+                    review.ReviewId,
+                    finding.FindingId,
+                    review.BasisId,
+                    currentBasis.BasisId,
+                    "acceptance_invalidated",
+                    DateTimeOffset.UtcNow);
+                invalidations[invalidationKey] = invalidation;
+                EnsureReviewTask(
+                    state,
+                    finding.FindingId,
+                    currentBasis.BasisId,
+                    invalidation.ReasonCode);
+
+                var auditId = NewId("AUDIT");
+                (state.AuditEntries ??= new(StringComparer.Ordinal))[auditId] =
+                    new AuditEntry(
+                        auditId,
+                        currentBasis.Context,
+                        "system_workflow",
+                        "acceptance-reconciler",
+                        "review.acceptance_invalidated",
+                        [
+                            review.ReviewId,
+                            finding.FindingId,
+                            review.BasisId,
+                            currentBasis.BasisId,
+                            invalidation.InvalidationId
+                        ],
+                        currentBasis.BasisId,
+                        invalidation.InvalidatedAt,
+                        correlationId);
+            }
+        }
+    }
+
+    private static bool EnsureReviewTask(
+        PersistedState state,
+        string findingId,
+        string basisId,
+        string reasonCode)
+    {
+        var tasks = state.ReviewTasks ??= new(StringComparer.Ordinal);
+        if (tasks.Values.Any(task =>
+                task.FindingId == findingId &&
+                task.BasisId == basisId &&
+                task.Status == "open"))
+        {
+            return false;
+        }
+
+        var task = new ReviewTask(
+            NewId("TASK"),
+            findingId,
+            basisId,
+            reasonCode,
+            "open");
+        tasks[task.TaskId] = task;
+        return true;
     }
 
     private static void PersistNonAutomaticDecision(
@@ -2789,13 +2894,7 @@ internal sealed class WorkflowService
             : state.Findings.Values
                 .Where(finding => finding.BasisId == basis.BasisId)
                 .ToArray();
-        if (findings.Length > 0 &&
-            findings.All(finding =>
-                state.FindingDispositions is not null &&
-                state.FindingDispositions.TryGetValue(
-                    $"{basis!.BasisId}:{finding.FindingId}",
-                    out var disposition) &&
-                disposition.Disposition == "accepted"))
+        if (CurrentFindingsAreAccepted(state, basis, findings))
         {
             return "accepted";
         }
@@ -2842,7 +2941,14 @@ internal sealed class WorkflowService
             return "awaiting_external";
         }
 
-        if (currentStatus == "accepted")
+        var basis = CurrentBasis(state, context);
+        var currentFindings = basis is null
+            ? []
+            : state.Findings.Values
+                .Where(finding => finding.BasisId == basis.BasisId)
+                .ToArray();
+        if (currentStatus == "accepted" &&
+            CurrentFindingsAreAccepted(state, basis, currentFindings))
         {
             return "accepted";
         }
@@ -2856,6 +2962,19 @@ internal sealed class WorkflowService
 
         return "ready_for_acceptance";
     }
+
+    private static bool CurrentFindingsAreAccepted(
+        PersistedState state,
+        EvidenceBasis? basis,
+        IReadOnlyList<Finding> findings) =>
+        basis is not null &&
+        findings.Count > 0 &&
+        findings.All(finding =>
+            state.FindingDispositions is not null &&
+            state.FindingDispositions.TryGetValue(
+                $"{basis.BasisId}:{finding.FindingId}",
+                out var disposition) &&
+            disposition.Disposition == "accepted");
 
     private static EvidenceBasis? CurrentBasis(
         PersistedState state,
@@ -3010,11 +3129,7 @@ internal sealed class WorkflowService
                 .FirstOrDefault(finding =>
                     finding.BasisId == currentBasis.BasisId &&
                     RequestKey(currentBasis.Context, finding) == request.RequestKey);
-            if (currentFinding is null ||
-                state.PolicyDecisions.Values.Any(decision =>
-                    decision.BasisId == currentBasis.BasisId &&
-                    decision.FindingId == currentFinding.FindingId &&
-                    decision.Outcome == "auto_request"))
+            if (currentFinding is null)
             {
                 continue;
             }
@@ -3095,6 +3210,35 @@ internal sealed class WorkflowService
         string correlationId,
         string? currentBasisId = null)
     {
+        var reconciliationBasisId = currentBasisId ??
+            (state.EvidenceBases.TryGetValue(request.BasisId, out var requestBasis)
+                ? CurrentBasis(state, requestBasis.Context)?.BasisId
+                : null);
+        if (reconciliationBasisId is not null &&
+            !StringComparer.Ordinal.Equals(reconciliationBasisId, request.BasisId) &&
+            state.EvidenceBases.TryGetValue(reconciliationBasisId, out var currentBasis))
+        {
+            var currentFinding = state.Findings.Values
+                .FirstOrDefault(finding =>
+                    finding.BasisId == currentBasis.BasisId &&
+                    RequestKey(currentBasis.Context, finding) == request.RequestKey);
+            if (currentFinding is not null &&
+                EnsureReviewTask(
+                    state,
+                    currentFinding.FindingId,
+                    currentBasis.BasisId,
+                    reason))
+            {
+                if (state.Cases.TryGetValue(CaseKey(currentBasis.Context), out var persistedCase))
+                {
+                    state.Cases[CaseKey(currentBasis.Context)] = persistedCase with
+                    {
+                        CaseRevision = checked(persistedCase.CaseRevision + 1)
+                    };
+                }
+            }
+        }
+
         if (state.ReconciliationItems.Values.Any(item =>
                 item.IntentId == intent.IntentId &&
                 item.AttemptId == attemptId &&
@@ -3112,7 +3256,7 @@ internal sealed class WorkflowService
             attemptId,
             RequestContext(state, request),
             request.BasisId,
-            currentBasisId,
+            reconciliationBasisId,
             "open",
             reason,
             DateTimeOffset.UtcNow);
