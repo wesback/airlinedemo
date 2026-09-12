@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airlinedemo.example/contracts/recording-receipt/1.0/recording-receipt.schema.json",
+  "title": "AirlineDemo recording receipt",
+  "description": "Machine-checkable metadata for a previously captured synthetic-data walkthrough.",
+  "type": "object",
+  "required": [
+    "seed",
+    "fixtureVersion",
+    "applicationVersion",
+    "captureDate",
+    "syntheticDataLabel",
+    "mockIntegrationLabel",
+    "observedDurationSeconds",
+    "fallbackUsed"
+  ],
+  "properties": {
+    "seed": {
+      "type": "integer"
+    },
+    "fixtureVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "applicationVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captureDate": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "syntheticDataLabel": {
+      "const": "SYNTHETIC DATA"
+    },
+    "mockIntegrationLabel": {
+      "const": "MOCK INTEGRATION"
+    },
+    "observedDurationSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "fallbackUsed": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

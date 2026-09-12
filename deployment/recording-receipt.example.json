@@ -1,0 +1,10 @@
+{
+  "seed": 420042,
+  "fixtureVersion": "fixture-1.0.0",
+  "applicationVersion": "app-1.0.0",
+  "captureDate": "2026-09-12T20:00:00Z",
+  "syntheticDataLabel": "SYNTHETIC DATA",
+  "mockIntegrationLabel": "MOCK INTEGRATION",
+  "observedDurationSeconds": 180,
+  "fallbackUsed": false
+}
