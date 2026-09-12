@@ -98,7 +98,8 @@ public sealed record CaseSummary(
     IReadOnlyList<PackageProcessingStatus> PackageProcessing,
     InvestigationOutcome? Investigation = null,
     IReadOnlyList<ReviewTask>? OpenReviewTasks = null,
-    IReadOnlyList<EvidenceRequest>? ActiveEvidenceRequests = null);
+    IReadOnlyList<EvidenceRequest>? ActiveEvidenceRequests = null,
+    IReadOnlyList<ReconciliationItem>? ReconciliationItems = null);
 
 public sealed record EvidencePreview(
     string DocumentId,
@@ -284,6 +285,18 @@ public sealed record DeliveryAttempt(
     string CorrelationId,
     string? Reason = null);
 
+public sealed record ReconciliationItem(
+    string ReconciliationId,
+    string RequestId,
+    string IntentId,
+    string? AttemptId,
+    CaseContext Context,
+    string BasisId,
+    string? CurrentBasisId,
+    string Status,
+    string Reason,
+    DateTimeOffset CreatedAt);
+
 public sealed record AutomaticRequestPolicyConfiguration(
     string RecipientRef,
     string TemplateVersion,
@@ -400,6 +413,7 @@ internal sealed class PersistedState
     public Dictionary<string, DispatchOutboxIntent> DispatchOutbox { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, MockInboxItem> MockInbox { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, DeliveryAttempt> DeliveryAttempts { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, ReconciliationItem> ReconciliationItems { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Dictionary<string, ReviewDecision>? ReviewDecisions { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

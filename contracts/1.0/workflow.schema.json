@@ -614,6 +614,57 @@
       },
       "additionalProperties": false
     },
+    "ReconciliationItem": {
+      "type": "object",
+      "required": [
+        "reconciliationId",
+        "requestId",
+        "intentId",
+        "context",
+        "basisId",
+        "status",
+        "reason",
+        "createdAt"
+      ],
+      "properties": {
+        "reconciliationId": {
+          "$ref": "#/$defs/Id"
+        },
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "intentId": {
+          "$ref": "#/$defs/Id"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Id"
+        },
+        "context": {
+          "$ref": "#/$defs/CaseContext"
+        },
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "currentBasisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "additionalProperties": false
+    },
     "AuditEntry": {
       "type": "object",
       "required": [
@@ -1060,6 +1111,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/EvidenceRequest"
+          }
+        },
+        "reconciliationItems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReconciliationItem"
           }
         },
         "investigation": {

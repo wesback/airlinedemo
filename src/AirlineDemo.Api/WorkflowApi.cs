@@ -767,6 +767,10 @@ internal sealed class WorkflowService
                     basis.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var reconciliationKeys = state.ReconciliationItems
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
             var runOperationIds = state.Operations
                 .Where(entry => entry.Value.Status.RunId == runId)
                 .Select(entry => entry.Key)
@@ -819,6 +823,7 @@ internal sealed class WorkflowService
                 dispatchOutboxKeys.Length +
                 mockInboxKeys.Length +
                 deliveryAttemptKeys.Length +
+                reconciliationKeys.Length +
                 reviewDecisionKeys.Length +
                 findingDispositionKeys.Length +
                 reviewTaskKeys.Length +
@@ -901,6 +906,11 @@ internal sealed class WorkflowService
             foreach (var key in deliveryAttemptKeys)
             {
                 state.DeliveryAttempts.Remove(key);
+            }
+
+            foreach (var key in reconciliationKeys)
+            {
+                state.ReconciliationItems.Remove(key);
             }
 
             foreach (var key in reviewDecisionKeys)
@@ -1348,6 +1358,7 @@ internal sealed class WorkflowService
                         package.OperationId,
                         correlationId);
                     PersistReviewTasks(state, basis!, derivedFindings);
+                    ReconcileSupersededDispatches(state, basis!, correlationId);
                 }
                 else
                 {
@@ -1827,6 +1838,11 @@ internal sealed class WorkflowService
                     ScopeMatches(basis.Context, persistedCase.Context))
                 .OrderBy(request => request.CreatedAt)
                 .ToArray();
+            var reconciliationItems = state.ReconciliationItems.Values
+                .Where(item => ScopeMatches(item.Context, persistedCase.Context))
+                .Where(item => item.Status == "open")
+                .OrderBy(item => item.CreatedAt)
+                .ToArray();
             return new CaseSummary(
                 persistedCase.Context.CaseId,
                 persistedCase.Context.RunId,
@@ -1843,7 +1859,8 @@ internal sealed class WorkflowService
                 packages,
                 investigation,
                 openReviewTasks,
-                activeEvidenceRequests);
+                activeEvidenceRequests,
+                reconciliationItems);
         });
 
         return Task.FromResult<IResult>(summary is null
@@ -2065,15 +2082,30 @@ internal sealed class WorkflowService
                 .SingleOrDefault(item => item.RequestId == request.RequestId);
             var isCurrentAndEligible = IsDispatchEligible(
                 state, request, automaticRequestPolicy);
+            var obsoleteReason = isCurrentAndEligible
+                ? null
+                : DispatchObsoleteReason(state, request);
+            if (!isCurrentAndEligible &&
+                existingItem is not null &&
+                obsoleteReason == "basis_superseded")
+            {
+                EnsureReconciliationItem(
+                    state,
+                    request,
+                    intent,
+                    attemptId,
+                    obsoleteReason,
+                    correlationId);
+            }
             if (!isCurrentAndEligible && existingItem is null)
             {
-                var obsoleteReason = DispatchObsoleteReason(state, request);
+                var reason = obsoleteReason ?? "request_not_eligible";
                 if (request.Status == "pending")
                 {
                     state.EvidenceRequests[request.RequestId] = request with
                     {
                         Status = "cancelled",
-                        ClosureReason = $"obsolete:{obsoleteReason}"
+                        ClosureReason = $"obsolete:{reason}"
                     };
                     request = state.EvidenceRequests[request.RequestId];
                 }
@@ -2086,7 +2118,7 @@ internal sealed class WorkflowService
                 state.DeliveryAttempts[attemptId] = state.DeliveryAttempts[attemptId] with
                 {
                     Status = "obsolete",
-                    Reason = obsoleteReason
+                    Reason = reason
                 };
                 AddDispatchAudit(
                     state,
@@ -2094,13 +2126,13 @@ internal sealed class WorkflowService
                     "dispatch.obsolete",
                     [request.RequestId, intent.IntentId, attemptId],
                     correlationId,
-                    obsoleteReason);
+                    reason);
                 result = new DispatchResult(
                     "obsolete",
                     request.RequestId,
                     intent.IntentId,
                     attemptId,
-                    Reason: obsoleteReason);
+                    Reason: reason);
                 return;
             }
 
@@ -2956,6 +2988,147 @@ internal sealed class WorkflowService
         }
 
         return "request_not_eligible";
+    }
+
+    private static void ReconcileSupersededDispatches(
+        PersistedState state,
+        EvidenceBasis currentBasis,
+        string correlationId)
+    {
+        var supersededRequests = state.EvidenceRequests.Values
+            .Where(request =>
+                request.Status is "pending" or "leased" or "delivery_unknown")
+            .Where(request =>
+                state.EvidenceBases.TryGetValue(request.BasisId, out var basis) &&
+                ScopeMatches(basis.Context, currentBasis.Context) &&
+                request.BasisId != currentBasis.BasisId)
+            .ToArray();
+
+        foreach (var request in supersededRequests)
+        {
+            var currentFinding = state.Findings.Values
+                .FirstOrDefault(finding =>
+                    finding.BasisId == currentBasis.BasisId &&
+                    RequestKey(currentBasis.Context, finding) == request.RequestKey);
+            if (currentFinding is null ||
+                state.PolicyDecisions.Values.Any(decision =>
+                    decision.BasisId == currentBasis.BasisId &&
+                    decision.FindingId == currentFinding.FindingId &&
+                    decision.Outcome == "auto_request"))
+            {
+                continue;
+            }
+
+            var intents = state.DispatchOutbox.Values
+                .Where(intent => intent.RequestId == request.RequestId)
+                .Where(intent => intent.Status is "pending" or "leased" or "delivery_unknown")
+                .ToArray();
+            foreach (var intent in intents)
+            {
+                if (intent.Status == "pending" && request.Status == "pending")
+                {
+                    state.EvidenceRequests[request.RequestId] = request with
+                    {
+                        Status = "cancelled",
+                        ClosureReason = "obsolete:basis_superseded"
+                    };
+                    state.DispatchOutbox[intent.IntentId] = intent with
+                    {
+                        Status = "obsolete",
+                        LeaseId = null,
+                        LeaseExpiresAt = null
+                    };
+                    AddDispatchAudit(
+                        state,
+                        request,
+                        "dispatch.obsolete",
+                        [request.RequestId, intent.IntentId],
+                        correlationId,
+                        "basis_superseded");
+                    continue;
+                }
+
+                var attempt = state.DeliveryAttempts.Values
+                    .Where(candidate => candidate.IntentId == intent.IntentId)
+                    .Where(candidate => candidate.Status is "leased" or "delivery_unknown")
+                    .OrderByDescending(candidate => candidate.AttemptedAt)
+                    .FirstOrDefault();
+                if (attempt is null)
+                {
+                    continue;
+                }
+
+                state.EvidenceRequests[request.RequestId] = request with
+                {
+                    Status = "delivery_unknown",
+                    ClosureReason = "obsolete:basis_superseded"
+                };
+                state.DispatchOutbox[intent.IntentId] = intent with
+                {
+                    Status = "obsolete",
+                    LeaseId = null,
+                    LeaseExpiresAt = null
+                };
+                state.DeliveryAttempts[attempt.AttemptId] = attempt with
+                {
+                    Status = "delivery_unknown",
+                    Reason = "basis_superseded"
+                };
+                EnsureReconciliationItem(
+                    state,
+                    request,
+                    intent,
+                    attempt.AttemptId,
+                    "basis_superseded",
+                    correlationId,
+                    currentBasis.BasisId);
+            }
+        }
+    }
+
+    private static void EnsureReconciliationItem(
+        PersistedState state,
+        EvidenceRequest request,
+        DispatchOutboxIntent intent,
+        string? attemptId,
+        string reason,
+        string correlationId,
+        string? currentBasisId = null)
+    {
+        if (state.ReconciliationItems.Values.Any(item =>
+                item.IntentId == intent.IntentId &&
+                item.AttemptId == attemptId &&
+                item.Reason == reason &&
+                item.Status == "open"))
+        {
+            return;
+        }
+
+        var reconciliationId = NewId("RECONCILE");
+        state.ReconciliationItems[reconciliationId] = new ReconciliationItem(
+            reconciliationId,
+            request.RequestId,
+            intent.IntentId,
+            attemptId,
+            RequestContext(state, request),
+            request.BasisId,
+            currentBasisId,
+            "open",
+            reason,
+            DateTimeOffset.UtcNow);
+        var affectedIds = new List<string> { request.RequestId, intent.IntentId };
+        if (attemptId is not null)
+        {
+            affectedIds.Add(attemptId);
+        }
+        affectedIds.Add(reconciliationId);
+        AddDispatchAudit(
+            state,
+            request,
+            "dispatch.reconciliation_required",
+            affectedIds,
+            correlationId,
+            reason);
     }
 
     private static string FindingKeyForRequest(EvidenceRequest request) =>

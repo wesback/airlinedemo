@@ -49,6 +49,7 @@ public sealed class FileDocumentStorage :
 {
     private readonly string rootDirectory;
     private readonly IReadOnlyList<SelectedFixtureEntry>? selectedFixtureEntries;
+    private readonly IReadOnlyList<SelectedFixtureEntry> applicationInputEntries;
     private readonly string? selectedFixtureManifestError;
 
     public FileDocumentStorage(string rootDirectory)
@@ -57,6 +58,7 @@ public sealed class FileDocumentStorage :
         Directory.CreateDirectory(this.rootDirectory);
         (selectedFixtureEntries, selectedFixtureManifestError) =
             LoadSelectedFixtureManifest(this.rootDirectory);
+        applicationInputEntries = LoadApplicationInputEntries(this.rootDirectory);
     }
 
     public async Task<string?> ReadPagePreviewAsync(
@@ -325,6 +327,7 @@ public sealed class FileDocumentStorage :
         var selectedByDocument = selectedEntries.ToDictionary(
             entry => $"{entry.DocumentId}:{entry.Version}",
             StringComparer.Ordinal);
+        var resolvedEntries = new List<SelectedFixtureEntry>();
         var packageKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var document in manifest)
         {
@@ -334,10 +337,20 @@ public sealed class FileDocumentStorage :
             }
 
             var key = $"{document.DocumentId}:{document.Version}";
-            if (!packageKeys.Add(key) ||
-                !selectedByDocument.TryGetValue(key, out var selectedEntry))
+            if (!packageKeys.Add(key))
             {
                 return $"The document '{document.DocumentId}' is not declared by the selected initial input manifest.";
+            }
+
+            var selectedEntry = selectedByDocument.TryGetValue(key, out var initialEntry)
+                ? initialEntry
+                : applicationInputEntries.FirstOrDefault(entry =>
+                    entry.Scope.Matches(context) &&
+                    entry.DocumentId == document.DocumentId &&
+                    entry.Version == document.Version);
+            if (selectedEntry is null)
+            {
+                return $"The document '{document.DocumentId}' is not declared by an authorised application input.";
             }
 
             if (!StringComparer.Ordinal.Equals(
@@ -349,6 +362,7 @@ public sealed class FileDocumentStorage :
             {
                 return $"The declared file '{document.FileName}' does not match the selected initial input manifest.";
             }
+            resolvedEntries.Add(selectedEntry);
 
             var selectedPath = ResolveSelectedPath(selectedEntry.RelativePath);
             if (selectedPath is null || Directory.Exists(selectedPath))
@@ -370,17 +384,24 @@ public sealed class FileDocumentStorage :
             }
         }
 
-        if (packageKeys.Count != selectedEntries.Count)
+        var isSupplementPackage = resolvedEntries.Any(entry =>
+            !selectedByDocument.ContainsKey($"{entry.DocumentId}:{entry.Version}"));
+        if (isSupplementPackage && resolvedEntries.Any(entry =>
+                selectedByDocument.ContainsKey($"{entry.DocumentId}:{entry.Version}")))
+        {
+            return "A supplementary package cannot mix initial and later document versions.";
+        }
+        if (!isSupplementPackage && packageKeys.Count != selectedEntries.Count)
         {
             return "The package manifest does not declare every selected initial input.";
         }
 
-        var packageDirectories = selectedEntries
+        var packageDirectories = resolvedEntries
             .Select(entry => Path.GetDirectoryName(entry.RelativePath))
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        var declaredPaths = selectedEntries
+        var declaredPaths = resolvedEntries
             .Select(entry => ResolveSelectedPath(entry.RelativePath))
             .Where(path => path is not null)
             .Select(path => Path.GetFullPath(path!))
@@ -440,7 +461,9 @@ public sealed class FileDocumentStorage :
             return null;
         }
 
-        var entry = selectedFixtureEntries.SingleOrDefault(candidate =>
+        var entry = selectedFixtureEntries
+            .Concat(applicationInputEntries)
+            .FirstOrDefault(candidate =>
             candidate.Scope.RunId == parts[0] &&
             candidate.Scope.CaseId == parts[1] &&
             candidate.DocumentId == parts[2] &&
@@ -508,6 +531,52 @@ public sealed class FileDocumentStorage :
         {
             return (null, "The selected initial input manifest is invalid.");
         }
+    }
+
+    private static IReadOnlyList<SelectedFixtureEntry> LoadApplicationInputEntries(
+        string rootDirectory)
+    {
+        var applicationInputsDirectory = Path.Combine(rootDirectory, "application-inputs");
+        if (!Directory.Exists(applicationInputsDirectory))
+        {
+            return [];
+        }
+
+        var entries = new List<SelectedFixtureEntry>();
+        foreach (var manifestPath in Directory.EnumerateFiles(
+                     applicationInputsDirectory,
+                     "manifest.json",
+                     SearchOption.AllDirectories))
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var root = document.RootElement;
+            var scope = new CaseContext(
+                root.GetProperty("runId").GetString() ?? throw new InvalidDataException(),
+                root.GetProperty("caseId").GetString() ?? throw new InvalidDataException(),
+                root.GetProperty("airlineId").GetString() ?? throw new InvalidDataException(),
+                root.GetProperty("aircraftId").GetString() ?? throw new InvalidDataException(),
+                root.GetProperty("leaseId").GetString() ?? throw new InvalidDataException());
+            var packageDirectory = Path.GetDirectoryName(manifestPath)
+                ?? throw new InvalidDataException("An application input manifest has no directory.");
+            foreach (var item in root.GetProperty("manifest").EnumerateArray())
+            {
+                var fileName = item.GetProperty("fileName").GetString()
+                    ?? throw new InvalidDataException();
+                entries.Add(new SelectedFixtureEntry(
+                    Path.GetRelativePath(
+                        rootDirectory,
+                        Path.Combine(packageDirectory, fileName))
+                        .Replace('\\', '/'),
+                    item.GetProperty("documentId").GetString()
+                        ?? throw new InvalidDataException(),
+                    item.GetProperty("version").GetInt32(),
+                    item.GetProperty("sha256").GetString()
+                        ?? throw new InvalidDataException(),
+                    scope));
+            }
+        }
+
+        return entries;
     }
 
     private static SelectedFixtureEntry ParseSelectedFixtureEntry(JsonElement value)
