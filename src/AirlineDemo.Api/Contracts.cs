@@ -347,7 +347,8 @@ public sealed record ReviewTask(
     string BasisId,
     string ReasonCode,
     string Status,
-    string? AssignedReviewerSubject = null);
+    string? AssignedReviewerSubject = null,
+    IReadOnlyList<string>? PermittedDecisions = null);
 
 public sealed record ReviewTaskAssignment(string ReviewerSubject);
 

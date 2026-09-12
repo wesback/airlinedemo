@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Authoritative aircraft return-readiness review">
+  <title>Transition Readiness | Altivane</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Altivane Transition Readiness home">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <span><strong>Altivane</strong><small>Transition Readiness</small></span>
+    </a>
+    <div class="environment">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span>Evidence-led workflow</span>
+      <span class="divider" aria-hidden="true"></span>
+      <span>Reviewer session</span>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">AIRCRAFT RETURN / CONTROLLED REVIEW</p>
+        <h1 id="page-title">Transition readiness</h1>
+        <p class="lede">Review the current evidence basis, then record one deliberate, server-authorised decision.</p>
+      </div>
+      <div class="revision-card">
+        <span>Case revision</span>
+        <strong id="case-revision">-</strong>
+        <small>Server controlled</small>
+      </div>
+    </section>
+
+    <div id="global-error" class="safe-error" role="alert" hidden></div>
+    <div id="stale-notice" class="stale-notice" role="alert" hidden></div>
+
+    <section class="case-strip" aria-label="Case summary">
+      <div><span class="label">Aircraft</span><strong id="aircraft-id">-</strong></div>
+      <div><span class="label">Airline / lease</span><strong id="scope-label">-</strong></div>
+      <div><span class="label">Workflow state</span><strong id="case-status">Loading...</strong></div>
+      <div><span class="label">Current basis</span><strong id="basis-id">-</strong></div>
+    </section>
+
+    <section class="work-grid">
+      <div class="queue-column">
+        <div class="section-heading">
+          <div><p class="eyebrow">WORK QUEUE</p><h2>Internal review tasks</h2></div>
+          <span id="task-count" class="count-badge">0</span>
+        </div>
+        <div id="task-list" class="task-list" aria-live="polite">
+          <p class="muted">Loading current tasks...</p>
+        </div>
+        <div id="external-work" class="external-work"></div>
+      </div>
+
+      <article id="review-panel" class="review-panel" aria-labelledby="review-heading">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">CURRENT BASIS</p>
+            <h2 id="review-heading">Select a task to review</h2>
+          </div>
+          <span id="task-state" class="state-pill">Waiting</span>
+        </div>
+        <div id="review-content" class="review-content">
+          <p class="muted">Only evidence and decisions returned by the server appear here.</p>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

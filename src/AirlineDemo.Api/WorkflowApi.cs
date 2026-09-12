@@ -39,6 +39,9 @@ public static class WorkflowApi
             app.UseDeveloperExceptionPage();
         }
 
+        app.UseDefaultFiles();
+        app.UseStaticFiles();
+
         app.MapPost("/api/packages", async (
             PackageSubmissionRequest request,
             HttpContext httpContext,
@@ -192,6 +195,8 @@ internal sealed class WorkflowService
 {
     private const string ParserVersion = "deterministic-pdf-parser/1.0";
     private const string ExtractorVersion = "deterministic-text-extractor/1.0";
+    private static readonly IReadOnlyList<string> PermittedReviewDecisions =
+        ["accept_evidence", "dismiss_finding", "needs_evidence"];
 
     private readonly JsonStateStore stateStore;
     private readonly IDocumentStorage documentStorage;
@@ -1760,7 +1765,8 @@ internal sealed class WorkflowService
             findingId,
             basisId,
             reasonCode,
-            "open");
+            "open",
+            PermittedDecisions: PermittedReviewDecisions);
         tasks[task.TaskId] = task;
         return true;
     }
@@ -1935,6 +1941,7 @@ internal sealed class WorkflowService
                     ScopeMatches(basis.Context, persistedCase.Context) &&
                     state.Findings.TryGetValue(FindingKeyForTask(task), out var finding) &&
                     finding.BasisId == task.BasisId)
+                .Select(WithPermittedDecisions)
                 .OrderBy(task => task.TaskId, StringComparer.Ordinal)
                 .ToArray() ?? [];
             var activeEvidenceRequests = state.EvidenceRequests.Values
@@ -2022,7 +2029,7 @@ internal sealed class WorkflowService
                 return null;
             }
 
-            return candidate;
+            return WithPermittedDecisions(candidate);
         });
         return task is null
             ? Results.Json(new SafeError("CASE_NOT_FOUND", correlationId), statusCode: 404)
@@ -2395,6 +2402,22 @@ internal sealed class WorkflowService
             {
                 failure = new SafeError("CASE_NOT_FOUND", correlationId);
                 statusCode = 404;
+                return;
+            }
+
+            var reviewTask = state.ReviewTasks?.Values
+                .Where(task => task.BasisId == basis.BasisId &&
+                    task.FindingId == finding.FindingId &&
+                    task.Status == "open")
+                .OrderBy(task => task.TaskId, StringComparer.Ordinal)
+                .Select(WithPermittedDecisions)
+                .FirstOrDefault();
+            var permittedDecisions = reviewTask?.PermittedDecisions ?? PermittedReviewDecisions;
+            if (reviewTask is not null &&
+                !permittedDecisions.Contains(command.Decision, StringComparer.Ordinal))
+            {
+                failure = new SafeError("ACTION_FORBIDDEN", correlationId);
+                statusCode = 403;
                 return;
             }
 
@@ -2990,8 +3013,14 @@ internal sealed class WorkflowService
         PersistedCase persistedCase) =>
         state.ReviewTasks?.Values
             .Where(task => TaskBelongsToCase(state, task, persistedCase.Context))
+            .Select(WithPermittedDecisions)
             .OrderBy(task => task.TaskId, StringComparer.Ordinal)
             .ToArray() ?? [];
+
+    private static ReviewTask WithPermittedDecisions(ReviewTask task) =>
+        task.PermittedDecisions is { Count: > 0 }
+            ? task
+            : task with { PermittedDecisions = PermittedReviewDecisions };
 
     private static bool TaskBelongsToCase(
         PersistedState state,
