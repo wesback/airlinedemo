@@ -8,69 +8,148 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/" aria-label="Altivane Transition Readiness home">
-      <span class="brand-mark" aria-hidden="true">A</span>
-      <span><strong>Altivane</strong><small>Transition Readiness</small></span>
-    </a>
-    <div class="environment">
-      <span class="status-dot" aria-hidden="true"></span>
-      <span>Evidence-led workflow</span>
-      <span class="divider" aria-hidden="true"></span>
-      <span>Reviewer session</span>
-    </div>
-  </header>
-
-  <main class="page-shell">
-    <section class="hero" aria-labelledby="page-title">
-      <div>
-        <p class="eyebrow">AIRCRAFT RETURN / CONTROLLED REVIEW</p>
-        <h1 id="page-title">Transition readiness</h1>
-        <p class="lede">Review the current evidence basis, then record one deliberate, server-authorised decision.</p>
+  <script>window.airlineDemoConfig = window.airlineDemoConfig || {};</script>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Altivane Aviation Capital home">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span>
+          <strong>Altivane</strong>
+          <small>Aviation Capital</small>
+        </span>
+      </a>
+      <div class="shell-meta">
+        <span class="environment-pill"><span class="status-dot" aria-hidden="true"></span>Synthetic demo</span>
+        <span class="scope-label">Server-authoritative controls</span>
       </div>
-      <div class="revision-card">
-        <span>Case revision</span>
-        <strong id="case-revision">-</strong>
-        <small>Server controlled</small>
-      </div>
-    </section>
+    </header>
 
-    <div id="global-error" class="safe-error" role="alert" hidden></div>
-    <div id="stale-notice" class="stale-notice" role="alert" hidden></div>
-
-    <section class="case-strip" aria-label="Case summary">
-      <div><span class="label">Aircraft</span><strong id="aircraft-id">-</strong></div>
-      <div><span class="label">Airline / lease</span><strong id="scope-label">-</strong></div>
-      <div><span class="label">Workflow state</span><strong id="case-status">Loading...</strong></div>
-      <div><span class="label">Current basis</span><strong id="basis-id">-</strong></div>
-    </section>
-
-    <section class="work-grid">
-      <div class="queue-column">
-        <div class="section-heading">
-          <div><p class="eyebrow">WORK QUEUE</p><h2>Internal review tasks</h2></div>
-          <span id="task-count" class="count-badge">0</span>
+    <main class="content">
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">AIRCRAFT RETURN READINESS</p>
+          <h1 id="page-title">A controlled handover, backed by evidence.</h1>
+          <p class="lede">Review the delivered request and operate the approved demonstration run without leaving the authenticated scope.</p>
         </div>
-        <div id="task-list" class="task-list" aria-live="polite">
-          <p class="muted">Loading current tasks...</p>
+        <div class="hero-state">
+          <span class="state-label">Execution mode</span>
+          <strong>Mock integrations only</strong>
+          <span>No real partner communication</span>
         </div>
-        <div id="external-work" class="external-work"></div>
-      </div>
+      </section>
 
-      <article id="review-panel" class="review-panel" aria-labelledby="review-heading">
-        <div class="panel-header">
+      <section class="overview-grid" aria-label="Current demonstration scope">
+        <article class="scope-card">
+          <span class="card-label">CURRENT RUN</span>
+          <strong id="run-id">Not configured</strong>
+          <span class="muted">Selected by the server</span>
+        </article>
+        <article class="scope-card">
+          <span class="card-label">CASE SCOPE</span>
+          <strong id="case-id">Not configured</strong>
+          <span class="muted">Authenticated resource boundary</span>
+        </article>
+        <article class="scope-card">
+          <span class="card-label">ACTION BOUNDARY</span>
+          <strong>Evidence only</strong>
+          <span class="muted">No acceptance decision here</span>
+        </article>
+      </section>
+
+      <div id="global-status" class="sr-status" role="status" aria-live="polite"></div>
+
+      <section class="panel inbox-panel" aria-labelledby="inbox-heading">
+        <div class="panel-heading">
           <div>
-            <p class="eyebrow">CURRENT BASIS</p>
-            <h2 id="review-heading">Select a task to review</h2>
+            <p class="eyebrow">SIMULATED EXTERNAL VIEW</p>
+            <h2 id="inbox-heading">Mock partner inbox</h2>
           </div>
-          <span id="task-state" class="state-pill">Waiting</span>
+          <span class="simulation-badge"><span aria-hidden="true">◌</span> Synthetic partner portal</span>
         </div>
-        <div id="review-content" class="review-content">
-          <p class="muted">Only evidence and decisions returned by the server appear here.</p>
+        <p class="panel-intro">Only requests delivered by the scoped workflow appear here. Wording is approved by server policy and cannot be edited.</p>
+        <div id="inbox-list" class="inbox-list">
+          <div class="loading-state">Loading the authoritative inbox…</div>
         </div>
-      </article>
-    </section>
-  </main>
-  <script src="/app.js"></script>
+      </section>
+
+      <section class="panel controls-panel" aria-labelledby="controls-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">PRESENTER OPERATIONS</p>
+            <h2 id="controls-heading">Demo controls</h2>
+          </div>
+          <span class="server-badge">Server-confirmed</span>
+        </div>
+        <p class="panel-intro">Run controls use a preselected fixture. They never accept a local path, evaluator answer, recipient, or role override.</p>
+        <div class="control-grid">
+          <article class="control-card">
+            <div class="control-icon" aria-hidden="true">↥</div>
+            <div class="control-copy">
+              <h3>Load approved fixture</h3>
+              <p>Start the fixture selected for this demonstration run.</p>
+              <button id="load-fixture" class="button button-primary" type="button">Load fixture</button>
+              <div id="load-result" class="operation-result" aria-live="polite"></div>
+            </div>
+          </article>
+          <article class="control-card control-card-reset">
+            <div class="control-icon" aria-hidden="true">↻</div>
+            <div class="control-copy">
+              <h3>Reset demonstration run</h3>
+              <p>Remove only application records owned by the current run.</p>
+              <button id="reset-run" class="button button-secondary" type="button">Reset run</button>
+              <div id="reset-result" class="operation-result" aria-live="polite"></div>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section class="review-shell" aria-label="Internal review">
+        <section class="review-summary">
+          <div class="revision-card">
+            <span>Case revision</span>
+            <strong id="case-revision">-</strong>
+            <small>Server controlled</small>
+          </div>
+          <div class="case-strip">
+            <div><span class="label">Aircraft</span><strong id="aircraft-id">-</strong></div>
+            <div><span class="label">Airline / lease</span><strong id="scope-label">-</strong></div>
+            <div><span class="label">Workflow state</span><strong id="case-status">Loading...</strong></div>
+            <div><span class="label">Current basis</span><strong id="basis-id">-</strong></div>
+          </div>
+        </section>
+        <div id="global-error" class="safe-error" role="alert" hidden></div>
+        <div id="stale-notice" class="stale-notice" role="alert" hidden></div>
+        <section class="work-grid">
+          <div class="queue-column">
+            <div class="section-heading">
+              <div><p class="eyebrow">WORK QUEUE</p><h2>Internal review tasks</h2></div>
+              <span id="task-count" class="count-badge">0</span>
+            </div>
+            <div id="task-list" class="task-list" aria-live="polite">
+              <p class="muted">Loading current tasks...</p>
+            </div>
+            <div id="external-work" class="external-work"></div>
+          </div>
+          <article id="review-panel" class="review-panel" aria-labelledby="review-heading">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">CURRENT BASIS</p>
+                <h2 id="review-heading">Select a task to review</h2>
+              </div>
+              <span id="task-state" class="state-pill">Waiting</span>
+            </div>
+            <div id="review-content" class="review-content">
+              <p class="muted">Only evidence and decisions returned by the server appear here.</p>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Altivane Aviation Capital · Demonstration environment</span>
+      <span>Evidence-led automation, human acceptance authority</span>
+    </footer>
+  </div>
+  <script src="/app.js" defer></script>
 </body>
 </html>
