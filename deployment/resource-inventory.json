@@ -1,0 +1,495 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "inventoryVersion": "1.0",
+  "purpose": "Authoritative inventory of Terraform-managed AirlineDemo resources, lifecycle ownership, data and network boundaries, cost allocation, outputs, and identity assignment ownership.",
+  "sourceOfTruth": {
+    "workloadRoot": "terraform/",
+    "protectedStateBootstrap": "terraform/bootstrap/",
+    "permissionInventory": "deployment/identity-mapping.json",
+    "stateBackendBootstrapIsOutsideWorkloadRoot": true
+  },
+  "ownershipBoundaries": {
+    "disposableDemo": {
+      "lifecycleOwner": "airlinedemo-demo",
+      "resourceGroup": "var.resource_group_name",
+      "costTags": {
+        "deployment": "var.deployment_name",
+        "environment": "var.environment",
+        "owner": "var.owner",
+        "cost_center": "var.cost_center",
+        "managed_by": "terraform"
+      },
+      "teardown": "May be destroyed by the approved demo teardown after data and recording retention decisions."
+    },
+    "externallyOwnedRemoteState": {
+      "lifecycleOwner": "airlinedemo-platform",
+      "resourceGroup": "var.state_resource_group_name",
+      "costTags": {
+        "owner": "var.owner",
+        "cost_center": "var.cost_center",
+        "managed_by": "terraform-bootstrap",
+        "purpose": "airlinedemo-terraform-state"
+      },
+      "teardown": "Must not be destroyed, imported, or changed by disposable demo teardown; platform owner approves its separate cleanup path."
+    }
+  },
+  "costTagPolicy": {
+    "directTagKeys": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+    "bootstrapTagKeys": ["owner", "cost_center", "managed_by", "purpose"],
+    "directlyTaggedResources": "Resources whose Terraform provider schema accepts tags receive the common or bootstrap tag set.",
+    "inheritedCostAttribution": [
+      {
+        "resource": "module.demo_boundary.azurerm_storage_management_policy.evidence",
+        "attribution": "evidence storage account and disposable demo resource group"
+      },
+      {
+        "resource": "module.container_apps.azurerm_role_assignment.*",
+        "attribution": "Container Apps module and disposable demo resource group"
+      },
+      {
+        "resource": "module.sql.azurerm_mssql_firewall_rule.azure_services",
+        "attribution": "SQL server and disposable demo resource group"
+      },
+      {
+        "resource": "module.ai.azurerm_cognitive_deployment.this",
+        "attribution": "Azure OpenAI account and disposable demo resource group"
+      },
+      {
+        "resource": "terraform.bootstrap.azurerm_storage_container.state",
+        "attribution": "Protected state storage account and platform-owned state resource group"
+      },
+      {
+        "resource": "terraform.bootstrap.azurerm_role_assignment.deployment_state_blob_contributor",
+        "attribution": "Protected state storage account and platform-owned state resource group"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "module": "demo_boundary",
+      "source": "terraform/modules/demo-boundary",
+      "root": "terraform/",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Private, versioned synthetic evidence blobs only; no workflow-state or runtime-host storage.",
+      "networkExposure": "Private storage account; public network access disabled and storage firewall defaults to Deny.",
+      "costTags": "ownershipBoundaries.disposableDemo.costTags",
+      "resources": [
+        "module.demo_boundary.azurerm_resource_group.this",
+        "module.demo_boundary.azurerm_storage_account.evidence",
+        "module.demo_boundary.azurerm_storage_management_policy.evidence"
+      ]
+    },
+    {
+      "module": "observability",
+      "source": "terraform/modules/observability",
+      "root": "terraform/",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Synthetic application telemetry and diagnostic logs; not evidence content or workflow business state.",
+      "networkExposure": "Azure Monitor managed service endpoints; no application ingress or storage data-plane endpoint is created by this module.",
+      "costTags": "ownershipBoundaries.disposableDemo.costTags",
+      "resources": [
+        "module.observability.azurerm_log_analytics_workspace.this",
+        "module.observability.azurerm_application_insights.this"
+      ]
+    },
+    {
+      "module": "container_apps",
+      "source": "terraform/modules/container-apps",
+      "root": "terraform/",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Application runtime only. The runtime can read case-scoped evidence and call the explicitly assigned AI services; no runtime-host storage is provisioned.",
+      "networkExposure": "Container App has external ingress restricted to supplied CIDR ranges. Registry uses its Azure data plane with admin credentials disabled. Role assignments and the managed identity have no network endpoint.",
+      "costTags": "ownershipBoundaries.disposableDemo.costTags",
+      "resources": [
+        "module.container_apps.azurerm_container_registry.application",
+        "module.container_apps.azurerm_container_app_environment.this",
+        "module.container_apps.azurerm_container_app.this",
+        "module.container_apps.azurerm_user_assigned_identity.migration",
+        "module.container_apps.azurerm_role_assignment.runtime_evidence_reader",
+        "module.container_apps.azurerm_role_assignment.runtime_document_intelligence_user",
+        "module.container_apps.azurerm_role_assignment.runtime_azure_openai_user"
+      ]
+    },
+    {
+      "module": "sql",
+      "source": "terraform/modules/sql",
+      "root": "terraform/",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Authoritative workflow, business, and audit state for synthetic demo cases; schema migration is a separate identity boundary.",
+      "networkExposure": "Public Azure SQL endpoint with the provider's Azure-services firewall rule; authentication is Entra-only and the endpoint remains firewall-restricted.",
+      "costTags": "ownershipBoundaries.disposableDemo.costTags",
+      "resources": [
+        "module.sql.azurerm_mssql_server.this",
+        "module.sql.azurerm_mssql_database.this",
+        "module.sql.azurerm_mssql_firewall_rule.azure_services"
+      ]
+    },
+    {
+      "module": "document_intelligence",
+      "source": "terraform/modules/document-intelligence",
+      "root": "terraform/",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Bounded document extraction data plane for case-scoped synthetic evidence.",
+      "networkExposure": "Public service endpoint with explicit IP network ACLs and default action Deny; local authentication is disabled.",
+      "costTags": "ownershipBoundaries.disposableDemo.costTags",
+      "resources": [
+        "module.document_intelligence.azurerm_cognitive_account.this"
+      ]
+    },
+    {
+      "module": "ai",
+      "source": "terraform/modules/ai",
+      "root": "terraform/",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Governed Azure OpenAI extraction/classification data plane for bounded case-scoped processing; model output cannot choose policy or permissions.",
+      "networkExposure": "Public service endpoint with explicit IP network ACLs and default action Deny; Azure Services bypass is provider-configured and local authentication is disabled.",
+      "costTags": "ownershipBoundaries.disposableDemo.costTags",
+      "resources": [
+        "module.ai.azurerm_cognitive_account.this",
+        "module.ai.azurerm_cognitive_deployment.this"
+      ]
+    },
+    {
+      "module": "protected_state_bootstrap",
+      "source": "terraform/bootstrap",
+      "root": "terraform/bootstrap/",
+      "lifecycleOwner": "airlinedemo-platform",
+      "ownershipBoundary": "externallyOwnedRemoteState",
+      "dataBoundary": "Sensitive Terraform state and blob lease metadata only; no application evidence or workflow data.",
+      "networkExposure": "State storage has a private blob container and a Deny-by-default firewall limited to approved operator CIDRs. Entra authentication is required and shared keys are disabled.",
+      "costTags": "ownershipBoundaries.externallyOwnedRemoteState.costTags",
+      "resources": [
+        "terraform.bootstrap.azurerm_resource_group.state",
+        "terraform.bootstrap.azurerm_storage_account.state",
+        "terraform.bootstrap.azurerm_storage_container.state",
+        "terraform.bootstrap.azurerm_role_assignment.deployment_state_blob_contributor"
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "address": "module.demo_boundary.azurerm_resource_group.this",
+      "module": "demo_boundary",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Azure resource-group control-plane boundary for disposable demo resources.",
+      "networkExposure": "No data-plane endpoint.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["resource_group_id", "resource_group_name"]
+    },
+    {
+      "address": "module.demo_boundary.azurerm_storage_account.evidence",
+      "module": "demo_boundary",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Private, versioned synthetic evidence blobs; separate from runtime-host storage.",
+      "networkExposure": "Private; public network access disabled, shared access keys disabled, firewall default Deny.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["evidence_storage_account_id", "evidence_storage_account_name"]
+    },
+    {
+      "address": "module.demo_boundary.azurerm_storage_management_policy.evidence",
+      "module": "demo_boundary",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Lifecycle policy for evidence blob versions only.",
+      "networkExposure": "No data-plane endpoint; applies to the private evidence account.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": []
+    },
+    {
+      "address": "module.observability.azurerm_log_analytics_workspace.this",
+      "module": "observability",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Synthetic application telemetry and diagnostic logs.",
+      "networkExposure": "Azure Monitor managed endpoint; no public application ingress provisioned.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["log_analytics_workspace_id"]
+    },
+    {
+      "address": "module.observability.azurerm_application_insights.this",
+      "module": "observability",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Synthetic application telemetry correlated to the Log Analytics workspace.",
+      "networkExposure": "Azure Monitor managed endpoint; no application ingress provisioned.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["application_insights_id"]
+    },
+    {
+      "address": "module.container_apps.azurerm_container_registry.application",
+      "module": "container_apps",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Application image and registry metadata; no admin credentials.",
+      "networkExposure": "Azure Container Registry data plane; admin authentication is disabled. Network restrictions are governed by the registry service configuration, not by application ingress.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["container_app_registry_id"]
+    },
+    {
+      "address": "module.container_apps.azurerm_container_app_environment.this",
+      "module": "container_apps",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Container Apps hosting and managed environment metadata.",
+      "networkExposure": "Hosting environment for the externally restricted Container App; no separate application endpoint.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": []
+    },
+    {
+      "address": "module.container_apps.azurerm_container_app.this",
+      "module": "container_apps",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "ASP.NET Core application runtime; evidence access is through the separate private evidence account.",
+      "networkExposure": "External ingress enabled on the configured port and restricted by the supplied CIDR allow-list; scale-to-zero, one maximum replica.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["container_app_id", "container_app_runtime_principal_id"]
+    },
+    {
+      "address": "module.container_apps.azurerm_user_assigned_identity.migration",
+      "module": "container_apps",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Identity metadata only; used for versioned SQL migrations and not application runtime or deployment credentials.",
+      "networkExposure": "No network endpoint.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["migration_identity_id", "migration_identity_client_id", "migration_identity_principal_id"]
+    },
+    {
+      "address": "module.container_apps.azurerm_role_assignment.runtime_evidence_reader",
+      "module": "container_apps",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Permission metadata only; grants runtime read access to private evidence blobs.",
+      "networkExposure": "No network endpoint; exact scope is the evidence storage account.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": []
+    },
+    {
+      "address": "module.container_apps.azurerm_role_assignment.runtime_document_intelligence_user",
+      "module": "container_apps",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Permission metadata only; grants the runtime bounded Document Intelligence use role.",
+      "networkExposure": "No network endpoint; exact scope is the Document Intelligence account.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": []
+    },
+    {
+      "address": "module.container_apps.azurerm_role_assignment.runtime_azure_openai_user",
+      "module": "container_apps",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Permission metadata only; grants the runtime bounded Azure OpenAI use role.",
+      "networkExposure": "No network endpoint; exact scope is the Azure OpenAI account.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": []
+    },
+    {
+      "address": "module.sql.azurerm_mssql_server.this",
+      "module": "sql",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Azure SQL control plane and Entra-only connection boundary for synthetic workflow state.",
+      "networkExposure": "Public endpoint with Azure-services firewall rule; no SQL password is provisioned.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["sql_server_id", "sql_server_fully_qualified_domain_name"]
+    },
+    {
+      "address": "module.sql.azurerm_mssql_database.this",
+      "module": "sql",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Authoritative workflow, business, and audit state for synthetic demo cases.",
+      "networkExposure": "Reachable only through the SQL server's firewall and Entra authentication boundary.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["sql_database_id"]
+    },
+    {
+      "address": "module.sql.azurerm_mssql_firewall_rule.azure_services",
+      "module": "sql",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Firewall configuration metadata only.",
+      "networkExposure": "Allows Azure services through the SQL public endpoint; this is not a private endpoint.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": []
+    },
+    {
+      "address": "module.document_intelligence.azurerm_cognitive_account.this",
+      "module": "document_intelligence",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Bounded synthetic document extraction service.",
+      "networkExposure": "Public endpoint with IP ACL default Deny; local authentication disabled.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["document_intelligence_id", "document_intelligence_endpoint"]
+    },
+    {
+      "address": "module.ai.azurerm_cognitive_account.this",
+      "module": "ai",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "Governed synthetic extraction/classification model account.",
+      "networkExposure": "Public endpoint with IP ACL default Deny and Azure Services bypass; local authentication disabled.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["azure_openai_id", "azure_openai_endpoint"]
+    },
+    {
+      "address": "module.ai.azurerm_cognitive_deployment.this",
+      "module": "ai",
+      "lifecycleOwner": "airlinedemo-demo",
+      "ownershipBoundary": "disposableDemo",
+      "dataBoundary": "One explicitly selected, governed Azure OpenAI model deployment.",
+      "networkExposure": "Uses the parent Azure OpenAI account endpoint and its network ACL; no independent endpoint.",
+      "costTags": ["deployment", "environment", "owner", "cost_center", "managed_by"],
+      "nonSecretOutputs": ["azure_openai_deployment_id", "azure_openai_deployment_name"]
+    },
+    {
+      "address": "terraform.bootstrap.azurerm_resource_group.state",
+      "module": "protected_state_bootstrap",
+      "lifecycleOwner": "airlinedemo-platform",
+      "ownershipBoundary": "externallyOwnedRemoteState",
+      "dataBoundary": "Control-plane boundary for retained protected Terraform state.",
+      "networkExposure": "No data-plane endpoint.",
+      "costTags": ["owner", "cost_center", "managed_by", "purpose"],
+      "nonSecretOutputs": ["state_resource_group_name"]
+    },
+    {
+      "address": "terraform.bootstrap.azurerm_storage_account.state",
+      "module": "protected_state_bootstrap",
+      "lifecycleOwner": "airlinedemo-platform",
+      "ownershipBoundary": "externallyOwnedRemoteState",
+      "dataBoundary": "Sensitive Terraform state blobs and versions only.",
+      "networkExposure": "Public network flag remains enabled for the service, but the firewall defaults to Deny and permits only approved operator CIDRs; shared keys are disabled.",
+      "costTags": ["owner", "cost_center", "managed_by", "purpose"],
+      "nonSecretOutputs": ["state_storage_account_name"]
+    },
+    {
+      "address": "terraform.bootstrap.azurerm_storage_container.state",
+      "module": "protected_state_bootstrap",
+      "lifecycleOwner": "airlinedemo-platform",
+      "ownershipBoundary": "externallyOwnedRemoteState",
+      "dataBoundary": "Private Terraform state container; state is sensitive and never a workload output.",
+      "networkExposure": "Private blob container; access requires Entra authorization and the state account firewall.",
+      "costTags": ["owner", "cost_center", "managed_by", "purpose"],
+      "nonSecretOutputs": ["state_container_name", "state_container_resource_id"]
+    },
+    {
+      "address": "terraform.bootstrap.azurerm_role_assignment.deployment_state_blob_contributor",
+      "module": "protected_state_bootstrap",
+      "lifecycleOwner": "airlinedemo-platform",
+      "ownershipBoundary": "externallyOwnedRemoteState",
+      "dataBoundary": "Permission metadata only; container-scoped state read/write and lease access.",
+      "networkExposure": "No network endpoint; exact scope is the state blob container.",
+      "costTags": ["owner", "cost_center", "managed_by", "purpose"],
+      "nonSecretOutputs": []
+    }
+  ],
+  "nonSecretOutputPolicy": {
+    "published": "Resource IDs, names, public service endpoints, approved deployment names, and identity principal/client IDs needed by separately owned deployment or migration steps.",
+    "neverPublished": ["client secrets", "storage keys", "SAS tokens", "connection strings", "passwords", "Terraform state", "evaluator data"],
+    "runtimeHostStorageAccess": "Not provisioned by this root. Evidence access is private and separate: the Container App receives only Storage Blob Data Reader on the evidence storage account, and no runtime-host storage account or host-storage role is created."
+  },
+  "identityInventory": [
+    {
+      "name": "deployment",
+      "identityMappingRef": "identities.deploymentPrincipal",
+      "lifecycle": "Externally supplied Entra deployment principal.",
+      "minimumScope": "Protected state container plus the approved workload infrastructure scope required to create or update only this deployment.",
+      "assignments": [
+        {
+          "scope": "terraform/bootstrap/azurerm_storage_container.state",
+          "role": "Storage Blob Data Contributor",
+          "implementation": "terraform/bootstrap/main.tf",
+          "ownership": "terraform-bootstrap-managed",
+          "approval": "Platform-owner approval; deployment principal object ID is supplied privately."
+        },
+        {
+          "scope": "Approved workload infrastructure scope",
+          "role": "Minimum resource-management permissions for this Terraform root",
+          "implementation": "Externally supplied deployment authorization; not a workload role assignment",
+          "ownership": "externally-supplied",
+          "approval": "Tenant/subscription administrator approval required; never reused by runtime or migration."
+        }
+      ],
+      "prohibitedReuse": ["runtime", "migration", "application data plane"]
+    },
+    {
+      "name": "runtime",
+      "identityMappingRef": "identities.containerAppRuntime",
+      "lifecycle": "System-assigned identity created with the Container App and removed with it.",
+      "minimumScope": "Exactly three resource-scoped data-plane roles: evidence account reader, Document Intelligence user, and Azure OpenAI user.",
+      "assignments": [
+        {
+          "scope": "output.evidence_storage_account_id",
+          "role": "Storage Blob Data Reader",
+          "implementation": "terraform/modules/container-apps/main.tf:runtime_evidence_reader",
+          "ownership": "terraform-managed",
+          "approval": "Deployment principal must be authorized to create the role assignment; no tenant-wide runtime grant."
+        },
+        {
+          "scope": "output.document_intelligence_id",
+          "role": "Cognitive Services User",
+          "implementation": "terraform/modules/container-apps/main.tf:runtime_document_intelligence_user",
+          "ownership": "terraform-managed",
+          "approval": "Deployment principal must be authorized to create the role assignment; no tenant-wide runtime grant."
+        },
+        {
+          "scope": "output.azure_openai_id",
+          "role": "Cognitive Services OpenAI User",
+          "implementation": "terraform/modules/container-apps/main.tf:runtime_azure_openai_user",
+          "ownership": "terraform-managed",
+          "approval": "Deployment principal must be authorized to create the role assignment; no tenant-wide runtime grant."
+        }
+      ],
+      "prohibitedReuse": ["deployment", "terraform-state", "migration", "Owner", "Contributor", "subscription scope"]
+    },
+    {
+      "name": "migration",
+      "identityMappingRef": "identities.migrationIdentity",
+      "lifecycle": "Terraform-managed user-assigned identity retained with the disposable workload until approved teardown.",
+      "minimumScope": "Only the workload SQL database, for versioned schema migration through the separately supplied SQL Entra administrator path.",
+      "assignments": [
+        {
+          "scope": "output.sql_database_id",
+          "role": "versioned-schema-migration",
+          "implementation": "deployment/sql-migration-procedure.md and the SQL Entra administrator path",
+          "ownership": "externally-supplied-sql-entra-administrator",
+          "approval": "Tenant-level Entra/SQL administrator approval required; not granted by the workload root and not a deployment credential."
+        }
+      ],
+      "prohibitedReuse": ["deployment", "terraform-state", "runtime", "application data plane"]
+    },
+    {
+      "name": "terraform-state",
+      "identityMappingRef": "identities.stateBootstrapAccess",
+      "lifecycle": "Independent protected-state access path; state resources outlive disposable demo resources.",
+      "minimumScope": "Only the private Terraform state blob container, using Entra-authenticated backend access and native blob lease locking.",
+      "assignments": [
+        {
+          "scope": "terraform/bootstrap/azurerm_storage_container.state",
+          "role": "Storage Blob Data Contributor",
+          "implementation": "terraform/bootstrap/main.tf:deployment_state_blob_contributor",
+          "ownership": "terraform-bootstrap-managed",
+          "approval": "Protected-state/platform-owner approval; bootstrap is outside the deployment root."
+        }
+      ],
+      "prohibitedReuse": ["runtime", "migration", "application evidence access"]
+    }
+  ],
+  "roleAssignmentImplementation": {
+    "protectedStateWork": "terraform/bootstrap/main.tf supplies the container-scoped Storage Blob Data Contributor assignment for the externally supplied deployment principal.",
+    "identityOperatingModelWork": "terraform/modules/container-apps/main.tf supplies the three exact resource-scoped runtime assignments and distinct runtime/migration identities.",
+    "migrationPermission": "The SQL migration assignment is intentionally supplied through the separately owned SQL Entra administrator path documented in deployment/sql-migration-procedure.md; this root does not grant it.",
+    "canonicalPermissionDetails": "deployment/identity-mapping.json"
+  }
+}
