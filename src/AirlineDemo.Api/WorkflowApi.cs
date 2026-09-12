@@ -129,6 +129,25 @@ public static class WorkflowApi
             await service.CompleteReviewTaskAsync(
                 id, taskId, httpContext, cancellationToken));
 
+        app.MapPost("/api/dispatch", async (
+            DispatchCommand? command,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.DispatchAsync(command, httpContext, cancellationToken));
+
+        app.MapPost("/api/mock-inbox/dispatch", async (
+            DispatchCommand? command,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.DispatchAsync(command, httpContext, cancellationToken));
+
+        app.MapGet("/api/mock-inbox", (
+            HttpContext httpContext,
+            WorkflowService service) =>
+            service.GetMockInbox(httpContext));
+
         return app;
     }
 }
@@ -461,6 +480,18 @@ internal sealed class WorkflowService
                     basis.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var mockInboxKeys = state.MockInbox
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var deliveryAttemptKeys = state.DeliveryAttempts
+                .Where(entry => state.EvidenceRequests.TryGetValue(
+                    entry.Value.RequestId, out var request) &&
+                    state.EvidenceBases.TryGetValue(
+                        request.BasisId, out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
             var runOperationIds = state.Operations
                 .Where(entry => entry.Value.Status.RunId == runId)
                 .Select(entry => entry.Key)
@@ -509,6 +540,8 @@ internal sealed class WorkflowService
                 policyDecisionKeys.Length +
                 evidenceRequestKeys.Length +
                 dispatchOutboxKeys.Length +
+                mockInboxKeys.Length +
+                deliveryAttemptKeys.Length +
                 reviewDecisionKeys.Length +
                 findingDispositionKeys.Length +
                 reviewTaskKeys.Length +
@@ -571,6 +604,16 @@ internal sealed class WorkflowService
             foreach (var key in dispatchOutboxKeys)
             {
                 state.DispatchOutbox.Remove(key);
+            }
+
+            foreach (var key in mockInboxKeys)
+            {
+                state.MockInbox.Remove(key);
+            }
+
+            foreach (var key in deliveryAttemptKeys)
+            {
+                state.DeliveryAttempts.Remove(key);
             }
 
             foreach (var key in reviewDecisionKeys)
@@ -1448,6 +1491,249 @@ internal sealed class WorkflowService
             : Results.Ok(summary));
     }
 
+    public IResult GetMockInbox(HttpContext httpContext)
+    {
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        if (caller is null)
+        {
+            return Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", NewCorrelationId()), statusCode: 401);
+        }
+
+        var items = stateStore.Read(state => state.MockInbox.Values
+            .Where(item => caller.Matches(item.Context))
+            .OrderBy(item => item.DeliveredAt)
+            .ToArray());
+        return Results.Ok(items);
+    }
+
+    public Task<IResult> DispatchAsync(
+        DispatchCommand? command,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = NewCorrelationId();
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        if (caller is null)
+        {
+            return Task.FromResult<IResult>(Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", correlationId), statusCode: 401));
+        }
+
+        var commandProvided = command is not null;
+        command ??= new DispatchCommand();
+        if (command.RequestId is not null && !IsValidId(command.RequestId) ||
+            command.Acknowledgement is not null &&
+            command.Acknowledgement is not
+                ("acknowledged" or "indeterminate" or "absent" or "none") ||
+            command.LeaseDurationSeconds is < 1 or > 300)
+        {
+            return Task.FromResult<IResult>(Results.Json(
+                new SafeError("INVALID_PAYLOAD", correlationId), statusCode: 400));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var leaseDuration = TimeSpan.FromSeconds(command.LeaseDurationSeconds ?? 60);
+        string? intentId = null;
+        string? requestId = null;
+        string? attemptId = null;
+        string? leaseId = null;
+        SafeError? failure = null;
+        var leaseExpiresAt = now.Add(leaseDuration);
+
+        stateStore.Update(state =>
+        {
+            var candidate = state.DispatchOutbox.Values
+                .Where(intent => command.RequestId is null || intent.RequestId == command.RequestId)
+                .Where(intent =>
+                    intent.Status is "pending" or "delivery_unknown" ||
+                    intent.Status == "leased" &&
+                    (intent.LeaseExpiresAt is null || intent.LeaseExpiresAt <= now))
+                .Select(intent => state.EvidenceRequests.TryGetValue(intent.RequestId, out var request)
+                    ? (Intent: intent, Request: request)
+                    : ((DispatchOutboxIntent Intent, EvidenceRequest Request)?)null)
+                .Where(candidate => candidate is not null)
+                .Select(candidate => candidate!.Value)
+                .Where(candidate =>
+                    IsRequestInCallerScope(state, candidate.Request, caller))
+                .OrderBy(candidate => candidate.Intent.CreatedAt)
+                .FirstOrDefault();
+
+            if (candidate == default)
+            {
+                return;
+            }
+
+            intentId = candidate.Intent.IntentId;
+            requestId = candidate.Request.RequestId;
+            leaseId = NewId("LEASE");
+            attemptId = NewId("DELIVERY");
+            state.DispatchOutbox[intentId] = candidate.Intent with
+            {
+                Status = "leased",
+                LeaseId = leaseId,
+                LeaseExpiresAt = leaseExpiresAt
+            };
+            state.DeliveryAttempts[attemptId] = new DeliveryAttempt(
+                attemptId,
+                intentId,
+                requestId,
+                leaseId,
+                "leased",
+                now,
+                correlationId);
+        });
+
+        if (intentId is null || requestId is null || attemptId is null || leaseId is null)
+        {
+            return Task.FromResult<IResult>(Results.Ok(
+                new DispatchResult("no_work", Reason: command.RequestId is null
+                    ? "No eligible dispatch intent is available."
+                    : "The requested dispatch intent is not eligible.")));
+        }
+
+        var acknowledgement = commandProvided
+            ? command.Acknowledgement ?? "absent"
+            : "acknowledged";
+        DispatchResult? result = null;
+        stateStore.Update(state =>
+        {
+            if (!state.DispatchOutbox.TryGetValue(intentId, out var intent) ||
+                !state.EvidenceRequests.TryGetValue(requestId, out var request) ||
+                intent.LeaseId != leaseId ||
+                !IsRequestInCallerScope(state, request, caller))
+            {
+                failure = new SafeError("DISPATCH_LEASE_LOST", correlationId);
+                return;
+            }
+
+            var existingItem = state.MockInbox.Values
+                .SingleOrDefault(item => item.RequestId == request.RequestId);
+            var isCurrentAndEligible = IsDispatchEligible(
+                state, request, automaticRequestPolicy);
+            if (!isCurrentAndEligible && existingItem is null)
+            {
+                var obsoleteReason = DispatchObsoleteReason(state, request);
+                if (request.Status == "pending")
+                {
+                    state.EvidenceRequests[request.RequestId] = request with
+                    {
+                        Status = "cancelled",
+                        ClosureReason = $"obsolete:{obsoleteReason}"
+                    };
+                    request = state.EvidenceRequests[request.RequestId];
+                }
+                state.DispatchOutbox[intent.IntentId] = intent with
+                {
+                    Status = "obsolete",
+                    LeaseId = null,
+                    LeaseExpiresAt = null
+                };
+                state.DeliveryAttempts[attemptId] = state.DeliveryAttempts[attemptId] with
+                {
+                    Status = "obsolete",
+                    Reason = obsoleteReason
+                };
+                AddDispatchAudit(
+                    state,
+                    request,
+                    "dispatch.obsolete",
+                    [request.RequestId, intent.IntentId, attemptId],
+                    correlationId,
+                    obsoleteReason);
+                result = new DispatchResult(
+                    "obsolete",
+                    request.RequestId,
+                    intent.IntentId,
+                    attemptId,
+                    Reason: obsoleteReason);
+                return;
+            }
+
+            var item = existingItem ?? new MockInboxItem(
+                NewId("INBOX"),
+                request.RequestId,
+                request.RequestKey,
+                RequestContext(state, request),
+                request.RecipientRef,
+                request.TemplateVersion,
+                request.Message,
+                now);
+            if (existingItem is null)
+            {
+                state.MockInbox[item.ItemId] = item;
+            }
+
+            if (acknowledgement == "acknowledged")
+            {
+                state.EvidenceRequests[request.RequestId] = request with
+                {
+                    Status = "delivered",
+                    ClosureReason = null
+                };
+                state.DispatchOutbox[intent.IntentId] = intent with
+                {
+                    Status = "delivered",
+                    LeaseId = null,
+                    LeaseExpiresAt = null
+                };
+                state.DeliveryAttempts[attemptId] = state.DeliveryAttempts[attemptId] with
+                {
+                    Status = "acknowledged"
+                };
+                AddDispatchAudit(
+                    state,
+                    request,
+                    "dispatch.delivered",
+                    [request.RequestId, intent.IntentId, item.ItemId],
+                    correlationId);
+                result = new DispatchResult(
+                    "delivered",
+                    request.RequestId,
+                    intent.IntentId,
+                    attemptId,
+                    item.ItemId);
+            }
+            else
+            {
+                state.EvidenceRequests[request.RequestId] = request with
+                {
+                    Status = "delivery_unknown",
+                    ClosureReason = "delivery_acknowledgement_unavailable"
+                };
+                state.DispatchOutbox[intent.IntentId] = intent with
+                {
+                    Status = "delivery_unknown",
+                    LeaseId = null,
+                    LeaseExpiresAt = null
+                };
+                state.DeliveryAttempts[attemptId] = state.DeliveryAttempts[attemptId] with
+                {
+                    Status = "delivery_unknown",
+                    Reason = "delivery_acknowledgement_unavailable"
+                };
+                AddDispatchAudit(
+                    state,
+                    request,
+                    "dispatch.delivery_unknown",
+                    [request.RequestId, intent.IntentId, attemptId],
+                    correlationId,
+                    "delivery_acknowledgement_unavailable");
+                result = new DispatchResult(
+                    "delivery_unknown",
+                    request.RequestId,
+                    intent.IntentId,
+                    attemptId,
+                    item.ItemId,
+                    "delivery_acknowledgement_unavailable");
+            }
+        });
+
+        return Task.FromResult<IResult>(failure is null
+            ? Results.Ok(result!)
+            : Results.Json(failure, statusCode: 409));
+    }
+
     public Task<IResult> SubmitReviewAsync(
         string caseId,
         ReviewCommand? command,
@@ -1893,6 +2179,137 @@ internal sealed class WorkflowService
                     out var disposition) &&
                 disposition.Disposition == "accepted");
         return allAccepted ? "accepted" : "ready_for_acceptance";
+    }
+
+    private static bool IsRequestInCallerScope(
+        PersistedState state,
+        EvidenceRequest request,
+        CallerScope caller) =>
+        state.EvidenceBases.TryGetValue(request.BasisId, out var basis) &&
+        caller.Matches(basis.Context);
+
+    private static CaseContext RequestContext(
+        PersistedState state,
+        EvidenceRequest request) =>
+        state.EvidenceBases.TryGetValue(request.BasisId, out var basis)
+            ? basis.Context
+            : throw new InvalidDataException("The evidence request basis is missing.");
+
+    private static bool IsDispatchEligible(
+        PersistedState state,
+        EvidenceRequest request,
+        AutomaticRequestPolicyConfiguration policy)
+    {
+        if (request.Status is not ("pending" or "delivery_unknown") ||
+            !state.EvidenceBases.TryGetValue(request.BasisId, out var basis) ||
+            !state.Cases.TryGetValue(CaseKey(basis.Context), out var persistedCase) ||
+            persistedCase.Status is "closed" or "cancelled" or "accepted" ||
+            !state.Findings.TryGetValue(FindingKeyForRequest(request), out var finding) ||
+            finding.BasisId != basis.BasisId ||
+            finding.Assessment != "missing" ||
+            finding.EvidenceRefs.Count != 0 ||
+            !StringComparer.Ordinal.Equals(finding.RequirementId, request.RequirementId) ||
+            !state.PolicyDecisions.Values.Any(decision =>
+                decision.BasisId == request.BasisId &&
+                decision.FindingId == request.FindingId &&
+                decision.Outcome == "auto_request") ||
+            !StringComparer.Ordinal.Equals(request.RecipientRef, policy.RecipientRef) ||
+            !policy.ApprovedRecipientRefs.Contains(request.RecipientRef) ||
+            !policy.ApprovedTemplateVersions.Contains(request.TemplateVersion) ||
+            !IsCurrentBasis(state, basis) ||
+            !IsCompleteBasis(state, basis))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsCurrentBasis(PersistedState state, EvidenceBasis basis)
+    {
+        var current = state.EvidenceBases.Values
+            .Where(candidate => ScopeMatches(candidate.Context, basis.Context))
+            .OrderByDescending(candidate => candidate.CaseRevision)
+            .ThenByDescending(candidate => candidate.CreatedAt)
+            .FirstOrDefault();
+        return current is not null &&
+            StringComparer.Ordinal.Equals(current.BasisId, basis.BasisId);
+    }
+
+    private static bool IsCompleteBasis(PersistedState state, EvidenceBasis basis) =>
+        state.Packages.Values.Any(package =>
+            ScopeMatches(package.Context, basis.Context) &&
+            package.ProcessingStatus == "complete") &&
+        basis.DocumentInventory.All(document =>
+        {
+            var key = DocumentKey(basis.Context, document.DocumentId, document.Version);
+            return state.ExtractionRecords.TryGetValue(key, out var extraction) &&
+                ScopeMatches(extraction.Context, basis.Context) &&
+                extraction.ProcessingState == "complete" &&
+                extraction.PageInventory.Count > 0 &&
+                StringComparer.OrdinalIgnoreCase.Equals(extraction.Sha256, document.Sha256);
+        });
+
+    private static string DispatchObsoleteReason(
+        PersistedState state,
+        EvidenceRequest request)
+    {
+        if (request.Status is not ("pending" or "delivery_unknown"))
+        {
+            return $"request_status_{request.Status}";
+        }
+
+        if (!state.EvidenceBases.TryGetValue(request.BasisId, out var basis))
+        {
+            return "basis_missing";
+        }
+
+        if (!IsCurrentBasis(state, basis))
+        {
+            return "basis_superseded";
+        }
+
+        if (!state.PolicyDecisions.Values.Any(decision =>
+                decision.BasisId == request.BasisId &&
+                decision.FindingId == request.FindingId &&
+                decision.Outcome == "auto_request"))
+        {
+            return "policy_not_eligible";
+        }
+
+        if (!IsCompleteBasis(state, basis))
+        {
+            return "processing_incomplete";
+        }
+
+        return "request_not_eligible";
+    }
+
+    private static string FindingKeyForRequest(EvidenceRequest request) =>
+        $"{request.BasisId}:{request.FindingId}";
+
+    private static void AddDispatchAudit(
+        PersistedState state,
+        EvidenceRequest request,
+        string action,
+        IReadOnlyList<string> affectedIds,
+        string correlationId,
+        string? reason = null)
+    {
+        var context = RequestContext(state, request);
+        var auditId = NewId("AUDIT");
+        (state.AuditEntries ??= new(StringComparer.Ordinal)).Add(
+            auditId,
+            new AuditEntry(
+                auditId,
+                context,
+                "dispatcher",
+                "mock-inbox-dispatcher",
+                action,
+                affectedIds,
+                request.BasisId,
+                DateTimeOffset.UtcNow,
+                correlationId));
     }
 
     private static string CaseKey(CaseContext context) =>

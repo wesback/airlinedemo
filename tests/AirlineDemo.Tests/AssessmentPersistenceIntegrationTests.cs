@@ -557,6 +557,208 @@ public sealed class AssessmentPersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task EligibleDispatch_LeasesRequestCreatesScopedInboxItemAndRecordsDelivery()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        var dispatched = await server.Client.PostAsync("/api/dispatch", null);
+        Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
+        var result = await dispatched.Content.ReadFromJsonAsync<DispatchResult>();
+        Assert.NotNull(result);
+        Assert.Equal("delivered", result!.Status);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var requestState = state.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value;
+        var requestId = requestState.GetProperty("requestId").GetString();
+        Assert.Equal(result.RequestId, requestId);
+        Assert.Equal("delivered", requestState.GetProperty("status").GetString());
+        var inboxItem = state.RootElement.GetProperty("mockInbox")
+            .EnumerateObject().Single().Value;
+        Assert.Equal(requestId, inboxItem.GetProperty("requestId").GetString());
+        Assert.Equal(requestState.GetProperty("message").GetString(),
+            inboxItem.GetProperty("message").GetString());
+        Assert.Equal(requestState.GetProperty("recipientRef").GetString(),
+            inboxItem.GetProperty("recipientRef").GetString());
+        Assert.Equal(request.Package.RunId,
+            inboxItem.GetProperty("context").GetProperty("runId").GetString());
+        Assert.Equal(request.Package.AirlineId,
+            inboxItem.GetProperty("context").GetProperty("airlineId").GetString());
+        Assert.Contains(
+            state.RootElement.GetProperty("auditEntries").EnumerateObject(),
+            entry => entry.Value.GetProperty("action").GetString() == "dispatch.delivered" &&
+                entry.Value.GetProperty("affectedIds").EnumerateArray()
+                    .Any(id => id.GetString() == requestId));
+        Assert.Equal("delivered",
+            state.RootElement.GetProperty("dispatchOutbox").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+
+        var inboxResponse = await server.Client.GetAsync("/api/mock-inbox");
+        Assert.Equal(HttpStatusCode.OK, inboxResponse.StatusCode);
+        var scopedInbox = await inboxResponse.Content.ReadFromJsonAsync<MockInboxItem[]>();
+        Assert.NotNull(scopedInbox);
+        Assert.Single(scopedInbox!);
+        Assert.Equal(requestId, scopedInbox[0].RequestId);
+        using var outsideScope = new HttpClient { BaseAddress = server.BaseAddress };
+        outsideScope.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue(
+                "Bearer",
+                "run=RUN-0001;airline=OTHER-AIRLINE;aircraft=MOCK-AC-001;lease=LEASE-0001");
+        var outsideInbox = await outsideScope.GetFromJsonAsync<MockInboxItem[]>(
+            "/api/mock-inbox");
+        Assert.NotNull(outsideInbox);
+        Assert.Empty(outsideInbox!);
+    }
+
+    [Fact]
+    public async Task ConcurrentLeaseExpiryAndAcknowledgedRetry_DoNotDuplicateMockInboxDelivery()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        var responses = await Task.WhenAll(
+            server.Client.PostAsync("/api/dispatch", null),
+            server.Client.PostAsync("/api/dispatch", null));
+        Assert.Contains(responses, response => response.StatusCode == HttpStatusCode.OK);
+
+        var stateNode = JsonNode.Parse(await File.ReadAllTextAsync(fixture.StatePath))!.AsObject();
+        var requestEntry = stateNode["evidenceRequests"]!.AsObject().Single();
+        requestEntry.Value!["status"] = "pending";
+        var intentEntry = stateNode["dispatchOutbox"]!.AsObject().Single();
+        intentEntry.Value!["status"] = "leased";
+        intentEntry.Value!["leaseExpiresAt"] = "2000-01-01T00:00:00Z";
+        await File.WriteAllTextAsync(fixture.StatePath, stateNode.ToJsonString());
+
+        var retry = await server.Client.PostAsync("/api/dispatch", null);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(state.RootElement.GetProperty("mockInbox").EnumerateObject());
+        Assert.Equal("delivered",
+            state.RootElement.GetProperty("evidenceRequests").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        Assert.Equal(1,
+            state.RootElement.GetProperty("mockInbox").EnumerateObject()
+                .Count(item => item.Value.GetProperty("requestId").GetString() ==
+                    requestEntry.Value!["requestId"]!.GetValue<string>()));
+    }
+
+    [Theory]
+    [InlineData("closed")]
+    [InlineData("cancelled")]
+    [InlineData("superseded")]
+    [InlineData("no-longer-eligible")]
+    public async Task ObsoleteDispatchAction_IsNotDeliveredAndIsAudited(string obsoleteCase)
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        var stateNode = JsonNode.Parse(await File.ReadAllTextAsync(fixture.StatePath))!.AsObject();
+        var requestEntry = stateNode["evidenceRequests"]!.AsObject().Single();
+        if (obsoleteCase == "no-longer-eligible")
+        {
+            var decision = stateNode["policyDecisions"]!.AsObject()
+                .Single(entry => entry.Value!["outcome"]!.GetValue<string>() == "auto_request");
+            decision.Value!["outcome"] = "no_action";
+        }
+        else
+        {
+            requestEntry.Value!["status"] = obsoleteCase;
+        }
+        await File.WriteAllTextAsync(fixture.StatePath, stateNode.ToJsonString());
+        await server.DisposeAsync();
+        await using var restarted = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+
+        var dispatched = await restarted.Client.PostAsync("/api/dispatch", null);
+        Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
+        var result = await dispatched.Content.ReadFromJsonAsync<DispatchResult>();
+        Assert.NotNull(result);
+        Assert.Equal("obsolete", result!.Status);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Empty(state.RootElement.GetProperty("mockInbox").EnumerateObject());
+        Assert.Equal("obsolete",
+            state.RootElement.GetProperty("dispatchOutbox").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        Assert.Contains(
+            state.RootElement.GetProperty("auditEntries").EnumerateObject(),
+            entry => entry.Value.GetProperty("action").GetString() == "dispatch.obsolete");
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("indeterminate")]
+    public async Task MissingOrIndeterminateDeliveryAcknowledgement_IsUnknownAndAuditedWithoutSatisfaction(
+        string acknowledgement)
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        var dispatched = await server.Client.PostAsJsonAsync(
+            "/api/dispatch",
+            new DispatchCommand(Acknowledgement: acknowledgement));
+        Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
+        var result = await dispatched.Content.ReadFromJsonAsync<DispatchResult>();
+        Assert.NotNull(result);
+        Assert.Equal("delivery_unknown", result!.Status);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var requestState = state.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("delivery_unknown", requestState.GetProperty("status").GetString());
+        Assert.NotEqual("satisfied", requestState.GetProperty("status").GetString());
+        Assert.NotEqual("cancelled", requestState.GetProperty("status").GetString());
+        Assert.Single(state.RootElement.GetProperty("deliveryAttempts").EnumerateObject());
+        Assert.Equal("delivery_unknown",
+            state.RootElement.GetProperty("deliveryAttempts").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        Assert.Contains(
+            state.RootElement.GetProperty("auditEntries").EnumerateObject(),
+            entry => entry.Value.GetProperty("action").GetString() ==
+                "dispatch.delivery_unknown");
+        Assert.DoesNotContain(
+            state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
+            entry => entry.Value.GetProperty("outcome").GetString() == "accepted");
+    }
+
+    [Fact]
     public async Task IncompleteProcessing_PersistsNonAutomaticDecisionWithoutRequestOrDispatch()
     {
         using var fixture = new BaselineFixture();

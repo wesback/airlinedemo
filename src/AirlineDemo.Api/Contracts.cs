@@ -227,7 +227,42 @@ public sealed record DispatchOutboxIntent(
     string RequestId,
     string RequestKey,
     string Status,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? LeaseId = null,
+    DateTimeOffset? LeaseExpiresAt = null);
+
+public sealed record DispatchCommand(
+    string? RequestId = null,
+    string? Acknowledgement = null,
+    int? LeaseDurationSeconds = null);
+
+public sealed record DispatchResult(
+    string Status,
+    string? RequestId = null,
+    string? IntentId = null,
+    string? AttemptId = null,
+    string? InboxItemId = null,
+    string? Reason = null);
+
+public sealed record MockInboxItem(
+    string ItemId,
+    string RequestId,
+    string RequestKey,
+    CaseContext Context,
+    string RecipientRef,
+    string TemplateVersion,
+    string Message,
+    DateTimeOffset DeliveredAt);
+
+public sealed record DeliveryAttempt(
+    string AttemptId,
+    string IntentId,
+    string RequestId,
+    string LeaseId,
+    string Status,
+    DateTimeOffset AttemptedAt,
+    string CorrelationId,
+    string? Reason = null);
 
 public sealed record AutomaticRequestPolicyConfiguration(
     string RecipientRef,
@@ -339,6 +374,8 @@ internal sealed class PersistedState
     public Dictionary<string, PolicyDecision> PolicyDecisions { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceRequest> EvidenceRequests { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, DispatchOutboxIntent> DispatchOutbox { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, MockInboxItem> MockInbox { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, DeliveryAttempt> DeliveryAttempts { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Dictionary<string, ReviewDecision>? ReviewDecisions { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

@@ -26,6 +26,9 @@
     },
     {
       "name": "Runs"
+    },
+    {
+      "name": "Mock inbox"
     }
   ],
   "paths": {
@@ -284,6 +287,90 @@
     },
     "/packages/{id}/retry": {
       "$ref": "#/paths/~1operations~1{id}~1retry"
+    },
+    "/dispatch": {
+      "post": {
+        "tags": [
+          "Mock inbox"
+        ],
+        "operationId": "dispatchEvidenceRequest",
+        "summary": "Lease and deliver one eligible request to the scoped mock inbox",
+        "description": "The dispatcher claims one transactional outbox intent with a bounded lease, rechecks current policy state, and deduplicates delivery by request ID. This endpoint never communicates with a real partner.",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "workflow.write"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The delivery result, including no-work, obsolete, delivered, or delivery-unknown outcomes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidPayload"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          },
+          "409": {
+            "$ref": "#/components/responses/InvalidPayload"
+          }
+        }
+      }
+    },
+    "/mock-inbox": {
+      "get": {
+        "tags": [
+          "Mock inbox"
+        ],
+        "operationId": "getMockInbox",
+        "summary": "List delivered requests in the authenticated mock-partner scope",
+        "security": [
+          {
+            "WorkflowBearer": []
+          }
+        ],
+        "x-required-scopes": [
+          "workflow.read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped mock-inbox items.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MockInboxItem"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationRequired"
+          }
+        }
+      }
     },
     "/cases/{id}": {
       "get": {
@@ -709,6 +796,108 @@
       },
       "EvidencePreview": {
         "$ref": "workflow.schema.json#/$defs/EvidencePreview"
+      },
+      "DispatchCommand": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "acknowledgement": {
+            "type": "string",
+            "enum": [
+              "acknowledged",
+              "indeterminate",
+              "absent",
+              "none"
+            ]
+          },
+          "leaseDurationSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          }
+        },
+        "additionalProperties": false
+      },
+      "DispatchResult": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "no_work",
+              "obsolete",
+              "delivered",
+              "delivery_unknown"
+            ]
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "intentId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "attemptId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "inboxItemId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MockInboxItem": {
+        "type": "object",
+        "required": [
+          "itemId",
+          "requestId",
+          "requestKey",
+          "context",
+          "recipientRef",
+          "templateVersion",
+          "message",
+          "deliveredAt"
+        ],
+        "properties": {
+          "itemId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "requestKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "$ref": "#/components/schemas/CaseContext"
+          },
+          "recipientRef": {
+            "type": "string",
+            "minLength": 1
+          },
+          "templateVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "deliveredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          }
+        },
+        "additionalProperties": false
       },
       "ReviewCommand": {
         "$ref": "workflow.schema.json#/$defs/ReviewCommand"
