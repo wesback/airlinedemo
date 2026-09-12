@@ -608,6 +608,211 @@
           }
         }
       },
+      "/cases/{id}/review-tasks": {
+        "get": {
+          "tags": [
+            "Cases"
+          ],
+          "operationId": "getReviewTasks",
+          "summary": "List scoped review tasks",
+          "security": [
+            {
+              "WorkflowBearer": []
+            }
+          ],
+          "x-required-scopes": [
+            "case.review"
+          ],
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/ResourceId"
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Review tasks for the authorised case.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ReviewTask"
+                    }
+                  }
+                }
+              }
+            },
+            "401": {
+              "$ref": "#/components/responses/AuthenticationRequired"
+            },
+            "404": {
+              "$ref": "#/components/responses/CaseNotFound"
+            }
+          }
+        }
+      },
+      "/cases/{id}/review-tasks/derive": {
+        "post": {
+          "tags": [
+            "Cases"
+          ],
+          "operationId": "deriveReviewTasks",
+          "summary": "Derive idempotent internal review tasks for the current basis",
+          "security": [
+            {
+              "WorkflowBearer": []
+            }
+          ],
+          "x-required-scopes": [
+            "case.review"
+          ],
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/ResourceId"
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Current scoped review tasks.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ReviewTask"
+                    }
+                  }
+                }
+              }
+            },
+            "401": {
+              "$ref": "#/components/responses/AuthenticationRequired"
+            },
+            "404": {
+              "$ref": "#/components/responses/CaseNotFound"
+            }
+          }
+        }
+      },
+      "/cases/{id}/review-tasks/{taskId}": {
+        "get": {
+          "tags": [
+            "Cases"
+          ],
+          "operationId": "getReviewTask",
+          "summary": "Retrieve a scoped review task",
+          "security": [
+            {
+              "WorkflowBearer": []
+            }
+          ],
+          "x-required-scopes": [
+            "case.review"
+          ],
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/ResourceId"
+            },
+            {
+              "name": "taskId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "$ref": "#/components/schemas/Id"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "The requested scoped review task.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReviewTask"
+                  }
+                }
+              }
+            },
+            "401": {
+              "$ref": "#/components/responses/AuthenticationRequired"
+            },
+            "404": {
+              "$ref": "#/components/responses/CaseNotFound"
+            }
+          }
+        },
+        "post": {
+          "tags": [
+            "Cases"
+          ],
+          "operationId": "assignReviewTask",
+          "summary": "Assign an open scoped review task",
+          "security": [
+            {
+              "WorkflowBearer": []
+            }
+          ],
+          "x-required-scopes": [
+            "case.review"
+          ],
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/ResourceId"
+            },
+            {
+              "name": "taskId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "$ref": "#/components/schemas/Id"
+              }
+            },
+            {
+              "name": "If-Match",
+              "in": "header",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "pattern": "^\\\"[1-9][0-9]*\\\"$"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskAssignment"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "The assigned review task.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ReviewTask"
+                  }
+                }
+              }
+            },
+            "400": {
+              "$ref": "#/components/responses/InvalidPayload"
+            },
+            "401": {
+              "$ref": "#/components/responses/AuthenticationRequired"
+            },
+            "404": {
+              "$ref": "#/components/responses/CaseNotFound"
+            },
+            "412": {
+              "$ref": "#/components/responses/StalePrecondition"
+            }
+          }
+        }
+      },
       "/cases/{id}/review-tasks/{taskId}/complete": {
         "post": {
           "tags": [
@@ -962,6 +1167,12 @@
       },
       "ReviewTask": {
         "$ref": "workflow.schema.json#/$defs/ReviewTask"
+      },
+      "ReviewTaskAssignment": {
+        "$ref": "workflow.schema.json#/$defs/ReviewTaskAssignment"
+      },
+      "EvidenceRequest": {
+        "$ref": "workflow.schema.json#/$defs/EvidenceRequest"
       },
       "AuditEntry": {
         "$ref": "workflow.schema.json#/$defs/AuditEntry"

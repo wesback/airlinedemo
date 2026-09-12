@@ -25,6 +25,8 @@ public sealed class WorkflowContractTests
         "ReviewCommand",
         "ReviewDecision",
         "ReviewTask",
+        "ReviewTaskAssignment",
+        "EvidenceRequest",
         "AuditEntry",
         "InvestigationResult",
         "InvestigationOutcome"
@@ -258,7 +260,9 @@ public sealed class WorkflowContractTests
                   "leaseId": "LEASE-0001",
                   "caseRevision": 1,
                   "status": "awaiting_review",
-                  "packageProcessing": []
+                  "packageProcessing": [],
+                  "openReviewTasks": [],
+                  "activeEvidenceRequests": []
                 }
                 """),
             ("EvidencePreview", """

@@ -537,6 +537,83 @@
       },
       "additionalProperties": false
     },
+    "ReviewTaskAssignment": {
+      "type": "object",
+      "required": [
+        "reviewerSubject"
+      ],
+      "properties": {
+        "reviewerSubject": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EvidenceRequest": {
+      "type": "object",
+      "required": [
+        "requestId",
+        "requestKey",
+        "findingId",
+        "basisId",
+        "requirementId",
+        "recipientRef",
+        "templateVersion",
+        "message",
+        "status",
+        "createdAt"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "requestKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "findingId": {
+          "$ref": "#/$defs/Id"
+        },
+        "basisId": {
+          "$ref": "#/$defs/Id"
+        },
+        "requirementId": {
+          "$ref": "#/$defs/Id"
+        },
+        "recipientRef": {
+          "$ref": "#/$defs/Id"
+        },
+        "templateVersion": {
+          "$ref": "#/$defs/Id"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "delivered",
+            "delivery_unknown",
+            "responded",
+            "closed",
+            "cancelled"
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "closureReason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    },
     "AuditEntry": {
       "type": "object",
       "required": [
@@ -932,7 +1009,9 @@
         "leaseId",
         "caseRevision",
         "status",
-        "packageProcessing"
+        "packageProcessing",
+        "openReviewTasks",
+        "activeEvidenceRequests"
       ],
       "properties": {
         "caseId": {
@@ -969,6 +1048,18 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/PackageProcessingStatus"
+          }
+        },
+        "openReviewTasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReviewTask"
+          }
+        },
+        "activeEvidenceRequests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRequest"
           }
         },
         "investigation": {

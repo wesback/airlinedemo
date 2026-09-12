@@ -96,7 +96,9 @@ public sealed record CaseSummary(
     long CaseRevision,
     string Status,
     IReadOnlyList<PackageProcessingStatus> PackageProcessing,
-    InvestigationOutcome? Investigation = null);
+    InvestigationOutcome? Investigation = null,
+    IReadOnlyList<ReviewTask>? OpenReviewTasks = null,
+    IReadOnlyList<EvidenceRequest>? ActiveEvidenceRequests = null);
 
 public sealed record EvidencePreview(
     string DocumentId,
@@ -324,6 +326,8 @@ public sealed record ReviewTask(
     string ReasonCode,
     string Status,
     string? AssignedReviewerSubject = null);
+
+public sealed record ReviewTaskAssignment(string ReviewerSubject);
 
 public sealed record AuditEntry(
     string AuditId,
