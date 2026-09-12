@@ -1610,6 +1610,9 @@ public sealed class AssessmentPersistenceIntegrationTests
         Assert.DoesNotContain(
             state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
             entry => entry.Value.GetProperty("outcome").GetString() == "accepted");
+        var inbox = await server.Client.GetFromJsonAsync<MockInboxItem[]>("/api/mock-inbox");
+        Assert.NotNull(inbox);
+        Assert.Empty(inbox!);
     }
 
     [Fact]

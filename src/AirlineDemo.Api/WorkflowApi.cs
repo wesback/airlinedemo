@@ -13,10 +13,11 @@ public static class WorkflowApi
         bool useDevelopmentErrors = false,
         IInvestigationModel? investigationModel = null,
         InvestigationLimits? investigationLimits = null,
-        AutomaticRequestPolicyConfiguration? automaticRequestPolicy = null)
+        AutomaticRequestPolicyConfiguration? automaticRequestPolicy = null,
+        string? urls = null)
     {
         var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.WebHost.UseUrls(urls ?? "http://127.0.0.1:0");
         builder.Services.Configure<JsonOptions>(options =>
             options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
         var stateStore = new JsonStateStore(stateDirectory);
@@ -38,6 +39,9 @@ public static class WorkflowApi
         {
             app.UseDeveloperExceptionPage();
         }
+
+        app.UseDefaultFiles();
+        app.UseStaticFiles();
 
         app.MapPost("/api/packages", async (
             PackageSubmissionRequest request,
@@ -2077,7 +2081,11 @@ internal sealed class WorkflowService
         }
 
         var items = stateStore.Read(state => state.MockInbox.Values
-            .Where(item => caller.Matches(item.Context))
+            .Where(item =>
+                caller.Matches(item.Context) &&
+                StringComparer.Ordinal.Equals(item.RecipientRef, "mock-partner-inbox") &&
+                state.EvidenceRequests.TryGetValue(item.RequestId, out var request) &&
+                request.Status is "delivered" or "responded")
             .OrderBy(item => item.DeliveredAt)
             .ToArray());
         return Results.Ok(items);

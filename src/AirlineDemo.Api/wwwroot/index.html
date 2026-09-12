@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Bounded aircraft-return readiness demonstration">
+  <title>Transition Readiness | Altivane</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <script>window.airlineDemoConfig = window.airlineDemoConfig || {};</script>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Altivane Aviation Capital home">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span>
+          <strong>Altivane</strong>
+          <small>Aviation Capital</small>
+        </span>
+      </a>
+      <div class="shell-meta">
+        <span class="environment-pill"><span class="status-dot" aria-hidden="true"></span>Synthetic demo</span>
+        <span class="scope-label">Server-authoritative controls</span>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">AIRCRAFT RETURN READINESS</p>
+          <h1 id="page-title">A controlled handover, backed by evidence.</h1>
+          <p class="lede">Review the delivered request and operate the approved demonstration run without leaving the authenticated scope.</p>
+        </div>
+        <div class="hero-state">
+          <span class="state-label">Execution mode</span>
+          <strong>Mock integrations only</strong>
+          <span>No real partner communication</span>
+        </div>
+      </section>
+
+      <section class="overview-grid" aria-label="Current demonstration scope">
+        <article class="scope-card">
+          <span class="card-label">CURRENT RUN</span>
+          <strong id="run-id">Not configured</strong>
+          <span class="muted">Selected by the server</span>
+        </article>
+        <article class="scope-card">
+          <span class="card-label">CASE SCOPE</span>
+          <strong id="case-id">Not configured</strong>
+          <span class="muted">Authenticated resource boundary</span>
+        </article>
+        <article class="scope-card">
+          <span class="card-label">ACTION BOUNDARY</span>
+          <strong>Evidence only</strong>
+          <span class="muted">No acceptance decision here</span>
+        </article>
+      </section>
+
+      <div id="global-status" class="sr-status" role="status" aria-live="polite"></div>
+
+      <section class="panel inbox-panel" aria-labelledby="inbox-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">SIMULATED EXTERNAL VIEW</p>
+            <h2 id="inbox-heading">Mock partner inbox</h2>
+          </div>
+          <span class="simulation-badge"><span aria-hidden="true">◌</span> Synthetic partner portal</span>
+        </div>
+        <p class="panel-intro">Only requests delivered by the scoped workflow appear here. Wording is approved by server policy and cannot be edited.</p>
+        <div id="inbox-list" class="inbox-list">
+          <div class="loading-state">Loading the authoritative inbox…</div>
+        </div>
+      </section>
+
+      <section class="panel controls-panel" aria-labelledby="controls-heading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">PRESENTER OPERATIONS</p>
+            <h2 id="controls-heading">Demo controls</h2>
+          </div>
+          <span class="server-badge">Server-confirmed</span>
+        </div>
+        <p class="panel-intro">Run controls use a preselected fixture. They never accept a local path, evaluator answer, recipient, or role override.</p>
+        <div class="control-grid">
+          <article class="control-card">
+            <div class="control-icon" aria-hidden="true">↥</div>
+            <div class="control-copy">
+              <h3>Load approved fixture</h3>
+              <p>Start the fixture selected for this demonstration run.</p>
+              <button id="load-fixture" class="button button-primary" type="button">Load fixture</button>
+              <div id="load-result" class="operation-result" aria-live="polite"></div>
+            </div>
+          </article>
+          <article class="control-card control-card-reset">
+            <div class="control-icon" aria-hidden="true">↻</div>
+            <div class="control-copy">
+              <h3>Reset demonstration run</h3>
+              <p>Remove only application records owned by the current run.</p>
+              <button id="reset-run" class="button button-secondary" type="button">Reset run</button>
+              <div id="reset-result" class="operation-result" aria-live="polite"></div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Altivane Aviation Capital · Demonstration environment</span>
+      <span>Evidence-led automation, human acceptance authority</span>
+    </footer>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

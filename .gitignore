@@ -2,6 +2,8 @@
 bin/
 obj/
 *.user
+node_modules/
+test-results/
 
 # Terraform working directory and local state
 terraform/.terraform/

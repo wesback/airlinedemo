@@ -1,0 +1,10 @@
+{
+  "name": "airlinedemo-browser-tests",
+  "private": true,
+  "scripts": {
+    "test:browser": "playwright test tests/browser"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}
