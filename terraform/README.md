@@ -28,6 +28,12 @@ identities, deploy the application, or create Fabric, AI Search, AKS, Service
 Bus, API Management, private registry, reserved-capacity, Foundry Agent
 Service, or Microsoft Agent Framework runtime infrastructure.
 
+Remote state is created by the independent, owner-approved configuration in
+`terraform/bootstrap`. Apply that configuration first, then initialize this
+root with its Entra-authenticated `azurerm` backend. The state resource group
+and container have a separate owner, cost allocation, retention policy, and
+cleanup path; disposable demo teardown must not delete or import them.
+
 The example in `examples/demo.tfvars` contains no subscription or tenant
 identifier. Authentication and private deployment inputs are supplied by the
 operator's Azure/Terraform environment and are not committed here.
