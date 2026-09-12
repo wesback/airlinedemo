@@ -136,18 +136,33 @@ async function waitForBackend() {
 
 await waitForBackend();
 
-function proxyApi(request, response) {
-  fetch(`${backendUrl}${request.url}`, {
-    headers: { Authorization: request.headers.authorization || "" }
-  }).then(async backendResponse => {
+async function proxyApi(request, response) {
+  const body = request.method === "GET" || request.method === "HEAD"
+    ? undefined
+    : await new Promise((resolve, reject) => {
+        const chunks = [];
+        request.on("data", chunk => chunks.push(chunk));
+        request.on("end", () => resolve(Buffer.concat(chunks)));
+        request.on("error", reject);
+      });
+  const headers = {};
+  for (const name of ["accept", "authorization", "content-type", "if-match"]) {
+    if (request.headers[name]) headers[name] = request.headers[name];
+  }
+  try {
+    const backendResponse = await fetch(`${backendUrl}${request.url}`, {
+      method: request.method,
+      headers,
+      body
+    });
     response.writeHead(backendResponse.status, {
       "Content-Type": backendResponse.headers.get("content-type") || "application/json"
     });
     response.end(Buffer.from(await backendResponse.arrayBuffer()));
-  }).catch(() => {
+  } catch {
     response.writeHead(502, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ safeCode: "API_UNAVAILABLE", correlationId: "BROWSER-HARNESS" }));
-  });
+  }
 }
 
 const server = createServer(async (request, response) => {

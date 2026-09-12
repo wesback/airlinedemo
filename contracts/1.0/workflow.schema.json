@@ -509,7 +509,8 @@
         "findingId",
         "basisId",
         "reasonCode",
-        "status"
+        "status",
+        "permittedDecisions"
       ],
       "properties": {
         "taskId": {
@@ -533,6 +534,19 @@
         },
         "assignedReviewerSubject": {
           "$ref": "#/$defs/Id"
+        },
+        "permittedDecisions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "accept_evidence",
+              "dismiss_finding",
+              "needs_evidence"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
         }
       },
       "additionalProperties": false
