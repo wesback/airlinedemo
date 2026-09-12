@@ -78,6 +78,26 @@ output "container_app_registry_id" {
   value       = module.container_apps.container_registry_id
 }
 
+output "container_app_runtime_principal_id" {
+  description = "Non-secret principal ID for the Container App system-assigned runtime identity."
+  value       = module.container_apps.container_app_runtime_principal_id
+}
+
+output "migration_identity_id" {
+  description = "Non-secret resource ID for the distinct Terraform-managed migration identity."
+  value       = module.container_apps.migration_identity_id
+}
+
+output "migration_identity_client_id" {
+  description = "Non-secret client ID for the distinct Terraform-managed migration identity."
+  value       = module.container_apps.migration_identity_client_id
+}
+
+output "migration_identity_principal_id" {
+  description = "Non-secret principal ID for the distinct Terraform-managed migration identity."
+  value       = module.container_apps.migration_identity_principal_id
+}
+
 output "sql_server_id" {
   description = "Non-secret resource identifier for the Azure SQL logical server."
   value       = module.sql.sql_server_id

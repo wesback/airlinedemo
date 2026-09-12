@@ -36,6 +36,10 @@ locals {
     azure_openai_quota_tokens_minute       = var.azure_openai_quota_tokens_minute
     container_app_id                       = module.container_apps.container_app_id
     container_app_registry_id              = module.container_apps.container_registry_id
+    container_app_runtime_principal_id     = module.container_apps.container_app_runtime_principal_id
+    migration_identity_id                  = module.container_apps.migration_identity_id
+    migration_identity_client_id           = module.container_apps.migration_identity_client_id
+    migration_identity_principal_id        = module.container_apps.migration_identity_principal_id
     sql_server_id                          = module.sql.sql_server_id
     sql_server_fully_qualified_domain_name = module.sql.sql_server_fully_qualified_domain_name
     sql_database_id                        = module.sql.sql_database_id
@@ -75,6 +79,9 @@ module "container_apps" {
   resource_group_name        = module.demo_boundary.resource_group_name
   region                     = var.region
   log_analytics_workspace_id = module.observability.log_analytics_workspace_id
+  evidence_storage_account_id = module.demo_boundary.evidence_storage_account_id
+  document_intelligence_id    = module.document_intelligence.account_id
+  azure_openai_id             = module.ai.account_id
   container_image            = var.container_image
   container_port             = var.container_port
   allowed_source_ranges      = var.container_allowed_source_ranges

@@ -18,6 +18,21 @@ variable "log_analytics_workspace_id" {
   type        = string
 }
 
+variable "evidence_storage_account_id" {
+  description = "Resource ID of the private evidence storage account."
+  type        = string
+}
+
+variable "document_intelligence_id" {
+  description = "Resource ID of the Document Intelligence account."
+  type        = string
+}
+
+variable "azure_openai_id" {
+  description = "Resource ID of the Azure OpenAI account."
+  type        = string
+}
+
 variable "container_image" {
   description = "Explicit non-secret application image reference."
   type        = string

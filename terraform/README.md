@@ -15,7 +15,11 @@ demo workload in reusable modules:
   registry admin credentials disabled. The app uses an explicit image,
   target port, one-replica maximum and zero-replica minimum. Public ingress
   is restricted to explicitly supplied CIDR ranges. The app has a
-  system-assigned identity; registry permissions remain separately managed.
+  system-assigned runtime identity and a distinct Terraform-managed
+  user-assigned migration identity. Terraform grants the runtime only
+  `Storage Blob Data Reader` on evidence storage, `Cognitive Services User`
+  on Document Intelligence, and `Cognitive Services OpenAI User` on the
+  Azure OpenAI account. Each assignment targets one resource.
 - `modules/sql` creates the serverless General Purpose Azure SQL server,
   database, and the public firewall rule that permits Azure services.
 - `modules/document-intelligence` creates the S0 Document Intelligence
@@ -42,12 +46,19 @@ operator's Azure/Terraform environment and are not committed here.
 The `region` variable defaults to `swedencentral`. The example sets it
 explicitly so changing the deployment region is visible in configuration.
 
-The root exposes resource IDs, public service endpoints, and the non-secret
-`application_deployment` settings needed by later application deployment. It
-does not expose credentials, storage keys, connection strings, provider
-authentication values, Terraform state, or evaluator data. SQL Entra
-administrator inputs and the exact model/version are supplied privately after
-the readiness gate; identity role assignments remain outside this root.
+The root exposes resource IDs, public service endpoints, identity principal
+and client IDs, and the non-secret `application_deployment` settings needed by
+later application deployment. It does not expose credentials, storage keys,
+connection strings, provider authentication values, Terraform state, or
+evaluator data. SQL Entra administrator inputs and the exact model/version are
+supplied privately after the readiness gate. The runtime data-plane
+assignments are Terraform-managed; schema migration permission for the separate
+migration identity is supplied through the SQL Entra administrator path.
+
+The complete lifecycle, scope, prohibited reuse, and assignment ownership
+mapping is checked in at `deployment/identity-mapping.json`. The documented
+versioned schema-change procedure is
+`deployment/sql-migration-procedure.md`; infrastructure apply does not run it.
 
 Application lifecycle operations are separate epic-owned steps. Terraform only
 provisions the declared Azure resources and does not embed application
