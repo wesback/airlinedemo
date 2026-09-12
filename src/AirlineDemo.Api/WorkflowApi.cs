@@ -12,7 +12,8 @@ public static class WorkflowApi
         IDocumentStorage? documentStorage = null,
         bool useDevelopmentErrors = false,
         IInvestigationModel? investigationModel = null,
-        InvestigationLimits? investigationLimits = null)
+        InvestigationLimits? investigationLimits = null,
+        AutomaticRequestPolicyConfiguration? automaticRequestPolicy = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -27,7 +28,10 @@ public static class WorkflowApi
             storage,
             investigationModel is null
                 ? null
-                : new BoundedInvestigationGateway(investigationModel, investigationLimits)));
+                : new BoundedInvestigationGateway(investigationModel, investigationLimits),
+            automaticRequestPolicy));
+        builder.Services.AddSingleton(
+            automaticRequestPolicy ?? AutomaticRequestPolicyConfiguration.Default);
 
         var app = builder.Build();
         if (useDevelopmentErrors)
@@ -137,15 +141,19 @@ internal sealed class WorkflowService
     private readonly JsonStateStore stateStore;
     private readonly IDocumentStorage documentStorage;
     private readonly BoundedInvestigationGateway? investigationGateway;
+    private readonly AutomaticRequestPolicyConfiguration automaticRequestPolicy;
 
     public WorkflowService(
         JsonStateStore stateStore,
         IDocumentStorage documentStorage,
-        BoundedInvestigationGateway? investigationGateway = null)
+        BoundedInvestigationGateway? investigationGateway = null,
+        AutomaticRequestPolicyConfiguration? automaticRequestPolicy = null)
     {
         this.stateStore = stateStore;
         this.documentStorage = documentStorage;
         this.investigationGateway = investigationGateway;
+        this.automaticRequestPolicy =
+            automaticRequestPolicy ?? AutomaticRequestPolicyConfiguration.Default;
     }
 
     public async Task<IResult> SubmitPackageAsync(
@@ -445,6 +453,27 @@ internal sealed class WorkflowService
                     basis.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var dispatchOutboxKeys = state.DispatchOutbox
+                .Where(entry => state.EvidenceRequests.TryGetValue(
+                    entry.Value.RequestId, out var request) &&
+                    state.EvidenceBases.TryGetValue(
+                        request.BasisId, out var basis) &&
+                    basis.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var runOperationIds = state.Operations
+                .Where(entry => entry.Value.Status.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            policyDecisionKeys = state.PolicyDecisions
+                .Where(entry =>
+                    state.EvidenceBases.TryGetValue(
+                        entry.Value.BasisId, out var basis) &&
+                    basis.Context.RunId == runId ||
+                    entry.Value.BasisId.StartsWith("BASIS-", StringComparison.Ordinal) &&
+                    runOperationIds.Contains(entry.Value.BasisId["BASIS-".Length..]))
+                .Select(entry => entry.Key)
+                .ToArray();
             var reviewDecisionKeys = state.ReviewDecisions?
                 .Where(entry => state.EvidenceBases.TryGetValue(
                     entry.Value.BasisId, out var basis) &&
@@ -479,6 +508,7 @@ internal sealed class WorkflowService
                 findingKeys.Length +
                 policyDecisionKeys.Length +
                 evidenceRequestKeys.Length +
+                dispatchOutboxKeys.Length +
                 reviewDecisionKeys.Length +
                 findingDispositionKeys.Length +
                 reviewTaskKeys.Length +
@@ -536,6 +566,11 @@ internal sealed class WorkflowService
             foreach (var key in evidenceRequestKeys)
             {
                 state.EvidenceRequests.Remove(key);
+            }
+
+            foreach (var key in dispatchOutboxKeys)
+            {
+                state.DispatchOutbox.Remove(key);
             }
 
             foreach (var key in reviewDecisionKeys)
@@ -917,6 +952,15 @@ internal sealed class WorkflowService
                     };
                 }
             }
+            if (processingError is not null)
+            {
+                PersistNonAutomaticDecision(
+                    state,
+                    $"PROCESSING-{package.OperationId}",
+                    $"BASIS-{package.OperationId}",
+                    "processing_incomplete",
+                    "internal_review");
+            }
             var finalStatus = operation.Status with
             {
                 Status = processingError is null ? "complete" : "failed",
@@ -967,6 +1011,23 @@ internal sealed class WorkflowService
                     {
                         state.Findings[FindingKey(finding)] = finding;
                     }
+                    PersistPolicyDecisions(
+                        state,
+                        basis!,
+                        derivedFindings,
+                        package.OperationId,
+                        correlationId);
+                }
+                else
+                {
+                    PersistNonAutomaticDecision(
+                        state,
+                        $"INVESTIGATION-{investigation.BasisId}",
+                        investigation.BasisId,
+                        investigation.Error?.SafeCode == "INVESTIGATION_OUTPUT_INVALID"
+                            ? "unsupported_interpretation"
+                            : "investigation_blocked",
+                        "internal_review");
                 }
                 if (investigation.Status == "blocked" &&
                     state.Cases.TryGetValue(CaseKey(package.Context), out var persistedCase))
@@ -1054,6 +1115,211 @@ internal sealed class WorkflowService
 
         return null;
     }
+
+    private void PersistPolicyDecisions(
+        PersistedState state,
+        EvidenceBasis basis,
+        IReadOnlyList<Finding> findings,
+        string operationId,
+        string correlationId)
+    {
+        foreach (var finding in findings)
+        {
+            var reasonCodes = new List<string>();
+            var outcome = "no_action";
+            var canAutomaticallyRequest = finding.Assessment == "missing";
+
+            if (finding.Assessment == "ambiguous")
+            {
+                outcome = "internal_review";
+                reasonCodes.Add("identity_ambiguous");
+            }
+            else if (finding.Assessment == "conflicting")
+            {
+                outcome = "internal_review";
+                reasonCodes.Add("conflicting_evidence");
+            }
+            else if (finding.Assessment == "satisfied")
+            {
+                reasonCodes.Add("evidence_located");
+            }
+            else if (finding.Assessment != "missing")
+            {
+                outcome = "internal_review";
+                reasonCodes.Add("unsupported_assessment");
+                canAutomaticallyRequest = false;
+            }
+
+            if (canAutomaticallyRequest && finding.EvidenceRefs.Count > 0)
+            {
+                reasonCodes.Add("evidence_located");
+                canAutomaticallyRequest = false;
+            }
+
+            var approvedRequirement = basis.ApprovedRequirementVersions
+                .Where(requirement => requirement.RequirementId == finding.RequirementId)
+                .ToArray();
+            if (canAutomaticallyRequest &&
+                (approvedRequirement.Length != 1 ||
+                 string.IsNullOrWhiteSpace(approvedRequirement[0].ComponentId)))
+            {
+                reasonCodes.Add("requirement_not_approved");
+                canAutomaticallyRequest = false;
+            }
+            else if (canAutomaticallyRequest &&
+                !StringComparer.Ordinal.Equals(
+                    approvedRequirement[0].ComponentId,
+                    finding.ComponentId))
+            {
+                reasonCodes.Add("identity_ambiguous");
+                canAutomaticallyRequest = false;
+            }
+
+            if (canAutomaticallyRequest &&
+                !IsCompleteEvidenceBasis(state, basis, operationId))
+            {
+                reasonCodes.Add("processing_incomplete");
+                canAutomaticallyRequest = false;
+            }
+
+            if (canAutomaticallyRequest &&
+                !automaticRequestPolicy.ApprovedRecipientRefs.Contains(
+                    automaticRequestPolicy.RecipientRef))
+            {
+                reasonCodes.Add("recipient_not_approved");
+                canAutomaticallyRequest = false;
+            }
+
+            if (canAutomaticallyRequest &&
+                !automaticRequestPolicy.ApprovedTemplateVersions.Contains(
+                    automaticRequestPolicy.TemplateVersion))
+            {
+                reasonCodes.Add("template_not_approved");
+                canAutomaticallyRequest = false;
+            }
+
+            var requestKey = RequestKey(basis.Context, finding);
+            var activeRequest = state.EvidenceRequests.Values.Any(request =>
+                request.RequestKey == requestKey &&
+                request.Status is not ("closed" or "cancelled"));
+            if (canAutomaticallyRequest && activeRequest)
+            {
+                reasonCodes.Add("active_request_exists");
+                canAutomaticallyRequest = false;
+            }
+
+            if (canAutomaticallyRequest)
+            {
+                outcome = "auto_request";
+                reasonCodes.Add("missing_evidence");
+            }
+
+            var decision = new PolicyDecision(
+                NewId("POLICY"),
+                finding.FindingId,
+                basis.BasisId,
+                "automatic-request/1.0",
+                outcome,
+                reasonCodes.Distinct(StringComparer.Ordinal).ToArray(),
+                DateTimeOffset.UtcNow);
+            state.PolicyDecisions[PolicyDecisionKey(basis.BasisId, finding.FindingId)] = decision;
+
+            if (!canAutomaticallyRequest)
+            {
+                continue;
+            }
+
+            var requestId = NewId("REQUEST");
+            var createdAt = decision.EvaluatedAt;
+            var evidenceRequest = new EvidenceRequest(
+                requestId,
+                requestKey,
+                finding.FindingId,
+                basis.BasisId,
+                finding.RequirementId,
+                automaticRequestPolicy.RecipientRef,
+                automaticRequestPolicy.TemplateVersion,
+                $"We could not locate {finding.RequirementId} evidence in the submitted package. " +
+                "Please provide it or identify its location.",
+                "pending",
+                createdAt);
+            state.EvidenceRequests[requestId] = evidenceRequest;
+
+            var intentId = NewId("OUTBOX");
+            state.DispatchOutbox[intentId] = new DispatchOutboxIntent(
+                intentId,
+                requestId,
+                requestKey,
+                "pending",
+                createdAt);
+
+            var auditId = NewId("AUDIT");
+            (state.AuditEntries ??= new(StringComparer.Ordinal))[auditId] = new AuditEntry(
+                auditId,
+                basis.Context,
+                "system_policy",
+                "automatic-request-policy",
+                "policy.auto_request",
+                [decision.DecisionId, requestId, intentId],
+                basis.BasisId,
+                createdAt,
+                correlationId);
+        }
+    }
+
+    private static void PersistNonAutomaticDecision(
+        PersistedState state,
+        string findingId,
+        string basisId,
+        string reasonCode,
+        string outcome)
+    {
+        var decisionKey = PolicyDecisionKey(basisId, findingId);
+        if (state.PolicyDecisions.ContainsKey(decisionKey))
+        {
+            return;
+        }
+
+        state.PolicyDecisions[decisionKey] = new PolicyDecision(
+            NewId("POLICY"),
+            findingId,
+            basisId,
+            "automatic-request/1.0",
+            outcome,
+            [reasonCode],
+            DateTimeOffset.UtcNow);
+    }
+
+    private static bool IsCompleteEvidenceBasis(
+        PersistedState state,
+        EvidenceBasis basis,
+        string operationId)
+    {
+        if (!state.Operations.TryGetValue(operationId, out var operation) ||
+            operation.Status.Status != "complete")
+        {
+            return false;
+        }
+
+        return basis.DocumentInventory.All(document =>
+        {
+            var key = DocumentKey(
+                basis.Context,
+                document.DocumentId,
+                document.Version);
+            return state.ExtractionRecords.TryGetValue(key, out var record) &&
+                ScopeMatches(record.Context, basis.Context) &&
+                record.ProcessingState == "complete" &&
+                StringComparer.OrdinalIgnoreCase.Equals(record.Sha256, document.Sha256) &&
+                record.PageInventory.Count > 0;
+        });
+    }
+
+    private static string RequestKey(CaseContext context, Finding finding) =>
+        $"{CaseKey(context)}:{finding.RequirementId}:{finding.ComponentId}";
+
+    private static string PolicyDecisionKey(string basisId, string findingId) =>
+        $"{basisId}:{findingId}";
 
     private static void PersistExtractionAttempts(
         PersistedState state,

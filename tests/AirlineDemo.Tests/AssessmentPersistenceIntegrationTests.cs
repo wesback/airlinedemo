@@ -374,7 +374,11 @@ public sealed class AssessmentPersistenceIntegrationTests
             investigation.GetProperty("error").GetProperty("safeCode").GetString());
         Assert.Empty(investigation.GetProperty("findings").EnumerateArray());
         Assert.Empty(state.RootElement.GetProperty("findings").EnumerateObject());
-        Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.Single(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.Equal(
+            "internal_review",
+            state.RootElement.GetProperty("policyDecisions")
+                .EnumerateObject().Single().Value.GetProperty("outcome").GetString());
         Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
         Assert.False(state.RootElement.TryGetProperty("reviewDecisions", out _));
     }
@@ -450,7 +454,13 @@ public sealed class AssessmentPersistenceIntegrationTests
             });
         });
         Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
-        Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+        Assert.Equal(4, state.RootElement.GetProperty("policyDecisions").EnumerateObject().Count());
+        Assert.All(
+            state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
+            decision => Assert.Equal(
+                "no_action",
+                decision.Value.GetProperty("outcome").GetString()));
         Assert.DoesNotContain(
             state.RootElement.GetProperty("investigations").EnumerateObject()
                 .Single().Value.GetProperty("findings").EnumerateArray(),
@@ -490,6 +500,303 @@ public sealed class AssessmentPersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task LiveMissingFinding_PersistsAutomaticDecisionRequestAuditAndDispatchIntent()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var decision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Single(candidate => candidate.GetProperty("findingId").GetString() == "FIND-REQ-0002");
+        Assert.Equal("auto_request", decision.GetProperty("outcome").GetString());
+        Assert.Single(
+            state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
+            entry => entry.Value.GetProperty("outcome").GetString() == "auto_request");
+        Assert.Contains(
+            "missing_evidence",
+            decision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+
+        var evidenceRequest = state.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("FIND-REQ-0002", evidenceRequest.GetProperty("findingId").GetString());
+        Assert.Equal("REQ-0002", evidenceRequest.GetProperty("requirementId").GetString());
+        Assert.Equal("mock-partner-inbox", evidenceRequest.GetProperty("recipientRef").GetString());
+        Assert.Equal("evidence-request-v1", evidenceRequest.GetProperty("templateVersion").GetString());
+        Assert.Contains(
+            "could not locate",
+            evidenceRequest.GetProperty("message").GetString(),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("pending", evidenceRequest.GetProperty("status").GetString());
+
+        var audit = state.RootElement.GetProperty("auditEntries")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("system_policy", audit.GetProperty("actorType").GetString());
+        Assert.Equal("policy.auto_request", audit.GetProperty("action").GetString());
+        Assert.Equal(
+            decision.GetProperty("basisId").GetString(),
+            audit.GetProperty("basisId").GetString());
+        Assert.Equal(3, audit.GetProperty("affectedIds").GetArrayLength());
+
+        var intent = state.RootElement.GetProperty("dispatchOutbox")
+            .EnumerateObject().Single().Value;
+        Assert.Equal(
+            evidenceRequest.GetProperty("requestId").GetString(),
+            intent.GetProperty("requestId").GetString());
+        Assert.Equal("pending", intent.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task IncompleteProcessing_PersistsNonAutomaticDecisionWithoutRequestOrDispatch()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "processing-failure");
+        var storage = new RetryableProcessingFailureStorage(fixture.OutputDirectory);
+
+        await using var server = await fixture.StartAsync(storage);
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var decision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("internal_review", decision.GetProperty("outcome").GetString());
+        Assert.Contains(
+            "processing_incomplete",
+            decision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+    }
+
+    [Fact]
+    public async Task UnapprovedTemplateWithApprovedRecipient_PersistsNonAutomaticDecision()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+        var policy = new AutomaticRequestPolicyConfiguration(
+            "mock-partner-inbox",
+            "unapproved-template-v9",
+            new HashSet<string>(["mock-partner-inbox"], StringComparer.Ordinal),
+            new HashSet<string>(["evidence-request-v1"], StringComparer.Ordinal));
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.SingleFindingModel(
+                "REQ-0002",
+                "COMP-0001",
+                "missing"),
+            automaticRequestPolicy: policy);
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var decision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Select(entry => entry.Value)
+            .Single(candidate => candidate.GetProperty("findingId").GetString() == "FIND-REQ-0002");
+        Assert.Equal("no_action", decision.GetProperty("outcome").GetString());
+        Assert.Contains(
+            "template_not_approved",
+            decision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+    }
+
+    [Fact]
+    public async Task UnapprovedRecipient_PersistsNonAutomaticDecisionWithoutRequestOrDispatch()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+        var policy = new AutomaticRequestPolicyConfiguration(
+            "unapproved-recipient",
+            "evidence-request-v1",
+            new HashSet<string>(["mock-partner-inbox"], StringComparer.Ordinal),
+            new HashSet<string>(["evidence-request-v1"], StringComparer.Ordinal));
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.SingleFindingModel(
+                "REQ-0002",
+                "COMP-0001",
+                "missing"),
+            automaticRequestPolicy: policy);
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var decision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("no_action", decision.GetProperty("outcome").GetString());
+        Assert.Contains(
+            "recipient_not_approved",
+            decision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+    }
+
+    [Fact]
+    public async Task AbsentApprovedRequirement_PersistsNonAutomaticDecisionWithoutRequestOrDispatch()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+        await File.WriteAllTextAsync(
+            Path.Combine(
+                fixture.OutputDirectory,
+                "application-inputs",
+                "reference-data",
+                "requirements.json"),
+            "[]");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var decision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("internal_review", decision.GetProperty("outcome").GetString());
+        Assert.Contains(
+            "unsupported_interpretation",
+            decision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+    }
+
+    [Fact]
+    public async Task AmbiguousFinding_PersistsNonAutomaticDecisionWithoutRequestOrDispatch()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.SingleFindingModel(
+                "REQ-0003",
+                "COMP-0002",
+                "ambiguous"));
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var decision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("internal_review", decision.GetProperty("outcome").GetString());
+        Assert.Contains(
+            "identity_ambiguous",
+            decision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+    }
+
+    [Fact]
+    public async Task AlreadyLocatedEvidence_PersistsNonAutomaticDecisionWithoutRequestOrDispatch()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.SingleFindingModel(
+                "REQ-0001",
+                "COMP-0001",
+                "satisfied"));
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var decision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("no_action", decision.GetProperty("outcome").GetString());
+        Assert.Contains(
+            "evidence_located",
+            decision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+    }
+
+    [Fact]
+    public async Task EquivalentGap_ReusesActiveRequestKeyIncludingRespondedRequest()
+    {
+        using var fixture = new BaselineFixture();
+        var firstRequest = fixture.GenerateRequest(profile: "live");
+
+        await using (var server = await fixture.StartAsync(
+                         investigationModel: new BaselineFixture.FixtureFindingModel()))
+        {
+            var accepted = await server.Client.PostAsJsonAsync("/api/packages", firstRequest);
+            var firstOperation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+            Assert.NotNull(firstOperation);
+            await server.Client.PostAsync(
+                $"/api/operations/{firstOperation!.OperationId}/process",
+                null);
+        }
+
+        var stateNode = JsonNode.Parse(await File.ReadAllTextAsync(fixture.StatePath))!.AsObject();
+        var requestEntry = stateNode["evidenceRequests"]!.AsObject().Single();
+        requestEntry.Value!["status"] = "responded";
+        await File.WriteAllTextAsync(fixture.StatePath, stateNode.ToJsonString());
+        var requestKey = requestEntry.Value!["requestKey"]!.GetValue<string>();
+
+        var secondRequest = fixture.GenerateRequest(
+            packageId: "PKG-0002",
+            eventId: "EVT-0002",
+            correlationId: "CORR-0002",
+            profile: "live");
+        await using var restarted = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var secondAccepted = await restarted.Client.PostAsJsonAsync("/api/packages", secondRequest);
+        var secondOperation = await secondAccepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(secondOperation);
+        await restarted.Client.PostAsync(
+            $"/api/operations/{secondOperation!.OperationId}/process",
+            null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var requests = state.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Select(entry => entry.Value).ToArray();
+        Assert.Single(requests);
+        Assert.Equal(requestKey, requests[0].GetProperty("requestKey").GetString());
+        Assert.Equal("responded", requests[0].GetProperty("status").GetString());
+        Assert.Single(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+    }
+
+    [Fact]
     public async Task LiveAmbiguousIdentity_PersistsAmbiguousFindingWithoutExternalOrReviewAction()
     {
         using var fixture = new BaselineFixture();
@@ -518,8 +825,14 @@ public sealed class AssessmentPersistenceIntegrationTests
         Assert.Contains(
             finding.GetProperty("evidenceRefs").EnumerateArray(),
             evidence => evidence.GetProperty("documentId").GetString() == "DOC-0004");
-        Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
-        Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.Single(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.DoesNotContain(
+            state.RootElement.GetProperty("evidenceRequests").EnumerateObject(),
+            entry => entry.Value.GetProperty("findingId").GetString() == "FIND-REQ-0003");
+        Assert.Contains(
+            state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
+            decision => decision.Value.GetProperty("findingId").GetString() == "FIND-REQ-0003" &&
+                decision.Value.GetProperty("outcome").GetString() == "internal_review");
         Assert.False(state.RootElement.TryGetProperty("reviewDecisions", out _));
     }
 
@@ -552,7 +865,12 @@ public sealed class AssessmentPersistenceIntegrationTests
         Assert.Empty(investigation.GetProperty("findings").EnumerateArray());
         Assert.Empty(state.RootElement.GetProperty("findings").EnumerateObject());
         Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
-        Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.Empty(state.RootElement.GetProperty("dispatchOutbox").EnumerateObject());
+        Assert.Single(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+        Assert.Equal(
+            "unsupported_interpretation",
+            state.RootElement.GetProperty("policyDecisions")
+                .EnumerateObject().Single().Value.GetProperty("reasonCodes")[0].GetString());
         Assert.DoesNotContain(
             investigation.GetProperty("findings").EnumerateArray(),
             finding => finding.GetProperty("assessment").GetString() is
@@ -1063,12 +1381,14 @@ public sealed class AssessmentPersistenceIntegrationTests
 
         public async Task<ApiServer> StartAsync(
             IDocumentStorage? storage = null,
-            IInvestigationModel? investigationModel = null)
+            IInvestigationModel? investigationModel = null,
+            AutomaticRequestPolicyConfiguration? automaticRequestPolicy = null)
         {
             var app = WorkflowApi.Create(
                 Path.Combine(directory, "state"),
                 storage ?? new FileDocumentStorage(OutputDirectory),
-                investigationModel: investigationModel);
+                investigationModel: investigationModel,
+                automaticRequestPolicy: automaticRequestPolicy);
             server = new ApiServer(app);
             await server.App.StartAsync();
             server.Client = new HttpClient { BaseAddress = server.BaseAddress };
@@ -1168,6 +1488,40 @@ public sealed class AssessmentPersistenceIntegrationTests
                     evidence is null
                         ? []
                         : [new EvidenceRef(evidence.DocumentId, evidence.Version, evidence.Page)]));
+            }
+        }
+
+        public sealed class SingleFindingModel(
+            string requirementId,
+            string componentId,
+            string assessment) : IInvestigationModel
+        {
+            public Task<InvestigationResult> InvestigateAsync(
+                InvestigationRequest request,
+                CancellationToken cancellationToken)
+            {
+                var evidence = request.Documents.FirstOrDefault();
+                IReadOnlyList<EvidenceRef> evidenceRefs = assessment is "satisfied" or "ambiguous"
+                    ? [new EvidenceRef(evidence!.DocumentId, evidence.Version, evidence.Page)]
+                    : [];
+                return Task.FromResult(new InvestigationResult(
+                [
+                    new Finding(
+                        $"FIND-{requirementId}",
+                        componentId,
+                        requirementId,
+                        request.EvidenceBasis.BasisId,
+                        assessment,
+                        assessment == "ambiguous"
+                            ? "identity_ambiguous"
+                            : assessment == "missing"
+                                ? "records_gap"
+                                : "evidence_located",
+                        assessment == "missing"
+                            ? "The required record was not located."
+                            : "The cited evidence supports the requirement.",
+                        evidenceRefs)
+                ]));
             }
         }
 

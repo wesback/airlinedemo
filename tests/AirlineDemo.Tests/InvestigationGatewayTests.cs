@@ -296,7 +296,11 @@ public sealed class InvestigationGatewayTests
                     investigation.GetProperty("findings").EnumerateArray(),
                     finding => finding.GetProperty("assessment").GetString() is
                         "satisfied" or "missing" or "ambiguous" or "conflicting");
-                Assert.Empty(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+                Assert.Single(state.RootElement.GetProperty("policyDecisions").EnumerateObject());
+                Assert.Equal(
+                    "internal_review",
+                    state.RootElement.GetProperty("policyDecisions")
+                        .EnumerateObject().Single().Value.GetProperty("outcome").GetString());
                 Assert.Empty(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
 
                 var caseResponse = await client.GetAsync("/api/cases/CASE-0001");
