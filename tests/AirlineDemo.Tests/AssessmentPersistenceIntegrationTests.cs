@@ -1178,6 +1178,135 @@ public sealed class AssessmentPersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task ReplayDriver_UsesAuthoritativeRequestIdAndRestrictedPartnerAuthentication()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+        await server.Client.PostAsync("/api/dispatch", null);
+
+        using var beforeReplay = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var authoritativeRequestId = beforeReplay.RootElement
+            .GetProperty("evidenceRequests")
+            .EnumerateObject()
+            .Single()
+            .Value
+            .GetProperty("requestId")
+            .GetString()!;
+        var driver = new PartnerResponseReplayDriver(server.Client);
+        var replay = await driver.ReplayAsync(
+            new PartnerResponseReplayRequest(
+                fixture.Case,
+                Path.Combine(
+                    fixture.OutputDirectory,
+                    "staged-responses/package-002/manifest.json")));
+
+        Assert.Equal(HttpStatusCode.Accepted, replay.StatusCode);
+        Assert.Equal(authoritativeRequestId, replay.RequestId);
+        Assert.NotEqual("REQUEST-0001", replay.RequestId);
+        Assert.Equal("partner.response.received", replay.EventType);
+        Assert.StartsWith("REPLAY-", replay.EventId);
+
+        using var afterReplay = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var persistedResponse = afterReplay.RootElement
+            .GetProperty("partnerResponses")
+            .EnumerateObject()
+            .Single()
+            .Value;
+        Assert.Equal(authoritativeRequestId, persistedResponse.GetProperty("requestId").GetString());
+        Assert.Equal(fixture.ResponsePackageId, persistedResponse.GetProperty("packageId").GetString());
+        Assert.Single(afterReplay.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Single(afterReplay.RootElement.GetProperty("deliveryAttempts").EnumerateObject());
+        Assert.Single(afterReplay.RootElement.GetProperty("reassessmentTriggers").EnumerateObject());
+
+        var replayAgain = await driver.ReplayAsync(
+            new PartnerResponseReplayRequest(
+                fixture.Case,
+                Path.Combine(
+                    fixture.OutputDirectory,
+                    "staged-responses/package-002/manifest.json")));
+        Assert.Equal(HttpStatusCode.Accepted, replayAgain.StatusCode);
+        Assert.Equal(authoritativeRequestId, replayAgain.RequestId);
+        Assert.Equal(
+            afterReplay.RootElement.GetRawText(),
+            JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath))
+                .RootElement.GetRawText());
+
+        using var changedPayload = JsonDocument.Parse(
+            $$"""{"packageId":"PKG-CHANGED","requestId":"{{authoritativeRequestId}}"}""");
+        var conflictBase = fixture.GeneratePartnerResponseRequest(authoritativeRequestId);
+        var conflictingRequest = conflictBase with
+        {
+            Event = conflictBase.Event with
+            {
+                EventId = replay.EventId,
+                Payload = changedPayload.RootElement.Clone()
+            }
+        };
+        using var partner = fixture.CreatePartnerClient(server);
+        var conflict = await partner.PostAsJsonAsync(
+            "/api/partner-responses",
+            conflictingRequest);
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.Equal(
+            afterReplay.RootElement.GetRawText(),
+            JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath))
+                .RootElement.GetRawText());
+    }
+
+    [Theory]
+    [InlineData("partner", HttpStatusCode.Forbidden)]
+    [InlineData("package", HttpStatusCode.Forbidden)]
+    [InlineData("request", HttpStatusCode.NotFound)]
+    [InlineData("airline", HttpStatusCode.Forbidden)]
+    [InlineData("case", HttpStatusCode.NotFound)]
+    public async Task ReplayDriver_RejectsMismatchedScopesWithoutPersistedMutation(
+        string mismatch,
+        HttpStatusCode expectedStatus)
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync(
+            "/api/packages",
+            request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process",
+            null);
+        await server.Client.PostAsync("/api/dispatch", null);
+
+        var before = await File.ReadAllTextAsync(fixture.StatePath);
+        using var client = new HttpClient(new ReplayMutationHandler(mismatch))
+        {
+            BaseAddress = server.BaseAddress
+        };
+        var replay = await new PartnerResponseReplayDriver(client).ReplayAsync(
+            new PartnerResponseReplayRequest(
+                fixture.Case,
+                Path.Combine(
+                    fixture.OutputDirectory,
+                    "staged-responses/package-002/manifest.json")));
+
+        Assert.Equal(expectedStatus, replay.StatusCode);
+        Assert.Equal(
+            before,
+            await File.ReadAllTextAsync(fixture.StatePath));
+    }
+
+    [Fact]
     public async Task PartnerResponseReplay_IsIdempotentAndConflictingReuseDoesNotMutateState()
     {
         using var fixture = new BaselineFixture();
@@ -1293,7 +1422,7 @@ public sealed class AssessmentPersistenceIntegrationTests
                 Event = valid.Event with
                 {
                     Payload = JsonDocument.Parse(
-                        """{"packageId":"PKG-WRONG","requestId":"REQUEST-UNKNOWN"}""")
+                        $$"""{"packageId":"PKG-WRONG","requestId":"{{requestId}}"}""")
                         .RootElement.Clone()
                 }
             }, HttpStatusCode.BadRequest, "INVALID_PAYLOAD",
@@ -2595,6 +2724,56 @@ public sealed class AssessmentPersistenceIntegrationTests
         Assert.Empty(finalState.RootElement.GetProperty("evidenceBases").EnumerateObject());
     }
 
+    private sealed class ReplayMutationHandler(string mismatch) : DelegatingHandler(new HttpClientHandler())
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith(
+                    "/api/partner-responses",
+                    StringComparison.Ordinal) == true)
+            {
+                if (mismatch == "partner")
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue(
+                        "Bearer",
+                        "run=RUN-0001;airline=AIRLINE-0001;aircraft=MOCK-AC-001;" +
+                        "lease=LEASE-0001;subject=wrong-partner");
+                }
+                else
+                {
+                    var body = JsonNode.Parse(
+                            await request.Content!.ReadAsStringAsync(cancellationToken))
+                        ?.AsObject()
+                        ?? throw new InvalidDataException("The replay request body was empty.");
+                    if (mismatch == "package")
+                    {
+                        body["package"]!["caseId"] = "CASE-OTHER";
+                    }
+                    else if (mismatch == "request")
+                    {
+                        body["event"]!["payload"]!["requestId"] = "REQUEST-OTHER";
+                    }
+                    else if (mismatch == "airline")
+                    {
+                        body["event"]!["airlineId"] = "AIRLINE-OTHER";
+                        body["package"]!["airlineId"] = "AIRLINE-OTHER";
+                    }
+                    else if (mismatch == "case")
+                    {
+                        body["event"]!["caseId"] = "CASE-OTHER";
+                        body["package"]!["caseId"] = "CASE-OTHER";
+                    }
+
+                    request.Content = JsonContent.Create(body);
+                }
+            }
+
+            return await base.SendAsync(request, cancellationToken);
+        }
+    }
+
     private sealed class BaselineFixture : IDisposable
     {
         private readonly string directory = Path.Combine(
@@ -2605,6 +2784,9 @@ public sealed class AssessmentPersistenceIntegrationTests
         public string OutputDirectory => Path.Combine(directory, "fixture");
         public string StatePath => Path.Combine(directory, "state", "workflow-state.json");
         public string ResponsePackageId => "PKG-0002";
+        public AirlineDemo.Generator.CaseContext Case =>
+            generated?.ContractPackage.Case
+            ?? throw new InvalidOperationException("GenerateRequest must be called first.");
 
         public PackageSubmissionRequest GenerateRequest(
             string packageId = "PKG-0001",
