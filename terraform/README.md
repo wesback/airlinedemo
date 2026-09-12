@@ -60,6 +60,15 @@ mapping is checked in at `deployment/identity-mapping.json`. The documented
 versioned schema-change procedure is
 `deployment/sql-migration-procedure.md`; infrastructure apply does not run it.
 
+The complete resource and permission inventory is checked in at
+[`deployment/resource-inventory.json`](../deployment/resource-inventory.json).
+It covers both the 18 resources in this disposable workload root and the four
+resources in the separately owned protected-state bootstrap. Resources that do
+not support Azure tags (for example role assignments, firewall rules, and the
+model deployment) inherit cost attribution from their tagged parent resource
+and dedicated resource group; the inventory records that boundary rather than
+claiming unsupported direct tags.
+
 Application lifecycle operations are separate epic-owned steps. Terraform only
 provisions the declared Azure resources and does not embed application
 execution or data-loading commands.

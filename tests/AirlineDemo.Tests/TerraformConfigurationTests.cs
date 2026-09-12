@@ -790,6 +790,217 @@ public sealed class TerraformConfigurationTests
         Assert.DoesNotContain("sql_password", procedure, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void TerraformResourceInventory_CoversResourcesBoundariesOutputsAndIdentities()
+    {
+        var inventoryText = LoadText("deployment", "resource-inventory.json");
+        using var inventory = JsonDocument.Parse(inventoryText);
+        var root = inventory.RootElement;
+
+        Assert.Equal("terraform/", root.GetProperty("sourceOfTruth")
+            .GetProperty("workloadRoot").GetString());
+        Assert.True(root.GetProperty("sourceOfTruth")
+            .GetProperty("stateBackendBootstrapIsOutsideWorkloadRoot").GetBoolean());
+        Assert.Equal("deployment/identity-mapping.json", root.GetProperty("sourceOfTruth")
+            .GetProperty("permissionInventory").GetString());
+
+        var modules = root.GetProperty("modules").EnumerateArray().ToArray();
+        Assert.Equal(7, modules.Length);
+        Assert.Equal(
+            [
+                "ai",
+                "container_apps",
+                "demo_boundary",
+                "document_intelligence",
+                "observability",
+                "protected_state_bootstrap",
+                "sql"
+            ],
+            modules.Select(module => module.GetProperty("module").GetString())
+                .Order(StringComparer.Ordinal));
+        Assert.All(modules, module =>
+        {
+            Assert.NotEmpty(module.GetProperty("source").GetString() ?? string.Empty);
+            Assert.NotEmpty(module.GetProperty("lifecycleOwner").GetString() ?? string.Empty);
+            Assert.NotEmpty(module.GetProperty("dataBoundary").GetString() ?? string.Empty);
+            Assert.NotEmpty(module.GetProperty("networkExposure").GetString() ?? string.Empty);
+            Assert.NotEmpty(module.GetProperty("costTags").GetString() ?? string.Empty);
+            Assert.NotEmpty(module.GetProperty("resources").EnumerateArray());
+        });
+
+        var expectedResources = new[]
+        {
+            "module.demo_boundary.azurerm_resource_group.this",
+            "module.demo_boundary.azurerm_storage_account.evidence",
+            "module.demo_boundary.azurerm_storage_management_policy.evidence",
+            "module.observability.azurerm_log_analytics_workspace.this",
+            "module.observability.azurerm_application_insights.this",
+            "module.container_apps.azurerm_container_registry.application",
+            "module.container_apps.azurerm_container_app_environment.this",
+            "module.container_apps.azurerm_container_app.this",
+            "module.container_apps.azurerm_user_assigned_identity.migration",
+            "module.container_apps.azurerm_role_assignment.runtime_evidence_reader",
+            "module.container_apps.azurerm_role_assignment.runtime_document_intelligence_user",
+            "module.container_apps.azurerm_role_assignment.runtime_azure_openai_user",
+            "module.sql.azurerm_mssql_server.this",
+            "module.sql.azurerm_mssql_database.this",
+            "module.sql.azurerm_mssql_firewall_rule.azure_services",
+            "module.document_intelligence.azurerm_cognitive_account.this",
+            "module.ai.azurerm_cognitive_account.this",
+            "module.ai.azurerm_cognitive_deployment.this",
+            "terraform.bootstrap.azurerm_resource_group.state",
+            "terraform.bootstrap.azurerm_storage_account.state",
+            "terraform.bootstrap.azurerm_storage_container.state",
+            "terraform.bootstrap.azurerm_role_assignment.deployment_state_blob_contributor"
+        };
+        var resources = root.GetProperty("resources").EnumerateArray().ToArray();
+        Assert.Equal(expectedResources.Length, resources.Length);
+        Assert.Equal(
+            expectedResources.Order(StringComparer.Ordinal),
+            resources.Select(resource => resource.GetProperty("address").GetString())
+                .Order(StringComparer.Ordinal));
+
+        Assert.All(resources, resource =>
+        {
+            Assert.NotEmpty(resource.GetProperty("module").GetString() ?? string.Empty);
+            Assert.NotEmpty(resource.GetProperty("lifecycleOwner").GetString() ?? string.Empty);
+            Assert.NotEmpty(resource.GetProperty("ownershipBoundary").GetString() ?? string.Empty);
+            Assert.NotEmpty(resource.GetProperty("dataBoundary").GetString() ?? string.Empty);
+            Assert.NotEmpty(resource.GetProperty("networkExposure").GetString() ?? string.Empty);
+            Assert.Equal(JsonValueKind.Array, resource.GetProperty("costTags").ValueKind);
+            Assert.NotEmpty(resource.GetProperty("costTags").EnumerateArray());
+            Assert.Equal(JsonValueKind.Array, resource.GetProperty("nonSecretOutputs").ValueKind);
+        });
+
+        var boundaries = root.GetProperty("ownershipBoundaries");
+        Assert.Equal("airlinedemo-demo",
+            boundaries.GetProperty("disposableDemo").GetProperty("lifecycleOwner").GetString());
+        Assert.Equal("airlinedemo-platform",
+            boundaries.GetProperty("externallyOwnedRemoteState")
+                .GetProperty("lifecycleOwner").GetString());
+        Assert.Contains("must not be destroyed",
+            boundaries.GetProperty("externallyOwnedRemoteState")
+                .GetProperty("teardown").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+
+        var outputPolicy = root.GetProperty("nonSecretOutputPolicy");
+        Assert.Contains("client secrets",
+            outputPolicy.GetProperty("neverPublished").EnumerateArray()
+                .Select(value => value.GetString()),
+            StringComparer.Ordinal);
+        Assert.Contains("private and separate",
+            outputPolicy.GetProperty("runtimeHostStorageAccess").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no runtime-host storage account",
+            outputPolicy.GetProperty("runtimeHostStorageAccess").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+
+        var identities = root.GetProperty("identityInventory").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["deployment", "runtime", "migration", "terraform-state"],
+            identities.Select(identity => identity.GetProperty("name").GetString()));
+        Assert.All(identities, identity =>
+        {
+            Assert.NotEmpty(identity.GetProperty("lifecycle").GetString() ?? string.Empty);
+            Assert.NotEmpty(identity.GetProperty("minimumScope").GetString() ?? string.Empty);
+            Assert.NotEmpty(identity.GetProperty("prohibitedReuse").EnumerateArray());
+            Assert.NotEmpty(identity.GetProperty("assignments").EnumerateArray());
+            Assert.All(identity.GetProperty("assignments").EnumerateArray(), assignment =>
+            {
+                Assert.NotEmpty(assignment.GetProperty("scope").GetString() ?? string.Empty);
+                Assert.NotEmpty(assignment.GetProperty("role").GetString() ?? string.Empty);
+                Assert.NotEmpty(assignment.GetProperty("implementation").GetString() ?? string.Empty);
+                Assert.NotEmpty(assignment.GetProperty("ownership").GetString() ?? string.Empty);
+                Assert.NotEmpty(assignment.GetProperty("approval").GetString() ?? string.Empty);
+            });
+        });
+
+        var migrationAssignment = identities.Single(identity =>
+                identity.GetProperty("name").GetString() == "migration")
+            .GetProperty("assignments").EnumerateArray().Single();
+        Assert.Equal("externally-supplied-sql-entra-administrator",
+            migrationAssignment.GetProperty("ownership").GetString());
+        Assert.Contains("Tenant-level",
+            migrationAssignment.GetProperty("approval").GetString() ?? string.Empty,
+            StringComparison.Ordinal);
+
+        var implementation = root.GetProperty("roleAssignmentImplementation");
+        Assert.Contains("terraform/bootstrap/main.tf",
+            implementation.GetProperty("protectedStateWork").GetString() ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.Contains("terraform/modules/container-apps/main.tf",
+            implementation.GetProperty("identityOperatingModelWork").GetString() ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.Equal("deployment/identity-mapping.json",
+            implementation.GetProperty("canonicalPermissionDetails").GetString());
+    }
+
+    [Fact]
+    public void TerraformResourceInventory_MatchesEveryTerraformResourceDeclaration()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var terraformRoot = new DirectoryInfo(Path.Combine(repositoryRoot, "terraform"));
+        var inventoryText = LoadText("deployment", "resource-inventory.json");
+        using var inventory = JsonDocument.Parse(inventoryText);
+        var workloadModuleNamesByDirectory = Regex.Matches(
+                File.ReadAllText(Path.Combine(terraformRoot.FullName, "main.tf")),
+                @"(?ms)module\s+""(?<name>[^""]+)""\s*\{.*?source\s*=\s*""\./modules/(?<directory>[^""]+)""")
+            .ToDictionary(
+                match => match.Groups["directory"].Value,
+                match => match.Groups["name"].Value,
+                StringComparer.Ordinal);
+
+        var inventoryResources = inventory.RootElement
+            .GetProperty("resources")
+            .EnumerateArray()
+            .Select(resource => resource.GetProperty("address").GetString())
+            .Where(address => address is not null)
+            .Cast<string>()
+            .ToArray();
+        var declaredResources = terraformRoot
+            .EnumerateFiles("*.tf", SearchOption.AllDirectories)
+            .SelectMany(file => Regex.Matches(
+                    File.ReadAllText(file.FullName),
+                    @"(?m)^\s*resource\s+""(?<type>[^""]+)""\s+""(?<name>[^""]+)""")
+                .Select(match => ResolveTerraformResourceAddress(
+                    terraformRoot,
+                    file,
+                    workloadModuleNamesByDirectory,
+                    match.Groups["type"].Value,
+                    match.Groups["name"].Value)))
+            .ToArray();
+
+        Assert.Equal(inventoryResources.Length, inventoryResources.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(declaredResources.Length, declaredResources.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(
+            declaredResources.Order(StringComparer.Ordinal).ToArray(),
+            inventoryResources.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    private static string ResolveTerraformResourceAddress(
+        DirectoryInfo terraformRoot,
+        FileInfo file,
+        IReadOnlyDictionary<string, string> workloadModuleNamesByDirectory,
+        string resourceType,
+        string resourceName)
+    {
+        var relativeSegments = Path.GetRelativePath(terraformRoot.FullName, file.FullName)
+            .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+
+        return relativeSegments switch
+        {
+            [ "bootstrap", .. ] =>
+                $"terraform.bootstrap.{resourceType}.{resourceName}",
+            [ "modules", var moduleDirectory, .. ] when
+                workloadModuleNamesByDirectory.TryGetValue(moduleDirectory, out var moduleName) =>
+                $"module.{moduleName}.{resourceType}.{resourceName}",
+            [ .. ] when relativeSegments.Length == 1 =>
+                $"{resourceType}.{resourceName}",
+            _ => throw new InvalidOperationException(
+                $"Terraform resource declaration is outside a supported root: {file.FullName}")
+        };
+    }
+
     private static string LoadText(params string[] relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
