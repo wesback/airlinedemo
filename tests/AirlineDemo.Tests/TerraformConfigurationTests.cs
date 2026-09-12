@@ -34,9 +34,11 @@ public sealed class TerraformConfigurationTests
         Assert.Contains("default     = \"swedencentral\"", variables, StringComparison.Ordinal);
         Assert.Contains("region", example, StringComparison.Ordinal);
         Assert.Contains("= \"swedencentral\"", example, StringComparison.Ordinal);
-        Assert.Contains("Azure Functions v4", example, StringComparison.Ordinal);
-        Assert.Contains("dotnet-isolated", example, StringComparison.Ordinal);
-        Assert.Contains("StorageV2", example, StringComparison.Ordinal);
+        Assert.Contains("container_image", example, StringComparison.Ordinal);
+        Assert.Contains("container_port", example, StringComparison.Ordinal);
+        Assert.Contains("container_allowed_source_ranges", example, StringComparison.Ordinal);
+        Assert.Contains("container_min_replicas", example, StringComparison.Ordinal);
+        Assert.Contains("container_max_replicas", example, StringComparison.Ordinal);
         Assert.Contains("Serverless General Purpose", example, StringComparison.Ordinal);
         Assert.Contains("system-assigned managed identity", example, StringComparison.Ordinal);
         Assert.Contains("firewall-restricted", example, StringComparison.Ordinal);
@@ -76,14 +78,11 @@ public sealed class TerraformConfigurationTests
         Assert.Contains("deployment  = var.deployment_name", root, StringComparison.Ordinal);
         Assert.Contains("owner       = var.owner", root, StringComparison.Ordinal);
         Assert.Contains("cost_center = var.cost_center", root, StringComparison.Ordinal);
-        Assert.Contains("resource \"azurerm_storage_account\" \"runtime_host\"", boundary,
-            StringComparison.Ordinal);
         Assert.Contains("resource \"azurerm_storage_account\" \"evidence\"", boundary,
-            StringComparison.Ordinal);
-        Assert.Contains("runtime_host_storage_account_id", boundaryOutputs,
             StringComparison.Ordinal);
         Assert.Contains("evidence_storage_account_id", boundaryOutputs,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("runtime_host", boundary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -105,14 +104,8 @@ public sealed class TerraformConfigurationTests
         Assert.Contains("evidence_retention_days == 90", boundaryVariables,
             StringComparison.Ordinal);
 
-        var runtimeStart = boundary.IndexOf(
-            "resource \"azurerm_storage_account\" \"runtime_host\"", StringComparison.Ordinal);
-        var evidenceStart = boundary.IndexOf(
-            "resource \"azurerm_storage_account\" \"evidence\"", StringComparison.Ordinal);
-        Assert.True(runtimeStart >= 0 && evidenceStart > runtimeStart);
-        var runtimeBlock = boundary[runtimeStart..evidenceStart];
-        Assert.DoesNotContain("blob_properties", runtimeBlock, StringComparison.Ordinal);
-        Assert.DoesNotContain("azurerm_storage_management_policy", runtimeBlock,
+        Assert.DoesNotContain("runtime_host", boundary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("azurerm_storage_container", boundary,
             StringComparison.Ordinal);
     }
 
@@ -156,7 +149,7 @@ public sealed class TerraformConfigurationTests
             StringComparison.Ordinal);
         Assert.Contains("source = \"./modules/observability\"", configuration,
             StringComparison.Ordinal);
-        Assert.Contains("source = \"./modules/functions\"", configuration,
+        Assert.Contains("source = \"./modules/container-apps\"", configuration,
             StringComparison.Ordinal);
         Assert.Contains("source = \"./modules/sql\"", configuration,
             StringComparison.Ordinal);
@@ -174,21 +167,21 @@ public sealed class TerraformConfigurationTests
             [
             "azurerm_cognitive_account",
             "azurerm_cognitive_deployment",
-            "azurerm_function_app_flex_consumption",
             "azurerm_application_insights",
             "azurerm_log_analytics_workspace",
             "azurerm_mssql_database",
             "azurerm_mssql_firewall_rule",
             "azurerm_mssql_server",
             "azurerm_resource_group",
-            "azurerm_service_plan",
             "azurerm_storage_account",
-            "azurerm_storage_container",
-            "azurerm_storage_management_policy"
+            "azurerm_storage_management_policy",
+            "azurerm_container_app_environment",
+            "azurerm_container_app",
+            "azurerm_container_registry"
             ],
             StringComparer.Ordinal);
 
-        Assert.Equal(15, resourceTypes.Length);
+        Assert.Equal(14, resourceTypes.Length);
         Assert.Empty(resourceTypes.Except(approvedResourceTypes, StringComparer.Ordinal));
         Assert.Equal(
             approvedResourceTypes.Count,
@@ -201,7 +194,7 @@ public sealed class TerraformConfigurationTests
             .ToArray();
 
         Assert.Equal(
-            ["ai", "demo_boundary", "document_intelligence", "functions", "observability", "sql"],
+            ["ai", "container_apps", "demo_boundary", "document_intelligence", "observability", "sql"],
             moduleNames.Order(StringComparer.Ordinal).ToArray());
 
         var declarationHeaders = string.Join(
@@ -217,9 +210,13 @@ public sealed class TerraformConfigurationTests
                      "azurerm_kubernetes_cluster",
                      "azurerm_servicebus",
                      "azurerm_api_management",
-                     "azurerm_container_registry",
                      "azurerm_consumption_reservation",
                      "azurerm_capacity_reservation",
+                     "azurerm_function_app_flex_consumption",
+                     "azurerm_service_plan",
+                     "azurerm_storage_container",
+                     "azurerm_virtual_network",
+                     "azurerm_private_endpoint",
                      "foundry_agent_service",
                      "microsoft_agent_framework"
                  })
@@ -384,24 +381,34 @@ public sealed class TerraformConfigurationTests
     }
 
     [Fact]
-    public void TerraformWorkloadModules_ConfigureApprovedFunctionsSqlAndAiBoundaries()
+    public void TerraformWorkloadModules_ConfigureApprovedContainerAppsSqlAndAiBoundaries()
     {
         var root = LoadText("terraform", "main.tf");
-        var functions = LoadText("terraform", "modules", "functions", "main.tf");
+        var containerApps = LoadText("terraform", "modules", "container-apps", "main.tf");
         var sql = LoadText("terraform", "modules", "sql", "main.tf");
         var documentIntelligence = LoadText(
             "terraform", "modules", "document-intelligence", "main.tf");
         var ai = LoadText("terraform", "modules", "ai", "main.tf");
 
-        Assert.Contains("module \"functions\"", root, StringComparison.Ordinal);
-        Assert.Contains("sku_name            = \"FC1\"", functions, StringComparison.Ordinal);
-        Assert.Contains("azurerm_function_app_flex_consumption", functions,
+        Assert.Contains("module \"container_apps\"", root, StringComparison.Ordinal);
+        Assert.Contains("resource \"azurerm_container_app_environment\" \"this\"",
+            containerApps, StringComparison.Ordinal);
+        Assert.Contains("resource \"azurerm_container_app\" \"this\"", containerApps,
             StringComparison.Ordinal);
-        Assert.Matches(@"runtime_name\s*=\s*var\.function_worker_model", functions);
-        Assert.Matches(@"runtime_version\s*=\s*""10\.0""", functions);
-        Assert.Matches(@"FUNCTIONS_EXTENSION_VERSION\s*=\s*""~4""", functions);
-        Assert.Matches(@"FUNCTIONS_WORKER_RUNTIME\s*=\s*var\.function_worker_model",
-            functions);
+        Assert.Contains("resource \"azurerm_container_registry\" \"application\"",
+            containerApps, StringComparison.Ordinal);
+        Assert.Contains("admin_enabled       = false", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("image  = var.container_image", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("target_port      = var.container_port", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("dynamic \"ip_security_restriction\"", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("min_replicas = var.min_replicas", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("max_replicas = var.max_replicas", containerApps,
+            StringComparison.Ordinal);
         Assert.Contains("azurerm_mssql_server", sql, StringComparison.Ordinal);
         Assert.Contains("sku_name                    = \"GP_S_Gen5_2\"", sql,
             StringComparison.Ordinal);
@@ -450,7 +457,7 @@ public sealed class TerraformConfigurationTests
         var outputs = LoadText("terraform", "outputs.tf");
         var moduleFiles = new[]
         {
-            LoadText("terraform", "modules", "functions", "main.tf"),
+            LoadText("terraform", "modules", "container-apps", "main.tf"),
             LoadText("terraform", "modules", "sql", "main.tf"),
             LoadText("terraform", "modules", "document-intelligence", "main.tf"),
             LoadText("terraform", "modules", "ai", "main.tf")
@@ -460,7 +467,8 @@ public sealed class TerraformConfigurationTests
             root, StringComparison.Ordinal);
         Assert.All(moduleFiles, module => Assert.Contains("tags = var.tags", module,
             StringComparison.Ordinal));
-        Assert.Contains("function_app_endpoint", outputs, StringComparison.Ordinal);
+        Assert.Contains("container_app_id", outputs, StringComparison.Ordinal);
+        Assert.Contains("container_app_registry_id", outputs, StringComparison.Ordinal);
         Assert.Contains("sql_server_fully_qualified_domain_name", outputs,
             StringComparison.Ordinal);
         Assert.Contains("document_intelligence_endpoint", outputs,
@@ -474,23 +482,24 @@ public sealed class TerraformConfigurationTests
     [Fact]
     public void TerraformWorkloadModules_UsePublicFirewallRestrictedEndpointsWithoutNetworkInfrastructure()
     {
-        var functions = LoadText("terraform", "modules", "functions", "main.tf");
+        var containerApps = LoadText("terraform", "modules", "container-apps", "main.tf");
         var configuration = string.Join(
             Environment.NewLine,
             new[]
             {
-                functions,
+                containerApps,
                 LoadText("terraform", "modules", "sql", "main.tf"),
                 LoadText("terraform", "modules", "document-intelligence", "main.tf"),
                 LoadText("terraform", "modules", "ai", "main.tf")
             });
 
-        Assert.Matches(@"public_network_access_enabled\s*=\s*true", functions);
-        Assert.Matches(@"ip_restriction_default_action\s*=\s*""Deny""", functions);
-        Assert.Matches(@"scm_ip_restriction_default_action\s*=\s*""Deny""", functions);
-        Assert.Contains("dynamic \"ip_restriction\"", functions, StringComparison.Ordinal);
-        Assert.Contains("allowed_ip_ranges", functions, StringComparison.Ordinal);
-        Assert.Matches(@"public_network_access_enabled\s*=\s*true", configuration);
+        Assert.Contains("external_enabled = true", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("dynamic \"ip_security_restriction\"", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("allowed_source_ranges", containerApps, StringComparison.Ordinal);
+        Assert.Contains("action           = \"Allow\"", containerApps,
+            StringComparison.Ordinal);
         Assert.Contains("default_action = \"Deny\"", configuration,
             StringComparison.Ordinal);
         Assert.Contains("start_ip_address = \"0.0.0.0\"", configuration,
@@ -504,6 +513,52 @@ public sealed class TerraformConfigurationTests
         Assert.DoesNotContain("virtual_network_subnet_id", configuration,
             StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("local-exec", configuration, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TerraformConfiguration_RemovesRetiredFunctionsAndDeploymentExecutionContracts()
+    {
+        var terraformRoot = new DirectoryInfo(Path.Combine(FindRepositoryRoot(), "terraform"));
+        var files = terraformRoot
+            .EnumerateFiles("*.tf", SearchOption.AllDirectories)
+            .Where(file => !file.FullName.Contains(
+                Path.Combine("terraform", "bootstrap"), StringComparison.Ordinal))
+            .Concat([
+                new FileInfo(Path.Combine(terraformRoot.FullName, "README.md")),
+                new FileInfo(Path.Combine(terraformRoot.FullName, "examples", "demo.tfvars")),
+                new FileInfo(Path.Combine(terraformRoot.FullName, "outputs.tf"))
+            ]);
+        var configuration = string.Join(
+            Environment.NewLine,
+            files.Select(file => File.ReadAllText(file.FullName)));
+
+        foreach (var retiredContract in new[]
+                 {
+                     "Functions",
+                     "Durable",
+                     "dotnet-isolated",
+                     "Function App",
+                     "function_app_endpoint",
+                     "local-exec",
+                     "terraform apply -auto-approve",
+                     "sql migration",
+                     "fixture loading"
+                 })
+        {
+            Assert.DoesNotContain(retiredContract, configuration,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Contains("container_image", configuration, StringComparison.Ordinal);
+        Assert.Contains("container_port", configuration, StringComparison.Ordinal);
+        Assert.Contains("container_allowed_source_ranges", configuration,
+            StringComparison.Ordinal);
+        Assert.Contains("container_min_replicas", configuration, StringComparison.Ordinal);
+        Assert.Contains("container_max_replicas", configuration, StringComparison.Ordinal);
+        Assert.Contains("admin_enabled       = false", configuration,
+            StringComparison.Ordinal);
+        Assert.Contains("min_replicas = var.min_replicas", configuration,
+            StringComparison.Ordinal);
     }
 
     private static string LoadText(params string[] relativePath)

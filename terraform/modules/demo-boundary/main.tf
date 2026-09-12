@@ -8,20 +8,6 @@ resource "azurerm_resource_group" "this" {
   tags     = var.tags
 }
 
-resource "azurerm_storage_account" "runtime_host" {
-  name                     = "st${local.storage_name_prefix}host"
-  resource_group_name      = azurerm_resource_group.this.name
-  location                 = azurerm_resource_group.this.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  account_kind             = "StorageV2"
-
-  min_tls_version                 = "TLS1_2"
-  allow_nested_items_to_be_public = false
-  public_network_access_enabled   = true
-  tags                            = var.tags
-}
-
 resource "azurerm_storage_account" "evidence" {
   name                     = "st${local.storage_name_prefix}evid"
   resource_group_name      = azurerm_resource_group.this.name

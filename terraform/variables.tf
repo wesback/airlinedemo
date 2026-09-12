@@ -62,28 +62,6 @@ variable "region" {
   }
 }
 
-variable "function_runtime" {
-  description = "Azure Functions runtime generation approved by preflight."
-  type        = string
-  default     = "Azure Functions v4"
-
-  validation {
-    condition     = var.function_runtime == "Azure Functions v4"
-    error_message = "function_runtime must remain Azure Functions v4 for this deployment."
-  }
-}
-
-variable "function_worker_model" {
-  description = "Azure Functions worker model approved by preflight."
-  type        = string
-  default     = "dotnet-isolated"
-
-  validation {
-    condition     = var.function_worker_model == "dotnet-isolated"
-    error_message = "function_worker_model must be dotnet-isolated for this deployment."
-  }
-}
-
 variable "target_framework" {
   description = "Application target framework approved by preflight."
   type        = string
@@ -95,36 +73,56 @@ variable "target_framework" {
   }
 }
 
-variable "hosting_plan" {
-  description = "Azure Functions hosting plan approved by preflight."
+variable "container_image" {
+  description = "Explicit non-secret application image reference. Image deployment is separate from infrastructure provisioning."
   type        = string
-  default     = "Flex Consumption"
 
   validation {
-    condition     = var.hosting_plan == "Flex Consumption"
-    error_message = "hosting_plan must be Flex Consumption for this deployment."
+    condition     = length(trimspace(var.container_image)) > 0 && !strcontains(var.container_image, "@")
+    error_message = "container_image must be an explicit tagged image reference, not a digest or empty value."
   }
 }
 
-variable "durable_storage_kind" {
-  description = "Azure Storage kind for the Durable Functions backend."
-  type        = string
-  default     = "StorageV2"
+variable "container_port" {
+  description = "Container Apps ingress target port exposed by the application."
+  type        = number
+  default     = 8080
 
   validation {
-    condition     = var.durable_storage_kind == "StorageV2"
-    error_message = "durable_storage_kind must be StorageV2 for this deployment."
+    condition     = var.container_port >= 1 && var.container_port <= 65535
+    error_message = "container_port must be a valid TCP port."
   }
 }
 
-variable "durable_backend" {
-  description = "Durable Functions backend approved by preflight."
-  type        = string
-  default     = "Azure Storage"
+variable "container_allowed_source_ranges" {
+  description = "Explicit public ingress CIDR allow-list for the Container App."
+  type        = list(string)
 
   validation {
-    condition     = var.durable_backend == "Azure Storage"
-    error_message = "durable_backend must be Azure Storage for this deployment."
+    condition     = length(var.container_allowed_source_ranges) > 0 && alltrue([for ip in var.container_allowed_source_ranges : can(cidrhost(ip, 0))])
+    error_message = "container_allowed_source_ranges must contain at least one valid CIDR range."
+  }
+}
+
+variable "container_min_replicas" {
+  description = "Minimum Container App replica count; zero preserves scale-to-zero."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.container_min_replicas == 0
+    error_message = "container_min_replicas must remain zero for the approved consumption workload."
+  }
+}
+
+variable "container_max_replicas" {
+  description = "Maximum Container App replica count for the bounded demonstrator."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.container_max_replicas == 1
+    error_message = "container_max_replicas must remain one for the bounded demonstrator."
   }
 }
 
@@ -288,16 +286,5 @@ variable "cognitive_allowed_ip_ranges" {
   validation {
     condition     = alltrue([for ip in var.cognitive_allowed_ip_ranges : can(cidrhost(ip, 0))])
     error_message = "cognitive_allowed_ip_ranges must contain valid CIDR ranges."
-  }
-}
-
-variable "function_allowed_ip_ranges" {
-  description = "Explicit public firewall allow-list for the Function App. Empty denies public endpoint access."
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for ip in var.function_allowed_ip_ranges : can(cidrhost(ip, 0))])
-    error_message = "function_allowed_ip_ranges must contain valid CIDR ranges."
   }
 }

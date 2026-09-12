@@ -12,18 +12,16 @@ locals {
     resource_group_name                    = var.resource_group_name
     region                                 = var.region
     resource_group_id                      = module.demo_boundary.resource_group_id
-    runtime_host_storage_account_id        = module.demo_boundary.runtime_host_storage_account_id
-    runtime_host_storage_account_name      = module.demo_boundary.runtime_host_storage_account_name
     evidence_storage_account_id            = module.demo_boundary.evidence_storage_account_id
     evidence_storage_account_name          = module.demo_boundary.evidence_storage_account_name
     application_insights_id                = module.observability.application_insights_id
     log_analytics_workspace_id             = module.observability.log_analytics_workspace_id
-    function_runtime                       = var.function_runtime
-    function_worker_model                  = var.function_worker_model
     target_framework                       = var.target_framework
-    hosting_plan                           = var.hosting_plan
-    durable_backend                        = var.durable_backend
-    durable_storage_kind                   = var.durable_storage_kind
+    container_image                        = var.container_image
+    container_port                         = var.container_port
+    container_allowed_source_ranges        = var.container_allowed_source_ranges
+    container_min_replicas                 = var.container_min_replicas
+    container_max_replicas                 = var.container_max_replicas
     sql_engine                             = var.sql_engine
     sql_sku                                = var.sql_sku
     sql_authentication                     = var.sql_authentication
@@ -36,8 +34,8 @@ locals {
     azure_openai_model                     = var.azure_openai_model
     azure_openai_model_version             = var.azure_openai_model_version
     azure_openai_quota_tokens_minute       = var.azure_openai_quota_tokens_minute
-    function_app_id                        = module.functions.function_app_id
-    function_app_endpoint                  = module.functions.function_app_endpoint
+    container_app_id                       = module.container_apps.container_app_id
+    container_app_registry_id              = module.container_apps.container_registry_id
     sql_server_id                          = module.sql.sql_server_id
     sql_server_fully_qualified_domain_name = module.sql.sql_server_fully_qualified_domain_name
     sql_database_id                        = module.sql.sql_database_id
@@ -70,23 +68,19 @@ module "observability" {
   tags                = local.common_tags
 }
 
-module "functions" {
-  source = "./modules/functions"
+module "container_apps" {
+  source = "./modules/container-apps"
 
-  deployment_name                   = var.deployment_name
-  resource_group_name               = module.demo_boundary.resource_group_name
-  region                            = var.region
-  function_runtime                  = var.function_runtime
-  function_worker_model             = var.function_worker_model
-  target_framework                  = var.target_framework
-  hosting_plan                      = var.hosting_plan
-  durable_backend                   = var.durable_backend
-  durable_storage_kind              = var.durable_storage_kind
-  runtime_host_storage_account_id   = module.demo_boundary.runtime_host_storage_account_id
-  runtime_host_storage_account_name = module.demo_boundary.runtime_host_storage_account_name
-  application_insights_id           = module.observability.application_insights_id
-  allowed_ip_ranges                 = var.function_allowed_ip_ranges
-  tags                              = local.common_tags
+  deployment_name            = var.deployment_name
+  resource_group_name        = module.demo_boundary.resource_group_name
+  region                     = var.region
+  log_analytics_workspace_id = module.observability.log_analytics_workspace_id
+  container_image            = var.container_image
+  container_port             = var.container_port
+  allowed_source_ranges      = var.container_allowed_source_ranges
+  min_replicas               = var.container_min_replicas
+  max_replicas               = var.container_max_replicas
+  tags                       = local.common_tags
 }
 
 module "sql" {

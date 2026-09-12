@@ -18,16 +18,6 @@ output "resource_group_id" {
   value       = module.demo_boundary.resource_group_id
 }
 
-output "runtime_host_storage_account_id" {
-  description = "Non-secret resource identifier for Durable Functions host/task-hub storage."
-  value       = module.demo_boundary.runtime_host_storage_account_id
-}
-
-output "runtime_host_storage_account_name" {
-  description = "Non-secret name of the Durable Functions host/task-hub storage account."
-  value       = module.demo_boundary.runtime_host_storage_account_name
-}
-
 output "evidence_storage_account_id" {
   description = "Non-secret resource identifier for private evidence storage."
   value       = module.demo_boundary.evidence_storage_account_id
@@ -48,24 +38,9 @@ output "log_analytics_workspace_id" {
   value       = module.observability.log_analytics_workspace_id
 }
 
-output "function_runtime" {
-  description = "Approved Azure Functions runtime boundary."
-  value       = var.function_runtime
-}
-
-output "function_worker_model" {
-  description = "Approved Azure Functions worker model."
-  value       = var.function_worker_model
-}
-
 output "target_framework" {
   description = "Approved application target framework."
   value       = var.target_framework
-}
-
-output "durable_storage_kind" {
-  description = "Approved Durable Functions storage kind."
-  value       = var.durable_storage_kind
 }
 
 output "sql_authentication" {
@@ -93,14 +68,14 @@ output "application_deployment" {
   value       = local.application_deployment
 }
 
-output "function_app_id" {
-  description = "Non-secret resource identifier for the Flex Consumption Function App."
-  value       = module.functions.function_app_id
+output "container_app_id" {
+  description = "Non-secret resource identifier for the Container App."
+  value       = module.container_apps.container_app_id
 }
 
-output "function_app_endpoint" {
-  description = "HTTPS endpoint for the Flex Consumption Function App."
-  value       = module.functions.function_app_endpoint
+output "container_app_registry_id" {
+  description = "Non-secret resource identifier for the application container registry."
+  value       = module.container_apps.container_registry_id
 }
 
 output "sql_server_id" {
