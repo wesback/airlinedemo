@@ -621,6 +621,223 @@ public sealed class AssessmentPersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task AuthenticatedMockPartnerResponse_MarksRequestRespondedAndQueuesReassessment()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+        var dispatched = await server.Client.PostAsync("/api/dispatch", null);
+        Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
+
+        using var beforeResponse = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var requestId = beforeResponse.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value.GetProperty("requestId").GetString()!;
+        var partner = fixture.CreatePartnerClient(server);
+        var response = await partner.PostAsJsonAsync(
+            "/api/partner-responses",
+            fixture.GeneratePartnerResponseRequest(requestId));
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(result);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var requestState = state.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value;
+        Assert.Equal("responded", requestState.GetProperty("status").GetString());
+        var partnerResponse = state.RootElement.GetProperty("partnerResponses")
+            .EnumerateObject().Single().Value;
+        var responsePackageId = fixture.ResponsePackageId;
+        Assert.Equal(requestId, partnerResponse.GetProperty("requestId").GetString());
+        Assert.Equal(responsePackageId, partnerResponse.GetProperty("packageId").GetString());
+        var trigger = state.RootElement.GetProperty("reassessmentTriggers")
+            .EnumerateObject().Single().Value;
+        Assert.Equal(requestId, trigger.GetProperty("requestId").GetString());
+        Assert.Equal(responsePackageId, trigger.GetProperty("packageId").GetString());
+        Assert.Equal("queued", trigger.GetProperty("status").GetString());
+        Assert.DoesNotContain(
+            state.RootElement.GetProperty("cases").EnumerateObject(),
+            entry => entry.Value.GetProperty("status").GetString() == "accepted");
+        partner.Dispose();
+    }
+
+    [Fact]
+    public async Task PartnerResponseReplay_IsIdempotentAndConflictingReuseDoesNotMutateState()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+        await server.Client.PostAsync("/api/dispatch", null);
+        using var beforeResponse = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var requestId = beforeResponse.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value.GetProperty("requestId").GetString()!;
+        var partner = fixture.CreatePartnerClient(server);
+        var responseRequest = fixture.GeneratePartnerResponseRequest(requestId);
+
+        var first = await partner.PostAsJsonAsync("/api/partner-responses", responseRequest);
+        Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
+        var firstResult = await first.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(firstResult);
+        var afterFirst = await File.ReadAllTextAsync(fixture.StatePath);
+
+        var replay = await partner.PostAsJsonAsync("/api/partner-responses", responseRequest);
+        Assert.Equal(HttpStatusCode.Accepted, replay.StatusCode);
+        var replayResult = await replay.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(replayResult);
+        Assert.Equal(firstResult!.OperationId, replayResult!.OperationId);
+        Assert.Equal(afterFirst, await File.ReadAllTextAsync(fixture.StatePath));
+
+        using var changedPayload = JsonDocument.Parse(
+            """{"packageId":"PKG-0002","requestId":"REQUEST-DIFFERENT"}""");
+        var conflicting = responseRequest with
+        {
+            Event = responseRequest.Event with
+            {
+                Payload = changedPayload.RootElement.Clone()
+            }
+        };
+        var conflict = await partner.PostAsJsonAsync("/api/partner-responses", conflicting);
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.Equal(afterFirst, await File.ReadAllTextAsync(fixture.StatePath));
+        using var finalState = JsonDocument.Parse(afterFirst);
+        Assert.Single(finalState.RootElement.GetProperty("partnerResponses").EnumerateObject());
+        Assert.Single(finalState.RootElement.GetProperty("reassessmentTriggers").EnumerateObject());
+        Assert.Single(finalState.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Single(finalState.RootElement.GetProperty("deliveryAttempts").EnumerateObject());
+        partner.Dispose();
+    }
+
+    [Fact]
+    public async Task UnauthorisedOrMismatchedPartnerResponses_ExposeNoDataAndCreateNoMutation()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync(
+            $"/api/operations/{operation!.OperationId}/process", null);
+        await server.Client.PostAsync("/api/dispatch", null);
+        using var before = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var requestId = before.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value.GetProperty("requestId").GetString()!;
+        var valid = fixture.GeneratePartnerResponseRequest(requestId);
+
+        var protectedValues = new[]
+        {
+            requestId,
+            valid.Package.PackageId,
+            valid.Package.RunId,
+            valid.Package.CaseId,
+            valid.Package.AirlineId,
+            valid.Package.AircraftId,
+            valid.Package.LeaseId
+        }.Concat(valid.Package.Manifest.SelectMany(document =>
+            new[]
+            {
+                document.DocumentId,
+                document.SourceRecordId,
+                document.FileName,
+                document.Sha256
+            }))
+        .Where(value => !string.IsNullOrEmpty(value))
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+        var attempts =
+            new
+                (HttpClient Client, PackageSubmissionRequest Request, HttpStatusCode Status,
+                    string SafeCode, string? Message)[]
+        {
+            (new HttpClient { BaseAddress = server.BaseAddress }, valid,
+                HttpStatusCode.Unauthorized, "AUTHENTICATION_REQUIRED", null),
+            (fixture.CreatePartnerClient(server, "wrong-partner"), valid,
+                HttpStatusCode.Forbidden, "ACTION_FORBIDDEN", null),
+            (fixture.CreatePartnerClient(server), valid with
+            {
+                Event = valid.Event with
+                {
+                    Payload = JsonDocument.Parse(
+                        """{"packageId":"PKG-0002","requestId":"REQUEST-UNKNOWN"}""")
+                        .RootElement.Clone()
+                }
+            }, HttpStatusCode.NotFound, "RESPONSE_NOT_FOUND", null),
+            (fixture.CreatePartnerClient(server), valid with
+            {
+                Event = valid.Event with
+                {
+                    Payload = JsonDocument.Parse(
+                        """{"packageId":"PKG-WRONG","requestId":"REQUEST-UNKNOWN"}""")
+                        .RootElement.Clone()
+                }
+            }, HttpStatusCode.BadRequest, "INVALID_PAYLOAD",
+                "The package submission does not match the published contract."),
+            (fixture.CreatePartnerClient(server), valid with
+            {
+                Event = valid.Event with { AirlineId = "AIRLINE-OTHER" },
+                Package = valid.Package with { AirlineId = "AIRLINE-OTHER" }
+            }, HttpStatusCode.Forbidden, "ACTION_FORBIDDEN", null),
+            (fixture.CreatePartnerClient(server), valid with
+            {
+                Event = valid.Event with { CaseId = "CASE-OTHER" },
+                Package = valid.Package with { CaseId = "CASE-OTHER" }
+            }, HttpStatusCode.NotFound, "RESPONSE_NOT_FOUND", null)
+        };
+
+        foreach (var (client, responseRequest, expectedStatus, expectedSafeCode,
+                      expectedMessage) in attempts)
+        {
+            var response = await client.PostAsJsonAsync(
+                "/api/partner-responses", responseRequest);
+            Assert.Equal(expectedStatus, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync();
+            using var safeError = JsonDocument.Parse(body);
+            var properties = safeError.RootElement.EnumerateObject()
+                .Select(property => property.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+            Assert.Equal(
+                new[] { "correlationId", "message", "safeCode" },
+                properties);
+            Assert.Equal(expectedSafeCode,
+                safeError.RootElement.GetProperty("safeCode").GetString());
+            Assert.Equal(valid.Event.CorrelationId,
+                safeError.RootElement.GetProperty("correlationId").GetString());
+            var message = safeError.RootElement.GetProperty("message");
+            Assert.Equal(
+                expectedMessage is null ? JsonValueKind.Null : JsonValueKind.String,
+                message.ValueKind);
+            Assert.Equal(expectedMessage, message.GetString());
+            foreach (var protectedValue in protectedValues)
+            {
+                Assert.DoesNotContain(protectedValue, body, StringComparison.Ordinal);
+            }
+            client.Dispose();
+            Assert.Equal(before.RootElement.GetRawText(),
+                JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath))
+                    .RootElement.GetRawText());
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentLeaseExpiryAndAcknowledgedRetry_DoNotDuplicateMockInboxDelivery()
     {
         using var fixture = new BaselineFixture();
@@ -1515,6 +1732,7 @@ public sealed class AssessmentPersistenceIntegrationTests
 
         public string OutputDirectory => Path.Combine(directory, "fixture");
         public string StatePath => Path.Combine(directory, "state", "workflow-state.json");
+        public string ResponsePackageId => "PKG-0002";
 
         public PackageSubmissionRequest GenerateRequest(
             string packageId = "PKG-0001",
@@ -1575,6 +1793,74 @@ public sealed class AssessmentPersistenceIntegrationTests
                     correlationId,
                     payload.RootElement.Clone()),
                 package);
+        }
+
+        public PackageSubmissionRequest GeneratePartnerResponseRequest(
+            string requestId,
+            string eventId = "EVT-RESP-0001")
+        {
+            if (generated is null)
+            {
+                throw new InvalidOperationException("GenerateRequest must be called first.");
+            }
+
+            var sourcePackage = JsonSerializer.Deserialize<AirlineDemo.Generator.SubmissionPackage>(
+                File.ReadAllText(
+                    Path.Combine(
+                        OutputDirectory,
+                        "staged-responses/package-002/manifest.json")),
+                GeneratorContractJson.Options)
+                ?? throw new InvalidDataException("The staged response package is missing.");
+            var sourceEvent = generated.ContractPackage.Events.Single();
+            var documents = sourcePackage.Manifest
+                .Select(document => new DocumentMetadata(
+                    document.DocumentId,
+                    document.Version,
+                    document.SourceSystem,
+                    document.SourceRecordId,
+                    document.FileName,
+                    document.MediaType,
+                    document.Sha256,
+                    document.IssuedOn))
+                .ToArray();
+            using var payload = JsonDocument.Parse(
+                $$"""{"packageId":"{{sourcePackage.PackageId}}","requestId":"{{requestId}}"}""");
+            var package = new ApiSubmissionPackage(
+                sourcePackage.SchemaVersion,
+                sourcePackage.PackageId,
+                sourcePackage.RunId,
+                sourcePackage.CaseId,
+                sourcePackage.AirlineId,
+                sourcePackage.AircraftId,
+                sourcePackage.LeaseId,
+                sourcePackage.SubmittedAt,
+                sourcePackage.ScenarioEffectiveAt,
+                documents);
+            return new PackageSubmissionRequest(
+                new ApiEventEnvelope(
+                    sourceEvent.SchemaVersion,
+                    eventId,
+                    "partner.response.received",
+                    sourceEvent.RunId,
+                    sourceEvent.CaseId,
+                    sourceEvent.AirlineId,
+                    sourceEvent.AircraftId,
+                    sourceEvent.LeaseId,
+                    sourcePackage.SubmittedAt,
+                    sourcePackage.ScenarioEffectiveAt,
+                    "CORR-RESP-0001",
+                    payload.RootElement.Clone()),
+                package);
+        }
+
+        public HttpClient CreatePartnerClient(ApiServer apiServer, string subject = "mock-partner")
+        {
+            var client = new HttpClient { BaseAddress = apiServer.BaseAddress };
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                $"run=RUN-0001;airline=AIRLINE-0001;aircraft=MOCK-AC-001;" +
+                $"lease=LEASE-0001;subject={subject}");
+            return client;
         }
 
         public string ExtractionKey(DocumentMetadata document) =>

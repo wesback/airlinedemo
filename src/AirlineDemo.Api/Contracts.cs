@@ -222,6 +222,24 @@ public sealed record EvidenceRequest(
     DateTimeOffset CreatedAt,
     string? ClosureReason = null);
 
+public sealed record PartnerResponse(
+    string ResponseId,
+    string RequestId,
+    string PackageId,
+    CaseContext Context,
+    string EventId,
+    DateTimeOffset ReceivedAt,
+    string CanonicalHash);
+
+public sealed record ReassessmentTrigger(
+    string TriggerId,
+    string RequestId,
+    string PackageId,
+    CaseContext Context,
+    string Status,
+    DateTimeOffset CreatedAt,
+    string CorrelationId);
+
 public sealed record DispatchOutboxIntent(
     string IntentId,
     string RequestId,
@@ -373,6 +391,8 @@ internal sealed class PersistedState
     public Dictionary<string, Finding> Findings { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PolicyDecision> PolicyDecisions { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceRequest> EvidenceRequests { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, PartnerResponse> PartnerResponses { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, ReassessmentTrigger> ReassessmentTriggers { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, DispatchOutboxIntent> DispatchOutbox { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, MockInboxItem> MockInbox { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, DeliveryAttempt> DeliveryAttempts { get; init; } = new(StringComparer.Ordinal);

@@ -46,6 +46,13 @@ public static class WorkflowApi
             CancellationToken cancellationToken) =>
             await service.SubmitPackageAsync(request, httpContext, cancellationToken));
 
+        app.MapPost("/api/partner-responses", async (
+            PackageSubmissionRequest? request,
+            HttpContext httpContext,
+            WorkflowService service,
+            CancellationToken cancellationToken) =>
+            await service.SubmitPartnerResponseAsync(request, httpContext, cancellationToken));
+
         app.MapDelete("/api/demo/runs/{runId}", async (
             string runId,
             HttpRequest httpRequest,
@@ -362,6 +369,237 @@ internal sealed class WorkflowService
             statusCode: 202);
     }
 
+    public async Task<IResult> SubmitPartnerResponseAsync(
+        PackageSubmissionRequest? request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = request?.Event?.CorrelationId ?? NewCorrelationId();
+        var caller = CallerScopeParser.Parse(httpContext.Request.Headers.Authorization);
+        if (caller is null)
+        {
+            return Results.Json(
+                new SafeError("AUTHENTICATION_REQUIRED", correlationId), statusCode: 401);
+        }
+
+        if (request is null ||
+            request.Event is null ||
+            request.Package is null ||
+            !caller.IsMockPartner() ||
+            !caller.Matches(request.Event) ||
+            !ScopeMatches(request.Event, request.Package))
+        {
+            return Results.Json(
+                new SafeError("ACTION_FORBIDDEN", correlationId), statusCode: 403);
+        }
+
+        var canonicalHash = CanonicalHash(request);
+        var receiptKey = $"{request.Event.RunId}:{request.Event.EventId}";
+        var existing = stateStore.Read(state =>
+            state.Receipts.TryGetValue(receiptKey, out var receipt) &&
+            receipt.OperationType == "partner_response"
+                ? receipt
+                : null);
+        if (existing is not null)
+        {
+            if (!StringComparer.Ordinal.Equals(existing.CanonicalHash, canonicalHash))
+            {
+                return Results.Json(
+                    new SafeError("EVENT_PAYLOAD_CONFLICT", correlationId), statusCode: 409);
+            }
+
+            return Results.Json(
+                new OperationAccepted(existing.OperationId, existing.CaseId, existing.ReceiptId),
+                statusCode: 202);
+        }
+
+        var validationError = ValidatePartnerResponse(request);
+        if (validationError is not null)
+        {
+            return Results.Json(
+                new SafeError("INVALID_PAYLOAD", correlationId, validationError),
+                statusCode: 400);
+        }
+
+        var requestId = request.Event.Payload.GetProperty("requestId").GetString()!;
+        var context = new CaseContext(
+            request.Package.RunId,
+            request.Package.CaseId,
+            request.Package.AirlineId,
+            request.Package.AircraftId,
+            request.Package.LeaseId);
+        var persistedRequest = stateStore.Read(state =>
+            state.EvidenceRequests.TryGetValue(requestId, out var candidate) &&
+            candidate.Status is not ("closed" or "cancelled") &&
+            StringComparer.Ordinal.Equals(candidate.RecipientRef, "mock-partner-inbox") &&
+            IsRequestInCallerScope(state, candidate, caller) &&
+            state.EvidenceBases.TryGetValue(candidate.BasisId, out var basis) &&
+            ScopeMatches(basis.Context, context)
+                ? candidate
+                : null);
+        if (persistedRequest is null)
+        {
+            return Results.Json(
+                new SafeError("RESPONSE_NOT_FOUND", correlationId), statusCode: 404);
+        }
+
+        if (stateStore.Read(state =>
+                state.Packages.ContainsKey(PackageKey(context, request.Package.PackageId))))
+        {
+            return Results.Json(
+                new SafeError("INVALID_PAYLOAD", correlationId), statusCode: 409);
+        }
+
+        var operationId = NewId("OP");
+        var receiptId = NewId("RECEIPT");
+        var responseId = NewId("RESPONSE");
+        var triggerId = NewId("REASSESS");
+        var receivedAt = DateTimeOffset.UtcNow;
+        var operation = new PersistedOperation(
+            new OperationStatus(
+                operationId,
+                context.CaseId,
+                context.RunId,
+                context.AirlineId,
+                context.AircraftId,
+                context.LeaseId,
+                "queued"),
+            canonicalHash);
+        var package = new PersistedPackage(
+            request.Package,
+            context,
+            operationId,
+            "queued",
+            null);
+        var response = new PartnerResponse(
+            responseId,
+            requestId,
+            request.Package.PackageId,
+            context,
+            request.Event.EventId,
+            receivedAt,
+            canonicalHash);
+        var trigger = new ReassessmentTrigger(
+            triggerId,
+            requestId,
+            request.Package.PackageId,
+            context,
+            "queued",
+            receivedAt,
+            correlationId);
+
+        PersistedReceipt? replay = null;
+        var conflict = false;
+        var invalidRequest = false;
+        stateStore.Update(state =>
+        {
+            if (state.Receipts.TryGetValue(receiptKey, out var receipt))
+            {
+                if (!StringComparer.Ordinal.Equals(receipt.CanonicalHash, canonicalHash))
+                {
+                    conflict = true;
+                }
+                else
+                {
+                    replay = receipt;
+                }
+
+                return;
+            }
+
+            if (!state.EvidenceRequests.TryGetValue(requestId, out var currentRequest) ||
+                currentRequest.Status is "closed" or "cancelled" ||
+                !StringComparer.Ordinal.Equals(
+                    currentRequest.RecipientRef, "mock-partner-inbox") ||
+                !IsRequestInCallerScope(state, currentRequest, caller) ||
+                !state.EvidenceBases.TryGetValue(currentRequest.BasisId, out var basis) ||
+                !ScopeMatches(basis.Context, context) ||
+                state.Packages.ContainsKey(PackageKey(context, request.Package.PackageId)))
+            {
+                invalidRequest = true;
+                return;
+            }
+
+            if (!state.Cases.TryGetValue(CaseKey(context), out var persistedCase))
+            {
+                invalidRequest = true;
+                return;
+            }
+
+            state.Cases[CaseKey(context)] = persistedCase with
+            {
+                CaseRevision = checked(persistedCase.CaseRevision + 1),
+                Status = "active"
+            };
+            state.Operations.Add(operationId, operation);
+            state.Packages.Add(PackageKey(context, request.Package.PackageId), package);
+            foreach (var metadata in request.Package.Manifest)
+            {
+                var locator =
+                    $"{context.RunId}/{context.CaseId}/{metadata.DocumentId}/v{metadata.Version}";
+                state.Documents[DocumentKey(context, metadata.DocumentId, metadata.Version)] =
+                    new PersistedDocument(metadata, context, locator);
+            }
+
+            state.EvidenceRequests[requestId] = currentRequest with
+            {
+                Status = "responded",
+                ClosureReason = null
+            };
+            state.PartnerResponses.Add(responseId, response);
+            state.ReassessmentTriggers.Add(triggerId, trigger);
+            state.Receipts.Add(
+                receiptKey,
+                new PersistedReceipt(
+                    receiptId,
+                    context.RunId,
+                    request.Event.EventId,
+                    canonicalHash,
+                    operationId,
+                    context.CaseId,
+                    "partner_response",
+                    string.Empty,
+                    receivedAt,
+                    7 + request.Package.Manifest.Count));
+            var auditId = NewId("AUDIT");
+            (state.AuditEntries ??= new(StringComparer.Ordinal)).Add(
+                auditId,
+                new AuditEntry(
+                    auditId,
+                    context,
+                    "mock_partner",
+                    caller.Subject,
+                    "partner.response.received",
+                    [responseId, requestId, request.Package.PackageId, triggerId],
+                    currentRequest.BasisId,
+                    receivedAt,
+                    correlationId));
+        });
+
+        if (conflict)
+        {
+            return Results.Json(
+                new SafeError("EVENT_PAYLOAD_CONFLICT", correlationId), statusCode: 409);
+        }
+
+        if (replay is not null)
+        {
+            return Results.Json(
+                new OperationAccepted(replay.OperationId, replay.CaseId, replay.ReceiptId),
+                statusCode: 202);
+        }
+
+        if (invalidRequest)
+        {
+            return Results.Json(
+                new SafeError("RESPONSE_NOT_FOUND", correlationId), statusCode: 404);
+        }
+
+        return Results.Json(
+            new OperationAccepted(operationId, context.CaseId, receiptId),
+            statusCode: 202);
+    }
+
     public async Task<IResult> ResetRunAsync(
         string? routeRunId,
         RunResetRequest? request,
@@ -472,6 +710,14 @@ internal sealed class WorkflowService
                     basis.Context.RunId == runId)
                 .Select(entry => entry.Key)
                 .ToArray();
+            var partnerResponseKeys = state.PartnerResponses
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
+            var reassessmentTriggerKeys = state.ReassessmentTriggers
+                .Where(entry => entry.Value.Context.RunId == runId)
+                .Select(entry => entry.Key)
+                .ToArray();
             var dispatchOutboxKeys = state.DispatchOutbox
                 .Where(entry => state.EvidenceRequests.TryGetValue(
                     entry.Value.RequestId, out var request) &&
@@ -539,6 +785,8 @@ internal sealed class WorkflowService
                 findingKeys.Length +
                 policyDecisionKeys.Length +
                 evidenceRequestKeys.Length +
+                partnerResponseKeys.Length +
+                reassessmentTriggerKeys.Length +
                 dispatchOutboxKeys.Length +
                 mockInboxKeys.Length +
                 deliveryAttemptKeys.Length +
@@ -599,6 +847,16 @@ internal sealed class WorkflowService
             foreach (var key in evidenceRequestKeys)
             {
                 state.EvidenceRequests.Remove(key);
+            }
+
+            foreach (var key in partnerResponseKeys)
+            {
+                state.PartnerResponses.Remove(key);
+            }
+
+            foreach (var key in reassessmentTriggerKeys)
+            {
+                state.ReassessmentTriggers.Remove(key);
             }
 
             foreach (var key in dispatchOutboxKeys)
@@ -2107,6 +2365,24 @@ internal sealed class WorkflowService
         return null;
     }
 
+    private static string? ValidatePartnerResponse(PackageSubmissionRequest request)
+    {
+        if (request.Event.Type != "partner.response.received" ||
+            request.Event.Payload.ValueKind != JsonValueKind.Object ||
+            !request.Event.Payload.TryGetProperty("requestId", out var requestId) ||
+            requestId.ValueKind != JsonValueKind.String ||
+            !IsValidId(requestId.GetString()) ||
+            request.Event.Payload.EnumerateObject().Select(property => property.Name)
+                .ToHashSet(StringComparer.Ordinal)
+                .SetEquals(["packageId", "requestId"]) is false)
+        {
+            return "The partner response does not match the published contract.";
+        }
+
+        var packageEvent = request.Event with { Type = "package.submitted" };
+        return ValidateSubmission(request with { Event = packageEvent });
+    }
+
     private static bool IsValidId(string? value) =>
         value is not null &&
         value.Length is > 0 and <= 128 &&
@@ -2465,6 +2741,9 @@ internal static class CallerScopeParser
 
 internal static class CallerScopeExtensions
 {
+    public static bool IsMockPartner(this CallerScope caller) =>
+        StringComparer.Ordinal.Equals(caller.Subject, "mock-partner");
+
     public static bool Matches(this CallerScope caller, EventEnvelope eventEnvelope) =>
         caller.RunId == eventEnvelope.RunId &&
         caller.AirlineId == eventEnvelope.AirlineId &&
