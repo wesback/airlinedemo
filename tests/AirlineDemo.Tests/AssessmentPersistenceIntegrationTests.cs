@@ -1485,6 +1485,314 @@ public sealed class AssessmentPersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task ContradictoryLaterVersion_PreservesPriorPolicyAndRequestHistoryAndSuppressesPendingDelivery()
+    {
+        using var fixture = new BaselineFixture();
+        var initial = fixture.GenerateRequest(profile: "contradiction");
+        var later = fixture.GenerateContradictionLaterRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.ContradictionModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", initial);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync($"/api/operations/{operation!.OperationId}/process", null);
+
+        using var before = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var priorBasisId = before.RootElement.GetProperty("evidenceBases")
+            .EnumerateObject().Single().Value.GetProperty("basisId").GetString()!;
+        var priorDecision = before.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject().Single().Value.GetRawText();
+        var priorRequestId = before.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value.GetProperty("requestId").GetString()!;
+        var priorIntentId = before.RootElement.GetProperty("dispatchOutbox")
+            .EnumerateObject().Single().Value.GetProperty("intentId").GetString()!;
+
+        var laterAccepted = await server.Client.PostAsJsonAsync("/api/packages", later);
+        var laterOperation = await laterAccepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(laterOperation);
+        await server.Client.PostAsync(
+            $"/api/operations/{laterOperation!.OperationId}/process", null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Equal(2, state.RootElement.GetProperty("evidenceBases").EnumerateObject().Count());
+        Assert.Contains(
+            state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
+            entry => entry.Value.GetRawText() == priorDecision &&
+                entry.Value.GetProperty("basisId").GetString() == priorBasisId);
+        var request = state.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value;
+        Assert.Equal(priorRequestId, request.GetProperty("requestId").GetString());
+        Assert.Equal("cancelled", request.GetProperty("status").GetString());
+        Assert.Equal("obsolete:basis_superseded", request.GetProperty("closureReason").GetString());
+        var intent = state.RootElement.GetProperty("dispatchOutbox")
+            .EnumerateObject().Single().Value;
+        Assert.Equal(priorIntentId, intent.GetProperty("intentId").GetString());
+        Assert.Equal("obsolete", intent.GetProperty("status").GetString());
+        Assert.Empty(state.RootElement.GetProperty("mockInbox").EnumerateObject());
+        Assert.Contains(
+            state.RootElement.GetProperty("findings").EnumerateObject(),
+            entry => entry.Value.GetProperty("basisId").GetString() ==
+                $"BASIS-{laterOperation.OperationId}" &&
+                entry.Value.GetProperty("assessment").GetString() == "satisfied");
+    }
+
+    [Fact]
+    public async Task ContradictoryLaterVersion_PreservesPartnerResponseAndDeliveredDispatchHistory()
+    {
+        using var fixture = new BaselineFixture();
+        var initial = fixture.GenerateRequest(profile: "contradiction");
+        var later = fixture.GenerateContradictionLaterRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.ContradictionModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", initial);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync($"/api/operations/{operation!.OperationId}/process", null);
+
+        using var beforeResponse = JsonDocument.Parse(
+            await File.ReadAllTextAsync(fixture.StatePath));
+        var requestId = beforeResponse.RootElement.GetProperty("evidenceRequests")
+            .EnumerateObject().Single().Value.GetProperty("requestId").GetString()!;
+        var intentId = beforeResponse.RootElement.GetProperty("dispatchOutbox")
+            .EnumerateObject().Single().Value.GetProperty("intentId").GetString()!;
+        var dispatched = await server.Client.PostAsync("/api/dispatch", null);
+        Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
+        using var partner = fixture.CreatePartnerClient(server);
+        var responseRequest = fixture.GeneratePartnerResponseRequest(requestId);
+        var responseAccepted = await partner.PostAsJsonAsync(
+            "/api/partner-responses",
+            responseRequest);
+        Assert.Equal(HttpStatusCode.Accepted, responseAccepted.StatusCode);
+
+        var laterAccepted = await server.Client.PostAsJsonAsync("/api/packages", later);
+        var laterOperation = await laterAccepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(laterOperation);
+        await server.Client.PostAsync(
+            $"/api/operations/{laterOperation!.OperationId}/process", null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(state.RootElement.GetProperty("partnerResponses").EnumerateObject());
+        Assert.Equal(requestId,
+            state.RootElement.GetProperty("partnerResponses").EnumerateObject().Single()
+                .Value.GetProperty("requestId").GetString());
+        Assert.Equal("responded",
+            state.RootElement.GetProperty("evidenceRequests").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        Assert.Equal(intentId,
+            state.RootElement.GetProperty("dispatchOutbox").EnumerateObject().Single()
+                .Value.GetProperty("intentId").GetString());
+        Assert.Equal("delivered",
+            state.RootElement.GetProperty("dispatchOutbox").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        Assert.Single(state.RootElement.GetProperty("mockInbox").EnumerateObject());
+        Assert.Equal(2, state.RootElement.GetProperty("evidenceBases").EnumerateObject().Count());
+    }
+
+    [Fact]
+    public async Task ContradictoryEvidenceDuringLeasedDelivery_CreatesReconciliationWithoutErasingAttempt()
+    {
+        using var fixture = new BaselineFixture();
+        var initial = fixture.GenerateRequest(profile: "contradiction");
+        var later = fixture.GenerateContradictionLaterRequest();
+
+        await using var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.ContradictionModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", initial);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync($"/api/operations/{operation!.OperationId}/process", null);
+
+        var stateNode = JsonNode.Parse(await File.ReadAllTextAsync(fixture.StatePath))!.AsObject();
+        using var beforeContradiction = JsonDocument.Parse(stateNode.ToJsonString());
+        var priorPolicyDecision = beforeContradiction.RootElement
+            .GetProperty("policyDecisions")
+            .EnumerateObject()
+            .Single()
+            .Value.Clone();
+        var priorAuditActions = beforeContradiction.RootElement
+            .GetProperty("auditEntries")
+            .EnumerateObject()
+            .Select(entry => entry.Value.GetProperty("action").GetString())
+            .ToArray();
+        var requestEntry = stateNode["evidenceRequests"]!.AsObject().Single();
+        var requestId = requestEntry.Value!["requestId"]!.GetValue<string>();
+        var intentEntry = stateNode["dispatchOutbox"]!.AsObject().Single();
+        var intentId = intentEntry.Value!["intentId"]!.GetValue<string>();
+        intentEntry.Value!["status"] = "leased";
+        intentEntry.Value!["leaseId"] = "LEASE-IN-FLIGHT";
+        intentEntry.Value!["leaseExpiresAt"] = "2099-01-01T00:00:00Z";
+        stateNode["deliveryAttempts"] = new JsonObject
+        {
+            ["DELIVERY-IN-FLIGHT"] = new JsonObject
+            {
+                ["attemptId"] = "DELIVERY-IN-FLIGHT",
+                ["intentId"] = intentId,
+                ["requestId"] = requestId,
+                ["leaseId"] = "LEASE-IN-FLIGHT",
+                ["status"] = "leased",
+                ["attemptedAt"] = "2026-09-10T13:01:00Z",
+                ["correlationId"] = "CORR-IN-FLIGHT"
+            }
+        };
+        var priorAttempt = stateNode["deliveryAttempts"]!["DELIVERY-IN-FLIGHT"]!;
+        var priorAttemptIntentId = priorAttempt["intentId"]!.GetValue<string>();
+        var priorAttemptRequestId = priorAttempt["requestId"]!.GetValue<string>();
+        var priorAttemptLeaseId = priorAttempt["leaseId"]!.GetValue<string>();
+        var priorAttemptedAt = priorAttempt["attemptedAt"]!.GetValue<string>();
+        var priorAttemptCorrelationId = priorAttempt["correlationId"]!.GetValue<string>();
+        await File.WriteAllTextAsync(fixture.StatePath, stateNode.ToJsonString());
+        await server.DisposeAsync();
+
+        await using var restarted = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.ContradictionModel());
+        var laterAccepted = await restarted.Client.PostAsJsonAsync("/api/packages", later);
+        var laterOperation = await laterAccepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(laterOperation);
+        await restarted.Client.PostAsync(
+            $"/api/operations/{laterOperation!.OperationId}/process", null);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        var reconciliation = state.RootElement.GetProperty("reconciliationItems")
+            .EnumerateObject().Single().Value;
+        Assert.Equal(requestId, reconciliation.GetProperty("requestId").GetString());
+        Assert.Equal(intentId, reconciliation.GetProperty("intentId").GetString());
+        Assert.Equal("DELIVERY-IN-FLIGHT", reconciliation.GetProperty("attemptId").GetString());
+        Assert.Equal("basis_superseded", reconciliation.GetProperty("reason").GetString());
+        Assert.Equal("open", reconciliation.GetProperty("status").GetString());
+        Assert.Contains(
+            state.RootElement.GetProperty("policyDecisions").EnumerateObject(),
+            entry => entry.Value.GetProperty("decisionId").GetString() ==
+                priorPolicyDecision.GetProperty("decisionId").GetString());
+        var preservedPolicyDecision = state.RootElement.GetProperty("policyDecisions")
+            .EnumerateObject()
+            .Single(entry => entry.Value.GetProperty("decisionId").GetString() ==
+                priorPolicyDecision.GetProperty("decisionId").GetString())
+            .Value;
+        Assert.Equal(
+            priorPolicyDecision.GetProperty("basisId").GetString(),
+            preservedPolicyDecision.GetProperty("basisId").GetString());
+        Assert.Equal(
+            priorPolicyDecision.GetProperty("findingId").GetString(),
+            preservedPolicyDecision.GetProperty("findingId").GetString());
+        Assert.Equal(
+            priorPolicyDecision.GetProperty("policyVersion").GetString(),
+            preservedPolicyDecision.GetProperty("policyVersion").GetString());
+        Assert.Equal(
+            priorPolicyDecision.GetProperty("outcome").GetString(),
+            preservedPolicyDecision.GetProperty("outcome").GetString());
+        Assert.Equal(
+            priorPolicyDecision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()),
+            preservedPolicyDecision.GetProperty("reasonCodes").EnumerateArray()
+                .Select(reason => reason.GetString()));
+        Assert.Equal(
+            priorPolicyDecision.GetProperty("evaluatedAt").GetString(),
+            preservedPolicyDecision.GetProperty("evaluatedAt").GetString());
+        var postAuditActions = state.RootElement.GetProperty("auditEntries")
+            .EnumerateObject()
+            .Select(entry => entry.Value.GetProperty("action").GetString())
+            .ToArray();
+        Assert.Equal(priorAuditActions, postAuditActions.Take(priorAuditActions.Length));
+        Assert.True(
+            Array.IndexOf(postAuditActions, "dispatch.reconciliation_required") >
+            Array.IndexOf(postAuditActions, "policy.auto_request"));
+        var preservedAttempt = state.RootElement.GetProperty("deliveryAttempts")
+            .GetProperty("DELIVERY-IN-FLIGHT");
+        Assert.Equal(priorAttemptIntentId, preservedAttempt.GetProperty("intentId").GetString());
+        Assert.Equal(priorAttemptRequestId, preservedAttempt.GetProperty("requestId").GetString());
+        Assert.Equal(priorAttemptLeaseId, preservedAttempt.GetProperty("leaseId").GetString());
+        Assert.Equal(
+            DateTimeOffset.Parse(priorAttemptedAt),
+            DateTimeOffset.Parse(preservedAttempt.GetProperty("attemptedAt").GetString()!));
+        Assert.Equal(
+            priorAttemptCorrelationId,
+            preservedAttempt.GetProperty("correlationId").GetString());
+        Assert.Equal(
+            "delivery_unknown",
+            state.RootElement.GetProperty("evidenceRequests")
+                .EnumerateObject()
+                .Single(entry => entry.Value.GetProperty("requestId").GetString() == requestId)
+                .Value.GetProperty("status").GetString());
+        Assert.Equal(
+            "obsolete",
+            state.RootElement.GetProperty("dispatchOutbox")
+                .EnumerateObject()
+                .Single(entry => entry.Value.GetProperty("intentId").GetString() == intentId)
+                .Value.GetProperty("status").GetString());
+        Assert.Equal(
+            "delivery_unknown",
+            state.RootElement.GetProperty("deliveryAttempts")
+                .GetProperty("DELIVERY-IN-FLIGHT").GetProperty("status").GetString());
+        Assert.Empty(state.RootElement.GetProperty("mockInbox").EnumerateObject());
+        Assert.Contains(
+            state.RootElement.GetProperty("auditEntries").EnumerateObject(),
+            entry => entry.Value.GetProperty("action").GetString() ==
+                "dispatch.reconciliation_required");
+    }
+
+    [Fact]
+    public async Task DispatcherRestart_ResumesExpiredLeaseWithoutDuplicateRequestOrInboxDelivery()
+    {
+        using var fixture = new BaselineFixture();
+        var request = fixture.GenerateRequest(profile: "live");
+        var server = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var accepted = await server.Client.PostAsJsonAsync("/api/packages", request);
+        var operation = await accepted.Content.ReadFromJsonAsync<OperationAccepted>();
+        Assert.NotNull(operation);
+        await server.Client.PostAsync($"/api/operations/{operation!.OperationId}/process", null);
+
+        var stateNode = JsonNode.Parse(await File.ReadAllTextAsync(fixture.StatePath))!.AsObject();
+        var requestEntry = stateNode["evidenceRequests"]!.AsObject().Single();
+        var requestId = requestEntry.Value!["requestId"]!.GetValue<string>();
+        var intentEntry = stateNode["dispatchOutbox"]!.AsObject().Single();
+        var intentId = intentEntry.Value!["intentId"]!.GetValue<string>();
+        intentEntry.Value!["status"] = "leased";
+        intentEntry.Value!["leaseId"] = "LEASE-RESTART";
+        intentEntry.Value!["leaseExpiresAt"] = "2000-01-01T00:00:00Z";
+        stateNode["deliveryAttempts"] = new JsonObject
+        {
+            ["DELIVERY-RESTART"] = new JsonObject
+            {
+                ["attemptId"] = "DELIVERY-RESTART",
+                ["intentId"] = intentId,
+                ["requestId"] = requestId,
+                ["leaseId"] = "LEASE-RESTART",
+                ["status"] = "leased",
+                ["attemptedAt"] = "2026-09-10T13:01:00Z",
+                ["correlationId"] = "CORR-RESTART"
+            }
+        };
+        await File.WriteAllTextAsync(fixture.StatePath, stateNode.ToJsonString());
+        await server.DisposeAsync();
+
+        await using var restarted = await fixture.StartAsync(
+            investigationModel: new BaselineFixture.FixtureFindingModel());
+        var resumed = await restarted.Client.PostAsync("/api/dispatch", null);
+        Assert.Equal(HttpStatusCode.OK, resumed.StatusCode);
+        var result = await resumed.Content.ReadFromJsonAsync<DispatchResult>();
+        Assert.NotNull(result);
+        Assert.Equal("delivered", result!.Status);
+
+        using var state = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(state.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+        Assert.Single(state.RootElement.GetProperty("mockInbox").EnumerateObject());
+        Assert.Equal("delivered",
+            state.RootElement.GetProperty("evidenceRequests").EnumerateObject().Single()
+                .Value.GetProperty("status").GetString());
+        var alreadyDelivered = await restarted.Client.PostAsync("/api/dispatch", null);
+        Assert.Equal(HttpStatusCode.OK, alreadyDelivered.StatusCode);
+        var noWork = await alreadyDelivered.Content.ReadFromJsonAsync<DispatchResult>();
+        Assert.NotNull(noWork);
+        Assert.Equal("no_work", noWork!.Status);
+        using var finalState = JsonDocument.Parse(await File.ReadAllTextAsync(fixture.StatePath));
+        Assert.Single(finalState.RootElement.GetProperty("mockInbox").EnumerateObject());
+        Assert.Single(finalState.RootElement.GetProperty("evidenceRequests").EnumerateObject());
+    }
+
+    [Fact]
     public async Task LiveAmbiguousIdentity_PersistsAmbiguousFindingWithoutExternalOrReviewAction()
     {
         using var fixture = new BaselineFixture();
@@ -2025,8 +2333,9 @@ public sealed class AssessmentPersistenceIntegrationTests
                 profile == "baseline"
                     ? "template-assessment-1"
                     : $"template-{profile}-1");
-            var sourcePackage = generated.ContractPackage.SubmissionPackages.Single();
-            var sourceEvent = generated.ContractPackage.Events.Single();
+            var sourcePackage = generated.ContractPackage.SubmissionPackages
+                .Single(package => package.PackageId == "PKG-0001");
+            var sourceEvent = generated.ContractPackage.Events.First();
             using var payload = JsonDocument.Parse($$"""{"packageId":"{{packageId}}"}""");
             var package = new ApiSubmissionPackage(
                 sourcePackage.SchemaVersion,
@@ -2064,6 +2373,55 @@ public sealed class AssessmentPersistenceIntegrationTests
                 package);
         }
 
+        public PackageSubmissionRequest GenerateContradictionLaterRequest(
+            string eventId = "EVT-0002",
+            string correlationId = "CORR-0002")
+        {
+            if (generated is null)
+            {
+                throw new InvalidOperationException("GenerateRequest must be called first.");
+            }
+
+            var sourcePackage = generated.ContractPackage.SubmissionPackages
+                .Single(package => package.PackageId == "PKG-0003");
+            var sourceEvent = generated.ContractPackage.Events.Last();
+            using var payload = JsonDocument.Parse(
+                $$"""{"packageId":"{{sourcePackage.PackageId}}"}""");
+            return new PackageSubmissionRequest(
+                new ApiEventEnvelope(
+                    sourceEvent.SchemaVersion,
+                    eventId,
+                    "package.submitted",
+                    sourcePackage.RunId,
+                    sourcePackage.CaseId,
+                    sourcePackage.AirlineId,
+                    sourcePackage.AircraftId,
+                    sourcePackage.LeaseId,
+                    sourcePackage.SubmittedAt,
+                    sourcePackage.ScenarioEffectiveAt,
+                    correlationId,
+                    payload.RootElement.Clone()),
+                new ApiSubmissionPackage(
+                    sourcePackage.SchemaVersion,
+                    sourcePackage.PackageId,
+                    sourcePackage.RunId,
+                    sourcePackage.CaseId,
+                    sourcePackage.AirlineId,
+                    sourcePackage.AircraftId,
+                    sourcePackage.LeaseId,
+                    sourcePackage.SubmittedAt,
+                    sourcePackage.ScenarioEffectiveAt,
+                    sourcePackage.Manifest.Select(document => new DocumentMetadata(
+                        document.DocumentId,
+                        document.Version,
+                        document.SourceSystem,
+                        document.SourceRecordId,
+                        document.FileName,
+                        document.MediaType,
+                        document.Sha256,
+                        document.IssuedOn)).ToArray()));
+        }
+
         public PackageSubmissionRequest GeneratePartnerResponseRequest(
             string requestId,
             string eventId = "EVT-RESP-0001")
@@ -2080,7 +2438,8 @@ public sealed class AssessmentPersistenceIntegrationTests
                         "staged-responses/package-002/manifest.json")),
                 GeneratorContractJson.Options)
                 ?? throw new InvalidDataException("The staged response package is missing.");
-            var sourceEvent = generated.ContractPackage.Events.Single();
+            var sourceEvent = generated.ContractPackage.Events
+                .First(candidate => candidate.Type == "package.submitted");
             var documents = sourcePackage.Manifest
                 .Select(document => new DocumentMetadata(
                     document.DocumentId,
@@ -2278,6 +2637,35 @@ public sealed class AssessmentPersistenceIntegrationTests
                             ? "The required record was not located."
                             : "The cited evidence supports the requirement.",
                         evidenceRefs)
+                ]));
+            }
+
+        }
+
+        public sealed class ContradictionModel : IInvestigationModel
+        {
+            public Task<InvestigationResult> InvestigateAsync(
+                InvestigationRequest request,
+                CancellationToken cancellationToken)
+            {
+                var document = request.Documents.Single(candidate =>
+                    candidate.DocumentId == "DOC-0004");
+                var later = document.Version == 2;
+                return Task.FromResult(new InvestigationResult(
+                [
+                    new Finding(
+                        "FIND-REQ-0002",
+                        "COMP-0001",
+                        "REQ-0002",
+                        request.EvidenceBasis.BasisId,
+                        later ? "satisfied" : "missing",
+                        later ? "evidence_located" : "removal-history",
+                        later
+                            ? "The later version supplies the removal-history record."
+                            : "The initial basis does not contain the requested removal-history record.",
+                        later
+                            ? [new EvidenceRef(document.DocumentId, document.Version, document.Page)]
+                            : [])
                 ]));
             }
         }
