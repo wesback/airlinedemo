@@ -1,11 +1,13 @@
 # Implementation Brief - Terraform and Deployment
 
-Version: 0.2 draft | Date: 10 September 2026
+Version: 0.3 draft | Date: 12 September 2026
 Dependency: [Demo PRD](demo-prd.md) and the runtime contracts in [Workflow/API brief](workflow-evidence-api-brief.md).
 
 ## 0. Technology decision
 
-Provision the selected .NET 10 isolated Azure Functions application with Azure SQL for workflow/business/audit state and Blob Storage for document content and versions. Use Azure AI Foundry for model governance/evaluation and a governed Azure OpenAI deployment for bounded extraction/classification. Do not provision Foundry Agent Service or Microsoft Agent Framework runtime infrastructure for the core workflow.
+Provision the selected .NET 10 ASP.NET Core application as an Azure Container Apps workload (scale-to-zero consumption plan), with Azure SQL for workflow/business/audit state and Blob Storage for document content and versions. Use Azure AI Foundry for model governance/evaluation and a governed Azure OpenAI deployment for bounded extraction/classification. Do not provision Foundry Agent Service or Microsoft Agent Framework runtime infrastructure for the core workflow.
+
+**Revision note (this version):** an earlier draft of this brief specified an isolated Azure Functions host with a Durable Functions backend. The merged application was built and reviewed as a conventional ASP.NET Core web app with its own workflow/state persistence, not as a Functions isolated-worker host, and no Durable Functions orchestration exists or is planned. Rather than retrofit the application onto Functions, this revision repoints the compute target to Azure Container Apps, which runs the application substantially as built and preserves a comparable consumption-based cost profile. Story #48's cost estimate was priced against Functions + Durable Functions hosting and must be re-costed against Container Apps pricing before re-approval.
 
 ## 1. Outcome and authority
 
@@ -20,8 +22,8 @@ This is not infrastructure for a 1,200-aircraft production rollout. Production g
 | Required input | Why it blocks deployment |
 | --- | --- |
 | Subscription, tenant and resource naming/prefix | Establish destination and prevent accidental deployment into shared/customer environments. |
-| Package versions and Azure Functions hosting/runtime compatibility | Establish compatible build and hosting requirements; do not scaffold competing language implementations. |
-| Hosting plan and Durable backend | Confirm availability, identity integration, networking, persistence and costs together. |
+| Package versions and Container Apps hosting/runtime compatibility | Establish compatible build, container image and hosting requirements; do not scaffold competing language implementations. |
+| Container Apps environment, scaling plan (including scale-to-zero) and container registry | Confirm availability, identity integration, networking, persistence and costs together. |
 | Model name/version/deployment type and quota | Confirm actual access and processing geography; resource location alone is insufficient. |
 | SQL configuration and connection identity | Price the database and establish least-privilege runtime/migration access. |
 | Network and organisational policy | Determine permitted endpoints, private connectivity, DNS and egress before deploy. |
@@ -34,7 +36,7 @@ Do not silently substitute a region or model when blocked. Document the limitati
 Create only the selected candidates:
 
 - Dedicated demo resource group, ownership/cost tags and environment naming.
-- Functions host with chosen Durable backend and required host storage.
+- Container Apps environment and app (scale-to-zero consumption plan) with a container registry for the application image.
 - Evidence storage with private access, versioning and explicit lifecycle behaviour.
 - Coordination SQL database and supported authentication configuration.
 - Document Intelligence and selected Azure OpenAI/Foundry resources.
@@ -43,7 +45,7 @@ Create only the selected candidates:
 - Required network resources and role assignments under organisational policy.
 - Cost alerts, without treating them as guaranteed spend caps.
 
-Prefer separate evidence and runtime-state storage boundaries: evidence versioning/retention must not unintentionally govern runtime task-hub storage. A shared resource must be justified with supported settings and scoped access, not chosen solely to reduce resource count.
+Prefer separate evidence and runtime-state storage boundaries: evidence versioning/retention must not unintentionally govern the application's own workflow-state storage. A shared resource must be justified with supported settings and scoped access, not chosen solely to reduce resource count.
 
 No automatic deployment of Fabric, AI Search, AKS, Service Bus, API Management, private registries or reserved model capacity without a documented requirement and price.
 
@@ -96,7 +98,7 @@ Keep schema migration capability separate from the runtime identity where practi
 
 ## 7. Costs and retention
 
-Produce an itemised monthly estimate using current Sweden Central pricing and actual usage assumptions: hosting, Durable backend, database, OCR/pages, model tokens, evidence versions, logs, networking and remote state.
+Produce an itemised monthly estimate using current Sweden Central pricing and actual usage assumptions: Container Apps hosting (including registry), database, OCR/pages, model tokens, evidence versions, logs, networking and remote state.
 
 Reserve contingency below USD 500; do not size exactly to the ceiling. Model/page limits, bounded retries and restricted demo access control variable use. Keep minimum charges and resources that remain billable when compute stops visible.
 
