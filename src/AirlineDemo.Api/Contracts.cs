@@ -204,14 +204,44 @@ public sealed record PolicyDecision(
     string DecisionId,
     string FindingId,
     string BasisId,
-    string Outcome);
+    string PolicyVersion,
+    string Outcome,
+    IReadOnlyList<string> ReasonCodes,
+    DateTimeOffset EvaluatedAt);
 
 public sealed record EvidenceRequest(
     string RequestId,
     string RequestKey,
     string FindingId,
     string BasisId,
-    string Status);
+    string RequirementId,
+    string RecipientRef,
+    string TemplateVersion,
+    string Message,
+    string Status,
+    DateTimeOffset CreatedAt,
+    string? ClosureReason = null);
+
+public sealed record DispatchOutboxIntent(
+    string IntentId,
+    string RequestId,
+    string RequestKey,
+    string Status,
+    DateTimeOffset CreatedAt);
+
+public sealed record AutomaticRequestPolicyConfiguration(
+    string RecipientRef,
+    string TemplateVersion,
+    IReadOnlySet<string> ApprovedRecipientRefs,
+    IReadOnlySet<string> ApprovedTemplateVersions)
+{
+    public static AutomaticRequestPolicyConfiguration Default { get; } =
+        new(
+            "mock-partner-inbox",
+            "evidence-request-v1",
+            new HashSet<string>(["mock-partner-inbox"], StringComparer.Ordinal),
+            new HashSet<string>(["evidence-request-v1"], StringComparer.Ordinal));
+}
 
 public sealed record ReviewCommand(
     string FindingId,
@@ -308,6 +338,7 @@ internal sealed class PersistedState
     public Dictionary<string, Finding> Findings { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, PolicyDecision> PolicyDecisions { get; init; } = new(StringComparer.Ordinal);
     public Dictionary<string, EvidenceRequest> EvidenceRequests { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, DispatchOutboxIntent> DispatchOutbox { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Dictionary<string, ReviewDecision>? ReviewDecisions { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
