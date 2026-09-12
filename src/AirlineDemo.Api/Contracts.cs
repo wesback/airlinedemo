@@ -326,6 +326,15 @@ public sealed record ReviewDecision(
     string Reason,
     DateTimeOffset DecidedAt);
 
+public sealed record AcceptanceInvalidation(
+    string InvalidationId,
+    string ReviewId,
+    string FindingId,
+    string PriorBasisId,
+    string CurrentBasisId,
+    string ReasonCode,
+    DateTimeOffset InvalidatedAt);
+
 public sealed record FindingDisposition(
     string FindingId,
     string BasisId,
@@ -416,6 +425,8 @@ internal sealed class PersistedState
     public Dictionary<string, ReconciliationItem> ReconciliationItems { get; init; } = new(StringComparer.Ordinal);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Dictionary<string, ReviewDecision>? ReviewDecisions { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Dictionary<string, AcceptanceInvalidation>? AcceptanceInvalidations { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public Dictionary<string, FindingDisposition>? FindingDispositions { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
