@@ -61,3 +61,35 @@ resource "azurerm_container_app" "this" {
 
   tags = var.tags
 }
+
+resource "azurerm_user_assigned_identity" "migration" {
+  name                = "id-${var.deployment_name}-migration"
+  resource_group_name = var.resource_group_name
+  location            = var.region
+  tags                = merge(var.tags, { purpose = "versioned-sql-migrations" })
+}
+
+resource "azurerm_role_assignment" "runtime_evidence_reader" {
+  scope                = var.evidence_storage_account_id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_container_app.this.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "runtime_document_intelligence_user" {
+  scope                = var.document_intelligence_id
+  role_definition_name = "Cognitive Services User"
+  principal_id         = azurerm_container_app.this.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "runtime_azure_openai_user" {
+  scope                = var.azure_openai_id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = azurerm_container_app.this.identity[0].principal_id
+}
+
+check "runtime_and_migration_principal_ids_are_distinct" {
+  assert {
+    condition     = azurerm_container_app.this.identity[0].principal_id != azurerm_user_assigned_identity.migration.principal_id
+    error_message = "The Container Apps runtime and migration identities must have distinct principal IDs."
+  }
+}

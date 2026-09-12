@@ -86,15 +86,24 @@ Infrastructure apply does not deploy working application behaviour by itself. Pr
 2. Bootstrap/use the protected backend.
 3. Initialise, validate and plan Terraform; review destination, cost drivers and changes.
 4. After explicit approval, apply infrastructure and verify required endpoints/identity paths.
-5. Build/deploy the application package with a supported deployment identity.
-6. Apply versioned SQL migrations with appropriate migration privileges.
+5. Build/deploy the application package with the separately supplied
+   deployment principal; do not reuse the Container Apps runtime identity.
+6. Apply versioned SQL migrations through the Entra-authenticated SQL
+   administrator path described in
+   [`deployment/sql-migration-procedure.md`](../../deployment/sql-migration-procedure.md).
+   The Container Apps runtime identity is prohibited from this operation.
 7. Load approved mock requirements and selected application-input fixtures.
 8. Authenticate reviewer/mock-partner roles and exercise the two demo paths.
 9. Record app/fixture/resource versions and capture the backup when ready.
 
 No broad `local-exec` chain should obscure application deployment, migration or data import inside Terraform. Do not embed the generator's answer key in app settings, deployment packages or evidence storage.
 
-Keep schema migration capability separate from the runtime identity where practical. If demo constraints require an exception, document it and do not present it as the production design.
+Keep schema migration capability separate from the runtime identity. The
+Container Apps system-assigned identity receives only the resource-scoped
+data-plane roles documented in `deployment/identity-mapping.json`. The
+Terraform-managed user-assigned migration identity is distinct; any
+database-scoped migration permission for it is supplied by the SQL Entra
+administrator and is not a runtime or deployment credential.
 
 ## 7. Costs and retention
 

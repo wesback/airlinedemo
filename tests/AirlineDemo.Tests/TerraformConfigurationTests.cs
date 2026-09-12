@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace AirlineDemo.Tests;
@@ -177,11 +178,13 @@ public sealed class TerraformConfigurationTests
             "azurerm_storage_management_policy",
             "azurerm_container_app_environment",
             "azurerm_container_app",
-            "azurerm_container_registry"
+            "azurerm_container_registry",
+            "azurerm_user_assigned_identity",
+            "azurerm_role_assignment"
             ],
             StringComparer.Ordinal);
 
-        Assert.Equal(14, resourceTypes.Length);
+        Assert.Equal(18, resourceTypes.Length);
         Assert.Empty(resourceTypes.Except(approvedResourceTypes, StringComparer.Ordinal));
         Assert.Equal(
             approvedResourceTypes.Count,
@@ -559,6 +562,232 @@ public sealed class TerraformConfigurationTests
             StringComparison.Ordinal);
         Assert.Contains("min_replicas = var.min_replicas", configuration,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TerraformContainerApps_SeparatesRuntimeAndMigrationPrincipalsFromDeploymentCredentials()
+    {
+        var root = LoadText("terraform", "main.tf");
+        var containerApps = LoadText("terraform", "modules", "container-apps", "main.tf");
+        var moduleOutputs = LoadText("terraform", "modules", "container-apps", "outputs.tf");
+        var outputs = LoadText("terraform", "outputs.tf");
+
+        Assert.Contains("identity {\n    type = \"SystemAssigned\"\n  }", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "resource \"azurerm_user_assigned_identity\" \"migration\"",
+            containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "condition     = azurerm_container_app.this.identity[0].principal_id != azurerm_user_assigned_identity.migration.principal_id",
+            containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "value       = azurerm_container_app.this.identity[0].principal_id",
+            moduleOutputs,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "value       = azurerm_user_assigned_identity.migration.principal_id",
+            moduleOutputs,
+            StringComparison.Ordinal);
+        Assert.Contains("output \"container_app_runtime_principal_id\"", outputs,
+            StringComparison.Ordinal);
+        Assert.Contains("output \"migration_identity_principal_id\"", outputs,
+            StringComparison.Ordinal);
+        Assert.Contains("container_app_runtime_principal_id", root, StringComparison.Ordinal);
+        Assert.Contains("migration_identity_principal_id", root, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("deployment_principal", containerApps,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deployment_credential", containerApps,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("client_secret", outputs, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("connection_string", outputs, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TerraformContainerApps_GrantsOnlyExactResourceScopedRuntimeDataPlaneRoles()
+    {
+        var root = LoadText("terraform", "main.tf");
+        var containerApps = LoadText("terraform", "modules", "container-apps", "main.tf");
+
+        Assert.Contains(
+            "evidence_storage_account_id = module.demo_boundary.evidence_storage_account_id",
+            root,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "document_intelligence_id    = module.document_intelligence.account_id",
+            root,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "azure_openai_id             = module.ai.account_id",
+            root,
+            StringComparison.Ordinal);
+
+        Assert.Contains("scope                = var.evidence_storage_account_id", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("role_definition_name = \"Storage Blob Data Reader\"", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("scope                = var.document_intelligence_id", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("role_definition_name = \"Cognitive Services User\"", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("scope                = var.azure_openai_id", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains("role_definition_name = \"Cognitive Services OpenAI User\"", containerApps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "principal_id         = azurerm_container_app.this.identity[0].principal_id",
+            containerApps,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            3,
+            Regex.Matches(containerApps, "resource \"azurerm_role_assignment\"").Count);
+        Assert.DoesNotContain("role_definition_name = \"Owner\"", containerApps,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("role_definition_name = \"Contributor\"", containerApps,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("subscription_id", containerApps,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("function_app", containerApps,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deployment_principal", containerApps,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void IdentityMapping_CoversLifecycleScopesReuseAndAssignmentOwnership()
+    {
+        var mappingText = LoadText("deployment", "identity-mapping.json");
+        using var mapping = JsonDocument.Parse(mappingText);
+        var identities = mapping.RootElement.GetProperty("identities");
+        var expectedNames = new[]
+        {
+            "deploymentPrincipal",
+            "stateBootstrapAccess",
+            "containerAppRuntime",
+            "migrationIdentity"
+        };
+
+        Assert.Equal(
+            expectedNames.Order(StringComparer.Ordinal),
+            identities.EnumerateObject().Select(property => property.Name)
+                .Order(StringComparer.Ordinal));
+
+        foreach (var name in expectedNames)
+        {
+            var identity = identities.GetProperty(name);
+            Assert.True(identity.TryGetProperty("lifecycle", out _));
+            Assert.True(identity.TryGetProperty("permittedScopes", out var scopes));
+            Assert.Equal(JsonValueKind.Array, scopes.ValueKind);
+            Assert.NotEmpty(scopes.EnumerateArray());
+            Assert.True(identity.TryGetProperty("prohibitedReuse", out var prohibited));
+            Assert.Equal(JsonValueKind.Array, prohibited.ValueKind);
+            Assert.NotEmpty(prohibited.EnumerateArray());
+            Assert.True(identity.TryGetProperty("assignments", out var assignments));
+            Assert.Equal(JsonValueKind.Array, assignments.ValueKind);
+            Assert.NotEmpty(assignments.EnumerateArray());
+            foreach (var assignment in assignments.EnumerateArray())
+            {
+                Assert.True(assignment.TryGetProperty("ownership", out var ownership));
+                Assert.NotEqual(JsonValueKind.Null, ownership.ValueKind);
+            }
+        }
+
+        Assert.Equal(
+            "terraform-output",
+            identities.GetProperty("containerAppRuntime").GetProperty("principalId")
+                .GetProperty("source").GetString());
+        Assert.Equal(
+            "container_app_runtime_principal_id",
+            identities.GetProperty("containerAppRuntime").GetProperty("principalId")
+                .GetProperty("output").GetString());
+        Assert.Equal(
+            "migration_identity_principal_id",
+            identities.GetProperty("migrationIdentity").GetProperty("principalId")
+                .GetProperty("output").GetString());
+        Assert.NotEqual(
+            identities.GetProperty("containerAppRuntime").GetProperty("principalId")
+                .GetProperty("output").GetString(),
+            identities.GetProperty("migrationIdentity").GetProperty("principalId")
+                .GetProperty("output").GetString());
+        Assert.Contains(
+            "separately-supplied-sql-entra-administrator",
+            mappingText,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("clientSecret", mappingText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("storageKey", mappingText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("connectionString", mappingText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deploymentPrincipalValue", mappingText,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Functions", mappingText, StringComparison.Ordinal);
+
+        var runtime = identities.GetProperty("containerAppRuntime");
+        foreach (var scope in runtime.GetProperty("permittedScopes").EnumerateArray())
+        {
+            var role = scope.TryGetProperty("roleDefinition", out var roleProperty)
+                ? roleProperty.GetString()
+                : null;
+            Assert.NotEqual("Owner", role);
+            Assert.NotEqual("Contributor", role);
+            Assert.NotEqual("subscription", scope.GetProperty("scopeKind").GetString());
+        }
+
+        var runtimeAssignments = identities.GetProperty("containerAppRuntime")
+            .GetProperty("assignments").EnumerateArray();
+        Assert.All(runtimeAssignments, assignment =>
+            Assert.Equal("terraform-managed", assignment.GetProperty("ownership").GetString()));
+        Assert.All(
+            identities.GetProperty("deploymentPrincipal").GetProperty("assignments")
+                .EnumerateArray(),
+            assignment => Assert.Equal(
+                "terraform-bootstrap-managed",
+                assignment.GetProperty("ownership").GetString()));
+        Assert.All(
+            identities.GetProperty("stateBootstrapAccess").GetProperty("assignments")
+                .EnumerateArray(),
+            assignment => Assert.Equal(
+                "terraform-bootstrap-managed",
+                assignment.GetProperty("ownership").GetString()));
+        Assert.All(
+            identities.GetProperty("migrationIdentity").GetProperty("assignments")
+                .EnumerateArray(),
+            assignment => Assert.Equal(
+                "externally-supplied-sql-entra-administrator",
+                assignment.GetProperty("ownership").GetString()));
+
+        var distinctAssertions = mapping.RootElement
+            .GetProperty("distinctIdentityAssertions").EnumerateArray().ToArray();
+        Assert.Equal(3, distinctAssertions.Length);
+        Assert.Contains(
+            distinctAssertions,
+            assertion => assertion.GetProperty("assertion").GetString() == "must-be-distinct");
+    }
+
+    [Fact]
+    public void SqlMigrationProcedure_RequiresEntraAdminPathAndProhibitsRuntimeCredentialReuse()
+    {
+        var procedure = LoadText("deployment", "sql-migration-procedure.md");
+
+        Assert.Contains("Entra", procedure, StringComparison.Ordinal);
+        Assert.Contains("versioned", procedure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("separately supplied SQL Entra administrator path", procedure,
+            StringComparison.Ordinal);
+        Assert.Contains("Container Apps system-assigned runtime identity", procedure,
+            StringComparison.Ordinal);
+        Assert.Contains("must never be used", procedure, StringComparison.Ordinal);
+        Assert.Contains("Terraform-managed user-assigned migration identity", procedure,
+            StringComparison.Ordinal);
+        Assert.Contains("not created by the workload Terraform", procedure,
+            StringComparison.Ordinal);
+        Assert.Contains("No app-registration client secret", procedure,
+            StringComparison.Ordinal);
+        Assert.Contains("storage key", procedure, StringComparison.Ordinal);
+        Assert.Contains("connection string", procedure, StringComparison.Ordinal);
+        Assert.Contains("secret-store integration", procedure, StringComparison.Ordinal);
+        Assert.DoesNotContain("azurerm_container_app.this.identity", procedure,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("sql_password", procedure, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string LoadText(params string[] relativePath)

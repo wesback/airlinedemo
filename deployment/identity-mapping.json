@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "mappingVersion": "1.0",
+  "purpose": "Authoritative identity and permission boundary for the Container Apps workload.",
+  "valueExposure": "principal, client, and resource IDs only; no credentials",
+  "identities": {
+    "deploymentPrincipal": {
+      "kind": "externally-supplied-entra-principal",
+      "lifecycle": "external",
+      "principalId": {
+        "source": "terraform-bootstrap-input",
+        "input": "deployment_principal_object_id"
+      },
+      "permittedScopes": [
+        {
+          "scopeKind": "terraform-state-container",
+          "scopeRef": "terraform/bootstrap/azurerm_storage_container.state"
+        },
+        {
+          "scopeKind": "workload-infrastructure",
+          "scopeRef": "terraform-root"
+        }
+      ],
+      "prohibitedReuse": [
+        "container-app-runtime",
+        "migration-identity",
+        "application-data-plane"
+      ],
+      "assignments": [
+        {
+          "scopeRef": "terraform/bootstrap/azurerm_storage_container.state",
+          "roleDefinition": "Storage Blob Data Contributor",
+          "ownership": "terraform-bootstrap-managed"
+        }
+      ]
+    },
+    "stateBootstrapAccess": {
+      "kind": "access-path",
+      "lifecycle": "independent-bootstrap",
+      "principalRef": "deploymentPrincipal",
+      "permittedScopes": [
+        {
+          "scopeKind": "single-blob-container",
+          "scopeRef": "terraform/bootstrap/azurerm_storage_container.state"
+        }
+      ],
+      "prohibitedReuse": [
+        "container-app-runtime",
+        "migration-identity"
+      ],
+      "assignments": [
+        {
+          "scopeRef": "terraform/bootstrap/azurerm_storage_container.state",
+          "roleDefinition": "Storage Blob Data Contributor",
+          "ownership": "terraform-bootstrap-managed"
+        }
+      ]
+    },
+    "containerAppRuntime": {
+      "kind": "system-assigned-managed-identity",
+      "lifecycle": "container-app-resource",
+      "principalId": {
+        "source": "terraform-output",
+        "output": "container_app_runtime_principal_id"
+      },
+      "permittedScopes": [
+        {
+          "scopeKind": "individual-resource",
+          "scopeRef": "output.evidence_storage_account_id",
+          "roleDefinition": "Storage Blob Data Reader"
+        },
+        {
+          "scopeKind": "individual-resource",
+          "scopeRef": "output.document_intelligence_id",
+          "roleDefinition": "Cognitive Services User"
+        },
+        {
+          "scopeKind": "individual-resource",
+          "scopeRef": "output.azure_openai_id",
+          "roleDefinition": "Cognitive Services OpenAI User"
+        }
+      ],
+      "prohibitedReuse": [
+        "deployment-principal",
+        "state-bootstrap-access",
+        "migration-identity",
+        "subscription-scope",
+        "owner",
+        "contributor"
+      ],
+      "assignments": [
+        {
+          "scopeRef": "output.evidence_storage_account_id",
+          "roleDefinition": "Storage Blob Data Reader",
+          "ownership": "terraform-managed"
+        },
+        {
+          "scopeRef": "output.document_intelligence_id",
+          "roleDefinition": "Cognitive Services User",
+          "ownership": "terraform-managed"
+        },
+        {
+          "scopeRef": "output.azure_openai_id",
+          "roleDefinition": "Cognitive Services OpenAI User",
+          "ownership": "terraform-managed"
+        }
+      ]
+    },
+    "migrationIdentity": {
+      "kind": "user-assigned-managed-identity",
+      "lifecycle": "terraform-managed-resource",
+      "resourceId": {
+        "source": "terraform-output",
+        "output": "migration_identity_id"
+      },
+      "clientId": {
+        "source": "terraform-output",
+        "output": "migration_identity_client_id"
+      },
+      "principalId": {
+        "source": "terraform-output",
+        "output": "migration_identity_principal_id"
+      },
+      "permittedScopes": [
+        {
+          "scopeKind": "individual-sql-database",
+          "scopeRef": "output.sql_database_id",
+          "permission": "versioned-schema-migration",
+          "authorizationPath": "separately-supplied-sql-entra-administrator"
+        }
+      ],
+      "prohibitedReuse": [
+        "deployment-principal",
+        "state-bootstrap-access",
+        "container-app-runtime",
+        "application-data-plane"
+      ],
+      "assignments": [
+        {
+          "scopeRef": "output.sql_database_id",
+          "roleDefinition": "versioned-schema-migration",
+          "ownership": "externally-supplied-sql-entra-administrator"
+        }
+      ]
+    }
+  },
+  "distinctIdentityAssertions": [
+    {
+      "left": "containerAppRuntime.principalId",
+      "right": "migrationIdentity.principalId",
+      "assertion": "must-be-distinct"
+    },
+    {
+      "left": "containerAppRuntime.principalId",
+      "right": "deploymentPrincipal.principalId",
+      "assertion": "must-not-reuse"
+    },
+    {
+      "left": "migrationIdentity.principalId",
+      "right": "deploymentPrincipal.principalId",
+      "assertion": "must-not-reuse"
+    }
+  ]
+}
