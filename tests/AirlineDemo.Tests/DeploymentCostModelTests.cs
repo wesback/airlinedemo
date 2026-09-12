@@ -30,11 +30,25 @@ public sealed class DeploymentCostModelTests
             .GetProperty("applicationInsightsAndLogAnalytics").GetInt32());
         Assert.Equal(30000, assumptions.GetProperty("model")
             .GetProperty("quotaTokensPerMinute").GetInt32());
+        var containerApps = assumptions.GetProperty("containerApps");
+        Assert.Equal("Consumption", containerApps.GetProperty("plan").GetString());
+        Assert.True(containerApps.GetProperty("scaleToZero").GetBoolean());
+        Assert.Equal(0, containerApps.GetProperty("minReplicas").GetInt32());
+        Assert.Equal(1, containerApps.GetProperty("maxReplicas").GetInt32());
+        Assert.Equal(0.5m, containerApps.GetProperty("vcpuPerReplica").GetDecimal());
+        Assert.Equal(1, containerApps.GetProperty("memoryGiBPerReplica").GetDecimal());
+        Assert.Equal(43200, containerApps.GetProperty("estimatedVcpuSecondsPerMonth").GetInt32());
+        Assert.Equal(86400, containerApps.GetProperty("estimatedGiBSecondsPerMonth").GetInt32());
+        var containerRegistry = assumptions.GetProperty("containerRegistry");
+        Assert.Equal("Basic", containerRegistry.GetProperty("sku").GetString());
+        Assert.Equal(1, containerRegistry.GetProperty("registries").GetInt32());
+        Assert.Equal(1, containerRegistry.GetProperty("retainedImageGb").GetInt32());
+        Assert.Equal(120, containerRegistry.GetProperty("imagePullsPerMonth").GetInt32());
 
         var requiredLineItems = new[]
         {
-            "functions-hosting",
-            "durable-backend",
+            "container-apps-hosting",
+            "container-registry",
             "azure-sql",
             "document-intelligence",
             "azure-openai",
@@ -67,6 +81,12 @@ public sealed class DeploymentCostModelTests
         });
         Assert.Equal(requiredLineItems,
             lineItems.Select(item => item.GetProperty("id").GetString()).ToArray());
+        Assert.DoesNotContain(lineItems, item =>
+            item.GetProperty("id").GetString()!.Contains("functions", StringComparison.OrdinalIgnoreCase)
+            || item.GetProperty("id").GetString()!.Contains("durable", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(lineItems, item =>
+            item.GetProperty("service").GetString()!.Contains("Functions", StringComparison.OrdinalIgnoreCase)
+            || item.GetProperty("service").GetString()!.Contains("Durable", StringComparison.OrdinalIgnoreCase));
 
         var totals = root.GetProperty("totals");
         var calculatedSubtotal = lineItems.Sum(item => item.GetProperty("subtotalUsd").GetDecimal());
@@ -91,7 +111,12 @@ public sealed class DeploymentCostModelTests
         Assert.Contains("USD 500 (100%)", procedure, StringComparison.Ordinal);
         Assert.Contains("alerts are notifications only", procedure, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("stops new rehearsals", procedure, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("stops the Function App", procedure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Container Apps", procedure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("container registry", procedure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Container Apps environment and app", procedure,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("application container registry", procedure,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains("remote Terraform state backend", procedure, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Retained evidence blobs and document versions", procedure,
             StringComparison.Ordinal);
@@ -102,6 +127,10 @@ public sealed class DeploymentCostModelTests
         Assert.Contains("disposable demo scope", procedure, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("externally owned backend", procedure,
             StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("notifications are not spend caps", procedure,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Functions", procedure, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Durable", procedure, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("does not configure Azure Cost Management budgets or alerts", procedure,
             StringComparison.OrdinalIgnoreCase);
     }

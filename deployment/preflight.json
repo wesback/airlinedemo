@@ -1,6 +1,7 @@
 {
   "recordVersion": "1.0",
   "purpose": "Non-secret deployment preflight for the AirlineDemo Sweden Central demonstrator.",
+  "status": "planning-only",
   "authorization": {
     "provisioningAuthorized": false,
     "spendingAuthorized": false,
@@ -22,16 +23,27 @@
     }
   },
   "application": {
-    "runtime": "Azure Functions v4",
-    "workerModel": "dotnet-isolated",
+    "runtime": "ASP.NET Core",
     "targetFramework": "net10.0",
-    "hosting": {
-      "plan": "Flex Consumption"
+    "containerImage": {
+      "baseImage": "mcr.microsoft.com/dotnet/aspnet:10.0",
+      "applicationImage": "acrairlinedemoswcdemo.azurecr.io/airlinedemo:net10.0",
+      "port": 8080
     },
-    "durableFunctions": {
-      "backend": "Azure Storage",
-      "storageAccountKind": "StorageV2",
-      "packageLock": "packages.lock.json"
+    "hosting": {
+      "service": "Azure Container Apps",
+      "plan": "Consumption",
+      "scaleToZero": true,
+      "minReplicas": 0,
+      "maxReplicas": 1,
+      "cpuCoresPerReplica": 0.5,
+      "memoryGiBPerReplica": 1
+    },
+    "containerRegistry": {
+      "service": "Azure Container Registry",
+      "name": "acrairlinedemoswcdemo",
+      "sku": "Basic",
+      "imageRetentionDays": 30
     }
   },
   "database": {
@@ -63,7 +75,7 @@
     "checks": [
       {
         "id": "sweden-central-availability",
-        "requirement": "Explicitly confirm that the selected Azure Functions, Azure SQL, Storage, monitoring, and Azure OpenAI configuration is available in Sweden Central.",
+        "requirement": "Explicitly confirm that Azure Container Apps consumption hosting, the Azure Container Registry SKU, Azure SQL, evidence storage, monitoring, and Azure OpenAI configuration are available in Sweden Central.",
         "confirmed": false
       },
       {
