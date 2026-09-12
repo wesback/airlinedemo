@@ -110,10 +110,25 @@
             <small>Server controlled</small>
           </div>
           <div class="case-strip">
+            <div><span class="label">Case identity</span><strong id="case-identity">-</strong></div>
             <div><span class="label">Aircraft</span><strong id="aircraft-id">-</strong></div>
             <div><span class="label">Airline / lease</span><strong id="scope-label">-</strong></div>
-            <div><span class="label">Workflow state</span><strong id="case-status">Loading...</strong></div>
-            <div><span class="label">Current basis</span><strong id="basis-id">-</strong></div>
+            <div><span class="label">Planned return</span><strong id="planned-return">-</strong></div>
+            <div><span class="label">Current status</span><strong id="case-status">Loading...</strong></div>
+            <div><span class="label">Unresolved items</span><strong id="unresolved-count">-</strong></div>
+            <div><span class="label">Owner / action</span><strong id="owner-action">-</strong></div>
+            <div><span class="label">Current evidence basis</span><strong id="basis-id">-</strong></div>
+          </div>
+        </section>
+        <section class="processing-panel" aria-labelledby="processing-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">PACKAGE PROCESSING</p>
+              <h2 id="processing-heading">Authoritative package state</h2>
+            </div>
+          </div>
+          <div id="package-processing" class="processing-list" aria-live="polite">
+            <p class="muted">Loading package state...</p>
           </div>
         </section>
         <div id="global-error" class="safe-error" role="alert" hidden></div>

@@ -350,16 +350,121 @@
       ready_for_acceptance: "Ready for acceptance",
       accepted: "Accepted for mock checklist",
       blocked: "Processing blocked",
-      active: "Processing active"
+      active: "Processing active",
+      queued: "Queued",
+      processing: "Processing",
+      complete: "Processing complete",
+      failed: "Processing failed",
+      missing: "Missing evidence",
+      ambiguous: "Ambiguous evidence",
+      conflicting: "Conflicting evidence",
+      satisfied: "Evidence satisfied"
     }[status] || status || "Unknown";
+  }
+
+  function valueAt(source, paths) {
+    for (const path of paths) {
+      const value = path.split(".").reduce((current, key) => (
+        current && typeof current === "object" ? current[key] : undefined
+      ), source);
+      if (value !== undefined && value !== null && String(value).trim()) return value;
+    }
+    return null;
+  }
+
+  function displayValue(value) {
+    if (value === null || value === undefined || value === "") return "Not supplied by server";
+    if (typeof value === "object") {
+      const label = value.displayName || value.name || value.subject || value.id;
+      return label ? String(label) : JSON.stringify(value);
+    }
+    return String(value);
+  }
+
+  function setAuthoritativeText(id, value) {
+    $(id).textContent = displayValue(value);
+  }
+
+  function renderPackageProcessing() {
+    const list = $("package-processing");
+    list.replaceChildren();
+    const packages = Array.isArray(summary.packageProcessing) ? summary.packageProcessing : [];
+    if (!packages.length) {
+      list.append(createElement(
+        "p",
+        "muted",
+        "No package processing state supplied by server."
+      ));
+      return;
+    }
+    packages.forEach((packageState) => {
+      const item = createElement("article", "processing-item");
+      item.dataset.processingState = text(packageState.status);
+      if (packageState.status === "failed") item.classList.add("processing-failed");
+      const heading = createElement("strong", "", text(packageState.packageId));
+      const state = createElement(
+        "span",
+        "processing-state",
+        statusLabel(packageState.status)
+      );
+      item.append(heading, state);
+      if (packageState.error && packageState.error.safeCode) {
+        item.append(createElement(
+          "span",
+          "processing-error",
+          `${packageState.error.safeCode} - correlation ${displayValue(packageState.error.correlationId)}`
+        ));
+      }
+      list.append(item);
+    });
   }
 
   function renderSummary() {
     $("case-revision").textContent = text(summary.caseRevision);
+    setAuthoritativeText("case-identity", summary.caseId);
     $("aircraft-id").textContent = text(summary.aircraftId);
     $("scope-label").textContent = `${text(summary.airlineId)} / ${text(summary.leaseId)}`;
+    setAuthoritativeText("planned-return", valueAt(summary, [
+      "plannedReturnDate",
+      "plannedReturn",
+      "returnDate",
+      "case.plannedReturnDate",
+      "context.plannedReturnDate"
+    ]));
     $("case-status").textContent = statusLabel(summary.status);
-    $("basis-id").textContent = selectedTask ? text(selectedTask.basisId) : "Current server basis";
+    setAuthoritativeText("unresolved-count", valueAt(summary, [
+      "unresolvedItemCount",
+      "unresolvedItemsCount",
+      "coordination.unresolvedItemCount",
+      "coordination.unresolvedItemsCount"
+    ]));
+    const owner = valueAt(summary, [
+      "owner",
+      "ownerId",
+      "coordination.owner",
+      "coordination.ownerId",
+      "coordination.assignedTo"
+    ]);
+    const action = valueAt(summary, [
+      "action",
+      "nextAction",
+      "coordination.action",
+      "coordination.nextAction"
+    ]);
+    setAuthoritativeText("owner-action", owner || action
+      ? `${displayValue(owner)} / ${displayValue(action)}`
+      : null);
+    $("basis-id").textContent = text(
+      selectedTask?.basisId ||
+      valueAt(summary, [
+        "currentBasisId",
+        "evidenceBasisId",
+        "investigation.basisId",
+        "evidenceBasis.basisId"
+      ]) ||
+      "Not supplied by server"
+    );
+    renderPackageProcessing();
 
     const tasks = (summary.openReviewTasks || []).filter((task) => task.status === "open");
     $("task-count").textContent = String(tasks.length);
@@ -447,31 +552,88 @@
     confirmedNewBasis = false;
     renderSummary();
     renderTask();
-    const reference = selectedFinding && selectedFinding.evidenceRefs && selectedFinding.evidenceRefs[0];
-    if (!reference) return;
-    try {
-      const preview = await api(
-        `/api/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(reference.documentId)}?version=${reference.version}&page=${reference.page}`
-      );
-      if (selectedTask && selectedTask.taskId === authorizedTask.taskId) renderPreview(preview);
-    } catch (error) {
-      showSafeError(error);
+    const references = selectedFinding && Array.isArray(selectedFinding.evidenceRefs)
+      ? selectedFinding.evidenceRefs
+      : [];
+    if (!references.length) return;
+    const previews = await Promise.all(references.map(async (reference) => {
+      try {
+        return await api(
+          `/api/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(reference.documentId)}?version=${reference.version}&page=${reference.page}`
+        );
+      } catch (error) {
+        showSafeError(error);
+        return null;
+      }
+    }));
+    if (selectedTask && selectedTask.taskId === authorizedTask.taskId) {
+      renderPreviews(references, previews);
     }
   }
 
-  function renderPreview(preview) {
+  function renderPreviews(references, previews) {
     const existing = $("evidence-preview");
     if (!existing) return;
     existing.replaceChildren();
-    const header = document.createElement("header");
-    const title = document.createElement("strong");
-    title.textContent = `${preview.documentId} - version ${preview.version}`;
-    const page = document.createElement("span");
-    page.textContent = `Page ${preview.page}`;
-    header.append(title, page);
-    const quote = document.createElement("blockquote");
-    quote.textContent = preview.textExcerpt;
-    existing.append(header, quote);
+    references.forEach((reference, index) => {
+      const preview = previews[index];
+      const citation = document.createElement("article");
+      citation.className = "evidence-citation";
+      citation.dataset.citation = `${reference.documentId}:v${reference.version}:p${reference.page}`;
+      const header = document.createElement("header");
+      const title = document.createElement("strong");
+      title.textContent = `${reference.documentId} - version ${reference.version}`;
+      const page = document.createElement("span");
+      page.textContent = `Page ${reference.page}`;
+      header.append(title, page);
+      citation.append(header);
+      if (preview && typeof preview.textExcerpt === "string") {
+        const quote = document.createElement("blockquote");
+        quote.textContent = preview.textExcerpt;
+        citation.append(quote);
+      } else {
+        citation.append(createElement(
+          "p",
+          "muted",
+          "Scoped evidence preview unavailable."
+        ));
+      }
+      existing.append(citation);
+    });
+  }
+
+  function policyRouteFor(finding, task) {
+    return valueAt(finding, [
+      "policyRoute",
+      "policyOutcome",
+      "policyDecision.outcome",
+      "policy.outcome"
+    ]) || valueAt(task, [
+      "policyRoute",
+      "policyOutcome",
+      "policyDecision.outcome"
+    ]) || valueAt(summary, [
+      `policyRoutes.${finding && finding.findingId}`,
+      `policyDecisions.${finding && finding.findingId}.outcome`
+    ]);
+  }
+
+  function renderFindingDetails(finding, task, content) {
+    if (!finding) return;
+    const details = document.createElement("dl");
+    details.className = "finding-details";
+    [
+      ["Requirement", finding.requirementId],
+      ["Assessment", statusLabel(finding.assessment)],
+      ["Explanation", finding.explanation],
+      ["Reason code", finding.reasonCode],
+      ["Policy route", policyRouteFor(finding, task)]
+    ].forEach(([label, value]) => {
+      const term = createElement("dt", "", label);
+      const description = createElement("dd", "", displayValue(value));
+      details.append(term, description);
+    });
+    content.append(details);
   }
 
   function renderTask() {
@@ -495,19 +657,25 @@
       ? `${finding.requirementId} - ${finding.assessment} - ${finding.reasonCode}`
       : `Finding ${selectedTask.findingId} - ${selectedTask.reasonCode}`;
     content.append(meta);
-    if (finding) {
-      const explanation = document.createElement("p");
-      explanation.className = "muted";
-      explanation.textContent = finding.explanation;
-      content.append(explanation);
-    }
+    renderFindingDetails(finding, selectedTask, content);
     const evidence = document.createElement("section");
     evidence.id = "evidence-preview";
     evidence.className = "evidence-preview";
-    const loading = document.createElement("p");
-    loading.className = "muted";
-    loading.textContent = "Loading scoped evidence preview...";
-    evidence.append(loading);
+    const references = finding && Array.isArray(finding.evidenceRefs)
+      ? finding.evidenceRefs
+      : [];
+    if (references.length) {
+      const loading = document.createElement("p");
+      loading.className = "muted";
+      loading.textContent = "Loading scoped evidence previews...";
+      evidence.append(loading);
+    } else {
+      evidence.append(createElement(
+        "p",
+        "muted",
+        "No document citations supplied by server."
+      ));
+    }
     content.append(evidence);
 
     const form = document.createElement("form");
