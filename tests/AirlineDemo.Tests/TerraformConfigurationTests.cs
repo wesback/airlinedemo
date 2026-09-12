@@ -936,6 +936,223 @@ public sealed class TerraformConfigurationTests
     }
 
     [Fact]
+    public void TerraformResourceInventory_MapsContainerAppsRegistryAndPrivateEvidenceBoundaries()
+    {
+        var inventoryText = LoadText("deployment", "resource-inventory.json");
+        using var inventory = JsonDocument.Parse(inventoryText);
+        var root = inventory.RootElement;
+
+        Assert.Equal("1.1", root.GetProperty("inventoryVersion").GetString());
+        var resources = root.GetProperty("resources").EnumerateArray()
+            .ToDictionary(
+                resource => resource.GetProperty("address").GetString()!,
+                StringComparer.Ordinal);
+
+        var containerAppAddresses = new[]
+        {
+            "module.container_apps.azurerm_container_app_environment.this",
+            "module.container_apps.azurerm_container_app.this",
+            "module.container_apps.azurerm_container_registry.application"
+        };
+
+        foreach (var address in containerAppAddresses)
+        {
+            var resource = resources[address];
+            Assert.Equal("airlinedemo-demo", resource.GetProperty("lifecycleOwner").GetString());
+            Assert.Equal("disposableDemo", resource.GetProperty("ownershipBoundary").GetString());
+            Assert.NotEmpty(resource.GetProperty("dataBoundary").GetString() ?? string.Empty);
+            Assert.NotEmpty(resource.GetProperty("networkExposure").GetString() ?? string.Empty);
+            Assert.Equal(
+                ["deployment", "environment", "owner", "cost_center", "managed_by"],
+                resource.GetProperty("costTags").EnumerateArray()
+                    .Select(tag => tag.GetString()));
+            Assert.Equal(JsonValueKind.Array, resource.GetProperty("nonSecretOutputs").ValueKind);
+        }
+
+        var registry = resources[
+            "module.container_apps.azurerm_container_registry.application"];
+        Assert.Contains("Container Apps application image",
+            registry.GetProperty("dataBoundary").GetString() ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.Contains("admin authentication is disabled",
+            registry.GetProperty("networkExposure").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            ["container_app_registry_id"],
+            registry.GetProperty("nonSecretOutputs").EnumerateArray()
+                .Select(output => output.GetString()));
+
+        var environment = resources[
+            "module.container_apps.azurerm_container_app_environment.this"];
+        Assert.Contains("Container Apps",
+            environment.GetProperty("dataBoundary").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no case evidence",
+            environment.GetProperty("dataBoundary").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(environment.GetProperty("nonSecretOutputs").EnumerateArray());
+
+        var app = resources["module.container_apps.azurerm_container_app.this"];
+        Assert.Contains("application runtime only",
+            app.GetProperty("dataBoundary").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("external ingress",
+            app.GetProperty("networkExposure").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            ["container_app_id", "container_app_runtime_principal_id"],
+            app.GetProperty("nonSecretOutputs").EnumerateArray()
+                .Select(output => output.GetString()));
+
+        var accessBoundaries = root.GetProperty("accessBoundaries");
+        var evidence = accessBoundaries.GetProperty("privateEvidence");
+        Assert.Equal(
+            "module.demo_boundary.azurerm_storage_account.evidence",
+            evidence.GetProperty("resource").GetString());
+        Assert.False(evidence.GetProperty("publicNetworkAccess").GetBoolean());
+        Assert.Contains("Storage Blob Data Reader",
+            evidence.GetProperty("runtimePermission").GetString() ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.Contains("private evidence boundary",
+            accessBoundaries.GetProperty("applicationRuntime")
+                .GetProperty("evidenceAccess").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TerraformResourceInventory_MapsRemoteStateIdentityScopesAndNonSecretOutputs()
+    {
+        var inventoryText = LoadText("deployment", "resource-inventory.json");
+        using var inventory = JsonDocument.Parse(inventoryText);
+        var root = inventory.RootElement;
+
+        var source = root.GetProperty("sourceOfTruth");
+        Assert.Equal("terraform/bootstrap/", source.GetProperty("protectedStateBootstrap").GetString());
+        Assert.True(source.GetProperty("stateBackendBootstrapIsOutsideWorkloadRoot").GetBoolean());
+        Assert.Contains("outside the disposable deployment root and its teardown scope",
+            source.GetProperty("stateBackendLifecycle").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        var completeness = source.GetProperty("inventoryCompleteness");
+        Assert.Equal(
+            ["terraform/", "terraform/bootstrap/"],
+            completeness.GetProperty("terraformRoots").EnumerateArray()
+                .Select(root => root.GetString()));
+        Assert.Equal(22, completeness.GetProperty("declaredResourceCount").GetInt32());
+        Assert.Equal(18, completeness.GetProperty("workloadResourceCount").GetInt32());
+        Assert.Equal(4, completeness.GetProperty("remoteStateResourceCount").GetInt32());
+        Assert.True(completeness.GetProperty("oneToOneWithTerraformDeclarations").GetBoolean());
+
+        var remoteState = root.GetProperty("ownershipBoundaries")
+            .GetProperty("externallyOwnedRemoteState");
+        Assert.Equal("airlinedemo-platform",
+            remoteState.GetProperty("lifecycleOwner").GetString());
+        Assert.Contains("must not be destroyed",
+            remoteState.GetProperty("teardown").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("outside the deployment root",
+            remoteState.GetProperty("teardown").GetString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            ["owner", "cost_center", "managed_by", "purpose"],
+            remoteState.GetProperty("costTags").EnumerateObject()
+                .Select(tag => tag.Name));
+
+        var resources = root.GetProperty("resources").EnumerateArray()
+            .Where(resource => resource.GetProperty("ownershipBoundary").GetString() ==
+                "externallyOwnedRemoteState")
+            .ToArray();
+        Assert.Equal(4, resources.Length);
+        Assert.All(resources, resource =>
+        {
+            Assert.Equal("airlinedemo-platform",
+                resource.GetProperty("lifecycleOwner").GetString());
+            Assert.Equal(
+                ["owner", "cost_center", "managed_by", "purpose"],
+                resource.GetProperty("costTags").EnumerateArray()
+                    .Select(tag => tag.GetString()));
+        });
+
+        var identities = root.GetProperty("identityInventory").EnumerateArray()
+            .ToDictionary(
+                identity => identity.GetProperty("name").GetString()!,
+                StringComparer.Ordinal);
+        Assert.Contains("Protected state container",
+            identities["deployment"].GetProperty("minimumScope").GetString()!,
+            StringComparison.Ordinal);
+        Assert.Contains("resource-scoped data-plane roles",
+            identities["runtime"].GetProperty("minimumScope").GetString()!,
+            StringComparison.Ordinal);
+        Assert.Contains("workload SQL database",
+            identities["migration"].GetProperty("minimumScope").GetString()!,
+            StringComparison.Ordinal);
+        Assert.Contains("private Terraform state blob container",
+            identities["terraform-state"].GetProperty("minimumScope").GetString()!,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            identities["deployment"].GetProperty("assignments").EnumerateArray(),
+            assignment => assignment.GetProperty("ownership").GetString() ==
+                "externally-supplied");
+        Assert.Contains(
+            identities["runtime"].GetProperty("prohibitedReuse").EnumerateArray(),
+            prohibited => prohibited.GetString() == "subscription scope");
+        Assert.Contains(
+            "distinct from runtime and deployment identities",
+            identities["migration"].GetProperty("lifecycle").GetString()!,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            identities["migration"].GetProperty("assignments").EnumerateArray(),
+            assignment => assignment.GetProperty("ownership").GetString() ==
+                "externally-supplied-sql-entra-administrator");
+        Assert.Contains(
+            identities["terraform-state"].GetProperty("assignments").EnumerateArray(),
+            assignment => assignment.GetProperty("scope").GetString() ==
+                "terraform/bootstrap/azurerm_storage_container.state");
+
+        var outputPolicy = root.GetProperty("nonSecretOutputPolicy");
+        var published = outputPolicy.GetProperty("published").GetString() ?? string.Empty;
+        Assert.Contains("Resource IDs", published, StringComparison.Ordinal);
+        Assert.Contains("identity principal/client IDs", published, StringComparison.Ordinal);
+        Assert.DoesNotContain("credentials", published, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            ["client secrets", "storage keys", "SAS tokens", "connection strings",
+                "passwords", "Terraform state", "evaluator data"],
+            outputPolicy.GetProperty("neverPublished").EnumerateArray()
+                .Select(output => output.GetString()));
+        Assert.DoesNotContain("clientSecret", inventoryText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("storageKey", inventoryText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("connectionString", inventoryText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deploymentPrincipalValue", inventoryText,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TerraformResourceInventory_ContainsNoRetiredWorkloadOrHostStorageEntries()
+    {
+        var inventoryText = LoadText("deployment", "resource-inventory.json");
+        using var inventory = JsonDocument.Parse(inventoryText);
+        var resources = inventory.RootElement.GetProperty("resources").EnumerateArray();
+
+        Assert.DoesNotContain("Functions", inventoryText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Durable", inventoryText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            resources,
+            resource => (resource.GetProperty("address").GetString() ?? string.Empty)
+                .Contains("host-storage", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            resources,
+            resource => (resource.GetProperty("module").GetString() ?? string.Empty)
+                .Contains("host-storage", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            resources,
+            resource => (resource.GetProperty("dataBoundary").GetString() ?? string.Empty)
+                .Contains("Functions", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            resources,
+            resource => (resource.GetProperty("dataBoundary").GetString() ?? string.Empty)
+                .Contains("Durable", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void TerraformResourceInventory_MatchesEveryTerraformResourceDeclaration()
     {
         var repositoryRoot = FindRepositoryRoot();
