@@ -4,6 +4,8 @@ obj/
 *.user
 node_modules/
 test-results/
+.airlinedemo-fixtures/
+.airlinedemo-destroy.tfplan
 
 # Terraform working directory and local state
 terraform/.terraform/
