@@ -11,7 +11,7 @@ public sealed class TerraformConfigurationTests
         var versions = LoadText("terraform", "versions.tf");
         var lockFile = LoadText("terraform", ".terraform.lock.hcl");
 
-        Assert.Contains("required_version = \"= 1.9.8\"", versions, StringComparison.Ordinal);
+        Assert.Contains("required_version = \">= 1.9.8\"", versions, StringComparison.Ordinal);
         Assert.Contains("source  = \"hashicorp/azurerm\"", versions, StringComparison.Ordinal);
         Assert.Contains("version = \"= 4.62.0\"", versions, StringComparison.Ordinal);
         Assert.Contains("registry.terraform.io/hashicorp/azurerm", lockFile,
