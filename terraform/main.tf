@@ -75,19 +75,19 @@ module "observability" {
 module "container_apps" {
   source = "./modules/container-apps"
 
-  deployment_name            = var.deployment_name
-  resource_group_name        = module.demo_boundary.resource_group_name
-  region                     = var.region
-  log_analytics_workspace_id = module.observability.log_analytics_workspace_id
+  deployment_name             = var.deployment_name
+  resource_group_name         = module.demo_boundary.resource_group_name
+  region                      = var.region
+  log_analytics_workspace_id  = module.observability.log_analytics_workspace_id
   evidence_storage_account_id = module.demo_boundary.evidence_storage_account_id
   document_intelligence_id    = module.document_intelligence.account_id
   azure_openai_id             = module.ai.account_id
-  container_image            = var.container_image
-  container_port             = var.container_port
-  allowed_source_ranges      = var.container_allowed_source_ranges
-  min_replicas               = var.container_min_replicas
-  max_replicas               = var.container_max_replicas
-  tags                       = local.common_tags
+  container_image             = var.container_image
+  container_port              = var.container_port
+  allowed_source_ranges       = var.container_allowed_source_ranges
+  min_replicas                = var.container_min_replicas
+  max_replicas                = var.container_max_replicas
+  tags                        = local.common_tags
 }
 
 module "sql" {

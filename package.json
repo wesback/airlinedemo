@@ -2,7 +2,9 @@
   "name": "airline-demo-browser-tests",
   "private": true,
   "scripts": {
-    "test:browser": "playwright test tests/browser --reporter=line"
+    "test:browser": "playwright test tests/browser --reporter=line",
+    "lint:demo-scripts": "shellcheck scripts/bootstrap-demo.sh scripts/destroy-demo.sh scripts/load-demo-fixtures.sh scripts/migrate-demo.sh",
+    "validate:terraform": "terraform fmt -check -recursive terraform && terraform -chdir=terraform init -backend=false -input=false -no-color >/dev/null && terraform -chdir=terraform validate"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0"

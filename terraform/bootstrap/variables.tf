@@ -40,7 +40,7 @@ variable "approved_operator_ip_ranges" {
   type        = list(string)
 
   validation {
-    condition     = length(var.approved_operator_ip_ranges) > 0 && alltrue([
+    condition = length(var.approved_operator_ip_ranges) > 0 && alltrue([
       for ip_range in var.approved_operator_ip_ranges : can(cidrhost(ip_range, 0))
     ])
     error_message = "approved_operator_ip_ranges must contain at least one valid, explicitly approved CIDR range."
