@@ -41,6 +41,19 @@ To avoid stalling implementation or failing review convergence:
   runs an additional command genuinely belongs in "done," say so in the
   narrative body as something a human needs to configure (a test-command
   override), not as an acceptance criterion, until that override exists.
+- **A named command must already exist and be freely addable.** If a
+  criterion says running `npm run <script>` (or similar) must exit 0 with
+  no warnings, that script must already exist, or adding it must not
+  require touching a file the blast-radius classifier treats as
+  shared-or-control-plane (version pins, CI workflow files, backend/provider
+  blocks, and the like) — that class of change needs an operator to add the
+  `hard-to-reverse-approved` label before it can be published, which an
+  autonomous run cannot grant itself. A criterion that quietly needs both
+  "add missing tooling" and "touch a hard-to-reverse file" has no path to
+  self-heal and will escalate every time for the same reason. Either wire
+  the missing script (and whatever config it depends on) yourself before
+  filing the story, or say plainly in the narrative that an operator needs
+  to add the approval label first.
 
 **Asked to draft a PRD** for something bigger? See `docs/prds/README.md`
 in this repo — that's the convention this pipeline expects.
