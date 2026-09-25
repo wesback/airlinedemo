@@ -144,7 +144,7 @@ public sealed class GettingStartedContractTests
         {
             "prerequisites",
             "authenticate",
-            "private terraform values",
+            "protected terraform state",
             "generate fixtures",
             "bootstrap",
             "validate",
@@ -161,9 +161,13 @@ public sealed class GettingStartedContractTests
             Assert.Contains(tool, prerequisites, StringComparison.Ordinal);
         }
 
-        var bootstrapInvocation = guide.IndexOf("./scripts/bootstrap-demo.sh", StringComparison.Ordinal);
-        Assert.True(bootstrapInvocation > guide.IndexOf("npm run lint:demo-scripts", StringComparison.Ordinal));
-        Assert.True(bootstrapInvocation > guide.IndexOf("npm run validate:terraform", StringComparison.Ordinal));
+        var bootstrapSection = GetSection(guide, "## 5.");
+        var bootstrapInvocation = bootstrapSection.IndexOf("./scripts/bootstrap-demo.sh",
+            StringComparison.Ordinal);
+        Assert.True(bootstrapInvocation > bootstrapSection.IndexOf(
+            "npm run lint:demo-scripts", StringComparison.Ordinal));
+        Assert.True(bootstrapInvocation > bootstrapSection.IndexOf(
+            "npm run validate:terraform", StringComparison.Ordinal));
         var teardown = GetSection(guide, "## 7.");
         foreach (var variable in new[]
         {
@@ -177,15 +181,20 @@ public sealed class GettingStartedContractTests
     }
 
     [Fact]
-    public void GuideDocumentsTheProtectedRemoteStatePrerequisites()
+    public void GuideDocumentsProtectedStateChecksBeforeWorkloadTerraformInitialization()
     {
         var root = FindRepositoryRoot();
         var guide = ReadGuide();
+        var normalizedGuide = Regex.Replace(guide, @"\s+", " ");
         var backend = File.ReadAllText(Path.Combine(root, "terraform", "backend.tf"));
+        var bootstrapScript = File.ReadAllText(Path.Combine(root, "scripts", "bootstrap-demo.sh"));
         var stateBootstrap = Path.Combine(root, "terraform", "bootstrap", "README.md");
 
         Assert.True(File.Exists(stateBootstrap));
-        Assert.Contains("terraform/bootstrap/README.md", guide, StringComparison.Ordinal);
+        Assert.Contains(
+            "[`terraform/bootstrap/README.md`](terraform/bootstrap/README.md)",
+            guide,
+            StringComparison.Ordinal);
         foreach (var (name, pattern) in new[]
         {
             ("resource group", @"resource_group_name\s*=\s*""([^""]+)"""),
@@ -199,7 +208,50 @@ public sealed class GettingStartedContractTests
         }
 
         Assert.Contains("Storage Blob Data Contributor", guide, StringComparison.Ordinal);
-        Assert.Contains("state container", guide, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("role assigned at the state container scope", normalizedGuide,
+            StringComparison.Ordinal);
+        Assert.Contains("separate, owner-approved", normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("demo workload bootstrap does not provision or repair this backend",
+            normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("demo teardown does not destroy it", normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("Azure Resource Manager", normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("az storage account show", guide, StringComparison.Ordinal);
+        Assert.Contains("--resource-group rg-airlinedemo-state", guide, StringComparison.Ordinal);
+        Assert.Contains("--name stairlinedemostate", guide, StringComparison.Ordinal);
+        Assert.Contains("az storage container show", guide, StringComparison.Ordinal);
+        Assert.Contains(
+            "az storage container show \\\n  --account-name stairlinedemostate \\\n  --name tfstate \\\n  --auth-mode login",
+            guide,
+            StringComparison.Ordinal);
+        Assert.Contains("--auth-mode login", guide, StringComparison.Ordinal);
+        Assert.Contains("account is not found in the selected subscription", normalizedGuide,
+            StringComparison.Ordinal);
+        Assert.Contains("container check explicitly reports that `tfstate` is absent", normalizedGuide,
+            StringComparison.Ordinal);
+        Assert.Contains("stop here and ask the platform/state owner to follow the approved bootstrap procedure",
+            normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains(
+            "A DNS-resolution failure, connection timeout, blocked network, or authorization error is not proof that the account is absent",
+            normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("lacks Azure Resource Manager read permission for the storage account",
+            normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("Reader role at the account or a parent scope", normalizedGuide,
+            StringComparison.Ordinal);
+        Assert.Contains("Storage Blob Data Contributor is a data-plane role and does not grant this ARM read access",
+            normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("verify the signed-in identity's container-scoped data role",
+            normalizedGuide, StringComparison.Ordinal);
+
+        var subscriptionSelection = guide.IndexOf("az account set --subscription", StringComparison.Ordinal);
+        var accountCheck = guide.IndexOf("az storage account show", StringComparison.Ordinal);
+        var containerCheck = guide.IndexOf("az storage container show", StringComparison.Ordinal);
+        var workloadBootstrap = guide.IndexOf("./scripts/bootstrap-demo.sh", StringComparison.Ordinal);
+        Assert.True(subscriptionSelection >= 0 && subscriptionSelection < accountCheck);
+        Assert.True(accountCheck < containerCheck && containerCheck < workloadBootstrap);
+        Assert.Contains("Complete both checks before running", normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("`terraform init` for the workload root", normalizedGuide, StringComparison.Ordinal);
+        Assert.Contains("run_step terraform-init terraform -chdir=", bootstrapScript,
+            StringComparison.Ordinal);
     }
 
     [Fact]

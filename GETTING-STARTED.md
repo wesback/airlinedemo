@@ -102,18 +102,31 @@ Wait until each provider is registered, for example:
 az provider show --namespace Microsoft.App --query registrationState --output tsv
 ```
 
-## 3. Prepare private Terraform values and remote state
+## 3. Verify protected Terraform state and prepare private values
 
-The workload backend in `terraform/backend.tf` uses state resource group
+### Protected-state setup and preflight
+
+The workload backend in `terraform/backend.tf` uses resource group
 `rg-airlinedemo-state`, storage account `stairlinedemostate`, and container
-`tfstate`, with Entra authentication. Before proceeding, the platform/state
-owner must complete the separate procedure in
-[`terraform/bootstrap/README.md`](terraform/bootstrap/README.md). The
-authenticated deployment identity needs the **Storage Blob Data Contributor**
-role on the state container, the account firewall must permit the operator's
-network, and the signed-in identity must be able to use that backend. A
-readable container confirms the state resources exist; verify the role
-assignment with the state owner if access is uncertain:
+`tfstate`, with Entra authentication. Its setup is a separate, owner-approved
+process described in
+[`terraform/bootstrap/README.md`](terraform/bootstrap/README.md). The demo
+workload bootstrap does not provision or repair this backend, and demo teardown
+does not destroy it; state provisioning and eventual cleanup are separately
+approved operations.
+
+After selecting the intended subscription in step 2, check the account through
+Azure Resource Manager:
+
+```bash
+az storage account show \
+  --resource-group rg-airlinedemo-state \
+  --name stairlinedemostate \
+  --query name --output tsv
+```
+
+The output must be `stairlinedemostate`. Then check the container using the
+current Entra login (not an account key):
 
 ```bash
 az storage container show \
@@ -123,8 +136,30 @@ az storage container show \
   --query name --output tsv
 ```
 
-The result must be `tfstate`. The workload script does not create or repair
-the protected backend.
+The output must be `tfstate`. The signed-in Entra identity running this
+container check needs data-plane permission to read the container. The
+workload deployment identity needs the **Storage Blob Data Contributor** role
+assigned at the state container scope, and the account firewall must permit
+the operator's network.
+
+If Azure Resource Manager explicitly reports that the account is not found in
+the selected subscription, or the container check explicitly reports that
+`tfstate` is absent, stop here and ask the platform/state owner to follow the
+approved bootstrap procedure. Do not try the workload `terraform init` or
+create the resources through the demo workflow. A DNS-resolution failure,
+connection timeout, blocked network, or authorization error is not proof that
+the account is absent. If the account check returns an authorization error,
+the signed-in identity lacks Azure Resource Manager read permission for the
+storage account; ask the subscription owner for read access (for example, the
+Reader role at the account or a parent scope). **Storage Blob Data Contributor
+is a data-plane role and does not grant this ARM read access.** If the
+container check returns an authorization error, ask the state owner to verify
+the signed-in identity's container-scoped data role. For DNS or connectivity
+errors, confirm network/firewall access with the state owner before proceeding.
+
+Complete both checks before running `./scripts/bootstrap-demo.sh`, which runs
+`terraform init` for the workload root and does not create or repair the
+protected backend.
 
 From the repository root, copy the example to a private file and fill its
 required Azure OpenAI model/version and SQL Entra administrator login/object
