@@ -12,11 +12,9 @@ RESOURCE_GROUP_NAME="${AIRLINEDEMO_RESOURCE_GROUP_NAME:-rg-airlinedemo-swc-demo}
 DEPLOYMENT_NAME="${AIRLINEDEMO_DEPLOYMENT_NAME:-airlinedemo-swc-demo}"
 REGISTRY_NAME="${AIRLINEDEMO_REGISTRY_NAME:-acrairlinedemoswcdemo}"
 IMAGE_REPOSITORY="${AIRLINEDEMO_IMAGE_REPOSITORY:-airlinedemo}"
-IMAGE_TAG="${AIRLINEDEMO_IMAGE_TAG:-demo-${AIRLINEDEMO_RUN_ID:-RUN-DEMO-001}}"
-IMAGE_REF="${REGISTRY_NAME}.azurecr.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
-API_BASE_URL="${AIRLINEDEMO_API_BASE_URL:-https://<container-app-fqdn>}"
 FIXTURE_ROOT="${AIRLINEDEMO_FIXTURE_ROOT:-$REPOSITORY_ROOT/.airlinedemo-fixtures}"
 DRY_RUN="${AIRLINEDEMO_DRY_RUN:-${AIRLINEDEMO_MOCK:-0}}"
+RUN_ID="${AIRLINEDEMO_RUN_ID:-}"
 
 usage() {
   printf 'Usage: %s [--dry-run] [--help]\n' "$0"
@@ -70,6 +68,17 @@ while (($# > 0)); do
   shift
 done
 
+if [[ -z "$RUN_ID" && -f "$FIXTURE_ROOT/generator-contract.json" ]]; then
+  command -v jq >/dev/null 2>&1 ||
+    fail "required tool 'jq' is missing; install it before reading the fixture run ID"
+  RUN_ID="$(jq -er '.configuration.runId' "$FIXTURE_ROOT/generator-contract.json")" ||
+    fail "unable to read configuration.runId from $FIXTURE_ROOT/generator-contract.json"
+fi
+RUN_ID="${RUN_ID:-RUN-DEMO-001}"
+IMAGE_TAG="${AIRLINEDEMO_IMAGE_TAG:-demo-$RUN_ID}"
+IMAGE_REF="${REGISTRY_NAME}.azurecr.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+API_BASE_URL="${AIRLINEDEMO_API_BASE_URL:-https://<container-app-fqdn>}"
+
 if [[ "$DRY_RUN" != "1" ]]; then
   [[ -n "$OPERATOR_VARS_FILE" ]] ||
     fail "AIRLINEDEMO_OPERATOR_VARS_FILE is required and must point to private Terraform values"
@@ -111,6 +120,19 @@ run_step terraform-apply terraform -chdir="$TERRAFORM_ROOT" apply \
 if [[ "$DRY_RUN" == "1" ]]; then
   API_BASE_URL="https://<container-app-fqdn>"
 else
+  SQL_SERVER_OUTPUT="$(
+    terraform -chdir="$TERRAFORM_ROOT" output -raw sql_server_fully_qualified_domain_name
+  )" || fail "unable to read Terraform output sql_server_fully_qualified_domain_name"
+  SQL_DATABASE_ID="$(
+    terraform -chdir="$TERRAFORM_ROOT" output -raw sql_database_id
+  )" || fail "unable to read Terraform output sql_database_id"
+  [[ -n "$SQL_SERVER_OUTPUT" ]] ||
+    fail "Terraform returned an empty SQL server FQDN"
+  [[ "$SQL_DATABASE_ID" == */databases/* && -n "${SQL_DATABASE_ID##*/}" ]] ||
+    fail "Terraform returned an invalid SQL database resource ID"
+  export AIRLINEDEMO_SQL_SERVER="${AIRLINEDEMO_SQL_SERVER:-$SQL_SERVER_OUTPUT}"
+  export AIRLINEDEMO_SQL_DATABASE="${AIRLINEDEMO_SQL_DATABASE:-${SQL_DATABASE_ID##*/}}"
+
   API_HOST="$(
     az containerapp show \
       --name "ca-$DEPLOYMENT_NAME" \
