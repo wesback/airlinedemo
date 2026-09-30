@@ -5,7 +5,7 @@ Dependency: [Demo PRD](demo-prd.md) and the runtime contracts in [Workflow/API b
 
 ## 0. Technology decision
 
-Provision the selected .NET 10 ASP.NET Core application as an Azure Container Apps workload (scale-to-zero consumption plan), with Azure SQL for workflow/business/audit state and Blob Storage for document content and versions. Use Azure AI Foundry for model governance/evaluation and a governed Azure OpenAI deployment for bounded extraction/classification. Do not provision Foundry Agent Service or Microsoft Agent Framework runtime infrastructure for the core workflow.
+Provision the selected .NET 10 ASP.NET Core application as an Azure Container Apps workload (scale-to-zero consumption plan), with Azure SQL for workflow/business/audit state and Blob Storage for document content and versions. Use Azure AI Foundry for model governance/evaluation and governed Azure OpenAI deployments for the evaluated model arms (a small and a larger model; see the Demo PRD evaluation harness). The bounded investigation agent is an in-process Microsoft Agent Framework library inside the application; do not provision Foundry Agent Service or separate agent runtime infrastructure.
 
 **Revision note (this version):** an earlier draft of this brief specified an isolated Azure Functions host with a Durable Functions backend. The merged application was built and reviewed as a conventional ASP.NET Core web app with its own workflow/state persistence, not as a Functions isolated-worker host, and no Durable Functions orchestration exists or is planned. Rather than retrofit the application onto Functions, this revision repoints the compute target to Azure Container Apps, which runs the application substantially as built and preserves a comparable consumption-based cost profile. Story #48's cost estimate was priced against Functions + Durable Functions hosting and must be re-costed against Container Apps pricing before re-approval.
 
@@ -107,7 +107,7 @@ administrator and is not a runtime or deployment credential.
 
 ## 7. Costs and retention
 
-Produce an itemised monthly estimate using current Sweden Central pricing and actual usage assumptions: Container Apps hosting (including registry), database, OCR/pages, model tokens, evidence versions, logs, networking and remote state.
+Produce an itemised monthly estimate using current Sweden Central pricing and actual usage assumptions: Container Apps hosting (including registry), database, OCR/pages, model tokens, evidence versions, logs, networking and remote state. Include the token cost of running the evaluation batch (30-50 cases x two model arms) as a separate line, and re-approve the estimate before that batch runs.
 
 Reserve contingency below USD 500; do not size exactly to the ceiling. Model/page limits, bounded retries and restricted demo access control variable use. Keep minimum charges and resources that remain billable when compute stops visible.
 
