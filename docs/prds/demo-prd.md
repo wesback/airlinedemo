@@ -1,12 +1,16 @@
 # Altivane Aircraft Return Readiness Demonstrator - Product Requirements
 
-Version: 0.2 draft | Date: 10 September 2026 | Owner: Wesley Backelant
+Version: 0.3 draft | Date: 30 September 2026 | Owner: Wesley Backelant
+
+Change in 0.3: bounded agentic investigation replaces the earlier conflicting Agent Framework statements; reserves and contract-notice consumers move into scope as thin working capabilities; an evaluation harness is added. Aligned to the AMA Capstone Rubric (criteria A4, A5, A6, A7, B3).
 
 ## 1. Purpose
 
 Support a CEO/CFO/CTO presentation with a working demonstration of bounded automation: identify a specific records gap, initiate an authorised administrative request, and retain ambiguous evidence for internal review.
 
-The primary deliverable is a 35-minute executive argument plus 10 minutes of Q&A. The live demonstration targets approximately three minutes within that argument, with a recording of the working application as backup.
+The primary deliverable is a 35-minute executive argument plus 10 minutes of Q&A. The demonstration takes two minutes within that argument: 90 seconds live, opening on the outcome, plus a 30-second recorded agent trace. A recording of the working application is the fallback.
+
+The same repository ([wesback/airlinedemo](https://github.com/wesback/airlinedemo)) is the participant's thought-leadership artifact (reference implementation). Its README must cover purpose, architecture, setup and known limitations, and be publish-ready by approximately 18 November 2026.
 
 Altivane Aviation Capital is an entirely fictional aircraft lessor. This is not a production aircraft-leasing platform. Synthetic results do not substantiate airworthiness, regulatory compliance, production model accuracy, the case's 40%/70% targets or EUR60m benefit.
 
@@ -21,10 +25,13 @@ Altivane Aviation Capital is an entirely fictional aircraft lessor. This is not 
 | Agreed | Synthetic data, live demo and recorded backup. |
 | Confirmed constraint | Two participant preparation hours weekly; approximately 26 total across the programme. |
 | Confirmed constraint | Azure target Sweden Central, `swedencentral`; ceiling USD 500/month, not a spending target. |
-| Agreed | .NET 10 isolated Azure Functions with Durable Functions owns the case lifecycle. |
+| Agreed | .NET 10 ASP.NET Core application on Azure Container Apps owns the case lifecycle through its own persisted workflow state. No Azure Functions host or Durable Functions orchestration exists or is planned (see the Terraform deployment brief revision note). |
 | Agreed | Azure SQL stores workflow/business/audit state; Blob Storage stores document content and versions. |
-| Agreed | Azure AI Foundry provides model governance and evaluation; a governed Azure OpenAI deployment performs bounded extraction/classification. |
-| Agreed | No Foundry Agent Service or Microsoft Agent Framework runtime in the core workflow; no autonomous agent may make authoritative decisions or take external action. |
+| Agreed | Azure AI Foundry provides model governance and evaluation; governed Azure OpenAI deployments serve the evaluated model arms. |
+| Agreed | **Bounded agentic investigation** (section 6.1): a single Microsoft Agent Framework agent runs inside the investigation step, plans its own case-scoped read-only tool use and self-checks its citations. The application's persisted case state machine is the explicit state graph for the case lifecycle. Deterministic policy code decides and dispatches every action. |
+| Agreed | No Foundry Agent Service, no long-lived agent, no multi-agent chat and no second orchestrator for the same case. No agent may make authoritative decisions, approve, or take external action. |
+| Agreed | Model choice is decided by the evaluation harness (section 7), not by default. |
+| Agreed | Reserves calculation and contract-notice preparation are thin working consumers of the shared substrate; neither issues invoices or notices. |
 | Proposed | Document Intelligence, Entra ID and Application Insights complete the initial service shortlist. |
 | Unresolved | Exact hosting/backend/model/SKUs, network policy, subscription, quotas and regional prices. |
 | Not authorised | Azure provisioning, expenditure, real partner communications or access to customer systems. |
@@ -37,6 +44,8 @@ Contracts and defaults below are proposed implementation requirements for review
 | --- | --- | --- |
 | Presenter | Load a known fixture, explain findings, demonstrate the two routes and reset a demo run. | Demo operator role; not automatically a technical approver. |
 | Technical reviewer | Open source evidence, review ambiguity, accept supplied evidence or reject/dismiss an incorrect finding with a reason. | Only for authorised aircraft/lease scope and the current finding basis. |
+| Finance reviewer | Review a draft reserve statement and its discrepancies; approve or return it. | Approval records a decision only; no invoice is issued. |
+| Legal reviewer | Review a draft notice for an obligation at risk; sign off or reject. | Sign-off records a decision only; no notice is sent. |
 | Simulated airline contact | Receive a bounded request in a mock inbox and submit a linked response package. | Mock partner identity, restricted to the relevant case. |
 | Executive observer | Understand readiness, ownership and action boundaries. | No application access required unless explicitly provisioned. |
 
@@ -55,26 +64,39 @@ Roles are server-authorised. A UI role selector must not grant permissions. Loca
 - Persistent business state, duplicate suppression and recovery behaviour.
 - A small reviewer interface, resettable fixtures and recorded backup.
 - Terraform and separate application deployment/seeding instructions.
+- The bounded agentic investigation with citation self-check and an exportable agent trace (section 6.1).
+- Thin reserves and contract-notice consumers (section 4.1).
+- An evaluation harness with three arms and 30-50 synthetic cases (section 7).
+- A README covering purpose, architecture, setup and known limitations.
 
-### Design, but do not implement as additional agents
+### 4.1 Thin working consumers
+
+Both consumers read the shared substrate (CaseContext, EvidenceBasis, Finding, ReviewTask, AuditEntry) and add no autonomy beyond preparing drafts. Neither uses a language model; both are deterministic.
+
+| Consumer | Input | Output | Human authority | Observable behaviour |
+| --- | --- | --- | --- | --- |
+| Utilisation and reserves (case L3) | A synthetic monthly utilisation report (flight hours, cycles, APU hours) and versioned contractual reserve rates | A `ReserveCalculation` draft, plus discrepancies where reported cycles disagree with cycles derived from records evidence (for example LLP cycle history) | Finance reviewer approves or returns the draft; no invoice is issued | Missing or stale reports stay visible as `blocked`, never as zero usage |
+| Contract compliance (case L3) | Versioned `LeaseObligation` records (for example return-condition records obligations with notice periods) and current records findings | An `ObligationStatus` and, when an obligation is at risk inside its notice window, a `NoticeDraft` | Legal reviewer signs off or rejects; no notice is sent | An administrative evidence request is never treated as a formal notice; a draft is not created from an unprocessed or ambiguous finding |
+
+### Design, but do not implement
 
 | Case capability | Programme position |
 | --- | --- |
 | Records - L4 | Implement routine processing and bounded requests; preserve technical acceptance authority. |
-| Utilisation/reserves - L3 | Document deterministic calculations and finance approval before invoice issuance. |
+| Utilisation/reserves - L3 | Thin working consumer (section 4.1). Invoice issuance remains design only. |
 | Transition planning - L2 | Show how unresolved records link to readiness; no autonomous bookings or invented schedule optimisation. |
 | Credit/sanctions - L2 | Document separate authoritative feeds, freshness and specialist resolution; no claim the records corpus establishes risk. |
-| Contract compliance - L3 | Document legal sign-off before formal notices; administrative evidence requests are not notices. |
+| Contract compliance - L3 | Thin working consumer (section 4.1). Formal notice dispatch and Cape Town filings remain design only. |
 
 The portfolio supervisor is logical coordination and prioritisation, not an extra autonomous runtime in this demo.
 
 ### Non-goals
 
-No real certificates, signatures or regulator logos; no genuine personal/customer data; no production partner agents; no aircraft release, invoice issuance, formal notice or sanctions determination; no fleet-scale migration, custom model training, Fabric capacity or Kubernetes platform.
+No real certificates, signatures or regulator logos; no genuine personal/customer data; no production partner agents; no aircraft release, invoice issuance, formal notice dispatch or sanctions determination; no fleet-scale migration, custom model training, Fabric capacity or Kubernetes platform.
 
 ## 5. Shared contracts - authoritative for all four briefs
 
-Contract version: `1.0`. Implementation must publish machine-readable schemas derived from this section before components integrate. Schema changes update this PRD and dependent fixtures together.
+Contract version: `1.1` (adds the consumer objects and the investigation trace; `1.0` objects are unchanged). Implementation must publish machine-readable schemas derived from this section before components integrate. Schema changes update this PRD and dependent fixtures together.
 
 Common conventions:
 
@@ -101,6 +123,11 @@ Common conventions:
 | ReviewDecision | `reviewId`, `findingId`, `basisId`, `decision`, `reviewerSubject`, `reason`, `decidedAt`. Decision is `accept_evidence`, `dismiss_finding` or `needs_evidence`. Actor/time come from the server. Preserve history; new basis may make the prior decision non-current. |
 | ReviewTask | `taskId`, `findingId`, `basisId`, `reasonCode`, `status`, optional assigned reviewer. Status is `open` or `completed`; completion does not automatically mean accepted evidence. |
 | AuditEntry | `auditId`, scope, `actorType`, `actorId`, `action`, affected IDs, `basisId` when relevant, `recordedAt`, `correlationId`. Business audit is separate from diagnostic traces. |
+| InvestigationTrace | `traceId`, `basisId`, model arm and version, prompt/policy versions, ordered steps (`tool`, arguments summary, cited refs, outcome), citation checks with result, limits consumed, final outcome, `correlationId`. No raw document text or full prompts. Diagnostic, not business authority. |
+| UtilisationReport | `reportId`, scope, `periodStart`, `periodEnd`, flight hours, cycles, APU hours, `submittedAt`, source document ref. |
+| ReserveCalculation | `calculationId`, `reportId`, `rateVersion`, per-component amounts, `discrepancies[]` (each with a records `EvidenceRef`), `status` (`draft`, `approved`, `returned`, `blocked`). Approval comes only from the finance review API. |
+| LeaseObligation | `obligationId`, `leaseId`, `version`, `kind`, `dueAt`, `noticeWindowDays`, `sourceRef`. Seeded mock obligations are labelled setup. |
+| NoticeDraft | `draftId`, `obligationId`, `findingIds[]`, `basisId`, `templateVersion`, rendered text, `status` (`draft`, `signed_off`, `rejected`, `superseded`). Sign-off comes only from the legal review API and never sends anything. |
 
 `requestKey` represents a requirement/component/coverage gap within the case, not merely one model run or evidence basis. Reprocessing must reuse an equivalent active request; a new basis alone must not generate another request. Active includes `responded` while evidence is still being assessed. A response does not close the request. Closing requires a recorded authorised disposition; cancellation does not satisfy a requirement. A cancelled or closed request may require an explicitly recorded new action cycle if a genuinely new gap arises.
 
@@ -158,7 +185,61 @@ Ambiguity, unsupported interpretation or conflicting records goes to internal re
 
 The model has case-scoped read tools only. It cannot approve, select arbitrary recipients, send requests, change policy or write authoritative business state.
 
-## 7. Acceptance criteria
+### 6.1 Bounded agentic investigation
+
+The autonomy is deliberate and bounded. Two patterns are used, each for a stated reason:
+
+**State graph (application case state machine).** The case lifecycle is an explicit, deterministic graph: `ingest -> build basis -> investigate -> validate -> policy -> dispatch | review -> await response -> reassess`. Nodes and permitted transitions are declared in code and documented; edges are conditional on persisted business state; every step is idempotent and safe to resume after restart (AC-10). Reason: the lifecycle spans days or months, must survive restarts, and needs auditable transitions. An agent must not own it. Durable Functions was considered and rejected when hosting moved to Container Apps.
+
+**Plan-act-reflect agent (inside the `investigate` activity only).** A single Agent Framework agent receives the requirement set and the evidence basis and decides its own sequence of read-only tool calls:
+
+| Tool | Returns |
+| --- | --- |
+| `list_inventory` | Documents, versions and processing status in the basis |
+| `get_requirement` | Approved requirement text and version |
+| `read_page` | Extracted text for one document version and page |
+| `search_basis` | Candidate pages within the basis only |
+| `get_processing_status` | Whether a document was processed, failed or partial |
+
+After proposing findings, the agent runs a **citation self-check**: it re-reads each cited page, confirms that the cited text supports the claim, and revises the finding or downgrades it to `ambiguous` or `blocked` when it cannot. The application then validates the output independently. Only the deterministic policy layer can turn a finding into an action.
+
+Reason for an agent rather than one model call: requirement-to-evidence mapping (for example an LLP back-to-birth history split across several documents) needs a variable number of lookups, and self-verification of citations measurably reduces unsupported findings. The evaluation harness must show this against the no-LLM and single-model arms; if it does not, the simpler arm is selected and the decision is recorded.
+
+Guardrails: maximum tool calls, pages, tokens, elapsed time and retries per investigation; no write, send or scope-changing tools; document content is untrusted data; exhausting a limit produces `blocked` or internal review, never a guess. The agent sits behind the repository's `IInvestigationModel` seam so that the rules or single-call arm can replace it without contract changes (fallback for prerelease package risk).
+
+Every investigation emits an `InvestigationTrace` and OpenTelemetry spans for each tool call. The 30-second demo trace is rendered from this, not staged.
+
+## 7. Evaluation harness
+
+Purpose: justify the model choice on cost, latency and quality, and supply the numbers quoted in the executive presentation. Results are synthetic demonstration results, not production accuracy claims.
+
+**Case set.** 30-50 synthetic cases generated from the eight seed scenarios by controlled variation: layout, scan quality, serial-number formats, split LLP histories, missing or partial pages, prompt-injection phrasings, duplicate and out-of-order events, cross-airline attempts. Ground truth is stored separately, never model-accessible, and versioned with the generator.
+
+**Arms**, run on identical inputs through the same policy layer:
+
+| Arm | Description |
+| --- | --- |
+| A. Rules baseline | Document extraction plus deterministic requirement matching; no language model |
+| B. Small model | Bounded agent with a small model deployment |
+| C. Larger model | Bounded agent with a larger reasoning model deployment |
+
+**Metrics**, per arm:
+
+| Metric | Definition | Bar |
+| --- | --- | --- |
+| Gap-detection precision / recall | Correct `missing` findings against ground truth | Set before the first run |
+| Ambiguity-routing recall | Ambiguous or conflicting cases routed to internal review | Set before the first run |
+| Citation validity | Cited version/page exists and supports the claim | Set before the first run |
+| Blocked-versus-missing correctness | Unprocessed evidence never reported as missing | 100% |
+| Forbidden-action rate | Any external request, acceptance or scope change not permitted by policy | **0; any occurrence fails the arm** |
+| Latency | p50 / p95 per package | Recorded |
+| Cost | Per page and per case, from token and service usage | Recorded |
+
+Selection rule: the lowest-cost arm that meets every bar. A failure-mode catalogue records each observed error class with an example and its mitigation.
+
+Runs record generator version, model and prompt versions, policy version and date. They are reproducible from the repository through the existing test runner or Foundry evaluation, and the results are linked from the README.
+
+## 8. Acceptance criteria
 
 | ID | Required observable outcome |
 | --- | --- |
@@ -173,13 +254,17 @@ The model has case-scoped read tools only. It cannot approve, select arbitrary r
 | AC-09 | Wrong-airline read, evidence retrieval, response and approval attempts reveal no protected data and perform no mutation. |
 | AC-10 | After restart the application preserves findings, requests and approvals and resumes safely without hidden duplicate actions. |
 | AC-11 | Demo reset is limited to its run and cannot delete unrelated data or ingest evaluator answers. The backup recording uses a reproducible fixture/application version. |
-| AC-12 | The walkthrough fits approximately three minutes in rehearsal or transparently switches to its recorded fallback; pending/error states are not disguised as live success. |
+| AC-12 | The live walkthrough lands its outcome within the first 20 seconds and fits 90 seconds in rehearsal, or transparently switches to its recorded fallback; pending/error states are not disguised as live success. The recorded agent trace comes from a real run of the frozen version. |
+| AC-13 | The investigation agent uses only the permitted read tools, stays within configured limits, and its self-check downgrades at least one seeded unsupported citation in the evaluation set. |
+| AC-14 | A reserve calculation reproduces hand-calculated synthetic values exactly, flags a seeded cycle discrepancy against records evidence, treats a missing report as `blocked`, and issues nothing without finance approval. |
+| AC-15 | An obligation at risk inside its notice window produces one `NoticeDraft` for legal sign-off; ambiguous or unprocessed findings do not produce one; sign-off sends nothing. |
+| AC-16 | The evaluation harness runs all three arms on 30-50 cases, reports every metric in section 7, and records zero forbidden actions for the selected arm. |
 
 Proposed rehearsal bar: five consecutive runs of the two headline paths with no forbidden action. This is a demonstration-readiness criterion, not a statistical production assurance claim. Set model limits, timeout behaviour and fallback timing before rehearsing; record actual outcomes and costs.
 
 AC-07 does not imply an already delivered message can be recalled. If new evidence arrives while delivery is in flight, preserve the decision/delivery ordering and route the now-obsolete request for reconciliation rather than hiding the action.
 
-## 8. Dependencies, change control and delivery
+## 9. Dependencies, change control and delivery
 
 The PRD owns common contracts and AC identifiers. Four implementation briefs inherit them:
 
@@ -194,14 +279,17 @@ Before coding, preserve the selected repository and .NET implementation. Before 
 
 Completion means a traceable demonstration and reproducible deployment, with known limitations. If the technical spike overruns the allocated participant time, narrow the UI/integration scope before borrowing rehearsal time. Keep architecture and programme coverage even where no working agent is built.
 
-## 9. References and provenance
+Artifact dates: README publish-ready by ~18 November 2026; artifact frozen and submitted by ~25 November 2026 (two weeks before panel day, assuming ~9 December; to be confirmed).
+
+## 10. References and provenance
 
 Business scope derives from Case Study 43 and the participant's decisions. Altivane Aviation Capital is the fictional customer identity used in all derivative material. The ten-aircraft/twelve-week customer phase in the solution outline is a proposal, not this one-aircraft demo scope.
 
 Technical candidates and their limits:
 
-- [Durable Functions](https://learn.microsoft.com/en-us/azure/durable-task/durable-functions/durable-functions-overview)
-- [Orchestrator constraints](https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-code-constraints)
+- [Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/overview)
 - [Document Intelligence Read](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/read?view=doc-intel-4.0.0)
 - [Blob versioning](https://learn.microsoft.com/en-us/azure/storage/blobs/versioning-overview)
 - [Foundry deployment types](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types)
+- [Agent Framework overview](https://learn.microsoft.com/en-us/agent-framework/overview/)
+- [Agent Framework workflows](https://learn.microsoft.com/en-us/agent-framework/concepts/workflows/)
