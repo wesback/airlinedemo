@@ -67,6 +67,8 @@ internal sealed record CaseStoreDocument(int SchemaVersion, List<CaseState> Case
 public sealed class CaseStateStore
 {
     private const int SchemaVersion = 1;
+    private const int LockAttempts = 500;
+    private const int LockRetryMilliseconds = 10;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -108,6 +110,8 @@ public sealed class CaseStateStore
 
         lock (_gate)
         {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
             if (_cases.ContainsKey(caseId))
             {
                 throw new InvalidOperationException("Case already exists.");
@@ -167,6 +171,8 @@ public sealed class CaseStateStore
     {
         lock (_gate)
         {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
             var current = Current(scope);
             var fingerprint = Fingerprint(commit);
 
@@ -227,6 +233,28 @@ public sealed class CaseStateStore
             Persist(snapshot);
             _cases = snapshot;
             return new CommitResult(updated, Replayed: false);
+        }
+    }
+
+    /// <summary>
+    /// Holds an exclusive lock file so commits from other store instances on the same path are serialized.
+    /// Callers reload the file after acquiring it, so revision checks see the latest persisted state.
+    /// </summary>
+    private FileStream AcquireFileLock()
+    {
+        var fullPath = Path.GetFullPath(_path);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        var lockPath = fullPath + ".lock";
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < LockAttempts)
+            {
+                Thread.Sleep(LockRetryMilliseconds);
+            }
         }
     }
 
@@ -304,6 +332,7 @@ public sealed class CaseStateStore
     private static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
     {
         basisVersion = commit.NewBasis?.Version,
+        content = commit.NewBasis?.Content,
         contentDigest = commit.NewBasis?.ContentDigest,
         basisDigest = commit.NewBasis?.BasisDigest,
         commit.Actor,

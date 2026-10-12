@@ -52,6 +52,44 @@ public sealed class CaseStateStoreTests : IDisposable
         Assert.Single(store.ReadAudit(scope));
     }
 
+    [Fact]
+    public void Replayed_receipt_with_changed_basis_content_and_reused_digests_is_rejected_without_mutation()
+    {
+        var store = new CaseStateStore(PathFor());
+        var scope = store.CreateCase("case-a");
+        var v1 = CaseStateStore.CreateBasisVersion(1, "evidence v1", string.Empty);
+        store.Commit(scope, 0, BasisCommit(v1, "receipt-1"));
+
+        var tampered = v1 with { Content = "evidence changed" };
+        Assert.Throws<ReceiptConflictException>(() =>
+            store.Commit(scope, 1, BasisCommit(tampered, "receipt-1")));
+
+        Assert.Equal("evidence v1", store.GetBasisVersion(scope, 1).Content);
+        Assert.Equal(1, store.Read(scope).Revision);
+        Assert.Single(store.ReadAudit(scope));
+    }
+
+    [Fact]
+    public void Commit_from_a_second_instance_on_the_same_file_is_checked_against_latest_revision()
+    {
+        var path = PathFor();
+        var first = new CaseStateStore(path);
+        var firstScope = first.CreateCase("case-a");
+        var second = new CaseStateStore(path);
+        var secondScope = second.AuthorizeCase("case-a");
+
+        first.Commit(firstScope, 0, new CaseCommit(null, "receipt-1", "presenter", "open", "opened"));
+
+        Assert.Throws<RevisionConflictException>(() =>
+            second.Commit(secondScope, 0, new CaseCommit(null, "receipt-2", "reviewer", "decide", "approve")));
+
+        var restarted = new CaseStateStore(path);
+        var state = restarted.Read(restarted.AuthorizeCase("case-a"));
+        Assert.Equal(1, state.Revision);
+        Assert.Equal(["receipt-1"], state.ReceiptIds);
+        Assert.Single(state.Audit);
+    }
+
     // AC coverage: M-02 (scope and revision isolation), M-10 (immutable basis versions and digests),
     // M-03 (append-only audit, atomic commit), restart and restore.
 
