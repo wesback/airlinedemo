@@ -1,0 +1,233 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 143,
+  "branch": "ai-sdlc/issue-143",
+  "commitSha": "9faefcb9ba70a62e49ede62f9143909766c472bf",
+  "round": 3,
+  "pipelineVersion": "826ba00",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The in-memory store covers scoped reads and writes, versioned evidence, and transactional rollback. M-03 remains unenforced: the grant script is never applied and does not remove the conflicting broad writer grant.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 198,
+          "message": "M-03's grant control is declarative text only and leaves the conflicting broad writer grant in place. Apply and verify effective permissions so the app identity can append only through the approved procedure.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "AuditGrantScript is only a string constant; no code in the change executes it or connects it to database permissions. Its statements also do not revoke a pre-existing broad writer grant.",
+            "failureScenario": "With the broad writer grant described in the issue still active, the app identity can bypass the approved append procedure and alter audit rows even though AuditGrantScript contains a targeted REVOKE. The required append-only access control is not enforced (OWASP A01:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The scope, basis, replay, restore, and injected-failure tests exercise the other stated behaviors. The audit-grant test does not verify the access controls required by M-03.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs",
+          "line": 176,
+          "message": "M-03's grant test checks only that the script contains expected text; it does not verify that the approved append procedure works or that UPDATE and DELETE are denied for the app identity.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AuditGrants_AllowOnlyApprovedAppendAndDenyUpdateDelete reads the AuditGrantScript constant and checks for SQL text. It never applies the grants or exercises an app identity against the audit store.",
+            "failureScenario": "If the grant script is never applied, or the deployed app identity still has UPDATE or DELETE access, this test passes while that identity can rewrite audit rows. M-03's grant and denial behavior is not verified (OWASP A01:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change does not enforce database append-only grants, and snapshot MAC verification does not prevent rollback to an older valid snapshot during startup.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 168,
+          "message": "The append-only grant is inert text, so the change does not enforce the required denial of audit UPDATE and DELETE operations (OWASP A01:2025).",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "AuditGrantScript is a string constant; no code in the change applies it or invokes an append procedure. The store records audit events in memory.",
+            "failureScenario": "If the app connects to a database with the broad writer grant described in the issue, the constant does not change its permissions. The app identity can still UPDATE or DELETE audit rows directly, bypassing the required access control (OWASP A01:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 159,
+          "message": "Restore permits replay of an older signed snapshot on startup because its default freshness check has no external audit-count anchor (OWASP A08:2025).",
+          "confidence": 0.82,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Restore verifies the snapshot MAC, then compares it with the current in-memory ledger. Its minimumAuditEvents parameter defaults to zero, and a new store starts with only seeded cases.",
+            "failureScenario": "An attacker who can replace the persisted snapshot before startup replays an older, previously valid export. With a new store and the default minimum, Restore accepts it, losing later cases and audit events (OWASP A08:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
