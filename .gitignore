@@ -7,3 +7,4 @@ backend/**/obj/
 TestResults/
 *.user
 *.suo
+*.tsbuildinfo
