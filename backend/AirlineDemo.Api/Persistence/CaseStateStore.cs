@@ -41,6 +41,7 @@ public sealed record AuditEvent(
 
 public sealed record CaseState(
     string CaseId,
+    string Owner,
     long Revision,
     IReadOnlyList<BasisVersion> Basis,
     IReadOnlyList<string> ReceiptIds,
@@ -88,11 +89,17 @@ public sealed class CaseStateStore
         _cases = Load(path);
     }
 
-    public CaseScope AuthorizeCase(string caseId)
+    /// <summary>
+    /// Issues a scope only when <paramref name="owner"/> is the server-recorded owner of the case.
+    /// An unknown case, a case owned by someone else, or a missing owner all yield the same denial.
+    /// </summary>
+    public CaseScope AuthorizeCase(string caseId, string owner)
     {
         lock (_gate)
         {
-            if (string.IsNullOrEmpty(caseId) || !_cases.ContainsKey(caseId))
+            if (string.IsNullOrEmpty(caseId) || string.IsNullOrEmpty(owner)
+                || !_cases.TryGetValue(caseId, out var state)
+                || !string.Equals(state.Owner, owner, StringComparison.Ordinal))
             {
                 throw new CaseAccessDeniedException();
             }
@@ -101,11 +108,16 @@ public sealed class CaseStateStore
         }
     }
 
-    public CaseScope CreateCase(string caseId)
+    public CaseScope CreateCase(string caseId, string owner)
     {
         if (string.IsNullOrWhiteSpace(caseId))
         {
             throw new ArgumentException("Case id is required.", nameof(caseId));
+        }
+
+        if (string.IsNullOrWhiteSpace(owner))
+        {
+            throw new ArgumentException("Case owner is required.", nameof(owner));
         }
 
         lock (_gate)
@@ -119,7 +131,7 @@ public sealed class CaseStateStore
 
             var snapshot = new Dictionary<string, CaseState>(_cases)
             {
-                [caseId] = Freeze(new(caseId, 0, [], [], [], new Dictionary<string, string>(StringComparer.Ordinal))),
+                [caseId] = Freeze(new(caseId, owner, 0, [], [], [], new Dictionary<string, string>(StringComparer.Ordinal))),
             };
             Persist(snapshot);
             _cases = snapshot;

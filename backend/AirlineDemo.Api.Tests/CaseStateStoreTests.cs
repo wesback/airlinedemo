@@ -5,6 +5,8 @@ namespace AirlineDemo.Api.Tests;
 
 public sealed class CaseStateStoreTests : IDisposable
 {
+    private const string Owner = "owner-a";
+
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "case-state-" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
@@ -24,7 +26,7 @@ public sealed class CaseStateStoreTests : IDisposable
     public void Read_results_cannot_be_mutated_outside_commit()
     {
         var store = new CaseStateStore(PathFor());
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         store.Commit(scope, 0, new CaseCommit(null, "receipt-1", "presenter", "open", "opened"));
 
         var state = store.Read(scope);
@@ -42,7 +44,7 @@ public sealed class CaseStateStoreTests : IDisposable
     public void Reused_receipt_with_different_payload_is_rejected_without_mutation()
     {
         var store = new CaseStateStore(PathFor());
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         store.Commit(scope, 0, new CaseCommit(null, "receipt-1", "reviewer", "decide", "approve"));
 
         Assert.Throws<ReceiptConflictException>(() =>
@@ -56,7 +58,7 @@ public sealed class CaseStateStoreTests : IDisposable
     public void Replayed_receipt_with_changed_basis_content_and_reused_digests_is_rejected_without_mutation()
     {
         var store = new CaseStateStore(PathFor());
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         var v1 = CaseStateStore.CreateBasisVersion(1, "evidence v1", string.Empty);
         store.Commit(scope, 0, BasisCommit(v1, "receipt-1"));
 
@@ -74,9 +76,9 @@ public sealed class CaseStateStoreTests : IDisposable
     {
         var path = PathFor();
         var first = new CaseStateStore(path);
-        var firstScope = first.CreateCase("case-a");
+        var firstScope = first.CreateCase("case-a", Owner);
         var second = new CaseStateStore(path);
-        var secondScope = second.AuthorizeCase("case-a");
+        var secondScope = second.AuthorizeCase("case-a", Owner);
 
         first.Commit(firstScope, 0, new CaseCommit(null, "receipt-1", "presenter", "open", "opened"));
 
@@ -84,7 +86,7 @@ public sealed class CaseStateStoreTests : IDisposable
             second.Commit(secondScope, 0, new CaseCommit(null, "receipt-2", "reviewer", "decide", "approve")));
 
         var restarted = new CaseStateStore(path);
-        var state = restarted.Read(restarted.AuthorizeCase("case-a"));
+        var state = restarted.Read(restarted.AuthorizeCase("case-a", Owner));
         Assert.Equal(1, state.Revision);
         Assert.Equal(["receipt-1"], state.ReceiptIds);
         Assert.Single(state.Audit);
@@ -97,17 +99,30 @@ public sealed class CaseStateStoreTests : IDisposable
     public void M02_forged_or_unknown_case_id_is_denied_and_reveals_nothing()
     {
         var store = new CaseStateStore(PathFor());
-        store.CreateCase("case-a");
+        store.CreateCase("case-a", Owner);
 
-        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-b"));
-        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase(""));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-b", Owner));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("", Owner));
+    }
+
+    [Fact]
+    public void M02_existing_case_id_owned_by_another_caller_is_denied()
+    {
+        var store = new CaseStateStore(PathFor());
+        store.CreateCase("case-a", Owner);
+        store.CreateCase("case-b", "owner-b");
+
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-a", "owner-b"));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-a", ""));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-b", Owner));
+        Assert.NotNull(store.AuthorizeCase("case-a", Owner));
     }
 
     [Fact]
     public void M02_stale_revision_is_rejected_without_mutation()
     {
         var store = new CaseStateStore(PathFor());
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         store.Commit(scope, 0, new CaseCommit(null, null, "presenter", "open", "opened"));
 
         var before = store.Read(scope);
@@ -124,7 +139,7 @@ public sealed class CaseStateStoreTests : IDisposable
     public void M10_basis_versions_are_immutable_and_digest_checked()
     {
         var store = new CaseStateStore(PathFor());
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         var v1 = CaseStateStore.CreateBasisVersion(1, "evidence v1", string.Empty);
         store.Commit(scope, 0, BasisCommit(v1));
 
@@ -144,8 +159,8 @@ public sealed class CaseStateStoreTests : IDisposable
     public void M10_prior_basis_versions_remain_retrievable_for_the_authorized_case_only()
     {
         var store = new CaseStateStore(PathFor());
-        var a = store.CreateCase("case-a");
-        var b = store.CreateCase("case-b");
+        var a = store.CreateCase("case-a", Owner);
+        var b = store.CreateCase("case-b", "owner-b");
         var v1 = CaseStateStore.CreateBasisVersion(1, "a-evidence", string.Empty);
         store.Commit(a, 0, BasisCommit(v1));
 
@@ -173,7 +188,7 @@ public sealed class CaseStateStoreTests : IDisposable
     public void M03_each_commit_appends_one_audit_event_and_replayed_receipt_adds_none()
     {
         var store = new CaseStateStore(PathFor());
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
 
         var first = store.Commit(scope, 0, new CaseCommit(null, "receipt-1", "reviewer", "decide", "approve"));
         Assert.False(first.Replayed);
@@ -198,7 +213,7 @@ public sealed class CaseStateStoreTests : IDisposable
                 throw new IOException("injected transaction failure");
             }
         });
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         armed = true;
         var basis = CaseStateStore.CreateBasisVersion(1, "evidence", string.Empty);
 
@@ -216,22 +231,25 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void M03_restart_restores_case_state_basis_receipts_and_audit_without_duplicating_actions()
+    public void M03_restart_restores_case_state_basis_receipts_decisions_and_audit_without_duplicating_actions()
     {
         var path = PathFor();
         var store = new CaseStateStore(path);
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         var v1 = CaseStateStore.CreateBasisVersion(1, "evidence", string.Empty);
         store.Commit(scope, 0, BasisCommit(v1, "receipt-1"));
 
         var restarted = new CaseStateStore(path);
-        var restoredScope = restarted.AuthorizeCase("case-a");
+        var restoredScope = restarted.AuthorizeCase("case-a", Owner);
         var state = restarted.Read(restoredScope);
 
         Assert.Equal(1, state.Revision);
         Assert.Equal(v1.BasisDigest, state.Basis[0].BasisDigest);
         Assert.Equal(["receipt-1"], state.ReceiptIds);
         Assert.Single(state.Audit);
+        Assert.Equal("presenter", state.Audit[0].Actor);
+        Assert.Equal("submit-package", state.Audit[0].Action);
+        Assert.Equal("basis 1", state.Audit[0].Detail);
 
         var replay = restarted.Commit(restoredScope, 1, BasisCommit(v1, "receipt-1"));
         Assert.True(replay.Replayed);
@@ -252,7 +270,7 @@ public sealed class CaseStateStoreTests : IDisposable
     {
         var path = PathFor();
         var store = new CaseStateStore(path);
-        var scope = store.CreateCase("case-a");
+        var scope = store.CreateCase("case-a", Owner);
         store.Commit(scope, 0, new CaseCommit(null, null, "presenter", "open", "opened"));
 
         File.WriteAllText(path, File.ReadAllText(path).Replace("\"revision\": 1", "\"revision\": 5"));
