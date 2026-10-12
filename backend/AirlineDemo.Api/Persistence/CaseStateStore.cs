@@ -61,13 +61,15 @@ public sealed class CaseStateStore
 
     public WriteResult AddBasis(string authorizedCaseId, int expectedRevision, string actor, BasisSubmission s)
     {
+        if (Sha256(s.Content) != s.ContentDigest) return new(CaseWriteOutcome.DigestMismatch, null, null);
+
         lock (_gate)
         {
             if (_ledger.Receipts.TryGetValue(s.ReceiptId, out var existing))
             {
                 var sameRequest = existing.CaseId == authorizedCaseId
                     && existing.BasisDigest == s.BasisDigest
-                    && existing.ContentDigest == Sha256(s.Content);
+                    && existing.ContentDigest == s.ContentDigest;
                 return sameRequest
                     ? new(CaseWriteOutcome.Replayed, _ledger.Cases[existing.CaseId], existing)
                     : new(CaseWriteOutcome.ReceiptConflict, null, null);
@@ -77,8 +79,6 @@ public sealed class CaseStateStore
                 return new(CaseWriteOutcome.NotFound, null, null);
             if (current.Revision != expectedRevision)
                 return new(CaseWriteOutcome.Stale, null, null);
-            if (Sha256(s.Content) != s.ContentDigest)
-                return new(CaseWriteOutcome.DigestMismatch, null, null);
 
             var version = _ledger.Basis.Count(b => b.CaseId == authorizedCaseId) + 1;
             if (BasisDigestFor(authorizedCaseId, version, s.ContentDigest) != s.BasisDigest)
@@ -125,7 +125,8 @@ public sealed class CaseStateStore
         lock (_gate) return JsonSerializer.Serialize(_ledger);
     }
 
-    // Replaces state only when the saved document fully verifies; otherwise throws and keeps the current state.
+    // Replaces state only when the saved document fully verifies and extends the committed history; otherwise throws
+    // and keeps the current state. Restore can never shorten or rewrite audit events, basis versions, or receipts.
     public void Restore(string json)
     {
         Ledger? loaded;
@@ -140,7 +141,26 @@ public sealed class CaseStateStore
 
         if (loaded is null) throw new CaseStateRestoreException("Saved case state is missing.");
         Verify(loaded);
-        lock (_gate) _ledger = loaded;
+
+        lock (_gate)
+        {
+            EnsureExtends(_ledger, loaded);
+            _ledger = loaded;
+        }
+    }
+
+    private static void EnsureExtends(Ledger current, Ledger loaded)
+    {
+        if (loaded.Audit.Count < current.Audit.Count || !loaded.Audit.Take(current.Audit.Count).SequenceEqual(current.Audit))
+            throw new CaseStateRestoreException("Saved audit history does not extend committed history.");
+        if (loaded.Basis.Count < current.Basis.Count || !loaded.Basis.Take(current.Basis.Count).SequenceEqual(current.Basis))
+            throw new CaseStateRestoreException("Saved basis history does not extend committed history.");
+        foreach (var (receiptId, receipt) in current.Receipts)
+            if (!loaded.Receipts.TryGetValue(receiptId, out var saved) || saved != receipt)
+                throw new CaseStateRestoreException("Saved receipts do not extend committed receipts.");
+        foreach (var (caseId, state) in current.Cases)
+            if (!loaded.Cases.TryGetValue(caseId, out var saved) || saved.Revision < state.Revision)
+                throw new CaseStateRestoreException($"Saved case {caseId} revision regresses.");
     }
 
     private WriteResult Transact(Func<Ledger, WriteResult> change)
@@ -156,6 +176,8 @@ public sealed class CaseStateStore
     {
         if (l.Cases is null || l.Basis is null || l.Audit is null || l.Receipts is null)
             throw new CaseStateRestoreException("Saved case state is incomplete.");
+        foreach (var id in Ledger.SeededCaseIds)
+            if (!l.Cases.ContainsKey(id)) throw new CaseStateRestoreException($"Saved case state is missing {id}.");
 
         foreach (var (key, c) in l.Cases)
             if (key != c.CaseId) throw new CaseStateRestoreException($"Saved case {key} is mislabelled.");
@@ -190,10 +212,12 @@ public sealed class CaseStateStore
         public List<AuditEvent> Audit { get; set; } = new();
         public Dictionary<string, CaseReceipt> Receipts { get; set; } = new();
 
+        public static readonly string[] SeededCaseIds = ["case-001", "case-002", "case-003"];
+
         public static Ledger Seed()
         {
             var ledger = new Ledger();
-            foreach (var id in new[] { "case-001", "case-002", "case-003" })
+            foreach (var id in SeededCaseIds)
                 ledger.Cases[id] = new CaseState(id, 1, "awaiting-review", null);
             return ledger;
         }

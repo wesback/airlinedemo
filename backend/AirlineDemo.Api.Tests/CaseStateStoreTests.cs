@@ -72,8 +72,16 @@ public class CaseStateStoreTests
         Assert.Equal(CaseWriteOutcome.Replayed, replay.Outcome);
         Assert.Equal(3, store.Read("case-001", "case-001")!.Revision);
 
+        // A replay whose content no longer matches its declared digest is rejected before receipt lookup.
         var changedBody = store.AddBasis("case-001", 3, "presenter", v1 with { Content = Content + "-x" });
-        Assert.Equal(CaseWriteOutcome.ReceiptConflict, changedBody.Outcome);
+        Assert.Equal(CaseWriteOutcome.DigestMismatch, changedBody.Outcome);
+
+        var forgedDigest = store.AddBasis("case-001", 3, "presenter", v1 with { ContentDigest = "00" });
+        Assert.Equal(CaseWriteOutcome.DigestMismatch, forgedDigest.Outcome);
+        Assert.Equal(3, store.Read("case-001", "case-001")!.Revision);
+
+        var otherBody = store.AddBasis("case-001", 3, "presenter", v1 with { ReceiptId = "r-1", Content = "other", ContentDigest = CaseStateStore.Sha256("other") });
+        Assert.Equal(CaseWriteOutcome.ReceiptConflict, otherBody.Outcome);
     }
 
     [Fact]
@@ -137,6 +145,23 @@ public class CaseStateStoreTests
         var replay = restarted.AddBasis("case-001", 3, "presenter", submission);
         Assert.Equal(CaseWriteOutcome.Replayed, replay.Outcome);
         Assert.Equal(3, restarted.Read("case-001", "case-001")!.Revision);
+    }
+
+    [Fact]
+    public void Restore_EmptyOrTruncatedHistory_ThrowsAndKeepsAuditTrail()
+    {
+        var store = new CaseStateStore();
+        store.AddBasis("case-001", 1, "presenter", Submit("r-1", "case-001", 1, Content));
+        store.RecordDecision("case-001", 2, "reviewer", "accept", "basis matches records");
+        var auditBefore = store.Audit("case-001", "case-001").ToList();
+
+        var emptyLedger = new CaseStateStore().Export();
+        Assert.Throws<CaseStateRestoreException>(() => store.Restore(emptyLedger));
+        Assert.Throws<CaseStateRestoreException>(() => store.Restore("{\"Cases\":{},\"Basis\":[],\"Audit\":[],\"Receipts\":{}}"));
+
+        Assert.Equal(auditBefore, store.Audit("case-001", "case-001"));
+        Assert.Equal("accepted", store.Read("case-001", "case-001")!.Status);
+        Assert.Equal(Content, store.GetBasis("case-001", "case-001", 1)!.Content);
     }
 
     [Fact]
