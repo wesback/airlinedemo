@@ -9,6 +9,8 @@ terraform {
   }
 
   # Entra auth only; the azurerm backend takes a blob lease for state locking.
+  # Backend blocks cannot read variables, so terraform_state_backend validates the
+  # intended settings and CI must not override use_azuread_auth via -backend-config.
   backend "azurerm" {
     use_azuread_auth = true
   }
@@ -196,6 +198,11 @@ resource "azurerm_key_vault" "kv" {
   purge_protection_enabled      = true
   soft_delete_retention_days    = 90
   public_network_access_enabled = false
+
+  network_acls {
+    default_action = "Deny"
+    bypass         = "AzureServices"
+  }
 }
 
 resource "azurerm_cognitive_account" "model" {

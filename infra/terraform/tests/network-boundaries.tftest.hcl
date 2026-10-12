@@ -41,6 +41,16 @@ run "ingress_and_egress_allowlists" {
     condition     = azurerm_network_security_rule.egress_allow["0"].destination_address_prefix == "198.51.100.0/24" && azurerm_network_security_rule.egress_deny_all.access == "Deny"
     error_message = "Only the approved egress destination may be allowed and outbound must end in deny-all."
   }
+  # Azure's default AllowInternetOutBound sits at priority 65000; the deny-all must be
+  # outbound, match every destination, and rank above that default (lower number wins).
+  assert {
+    condition     = azurerm_network_security_rule.egress_deny_all.direction == "Outbound" && azurerm_network_security_rule.egress_deny_all.destination_address_prefix == "*" && azurerm_network_security_rule.egress_deny_all.priority == 4096 && azurerm_network_security_rule.egress_deny_all.priority < 65000
+    error_message = "Outbound deny-all must match all destinations at priority 4096, ahead of Azure's default outbound allow (65000)."
+  }
+  assert {
+    condition     = alltrue([for r in values(azurerm_network_security_rule.egress_allow) : r.priority < azurerm_network_security_rule.egress_deny_all.priority])
+    error_message = "Every explicit egress allow rule must have higher precedence than the deny-all."
+  }
 }
 
 run "empty_allowlists_deny_everything" {
@@ -54,6 +64,14 @@ run "empty_allowlists_deny_everything" {
   assert {
     condition     = length(azurerm_network_security_rule.ingress_allow) == 0 && length(azurerm_network_security_rule.egress_allow) == 0
     error_message = "Empty allowlists must create no inbound or outbound allow rules."
+  }
+  assert {
+    condition     = azurerm_network_security_rule.ingress_deny_all.access == "Deny" && azurerm_network_security_rule.ingress_deny_all.direction == "Inbound" && azurerm_network_security_rule.ingress_deny_all.priority == 4096
+    error_message = "Empty presenter/reviewer allowlist must still leave the inbound deny-all rule in place."
+  }
+  assert {
+    condition     = azurerm_network_security_rule.egress_deny_all.access == "Deny" && azurerm_network_security_rule.egress_deny_all.direction == "Outbound" && azurerm_network_security_rule.egress_deny_all.priority == 4096
+    error_message = "Empty egress allowlist must still leave the outbound deny-all rule in place."
   }
 }
 
@@ -76,6 +94,10 @@ run "encryption_and_no_key_outputs" {
   assert {
     condition     = azurerm_storage_account.blob.infrastructure_encryption_enabled == true && azurerm_storage_account.blob.shared_access_key_enabled == false && azurerm_key_vault.kv.purge_protection_enabled == true
     error_message = "Blob needs infrastructure encryption and no shared keys; Key Vault needs purge protection."
+  }
+  assert {
+    condition     = azurerm_key_vault.kv.network_acls[0].default_action == "Deny" && azurerm_key_vault.kv.public_network_access_enabled == false
+    error_message = "Key Vault network ACL default action must be Deny with public access disabled."
   }
   assert {
     condition     = azurerm_mssql_server.sql.minimum_tls_version == "1.2" && azurerm_mssql_server.sql.azuread_administrator[0].azuread_authentication_only == true
