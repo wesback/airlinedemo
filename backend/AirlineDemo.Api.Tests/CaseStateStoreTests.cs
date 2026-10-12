@@ -21,7 +21,42 @@ public sealed class CaseStateStoreTests : IDisposable
         new(basis, receipt, "presenter", "submit-package", "basis " + basis.Version);
 
     [Fact]
-    public void Forged_or_unknown_case_id_is_denied_and_reveals_nothing()
+    public void Read_results_cannot_be_mutated_outside_commit()
+    {
+        var store = new CaseStateStore(PathFor());
+        var scope = store.CreateCase("case-a");
+        store.Commit(scope, 0, new CaseCommit(null, "receipt-1", "presenter", "open", "opened"));
+
+        var state = store.Read(scope);
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)state.ReceiptIds).Add("forged"));
+        Assert.Throws<NotSupportedException>(() => ((IList<AuditEvent>)state.Audit).Clear());
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, string>)state.ReceiptFingerprints).Remove("receipt-1"));
+
+        var audit = store.ReadAudit(scope);
+        Assert.Throws<NotSupportedException>(() => ((IList<AuditEvent>)audit).Clear());
+        Assert.Single(store.ReadAudit(scope));
+        Assert.Equal(["receipt-1"], store.Read(scope).ReceiptIds);
+    }
+
+    [Fact]
+    public void Reused_receipt_with_different_payload_is_rejected_without_mutation()
+    {
+        var store = new CaseStateStore(PathFor());
+        var scope = store.CreateCase("case-a");
+        store.Commit(scope, 0, new CaseCommit(null, "receipt-1", "reviewer", "decide", "approve"));
+
+        Assert.Throws<ReceiptConflictException>(() =>
+            store.Commit(scope, 1, new CaseCommit(null, "receipt-1", "reviewer", "decide", "reject")));
+
+        Assert.Equal(1, store.Read(scope).Revision);
+        Assert.Single(store.ReadAudit(scope));
+    }
+
+    // AC coverage: M-02 (scope and revision isolation), M-10 (immutable basis versions and digests),
+    // M-03 (append-only audit, atomic commit), restart and restore.
+
+    [Fact]
+    public void M02_forged_or_unknown_case_id_is_denied_and_reveals_nothing()
     {
         var store = new CaseStateStore(PathFor());
         store.CreateCase("case-a");
@@ -31,7 +66,7 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void Stale_revision_is_rejected_without_mutation()
+    public void M02_stale_revision_is_rejected_without_mutation()
     {
         var store = new CaseStateStore(PathFor());
         var scope = store.CreateCase("case-a");
@@ -48,7 +83,7 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void Basis_versions_are_immutable_and_digest_checked()
+    public void M10_basis_versions_are_immutable_and_digest_checked()
     {
         var store = new CaseStateStore(PathFor());
         var scope = store.CreateCase("case-a");
@@ -68,7 +103,7 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void Prior_basis_versions_remain_retrievable_for_the_authorized_case_only()
+    public void M10_prior_basis_versions_remain_retrievable_for_the_authorized_case_only()
     {
         var store = new CaseStateStore(PathFor());
         var a = store.CreateCase("case-a");
@@ -81,7 +116,7 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void Audit_api_is_append_only_with_no_update_or_delete_operation()
+    public void M03_audit_api_is_append_only_with_no_update_or_delete_operation()
     {
         var mutators = typeof(CaseStateStore)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
@@ -97,7 +132,7 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void Each_commit_appends_one_audit_event_and_replayed_receipt_adds_none()
+    public void M03_each_commit_appends_one_audit_event_and_replayed_receipt_adds_none()
     {
         var store = new CaseStateStore(PathFor());
         var scope = store.CreateCase("case-a");
@@ -114,7 +149,7 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void Injected_persist_failure_leaves_no_partial_state_receipt_or_audit()
+    public void M03_injected_persist_failure_leaves_no_partial_state_receipt_or_audit()
     {
         var armed = false;
         var store = new CaseStateStore(PathFor(), beforePersist: () =>
@@ -143,7 +178,7 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void Restart_restores_case_state_basis_receipts_and_audit_without_duplicating_actions()
+    public void M03_restart_restores_case_state_basis_receipts_and_audit_without_duplicating_actions()
     {
         var path = PathFor();
         var store = new CaseStateStore(path);

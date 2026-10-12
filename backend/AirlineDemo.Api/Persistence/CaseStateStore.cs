@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,9 @@ public sealed class CaseAccessDeniedException()
 
 public sealed class RevisionConflictException()
     : Exception("Case revision is stale; no change was made.");
+
+public sealed class ReceiptConflictException()
+    : Exception("Receipt was already used for a different commit; no change was made.");
 
 public sealed class BasisIntegrityException(string message) : Exception(message);
 
@@ -40,7 +44,8 @@ public sealed record CaseState(
     long Revision,
     IReadOnlyList<BasisVersion> Basis,
     IReadOnlyList<string> ReceiptIds,
-    IReadOnlyList<AuditEvent> Audit);
+    IReadOnlyList<AuditEvent> Audit,
+    IReadOnlyDictionary<string, string> ReceiptFingerprints);
 
 public sealed record CaseCommit(
     BasisVersion? NewBasis,
@@ -110,7 +115,7 @@ public sealed class CaseStateStore
 
             var snapshot = new Dictionary<string, CaseState>(_cases)
             {
-                [caseId] = new(caseId, 0, [], [], []),
+                [caseId] = Freeze(new(caseId, 0, [], [], [], new Dictionary<string, string>(StringComparer.Ordinal))),
             };
             Persist(snapshot);
             _cases = snapshot;
@@ -163,9 +168,15 @@ public sealed class CaseStateStore
         lock (_gate)
         {
             var current = Current(scope);
+            var fingerprint = Fingerprint(commit);
 
-            if (commit.ReceiptId is not null && current.ReceiptIds.Contains(commit.ReceiptId))
+            if (commit.ReceiptId is not null && current.ReceiptFingerprints.TryGetValue(commit.ReceiptId, out var recorded))
             {
+                if (recorded != fingerprint)
+                {
+                    throw new ReceiptConflictException();
+                }
+
                 return new CommitResult(current, Replayed: true);
             }
 
@@ -193,16 +204,25 @@ public sealed class CaseStateStore
             }
 
             var receipts = current.ReceiptIds.ToList();
+            var fingerprints = new Dictionary<string, string>(current.ReceiptFingerprints, StringComparer.Ordinal);
             if (commit.ReceiptId is not null)
             {
                 receipts.Add(commit.ReceiptId);
+                fingerprints[commit.ReceiptId] = fingerprint;
             }
 
             var revision = current.Revision + 1;
             var audit = current.Audit.ToList();
             audit.Add(new AuditEvent(audit.Count + 1, revision, commit.Actor, commit.Action, commit.Detail, DateTimeOffset.UtcNow));
 
-            var updated = current with { Revision = revision, Basis = basis, ReceiptIds = receipts, Audit = audit };
+            var updated = Freeze(current with
+            {
+                Revision = revision,
+                Basis = basis,
+                ReceiptIds = receipts,
+                Audit = audit,
+                ReceiptFingerprints = fingerprints,
+            });
             var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
             Persist(snapshot);
             _cases = snapshot;
@@ -259,7 +279,7 @@ public sealed class CaseStateStore
         foreach (var state in document.Cases)
         {
             Validate(state);
-            if (!cases.TryAdd(state.CaseId, state))
+            if (!cases.TryAdd(state.CaseId, Freeze(state)))
             {
                 throw new InvalidDataException("Duplicate case in case state file.");
             }
@@ -267,6 +287,29 @@ public sealed class CaseStateStore
 
         return cases;
     }
+
+    /// <summary>Returns a copy whose collections cannot be mutated by callers, so changes only happen through Commit.</summary>
+    private static CaseState Freeze(CaseState state) => state with
+    {
+        Basis = Wrap(state.Basis),
+        ReceiptIds = Wrap(state.ReceiptIds),
+        Audit = Wrap(state.Audit),
+        ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
+            new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
+    };
+
+    private static ReadOnlyCollection<T> Wrap<T>(IEnumerable<T> items) => new(items.ToList());
+
+    /// <summary>Digest of the commit payload, used to tell a true replay from a reused receipt ID.</summary>
+    private static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
+    {
+        basisVersion = commit.NewBasis?.Version,
+        contentDigest = commit.NewBasis?.ContentDigest,
+        basisDigest = commit.NewBasis?.BasisDigest,
+        commit.Actor,
+        commit.Action,
+        commit.Detail,
+    }));
 
     private static void Validate(CaseState state)
     {
@@ -300,6 +343,13 @@ public sealed class CaseStateStore
         if (state.ReceiptIds.Distinct(StringComparer.Ordinal).Count() != state.ReceiptIds.Count)
         {
             throw new InvalidDataException("Duplicate receipt in case state file.");
+        }
+
+        if (state.ReceiptFingerprints is null
+            || state.ReceiptFingerprints.Count != state.ReceiptIds.Count
+            || state.ReceiptIds.Any(id => !state.ReceiptFingerprints.ContainsKey(id)))
+        {
+            throw new InvalidDataException("Receipt fingerprints do not match receipts.");
         }
     }
 
