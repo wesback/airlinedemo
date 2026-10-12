@@ -1,9 +1,11 @@
 variable "subscription_id" {
-  type = string
+  type     = string
+  nullable = false
 }
 
 variable "tenant_id" {
-  type = string
+  type     = string
+  nullable = false
 }
 
 variable "location" {
@@ -27,7 +29,8 @@ variable "private_endpoint_subnet_cidr" {
 }
 
 variable "presenter_reviewer_cidrs" {
-  type = list(string)
+  type     = list(string)
+  nullable = false
   validation {
     condition     = alltrue([for c in var.presenter_reviewer_cidrs : can(cidrnetmask(c))])
     error_message = "presenter_reviewer_cidrs entries must be CIDR blocks."
@@ -35,7 +38,8 @@ variable "presenter_reviewer_cidrs" {
 }
 
 variable "egress_allowed_destinations" {
-  type = list(string)
+  type     = list(string)
+  nullable = false
   validation {
     condition     = alltrue([for c in var.egress_allowed_destinations : can(cidrnetmask(c))])
     error_message = "egress_allowed_destinations entries must be CIDR blocks."
@@ -75,7 +79,8 @@ variable "terraform_principal_object_id" {
 }
 
 variable "budget_amount" {
-  type = number
+  type     = number
+  nullable = false
 }
 
 variable "budget_start_date" {
@@ -94,8 +99,9 @@ variable "terraform_state_backend" {
     use_azuread_auth     = bool
     locking_enabled      = bool
   })
+  nullable = false
   validation {
-    condition     = var.terraform_state_backend.use_azuread_auth == true && var.terraform_state_backend.locking_enabled == true
-    error_message = "terraform_state_backend requires use_azuread_auth = true and locking_enabled = true."
+    condition     = var.terraform_state_backend.use_azuread_auth == true && var.terraform_state_backend.locking_enabled == true && length(var.terraform_state_backend.storage_account_name) > 0
+    error_message = "terraform_state_backend requires use_azuread_auth = true, locking_enabled = true and a state storage account name."
   }
 }

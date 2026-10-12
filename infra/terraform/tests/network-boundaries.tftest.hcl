@@ -1,4 +1,28 @@
-mock_provider "azurerm" {}
+mock_provider "azurerm" {
+  mock_resource "azurerm_mssql_server" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Sql/servers/sql-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_storage_account" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest"
+    }
+  }
+
+  mock_resource "azurerm_cognitive_account" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.CognitiveServices/accounts/aoai-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_key_vault" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
+    }
+  }
+}
 
 variables {
   subscription_id               = "00000000-0000-0000-0000-000000000000"
@@ -38,7 +62,7 @@ run "ingress_and_egress_allowlists" {
     error_message = "Approved presenter/reviewer CIDR must be allowed inbound and inbound must end in deny-all."
   }
   assert {
-    condition     = azurerm_network_security_rule.egress_allow["0"].destination_address_prefix == "198.51.100.0/24" && azurerm_network_security_rule.egress_deny_all.access == "Deny"
+    condition     = toset([for r in values(azurerm_network_security_rule.egress_allow) : r.destination_address_prefix]) == toset(["198.51.100.0/24"]) && length(azurerm_network_security_rule.egress_allow) == 1 && azurerm_network_security_rule.egress_deny_all.access == "Deny"
     error_message = "Only the approved egress destination may be allowed and outbound must end in deny-all."
   }
   # Azure's default AllowInternetOutBound sits at priority 65000; the deny-all must be
@@ -86,6 +110,23 @@ run "data_endpoints_are_private" {
     condition     = alltrue([for k in ["sql", "blob", "model"] : contains(keys(azurerm_private_endpoint.demo), k)])
     error_message = "SQL, Blob and model each need a private endpoint."
   }
+  assert {
+    condition     = azurerm_private_endpoint.demo["sql"].private_service_connection[0].private_connection_resource_id == azurerm_mssql_server.sql.id && azurerm_private_endpoint.demo["sql"].private_service_connection[0].subresource_names[0] == "sqlServer"
+    error_message = "SQL private endpoint must connect to the SQL server through the sqlServer subresource."
+  }
+  assert {
+    condition     = azurerm_private_endpoint.demo["blob"].private_service_connection[0].private_connection_resource_id == azurerm_storage_account.blob.id && azurerm_private_endpoint.demo["blob"].private_service_connection[0].subresource_names[0] == "blob"
+    error_message = "Blob private endpoint must connect to the storage account through the blob subresource."
+  }
+  assert {
+    condition     = azurerm_private_endpoint.demo["model"].private_service_connection[0].private_connection_resource_id == azurerm_cognitive_account.model.id && azurerm_private_endpoint.demo["model"].private_service_connection[0].subresource_names[0] == "account"
+    error_message = "Model private endpoint must connect to the model account through the account subresource."
+  }
+  assert {
+    condition     = alltrue([for e in values(azurerm_private_endpoint.demo) : e.subnet_id == azurerm_subnet.private_endpoints.id])
+    error_message = "Every private endpoint must sit in the private endpoint subnet."
+  }
+  }
 }
 
 run "encryption_and_no_key_outputs" {
@@ -106,6 +147,19 @@ run "encryption_and_no_key_outputs" {
   assert {
     condition     = output.model_endpoint == "https://aoai-demo-test.openai.azure.com/"
     error_message = "Model endpoint must be HTTPS on the approved subdomain."
+  }
+  assert {
+    condition     = azurerm_mssql_server_transparent_data_encryption.sql.server_id == azurerm_mssql_server.sql.id
+    error_message = "SQL transparent data encryption must be configured on the SQL server."
+  }
+  assert {
+    condition     = can(regex("^https://", output.model_endpoint)) && azurerm_cognitive_account.model.local_auth_enabled == false
+    error_message = "Model transport must be HTTPS and key-based auth must be disabled."
+  }
+  assert {
+    condition     = !can(regex("(?i)AccountKey|ConnectionString|primary_access_key|secret", output.model_endpoint))
+    error_message = "Outputs must not emit access keys or connection strings."
+  }
   }
 }
 
@@ -140,3 +194,33 @@ run "rejects_backend_without_locking" {
 
   expect_failures = [var.terraform_state_backend]
 }
+
+run "rejects_backend_without_state_name" {
+  command = plan
+
+  variables {
+    terraform_state_backend = {
+      storage_account_name = ""
+      container_name       = "tfstate"
+      key                  = "demo.tfstate"
+      use_azuread_auth     = true
+      locking_enabled      = true
+    }
+  }
+
+  expect_failures = [var.terraform_state_backend]
+}
+
+run "terraform_identity_scoped_to_demo_rg" {
+  command = plan
+
+  assert {
+    condition     = azurerm_role_assignment.terraform_contributor.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test" && azurerm_role_assignment.terraform_contributor.role_definition_name == "Contributor"
+    error_message = "Terraform identity must hold Contributor scoped to the demo resource group only."
+  }
+  assert {
+    condition     = azurerm_role_assignment.terraform_contributor.principal_id == "33333333-3333-3333-3333-333333333333"
+    error_message = "Terraform role assignment must target the configured Terraform principal."
+  }
+}
+
