@@ -21,9 +21,11 @@ label `ai-eligible`, passes AI-SDLC's Definition-of-Ready gate, and every issue 
 - **`Depends on #N`**, one line per prerequisite issue. The story waits until those are closed.
 - **`PRD: docs/prd/<file>.md`** when the story comes from a PRD; cite the PRD's requirement IDs (FR-, NFR-, AC-).
 - **No wishlist words**: "nice to have", "maybe", "TBD", "etc.".
-- **Never** ask for changes to `.github/`, `.ai-sdlc/`, `AGENTS.md` or CI files: the implementer cannot
+- **Never** ask for changes to `.github/` other than `.github/workflows/`, `.ai-sdlc/`, `AGENTS.md` or other CI files: the implementer cannot
   write them and the pipeline never merges them. A story may add a package to a backend `.csproj` or to
   `frontend/package.json` (with its lockfile) when it needs one; name the package and why.
+- **GitHub Actions workflows** (`.github/workflows/`) may be written by a story. Such a pull request always waits for a
+  person to merge it (AI-SDLC never merges `.github/`), so keep workflow changes in their own stories.
 
 ### Story template
 
