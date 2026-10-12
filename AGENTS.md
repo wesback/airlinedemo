@@ -11,8 +11,8 @@ label `ai-eligible`, passes AI-SDLC's Definition-of-Ready gate, and every issue 
 - **One change**, with a clear title and a one-paragraph goal.
 - **The files it touches**, by path, inside the implementer's write scope (source and test folders).
 - **`## Acceptance criteria`**: checkboxes, each one testable, each naming the behaviour and at least one negative case.
-- **Size**: the pipeline refuses a change over 300 changed lines (added plus removed) or one with no test file. Aim for a story that changes
-  well under 300 lines; split anything bigger, and give a deletion-only cleanup its own test.
+- **Size**: the pipeline refuses a change over 500 changed lines (added plus removed) or one with no test file. Aim for a story that changes
+  well under 500 lines; split anything bigger, and give a deletion-only cleanup its own test.
 - **A behaviour test**: name the test file. The test must fail on a broken version; the pipeline requires the new tests
   to fail on `main` and pass on the branch, and the whole test suite to pass. One exception: a story that changes
   **only test files** (tests, specs, e2e, fixtures; no production file) cannot fail on `main`, so the pipeline waives
