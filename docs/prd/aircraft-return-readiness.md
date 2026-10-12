@@ -2,7 +2,7 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.1.0"
+version: "0.2.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
@@ -84,7 +84,7 @@ These source design positions are carried forward as draft product decisions, no
 | GOAL-003 | Run the reserves and contract-obligation consumers with expected synthetic outputs and recorded simulated review decisions, without invoice or notice dispatch. | Expected arithmetic, obligation fixtures, drafts, and review records. | MUST |
 | GOAL-004 | Reproduce the solution from a repository revision in an organization-approved environment, with smoke-test and live/fallback evidence. | Terraform plan/apply/repeat-plan evidence, deployment and seeding record, README, smoke tests, and rehearsal evidence. | MUST |
 
-These goals are linked to testable criteria, but do not assert target dates, measured baselines, or results. SMART status is deferred pending implementation evidence and review.
+Each goal has a quantitative indicator, a baseline, a target and a window in the goal-level measurement plan under Success Metrics. Baselines are the pre-build state (nothing is built yet); they are not measured results. Goals are bounded by release-candidate revision, not by calendar date. SMART status is assessed at the next PRD review.
 
 ## Functional Requirements
 
@@ -336,19 +336,19 @@ Real counterparties and data, operational access agreements, production support/
 
 ## Success Metrics
 
-No measured baseline or result is asserted. For the synthetic evaluation, use the frozen 40-case set, identical inputs across all four arms, independent annotations, eligible counts, and the definitions below. Do not tune on scored outcomes or lower thresholds after seeing results. A metric with no eligible examples is “not evaluated,” not a pass.
+No measured result is asserted; goal baselines are the pre-build state. Each goal is measured at every release-candidate revision. For the synthetic evaluation, use the frozen 40-case set, identical inputs across all four arms, independent annotations, eligible counts, and the definitions below. Do not tune on scored outcomes or lower thresholds after seeing results. A metric with no eligible examples is “not evaluated,” not a pass.
 
 ### Goal-level measurement plan
 
-| Goal | Baseline | Target | Measurement window | Evidence source |
-|---|---|---|---|---|
-| GOAL-001 | Not measured. | All linked synthetic journey acceptance checks pass, including human review and response-driven reassessment. | Versioned fixture run and recorded rehearsal. | Acceptance results, fixture revision, and business audit history. |
-| GOAL-002 | Not measured. | Complete four-arm comparison on the frozen 40-case set; the selected demonstration agent meets every applicable bar with zero forbidden actions. | Frozen scored evaluation run. | Ground truth, independent annotations, model/tool/policy versions, traces, eligible counts, and results. |
-| GOAL-003 | Not measured. | Both thin consumers match their synthetic expectations; finance/legal decisions are recorded; no invoice or notice is issued/sent. | Synthetic utilization and obligation fixture run. | Arithmetic and obligation fixtures, drafts, audit history, and acceptance results. |
-| GOAL-004 | Not measured. | Reproduce from the documented revision in an approved environment with plan/apply/repeat-plan evidence, passing smoke checks, and a live/fallback evidence package. | Each separately authorized deployment configuration and rehearsal. | Terraform evidence, revision/configuration, smoke tests, README, and rehearsal record. |
+| Goal | Indicator | Baseline | Target | Measurement window | Evidence source |
+|---|---|---|---|---|---|
+| GOAL-001 | Linked acceptance checks passing (17: AC-001 to AC-013, AC-017, AC-019 to AC-021), and business audit records of a consequential simulated human decision and of a response-driven reassessment. | 0 of 17 passing; no such records (not built). | 17 of 17 pass on 2 consecutive fixture runs at the same revision, and the audit history holds at least 1 consequential human decision and at least 1 response-driven reassessment. | Each release-candidate revision, plus the recorded rehearsal. | Acceptance results for both runs, fixture revision, and business audit history. |
+| GOAL-002 | The four-arm metrics and bars in the tables below (gap-detection precision and recall, and the others), with eligible counts, and forbidden actions by the selected agent. | Not measured. | Complete four-arm comparison on the frozen 40-case set; the selected demonstration agent meets every applicable bar with zero forbidden actions. | Frozen scored evaluation run. | Ground truth, independent annotations, model/tool/policy versions, traces, eligible counts, and results. |
+| GOAL-003 | Reserve draft lines matching the hand calculation to the cent (AC-014); obligation fixtures reaching their expected state (AC-015); invoices or notices dispatched. | 0 lines or fixtures matched (not built). | 100% of reserve lines and 100% of obligation fixtures match their expectations; 0 invoices or notices issued or sent; a finance or legal review decision is recorded for every draft. | Each synthetic utilization and obligation fixture run at a release-candidate revision. | Arithmetic and obligation fixtures, drafts, audit history, outbound-message log, and acceptance results. |
+| GOAL-004 | Resources changed by a repeat `terraform plan` after apply; smoke checks passing; minutes from a clean repository revision to a seeded, running deployment following only the README; rehearsal outcome. | no deployment exists (not built). | 0 changes on the repeat plan; all smoke checks pass; at most 60 minutes from clean revision to seeded, running deployment; the rehearsal completes live or through the recorded fallback. | Each separately authorized deployment configuration at a release-candidate revision. | Terraform plan/apply/repeat-plan output, timed deployment and seeding record, revision/configuration, smoke tests, README, and rehearsal record. |
 
 | Arm | Comparison |
-|---|---|
+|---|---|---|---|---|---|
 | A | Rules baseline: extraction and deterministic matching; no language model. |
 | B | Small-model bounded agent with iterative read-only tool use. |
 | C | Larger-model bounded agent with iterative read-only tool use. |
