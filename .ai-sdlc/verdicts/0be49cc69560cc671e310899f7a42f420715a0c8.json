@@ -1,0 +1,263 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 143,
+  "branch": "ai-sdlc/issue-143",
+  "commitSha": "0be49cc69560cc671e310899f7a42f420715a0c8",
+  "round": 0,
+  "pipelineVersion": "31f4862",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The store returns mutable internal collections, allowing audit history to be changed outside Commit and potentially making persisted state unrestorable. The tests also lack the criterion references required to verify acceptance-criteria coverage.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 122,
+          "message": "Read and ReadAudit expose mutable internal lists, so callers can bypass the append-only commit path and alter case state without persistence.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Commit stores mutable List instances in CaseState; Read and ReadAudit return those lists through IReadOnlyList without copying or wrapping them.",
+            "failureScenario": "After a commit, a caller casts store.ReadAudit(scope) to List<AuditEvent> and clears it. Audit history is removed without Commit; a later restart fails because the revision no longer matches the audit count."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs",
+          "line": 8,
+          "message": "The behavior tests do not identify which acceptance criterion each test covers; add criterion IDs to the relevant test names or comments.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criteria require behavior coverage for M-02, M-10, M-03, and restart restoration. The tests exercise related behavior but do not identify any criterion in their names or comments.",
+            "failureScenario": "When the review checks criterion-to-test coverage, none of these tests can be tied to a criterion as required by the review policy, leaving the required coverage map unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests exercise the listed scenarios, but returned state collections can be mutated outside Commit, and receipt replay does not verify that the retried action matches the original.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 113,
+          "message": "Return immutable snapshots or read-only wrappers so callers cannot mutate stored state through the returned list references.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Read and ReadAudit return the CaseState's IReadOnlyList properties directly; those properties hold List instances.",
+            "failureScenario": "A caller with an authorized scope casts store.ReadAudit(scope) to List<AuditEvent> and clears it. The in-memory audit history changes without Commit, revision validation, or persistence, bypassing the append-only API. The same issue applies to basis and receipt lists returned by Read."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 157,
+          "message": "Replay detection accepts a reused receipt ID with a different commit payload; retain enough data to verify the replay matches the original commit and reject conflicting reuse.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Commit treats any previously recorded ReceiptId as a replay before checking the revision or comparing the incoming commit with the original action.",
+            "failureScenario": "After receipt-1 records an approval, a caller submits a different action or basis using receipt-1. Commit returns Replayed=true with the old state, silently discarding the new action instead of identifying a conflicting receipt reuse."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The read API leaks mutable backing lists, so callers can change case state and audit history without the store's guarded commit path. This violates the append-only audit and mutation guarantees.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 122,
+          "message": "The store exposes mutable state collections through its read API, allowing callers to bypass the append-only audit and revision checks. This is an integrity failure (OWASP A08:2025).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Read returns the stored CaseState directly. Its Basis, ReceiptIds, and Audit properties reference mutable lists, and ReadAudit returns the stored audit list as well.",
+            "failureScenario": "A caller reads a case, casts state.Audit to List<AuditEvent>, and clears or edits it. This changes the store's in-memory audit history without Commit or a revision check; a later commit can persist the altered history, or leave the file inconsistent so restart fails."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 180,
+      "total": 196,
+      "percent": 91.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 180,
+          "total": 196,
+          "missed": [
+            100,
+            101,
+            107,
+            108,
+            216,
+            217,
+            255,
+            256,
+            263,
+            264,
+            281,
+            282,
+            293,
+            294,
+            301,
+            302
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
