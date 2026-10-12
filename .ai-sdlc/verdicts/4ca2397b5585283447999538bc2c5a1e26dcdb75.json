@@ -1,0 +1,227 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 143,
+  "branch": "ai-sdlc/issue-143",
+  "commitSha": "4ca2397b5585283447999538bc2c5a1e26dcdb75",
+  "round": 2,
+  "pipelineVersion": "826ba00",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Scope isolation, immutable basis versions, atomic writes, and signed restore behavior are covered in the change. M-03 remains unmet because audit append-only behavior is checked only through the in-memory API, with no grant or procedure enforcement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs",
+          "line": 89,
+          "message": "M-03's narrow append grant and denied UPDATE/DELETE behavior are not implemented or tested; the in-memory API check cannot enforce database access controls.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "AuditTrail_IsAppendOnlyThroughPublicApi checks method names and in-memory event ordering. The implementation has no app identity, approved append procedure, or database grant enforcement.",
+            "failureScenario": "If the app identity retains the broad writer grant described in the issue, it can UPDATE or DELETE audit rows directly while this test passes. The required access control is therefore not enforced (OWASP A01:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change covers several scoped state, persistence, and atomicity behaviors, but receipt replays can bypass basis digest validation. M-03's audit grant controls are also absent from the implementation and test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 114,
+          "message": "The receipt replay path accepts an incorrect BasisDigest when the content digest still matches, violating M-10's requirement to reject mismatched digests.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AddBasis validates that the content matches ContentDigest, then the existing-receipt branch compares the case ID, BasisDigest, and ContentDigest only when deciding whether to return Replayed; it never verifies that BasisDigest matches the submitted case, version, and content digest on that branch.",
+            "failureScenario": "After a successful submission, retry the same receipt with unchanged content and ContentDigest but an incorrect BasisDigest. AddBasis returns Replayed instead of rejecting the digest mismatch required by M-10."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs",
+          "line": 89,
+          "message": "M-03's approved append grant and denial of UPDATE/DELETE are not implemented or tested; the reflection check only verifies the in-memory API.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "AuditTrail_IsAppendOnlyThroughPublicApi checks public method names and in-memory appends. Its comment says database grant enforcement is not covered, and the diff provides no app identity, approved append procedure, or grant enforcement.",
+            "failureScenario": "If the app identity has the broad writer grant described in M-03, it can UPDATE or DELETE audit rows directly while this test passes. The required denial is neither implemented nor verified (OWASP A01:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The MAC detects edited snapshots, but does not prevent replay of an older valid snapshot during startup, which can roll back persisted case and audit history.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 159,
+          "message": "Restore accepts replayed, older signed snapshots after startup because its extension check compares against only the current in-memory state. Persist a freshness value outside the snapshot or otherwise reject rollback.",
+          "confidence": 0.82,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Restore verifies the snapshot MAC, then checks that it extends only the store's current in-memory ledger before replacing that ledger.",
+            "failureScenario": "An attacker who can replace the persisted snapshot with an older, previously valid export can replay it before startup. The new store begins with an empty audit history, so EnsureExtends accepts the old snapshot and Restore loses later cases and audit events (OWASP A08:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
