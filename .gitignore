@@ -1,0 +1,9 @@
+.copilot-tracking/
+node_modules/
+frontend/dist/
+frontend/coverage/
+backend/**/bin/
+backend/**/obj/
+TestResults/
+*.user
+*.suo
