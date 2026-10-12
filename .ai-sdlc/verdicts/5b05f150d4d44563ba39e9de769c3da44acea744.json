@@ -1,0 +1,239 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 143,
+  "branch": "ai-sdlc/issue-143",
+  "commitSha": "5b05f150d4d44563ba39e9de769c3da44acea744",
+  "round": 0,
+  "pipelineVersion": "826ba00",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The store can accept an empty restore that erases saved state, permits audit history to be rewritten through Restore, and acknowledges a replay with a mismatched content digest.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 157,
+          "message": "Restore accepts an empty document as valid state and can erase the current ledger; reject documents missing required state.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Restore deserializes the supplied document, Verify accepts a ledger whose initialized collections are empty, and this assignment replaces the current ledger.",
+            "failureScenario": "After cases have been recorded, restoring \"{}\" succeeds and replaces the ledger with empty collections, losing the saved cases and audit history instead of rejecting an incomplete restore."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 157,
+          "message": "M-03 is not enforced: Restore can replace audit history without an approved append. This bypasses append-only access controls (OWASP A01:2025).",
+          "confidence": 0.95,
+          "category": "design",
+          "evidence": {
+            "codePathTraced": "Restore is public, Verify checks audit sequence numbers but not event contents or append history, and Restore replaces the ledger.",
+            "failureScenario": "A caller supplies a saved ledger with an existing audit event's detail changed but its sequence preserved; Restore accepts it and replaces the prior audit record, so audit updates are not denied."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 65,
+          "message": "The receipt replay path accepts a mismatched declared content digest, contrary to M-10's requirement to reject digest mismatches.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When a receipt already exists, AddBasis checks the submitted content against its computed hash but does not compare the supplied ContentDigest before returning Replayed.",
+            "failureScenario": "After a successful submission, retry with the same receipt ID, content, and basis digest but a false ContentDigest; AddBasis returns Replayed instead of rejecting the mismatched digest."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover scope checks, basis versions, and transaction rollback, but the change does not meet the required audit-grant behavior or persist findings and requests across restart.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs",
+          "line": 89,
+          "message": "M-03's approved append grant and denied UPDATE/DELETE behavior is not implemented or tested by this change. The reflection check only covers the in-memory store API, so it cannot catch the required grant failure.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AuditGrants_AreAppendOnly checks the CaseStateStore public method names and appends an in-memory audit event; it does not exercise an app identity, grant, or database procedure.",
+            "failureScenario": "If the app identity still has the broad writer grant described in the issue, it can UPDATE or DELETE audit rows directly while this test passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 197,
+          "message": "The restart criterion requires restoring findings and requests as well as decisions. This ledger stores basis versions, cases, receipts, and audit events only; the restart test covers a basis and decision but never findings or requests.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Export serializes Ledger, whose persisted fields are Cases, Basis, Audit, and Receipts; it has no findings or requests fields or operations.",
+            "failureScenario": "When findings or requests exist for a case, exporting and restoring this store cannot restore them, so they are lost after restart."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The public restore path can replace valid case state with a snapshot that omits prior audit events. The audit sequence check does not detect this history loss.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 143,
+          "message": "Restore bypasses append-only audit history (OWASP A08:2025: Software and Data Integrity Failures). Restrict restoration to a trusted startup path or verify that it cannot remove already committed audit events.",
+          "confidence": 0.83,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Restore accepts a JSON document, Verify checks only that audit sequence numbers are contiguous, then Restore replaces the entire ledger.",
+            "failureScenario": "A caller that can invoke Restore supplies a valid snapshot with the existing cases and basis but an empty audit list. Restore accepts it and replaces the ledger, erasing committed audit history despite the append-only requirement."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
