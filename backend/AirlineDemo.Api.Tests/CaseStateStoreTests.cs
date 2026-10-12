@@ -221,7 +221,7 @@ public class CaseStateStoreTests
         var saved = first.Export();
 
         var restarted = NewStore();
-        restarted.Restore(saved);
+        restarted.Restore(saved, first.AuditEventCount);
 
         Assert.Equal(first.Read("case-001", "case-001"), restarted.Read("case-001", "case-001"));
         Assert.Equal(first.Audit("case-001", "case-001"), restarted.Audit("case-001", "case-001"));
@@ -246,8 +246,8 @@ public class CaseStateStoreTests
         var auditBefore = store.Audit("case-001", "case-001").ToList();
 
         var emptyLedger = NewStore().Export();
-        Assert.Throws<CaseStateRestoreException>(() => store.Restore(emptyLedger));
-        Assert.Throws<CaseStateRestoreException>(() => store.Restore("{\"Cases\":{},\"Basis\":[],\"Audit\":[],\"Receipts\":{}}"));
+        Assert.Throws<CaseStateRestoreException>(() => store.Restore(emptyLedger, 0));
+        Assert.Throws<CaseStateRestoreException>(() => store.Restore("{\"Cases\":{},\"Basis\":[],\"Audit\":[],\"Receipts\":{}}", 0));
 
         Assert.Equal(auditBefore, store.Audit("case-001", "case-001"));
         Assert.Equal("accepted", store.Read("case-001", "case-001")!.Status);
@@ -261,10 +261,10 @@ public class CaseStateStoreTests
         store.AddBasis("case-001", 1, "presenter", Submit("r-1", "case-001", 1, Content));
         var saved = store.Export();
 
-        Assert.Throws<CaseStateRestoreException>(() => store.Restore("{not json"));
-        Assert.Throws<CaseStateRestoreException>(() => store.Restore("null"));
+        Assert.Throws<CaseStateRestoreException>(() => store.Restore("{not json", 0));
+        Assert.Throws<CaseStateRestoreException>(() => store.Restore("null", 0));
         Assert.Throws<CaseStateRestoreException>(() =>
-            store.Restore(saved.Replace(Content, "tampered-content")));
+            store.Restore(saved.Replace(Content, "tampered-content"), 0));
 
         Assert.Equal(2, store.Read("case-001", "case-001")!.Revision);
         Assert.Equal(Content, store.GetBasis("case-001", "case-001", 1)!.Content);
@@ -282,7 +282,7 @@ public class CaseStateStoreTests
         store.AddBasis("case-001", 1, "presenter", Submit("r-1", "case-001", 1, Content));
         var auditBefore = store.Audit("case-001", "case-001").ToList();
 
-        Assert.Throws<CaseStateRestoreException>(() => store.Restore(forged));
+        Assert.Throws<CaseStateRestoreException>(() => store.Restore(forged, 0));
 
         Assert.Equal(2, store.Read("case-001", "case-001")!.Revision);
         Assert.Equal("awaiting-review", store.Read("case-001", "case-001")!.Status);
@@ -298,7 +298,7 @@ public class CaseStateStoreTests
         var payload = doc.RootElement.GetProperty("Payload").GetString()!;
         var edited = JsonSerializer.Serialize(new { Payload = payload, Mac = new string('0', 64) });
 
-        Assert.Throws<CaseStateRestoreException>(() => NewStore().Restore(edited));
+        Assert.Throws<CaseStateRestoreException>(() => NewStore().Restore(edited, 0));
     }
 
     [Fact]

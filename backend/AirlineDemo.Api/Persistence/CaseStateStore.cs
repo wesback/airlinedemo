@@ -193,7 +193,8 @@ public sealed class CaseStateStore
     // Replaces state only when the saved document fully verifies and extends the committed history; otherwise throws
     // and keeps the current state. Restore can never shorten or rewrite audit events, basis versions, or receipts.
     // minimumAuditEvents is the audit count recorded outside the snapshot; an older signed snapshot below it is a rollback.
-    public void Restore(string json, int minimumAuditEvents = 0)
+    // It is required so no caller can restore without the external anchor.
+    public void Restore(string json, int minimumAuditEvents)
     {
         Ledger? loaded;
         try
