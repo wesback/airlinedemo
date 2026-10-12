@@ -57,7 +57,7 @@ A feature too large for one story starts as a PRD. The merge of the PRD is the h
    requirement and acceptance criterion a stable ID: `FR-1`, `NFR-1`, `AC-1`. Say what is out of scope and what the
    security notes are (data handled, trust boundaries).
 2. **Merge it through a PR.** A named person approves it in the PR.
-3. **Planning** (off for this repository: write the stories yourself using the rules above, with the same PRD: and Depends on lines): HVE's PRD quality review, the Security Planner (a threat model in
+3. **Planning** (on for this repository: the pipeline runs it by itself after the merge): HVE's PRD quality review, the Security Planner (a threat model in
    `docs/security/`), and the Functional Planner (the stories). The stories become issues with `ai-eligible`, a
    `PRD:` line, `Depends on #N` lines, and the threat model's mitigations as acceptance criteria. Review the created
    issues; each still has to pass the readiness gate before it is built.
