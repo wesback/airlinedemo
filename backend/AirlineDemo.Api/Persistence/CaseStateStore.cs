@@ -180,7 +180,9 @@ public sealed class CaseStateStore
     private string Mac(string payload) =>
         Convert.ToHexString(HMACSHA256.HashData(_integrityKey, Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
 
-    // Audit grants for the app identity: appends go through the approved procedure only; UPDATE and DELETE are denied.
+    // Deployment script for the database grants that #149 applies to the app identity. This store does not run it and
+    // has no database layer, so these grants are not enforced in-process; the in-process append-only guarantee is the
+    // public API surface checked by AuditTrail_IsAppendOnlyThroughPublicApi.
     public const string AuditGrantScript =
         "REVOKE UPDATE, DELETE ON case_audit FROM app_identity;\n" +
         "GRANT EXECUTE ON PROCEDURE append_case_audit TO app_identity;";
