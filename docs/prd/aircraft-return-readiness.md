@@ -2,7 +2,7 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.3.0"
+version: "0.4.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.3.0 | Last Updated: 2026-10-12
+> **aircraft-return-readiness** | Status: Draft | Version: 0.4.0 | Last Updated: 2026-10-12
 
 ## Executive Summary
 
@@ -77,10 +77,21 @@ These source design positions are carried forward as draft product decisions, no
 | DD-014 | Sign-in is demo-only: seeded synthetic users, their roles and their case scopes come from a versioned fixture, chosen on a sign-in page. The server issues an HttpOnly, Secure, SameSite=Strict session cookie and requires an anti-forgery token on every state-changing command. No external identity provider is used; the server stays authoritative for role and scope on every request. |
 | DD-015 | The Terraform root is `infra/terraform`. Azure SQL, Blob Storage and the model endpoint have public network access disabled and are reached through private endpoints in the Container Apps virtual network. The application authenticates with managed identity; no access keys or connection-string secrets. Encryption at rest uses Microsoft-managed keys. |
 | DD-016 | Investigation models are configuration, not code: arm B uses a small (mini-class) Azure OpenAI deployment, arm C a larger one, and arm D the same deployment as its agent comparator. Deployment names, API version and region live in the non-secret deployment configuration and are recorded in every investigation trace. |
-| DD-017 | Supply-chain evidence: a documented script produces a CycloneDX SBOM for the .NET and npm dependencies and runs `dotnet list package --vulnerable` and `npm audit`. A high or critical finding blocks the release candidate unless an exception with a reason and an expiry date is recorded in `docs/`. Packages come only from nuget.org and npmjs.org. Artifacts are not signed. |
+| DD-017 | Supply-chain evidence: the build produces a CycloneDX SBOM for the .NET and npm dependencies and runs `dotnet list package --vulnerable` and `npm audit`. A high or critical finding blocks the release candidate unless an exception with a reason and an expiry date is recorded in `docs/`. Packages come only from nuget.org and npmjs.org. The container image is signed with Notation and an Azure Key Vault key, and the deployment verifies the signature before it updates the app (DD-031). |
 | DD-018 | Each synthetic obligation carries `noticeWindowStart` and `noticeWindowEnd` as UTC dates, both inclusive. The obligation fixtures include a before-window case, a first-day case, a last-day case and an overdue case. Evaluation uses a fixed as-of date from the fixture, never the system clock. |
 | DD-019 | Workload limits (NFR-005, NFR-007): a package holds at most 12 documents, 10 MB each and 50 MB in total; an investigation makes at most 20 tool calls and 8 model calls within 30 seconds; a model call uses at most 16,000 input and 2,000 output tokens, with at most 2 retries and exponential backoff; each user submits at most 10 packages per minute; at most 2 investigations run at once; a scored evaluation run is 40 cases times 4 arms and stops, reporting what it completed, at 3,000,000 tokens. Every limit fails with an explicit, recorded error, never a silent truncation. |
 | DD-020 | No formal accessibility target applies. The bounded checks in NFR-009 are the acceptance bar for the interface and do not claim conformance to any standard. |
+| DD-021 | Mock evidence requests use this approved template, version 1, approved by the product owner with this PRD: "Synthetic demonstration request. For {component} {serialNumber}, please provide {missingRequirement}. Evidence basis {basisId} v{basisVersion}. Reference {requestId}." A request is delivered only with the current template version; changing the wording is a PRD change. |
+| DD-022 | Container Apps ingress is external but limited to an allowlist of presenter and reviewer IP ranges (CIDRs) in the non-secret deployment configuration; the platform denies everything else. An empty allowlist means nobody can reach the app. |
+| DD-023 | The sign-in page asks for one shared demo passcode before the seeded-user picker. The passcode is a Container Apps secret sourced from Key Vault, never in the repository. A wrong passcode gets a generic error and is rate-limited per source address. A session lasts 8 hours, sliding; sign-out is explicit, and switching users means signing out. |
+| DD-024 | Least-privilege identities, each scoped to a single resource. The app's user-assigned identity: an Azure SQL contained user with db_datareader, db_datawriter and EXECUTE on its schema (no DDL); Storage Blob Data Contributor on the evidence container only; Cognitive Services OpenAI User on the Azure OpenAI account. A separate migration identity, used only at deployment: db_ddladmin. The Terraform identity: Contributor and User Access Administrator on the demo resource group only. |
+| DD-025 | The Azure OpenAI account is in Sweden Central and uses Global Standard deployments, so model processing may happen outside the region; this is acceptable because all data is synthetic (CON-001). Default abuse monitoring applies; prompts are not used for training. The app reaches the model only through its private endpoint (DD-015). |
+| DD-026 | Evidence documents are text-based PDF only, without OCR. They are parsed in-process with a maintained .NET PDF library; page text is extracted, and embedded files, scripts, forms and images are ignored. A document has at most 200 pages (with DD-019's size limits); nested archives are rejected. A parse failure marks that document failed and retryable (AC-004) and never counts as evidence. |
+| DD-027 | Blob versioning and 14-day soft delete are on for the evidence container; documents are never overwritten in place. Azure SQL keeps 35 days of point-in-time restore. Audit records are append-only: the app identity cannot update or delete them, and they are kept for the life of the demo. A demo reset starts a new run and never rewrites history. Only the Terraform identity can delete the resource group. |
+| DD-028 | One origin: the app serves the React client, and there is no CORS. Content-Security-Policy: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'`. HTTPS only, TLS 1.2 minimum, HSTS. The session cookie is `__Host-` prefixed, HttpOnly, Secure and SameSite=Strict (DD-023). Every state-changing request carries an ASP.NET Core anti-forgery token in a header. |
+| DD-029 | Diagnostics go to Application Insights backed by a Log Analytics workspace in the demo resource group, with 30-day retention, readable only by the product owner and the Terraform identity. The app logs identifiers, states, counts, durations and token usage, never raw prompts, document text, passcodes or cookies; a logging filter enforces this and a test proves it. Investigation traces keep model and tool names and citations, not document content. |
+| DD-030 | Build and deployment run on GitHub Actions: the workflow builds the image, produces the SBOM and audit results (DD-017), signs the image, and pushes it to an Azure Container Registry in the demo resource group, which the app pulls over a private endpoint. Deployments run from a protected GitHub environment approved by the product owner, authenticated with OIDC federated credentials and no stored secrets. The SBOM, audit output and signature are kept as workflow artifacts for 90 days. The workflow is written by a person; pipeline stories do not edit `.github/`. |
+| DD-031 | Before a deployment updates the app, it verifies the image signature (DD-017) against the Key Vault certificate and refuses an unsigned or mismatched image. The image is referenced by digest. |
 
 ## Product Goals
 
@@ -206,7 +217,7 @@ Dashboard projections are server-derived: queue age is elapsed server execution 
 
 | ID | Open decision or evidence | Owner / target |
 |---|---|---|
-| None | The open decisions of v0.2.0 (sign-in, network baseline, model configuration, supply-chain evidence, notice windows, workload limits, accessibility target) are resolved in DD-014 to DD-020. | Not applicable. |
+| None | The open decisions of v0.2.0 are resolved in DD-014 to DD-020, and those raised by planning v0.3.0 (request wording, ingress, sign-in proof, identity grants, model service, document formats, signing, retention, browser policy, diagnostics, build path) in DD-021 to DD-031. | Not applicable. |
 
 Other environment, identity, network, service availability, model capacity, and cost prerequisites remain organization-approved external dependencies under CON-004 and CON-006. This document does not specify tenant configuration or grant deployment authority.
 
