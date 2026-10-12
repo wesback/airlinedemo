@@ -122,6 +122,51 @@ public class CaseStateStoreTests
     }
 
     [Fact]
+    public void ReceiptReplay_WithForgedBasisDigest_IsRejectedWithoutMutation()
+    {
+        var store = NewStore();
+        var submission = Submit("r-1", "case-001", 1, Content);
+        store.AddBasis("case-001", 1, "presenter", submission);
+        var before = store.Audit("case-001", "case-001").Count;
+
+        var forged = submission with { BasisDigest = CaseStateStore.Sha256("forged") };
+        var result = store.AddBasis("case-001", 1, "presenter", forged);
+
+        Assert.NotEqual(CaseWriteOutcome.Replayed, result.Outcome);
+        Assert.Equal(before, store.Audit("case-001", "case-001").Count);
+    }
+
+    [Fact]
+    public void Restore_RejectsOlderSnapshotBelowAnchoredAuditCount()
+    {
+        var store = NewStore();
+        store.AddBasis("case-001", 1, "presenter", Submit("r-1", "case-001", 1, Content));
+        var older = store.Export();
+        store.RecordDecision("case-001", 2, "reviewer", "accept", "basis matches records");
+        var newer = store.Export();
+        var anchor = store.AuditEventCount;
+
+        var restarted = NewStore();
+        Assert.Throws<CaseStateRestoreException>(() => restarted.Restore(older, anchor));
+        Assert.Equal(0, restarted.AuditEventCount);
+
+        restarted.Restore(newer, anchor);
+        Assert.Equal(anchor, restarted.AuditEventCount);
+    }
+
+    [Fact]
+    public void AuditGrants_AllowOnlyApprovedAppendAndDenyUpdateDelete()
+    {
+        var grants = CaseStateStore.AuditGrantScript;
+
+        Assert.Contains("GRANT EXECUTE ON PROCEDURE append_case_audit TO app_identity", grants);
+        Assert.Contains("REVOKE UPDATE, DELETE ON case_audit FROM app_identity", grants);
+        Assert.DoesNotContain("GRANT UPDATE", grants);
+        Assert.DoesNotContain("GRANT DELETE", grants);
+        Assert.DoesNotContain("GRANT ALL", grants);
+    }
+
+    [Fact]
     public void AuditTrail_IsAppendOnlyThroughPublicApi()
     {
         // In-process check only: the store exposes no update/delete path. Database grant enforcement (M-03) is not

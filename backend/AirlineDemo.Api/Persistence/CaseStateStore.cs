@@ -113,7 +113,11 @@ public sealed class CaseStateStore
             {
                 var sameRequest = existing.CaseId == authorizedCaseId
                     && existing.BasisDigest == s.BasisDigest
-                    && existing.ContentDigest == s.ContentDigest;
+                    && existing.ContentDigest == s.ContentDigest
+                    && _ledger.Basis.Any(b => b.CaseId == authorizedCaseId
+                        && b.BasisDigest == s.BasisDigest
+                        && b.ContentDigest == s.ContentDigest
+                        && BasisDigestFor(b.CaseId, b.Version, b.ContentDigest) == s.BasisDigest);
                 return sameRequest
                     ? new(CaseWriteOutcome.Replayed, _ledger.Cases[existing.CaseId], existing)
                     : new(CaseWriteOutcome.ReceiptConflict, null, null);
@@ -176,9 +180,20 @@ public sealed class CaseStateStore
     private string Mac(string payload) =>
         Convert.ToHexString(HMACSHA256.HashData(_integrityKey, Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
 
+    // Audit grants for the app identity: appends go through the approved procedure only; UPDATE and DELETE are denied.
+    public const string AuditGrantScript =
+        "REVOKE UPDATE, DELETE ON case_audit FROM app_identity;\n" +
+        "GRANT EXECUTE ON PROCEDURE append_case_audit TO app_identity;";
+
+    public int AuditEventCount
+    {
+        get { lock (_gate) return _ledger.Audit.Count; }
+    }
+
     // Replaces state only when the saved document fully verifies and extends the committed history; otherwise throws
     // and keeps the current state. Restore can never shorten or rewrite audit events, basis versions, or receipts.
-    public void Restore(string json)
+    // minimumAuditEvents is the audit count recorded outside the snapshot; an older signed snapshot below it is a rollback.
+    public void Restore(string json, int minimumAuditEvents = 0)
     {
         Ledger? loaded;
         try
@@ -198,6 +213,8 @@ public sealed class CaseStateStore
 
         if (loaded is null) throw new CaseStateRestoreException("Saved case state is missing.");
         Verify(loaded);
+        if (loaded.Audit.Count < minimumAuditEvents)
+            throw new CaseStateRestoreException("Saved case state is older than the last recorded state.");
 
         lock (_gate)
         {
