@@ -1,0 +1,204 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 142,
+  "branch": "ai-sdlc/issue-142",
+  "commitSha": "2309c26e555601b4d4a973fe8bbc45b507d8ede1",
+  "round": 0,
+  "pipelineVersion": "24323cf",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The protected case routes enforce session, role, scope, anti-forgery, and revision checks. Sign-in is a mutation that bypasses the stated anti-forgery requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "line": 38,
+          "message": "Sign-in mutates session state but does not validate an anti-forgery token or equivalent request origin.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "POST /api/auth/sign-in maps directly to SignIn, which accepts credentials and creates a session without anti-forgery validation.",
+            "failureScenario": "If an attacker can make a signed-in-to-the-demo user's browser submit a sign-in request with the demo passcode and an attacker-chosen seeded user, the server creates that session and sets its cookie without validating an anti-forgery token. This violates M-02's requirement that every mutation require anti-forgery validation. OWASP A01:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation includes positive and negative role, scope, anti-forgery, stale-revision, throttling, and sign-out coverage. It lacks the specified invalid-session mutation case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+          "line": 92,
+          "message": "Add a mutation test using an invalid session cookie and assert denial with no state change. The acceptance criteria explicitly require invalid sessions never to mutate state.",
+          "confidence": 0.84,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests cover a request with no session and a request after sign-out, but none sends a forged or expired session cookie to a mutation endpoint.",
+            "failureScenario": "If session validation regresses to accept an unknown cookie ID, a review request carrying that cookie could be recorded and advance the case revision without a valid session; the required invalid-session case would not catch it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The session, role, scope, and anti-forgery checks appear to enforce the stated boundaries. Concurrent sign-in attempts can bypass the intended failed-passcode throttle.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "line": 46,
+          "message": "The sign-in throttle can be bypassed by concurrent guesses because the lock check and failure recording are separate operations.",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "SignIn checks PasscodeThrottle.IsLocked before validating the passcode, then records a failure separately after an invalid passcode. These operations are not atomic.",
+            "failureScenario": "An attacker sends many concurrent sign-in guesses from one source. Each request can observe fewer than five recorded failures before any request records its failure, so the whole burst proceeds and the per-source throttle does not limit those attempts. This weakens brute-force protection for the shared passcode (OWASP A07:2025 Authentication Failures)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 4,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+      "backend/AirlineDemo.Api/Auth/CaseStore.cs",
+      "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+      "backend/AirlineDemo.Api/Auth/DemoFixture.cs",
+      "backend/AirlineDemo.Api/Auth/DemoSessionStore.cs",
+      "backend/AirlineDemo.Api/Auth/PasscodeThrottle.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs"
+    ],
+    "testUser": "tester"
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
