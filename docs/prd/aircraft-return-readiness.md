@@ -2,7 +2,7 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.2.0"
+version: "0.3.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.1.0 | Last Updated: 2026-10-12
+> **aircraft-return-readiness** | Status: Draft | Version: 0.3.0 | Last Updated: 2026-10-12
 
 ## Executive Summary
 
@@ -74,6 +74,13 @@ These source design positions are carried forward as draft product decisions, no
 | DD-011 | Compare model approaches in the evaluation harness; do not assume a preferred model before results. |
 | DD-012 | Reserves and contract-obligation handling are thin deterministic consumers. Neither issues invoices or notices. |
 | DD-013 | The reviewer interface is a React + TypeScript single-page client, built with Vite and served as static assets by the ASP.NET Core application in the same container. The server remains authoritative for identity, scope, state, policy, decisions, permissions, and capability labels. |
+| DD-014 | Sign-in is demo-only: seeded synthetic users, their roles and their case scopes come from a versioned fixture, chosen on a sign-in page. The server issues an HttpOnly, Secure, SameSite=Strict session cookie and requires an anti-forgery token on every state-changing command. No external identity provider is used; the server stays authoritative for role and scope on every request. |
+| DD-015 | The Terraform root is `infra/terraform`. Azure SQL, Blob Storage and the model endpoint have public network access disabled and are reached through private endpoints in the Container Apps virtual network. The application authenticates with managed identity; no access keys or connection-string secrets. Encryption at rest uses Microsoft-managed keys. |
+| DD-016 | Investigation models are configuration, not code: arm B uses a small (mini-class) Azure OpenAI deployment, arm C a larger one, and arm D the same deployment as its agent comparator. Deployment names, API version and region live in the non-secret deployment configuration and are recorded in every investigation trace. |
+| DD-017 | Supply-chain evidence: a documented script produces a CycloneDX SBOM for the .NET and npm dependencies and runs `dotnet list package --vulnerable` and `npm audit`. A high or critical finding blocks the release candidate unless an exception with a reason and an expiry date is recorded in `docs/`. Packages come only from nuget.org and npmjs.org. Artifacts are not signed. |
+| DD-018 | Each synthetic obligation carries `noticeWindowStart` and `noticeWindowEnd` as UTC dates, both inclusive. The obligation fixtures include a before-window case, a first-day case, a last-day case and an overdue case. Evaluation uses a fixed as-of date from the fixture, never the system clock. |
+| DD-019 | Workload limits (NFR-005, NFR-007): a package holds at most 12 documents, 10 MB each and 50 MB in total; an investigation makes at most 20 tool calls and 8 model calls within 30 seconds; a model call uses at most 16,000 input and 2,000 output tokens, with at most 2 retries and exponential backoff; each user submits at most 10 packages per minute; at most 2 investigations run at once; a scored evaluation run is 40 cases times 4 arms and stops, reporting what it completed, at 3,000,000 tokens. Every limit fails with an explicit, recorded error, never a silent truncation. |
+| DD-020 | No formal accessibility target applies. The bounded checks in NFR-009 are the acceptance bar for the interface and do not claim conformance to any standard. |
 
 ## Product Goals
 
@@ -199,7 +206,7 @@ Dashboard projections are server-derived: queue age is elapsed server execution 
 
 | ID | Open decision or evidence | Owner / target |
 |---|---|---|
-| OQ-007 | Confirm the authoritative accessibility target, or record that no formal target applies, before interface acceptance. The bounded checks in NFR-009 do not establish formal conformance. | Product owner with the applicable programme authority, before interface acceptance. |
+| None | The open decisions of v0.2.0 (sign-in, network baseline, model configuration, supply-chain evidence, notice windows, workload limits, accessibility target) are resolved in DD-014 to DD-020. | Not applicable. |
 
 Other environment, identity, network, service availability, model capacity, and cost prerequisites remain organization-approved external dependencies under CON-004 and CON-006. This document does not specify tenant configuration or grant deployment authority.
 
