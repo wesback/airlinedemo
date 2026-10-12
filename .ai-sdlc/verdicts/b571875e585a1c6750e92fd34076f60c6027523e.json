@@ -1,0 +1,233 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 143,
+  "branch": "ai-sdlc/issue-143",
+  "commitSha": "b571875e585a1c6750e92fd34076f60c6027523e",
+  "round": 1,
+  "pipelineVersion": "826ba00",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change does not implement or verify M-03's append-only access grants. Its restart state also omits findings and requests required by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs",
+          "line": 89,
+          "message": "M-03's approved append grant and denied UPDATE/DELETE behavior are missing; the reflection test does not exercise database access controls.",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "AuditGrants_AreAppendOnly inspects the in-memory CaseStateStore method names and appends an event. The implementation has no app identity, database grant, or approved append procedure.",
+            "failureScenario": "If the app identity retains the broad writer grant described in M-03, it can UPDATE or DELETE audit rows directly while this test passes. The required append-only access control is not implemented or verified (OWASP A01:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 197,
+          "message": "The restart criterion requires findings and requests to survive restart, but the ledger does not store them and the named test does not exercise them.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The persisted Ledger contains cases, basis versions, audit events, and receipts, but no findings or requests. The restart test exports and restores only a basis and decision.",
+            "failureScenario": "When a case has findings or requests, exporting and restoring this ledger cannot restore them, so they are lost after restart; the test named Restart_RestoresFindingsRequestsAndDecisions passes without creating or checking either."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The scope and basis tests exercise several in-memory behaviors, but M-03's grant restrictions are not covered and the store cannot persist findings or requests required by the restart criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs",
+          "line": 89,
+          "message": "M-03's approved append grant and denied UPDATE/DELETE behavior is not implemented or tested. The in-memory API check cannot detect whether the app identity can rewrite audit rows.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AuditGrants_AreAppendOnly checks public method names and in-memory audit appends; it does not exercise an app identity, database grant, or approved append procedure.",
+            "failureScenario": "If the app identity retains a broad writer grant and can UPDATE or DELETE audit rows directly, this test still passes, so M-03's required denial is not verified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 209,
+          "message": "The restart criterion requires restoring findings and requests as well as decisions, but the persisted ledger has no findings or requests. The restart test covers a decision only.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Export serializes Ledger, which contains cases, basis versions, audit events, and receipts; it has no findings or requests state.",
+            "failureScenario": "When a case has findings or requests, exporting and restoring this store cannot restore them, so they are lost after restart despite the restart criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Restore preserves existing audit entries, but does not authenticate or validate changes appended in a supplied snapshot. A crafted snapshot can change a case’s decision state and fabricate the corresponding audit event.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 158,
+          "message": "Restore accepts forged case state and audit events. Verify the snapshot’s integrity and decision history before replacing the ledger.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Restore verifies that the snapshot preserves existing audit events and does not reduce case revisions, then replaces the ledger. It does not verify that changed case status or newly appended audit events came from an approved decision.",
+            "failureScenario": "A caller able to supply a snapshot changes a case status to accepted, raises its revision, and adds a contiguous audit event claiming approval. Restore accepts it, allowing case state and audit history to be forged without RecordDecision (OWASP A08:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
