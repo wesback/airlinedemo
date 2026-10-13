@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Diagnostics;
 
@@ -25,6 +26,17 @@ public static partial class TelemetryRedaction
         public const string IntegritySignatureFailure = "security.integrity_signature_failure";
         public const string BudgetExhausted = "security.budget_exhausted";
     }
+
+    private static readonly HashSet<string> SecurityEventNames = new(StringComparer.Ordinal)
+    {
+        SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+    };
+
+    // Decisions are enumerated identifiers, never free text.
+    private static readonly HashSet<string> AllowedDecisions = new(StringComparer.Ordinal)
+    {
+        "return-ready", "return-not-ready", "escalate",
+    };
 
     public sealed record InvestigationTraceRecord(
         string TraceId,
@@ -55,6 +67,10 @@ public static partial class TelemetryRedaction
     [GeneratedRegex(@"[\p{Cc}\p{Cf}]")]
     private static partial Regex ControlPattern();
 
+    // Allowed values are short identifiers only; free text (prompts, documents, sentences) never matches.
+    [GeneratedRegex(@"^[A-Za-z0-9._#,:\-]{1,256}$")]
+    private static partial Regex IdentifierPattern();
+
     // Keeps only allowlisted keys, drops denylisted keys and scrubs secret-like and personal values.
     // Control characters are replaced so injected log content cannot forge new lines or fields.
     public static IReadOnlyDictionary<string, string> Redact(IEnumerable<KeyValuePair<string, object?>> attributes)
@@ -67,7 +83,8 @@ public static partial class TelemetryRedaction
                 continue;
             }
 
-            result[key] = Sanitize(value?.ToString() ?? string.Empty);
+            var text = value?.ToString() ?? string.Empty;
+            result[key] = IdentifierPattern().IsMatch(text) ? text : Redacted;
         }
 
         return result;
@@ -93,6 +110,11 @@ public static partial class TelemetryRedaction
     public static IReadOnlyDictionary<string, string> InvestigationTrace(
         InvestigationTraceRecord trace, string serviceVersion, string environment, byte[] actorKey)
     {
+        if (!AllowedDecisions.Contains(trace.Decision))
+        {
+            throw new ArgumentException("Decision must be an enumerated decision identifier.", nameof(trace));
+        }
+
         var attributes = Redact(new KeyValuePair<string, object?>[]
         {
             new("event.name", "investigation.completed"),
@@ -113,6 +135,33 @@ public static partial class TelemetryRedaction
         }
 
         return merged;
+    }
+
+    // Emission path: sanitized attributes become structured log properties (AppTraces Properties in Log Analytics).
+    public static void EmitInvestigationTrace(
+        ILogger logger, InvestigationTraceRecord trace, string serviceVersion, string environment, byte[] actorKey) =>
+        Emit(logger, LogLevel.Information, InvestigationTrace(trace, serviceVersion, environment, actorKey));
+
+    public static void EmitSecurityEvent(ILogger logger, string eventName, string serviceVersion, string environment)
+    {
+        if (!SecurityEventNames.Contains(eventName))
+        {
+            throw new ArgumentException("Unknown security event name.", nameof(eventName));
+        }
+
+        var attributes = new Dictionary<string, string>(ResourceAttributes(serviceVersion, environment), StringComparer.Ordinal)
+        {
+            ["event.name"] = eventName,
+        };
+        Emit(logger, LogLevel.Warning, attributes);
+    }
+
+    private static void Emit(ILogger logger, LogLevel level, IReadOnlyDictionary<string, string> attributes)
+    {
+        var state = attributes.Select(kv => new KeyValuePair<string, object?>(kv.Key, kv.Value)).ToList();
+        var eventName = attributes.TryGetValue("event.name", out var name) ? name : "telemetry";
+        logger.Log(level, new EventId(0, eventName), state, null,
+            static (s, _) => string.Join(" ", s.Select(kv => $"{kv.Key}={kv.Value}")));
     }
 
     public static IReadOnlyDictionary<string, string> ResourceAttributes(string serviceVersion, string environment) =>

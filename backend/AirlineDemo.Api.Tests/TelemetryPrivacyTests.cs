@@ -1,5 +1,6 @@
 using System.Text;
 using AirlineDemo.Api.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -145,5 +146,92 @@ public sealed class TelemetryPrivacyTests
         Assert.Equal(TelemetryRedaction.ServiceName, resource["service.name"]);
         Assert.Equal("1.2.3", resource["service.version"]);
         Assert.Equal("demo", resource["deployment.environment"]);
+    }
+
+    [Fact]
+    public void Free_text_decision_is_rejected_before_emission()
+    {
+        var trace = new TelemetryRedaction.InvestigationTraceRecord(
+            "trace-0002", "basis-v3", "gpt-demo-deployment", new[] { "reserve-calc" }, new[] { "doc-12#p4" },
+            Decision: $"Passenger note {Canaries[0]} with prompt text",
+            ActorId: "synthetic-analyst-01", Outcome: "approved");
+
+        var logger = new CapturingLogger();
+
+        Assert.Throws<ArgumentException>(() =>
+            TelemetryRedaction.EmitInvestigationTrace(logger, trace, "1.2.3", "demo", TestKey));
+        Assert.Empty(logger.States);
+    }
+
+    [Fact]
+    public void Free_text_values_on_allowlisted_keys_are_replaced_with_redacted()
+    {
+        var redacted = TelemetryRedaction.Redact(new[]
+        {
+            new KeyValuePair<string, object?>("investigation.outcome", "Please approve the claim for passenger"),
+            new KeyValuePair<string, object?>("trace.id", "trace-0003"),
+        });
+
+        Assert.Equal(TelemetryRedaction.Redacted, redacted["investigation.outcome"]);
+        Assert.Equal("trace-0003", redacted["trace.id"]);
+    }
+
+    [Fact]
+    public void Investigation_trace_is_emitted_with_required_correlation_properties()
+    {
+        var trace = new TelemetryRedaction.InvestigationTraceRecord(
+            "trace-0004", "basis-v3", "gpt-demo-deployment", new[] { "reserve-calc" }, new[] { "doc-12#p4" },
+            "escalate", "synthetic-analyst-01", "approved");
+        var logger = new CapturingLogger();
+
+        TelemetryRedaction.EmitInvestigationTrace(logger, trace, "1.2.3", "demo", TestKey);
+
+        var properties = Assert.Single(logger.States).ToDictionary(kv => kv.Key, kv => kv.Value?.ToString());
+        Assert.Equal("trace-0004", properties["trace.id"]);
+        Assert.Equal("escalate", properties["investigation.decision"]);
+        Assert.Equal("1.2.3", properties["service.version"]);
+        Assert.Equal("demo", properties["deployment.environment"]);
+        Assert.Equal(TelemetryRedaction.ServiceName, properties["service.name"]);
+        Assert.Equal("investigation.completed", properties["event.name"]);
+        Assert.DoesNotContain("synthetic-analyst-01", string.Join("|", properties.Values));
+    }
+
+    [Theory]
+    [InlineData(TelemetryRedaction.SecurityEvents.AuthScopeFailure)]
+    [InlineData(TelemetryRedaction.SecurityEvents.IntegritySignatureFailure)]
+    [InlineData(TelemetryRedaction.SecurityEvents.BudgetExhausted)]
+    public void Security_events_are_emitted_under_their_alert_event_name(string eventName)
+    {
+        var logger = new CapturingLogger();
+
+        TelemetryRedaction.EmitSecurityEvent(logger, eventName, "1.2.3", "demo");
+
+        var properties = Assert.Single(logger.States).ToDictionary(kv => kv.Key, kv => kv.Value?.ToString());
+        Assert.Equal(eventName, properties["event.name"]);
+    }
+
+    [Fact]
+    public void Unknown_security_event_names_are_rejected()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            TelemetryRedaction.EmitSecurityEvent(new CapturingLogger(), "security.made_up", "1.2.3", "demo"));
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (state is IReadOnlyList<KeyValuePair<string, object?>> list)
+            {
+                States.Add(list);
+            }
+        }
     }
 }

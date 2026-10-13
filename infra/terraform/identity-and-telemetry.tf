@@ -20,7 +20,7 @@ resource "azurerm_storage_container" "evidence" {
 }
 
 # App identity: model invocation, evidence container, and telemetry publishing.
-# SQL data-plane grants (no DDL, no audit UPDATE/DELETE) are not managed by ARM.
+# SQL data-plane grants (no DDL, no audit UPDATE/DELETE) are exported as output `app_sql_grant_statements`.
 resource "azurerm_role_assignment" "app_openai_user" {
   scope                = azurerm_cognitive_account.model.id
   role_definition_name = "Cognitive Services OpenAI User"
@@ -42,13 +42,26 @@ resource "azurerm_role_assignment" "app_telemetry" {
   principal_type       = "ServicePrincipal"
 }
 
-# Data-plane SQL contract for the app identity (applied by the migration pipeline, asserted in tests).
-# Audit tables are append-only for the app: no UPDATE, DELETE or DDL.
+# Data-plane SQL contract for the app identity. ARM cannot grant SQL database permissions, so the exact
+# T-SQL is exported as output `app_sql_grant_statements` for the migration identity to run.
+# Audit tables are append-only for the app: GRANT SELECT/INSERT only, UPDATE/DELETE/ALTER/CONTROL denied.
 locals {
   app_sql_grants = {
     operational = ["SELECT", "INSERT", "UPDATE", "DELETE", "EXECUTE"]
     audit       = ["SELECT", "INSERT"]
   }
+  app_sql_user = azurerm_user_assigned_identity.app.name
+  app_sql_grant_statements = concat(
+    [for p in local.app_sql_grants.operational : "GRANT ${p} ON SCHEMA::dbo TO [${local.app_sql_user}];"],
+    [for p in local.app_sql_grants.audit : "GRANT ${p} ON SCHEMA::audit TO [${local.app_sql_user}];"],
+    [for p in ["UPDATE", "DELETE", "ALTER", "CONTROL"] : "DENY ${p} ON SCHEMA::audit TO [${local.app_sql_user}];"],
+    ["DENY ALTER ON SCHEMA::dbo TO [${local.app_sql_user}];"],
+  )
+}
+
+output "app_sql_grant_statements" {
+  description = "T-SQL the migration identity runs to grant the app identity its exact SQL data-plane rights."
+  value       = local.app_sql_grant_statements
 }
 
 # Migration identity: management-plane SQL scope only.

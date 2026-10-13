@@ -29,6 +29,12 @@ mock_provider "azurerm" {
     }
   }
 
+  mock_resource "azurerm_monitor_action_group" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Insights/actionGroups/ag-security-owner"
+    }
+  }
+
   mock_resource "azurerm_user_assigned_identity" {
     defaults = {
       principal_id = "55555555-5555-5555-5555-555555555555"
@@ -95,6 +101,44 @@ run "M-14_app_identity_grants_are_exact" {
   assert {
     condition     = !contains(["Owner", "Contributor", "User Access Administrator", "SQL DB Contributor", "Storage Blob Data Owner"], azurerm_role_assignment.app_evidence.role_definition_name) && !contains(["Owner", "Contributor", "User Access Administrator"], azurerm_role_assignment.app_openai_user.role_definition_name) && !contains(["Owner", "Contributor", "User Access Administrator"], azurerm_role_assignment.app_telemetry.role_definition_name)
     error_message = "App identity must not hold broad management or ownership roles."
+  }
+}
+
+run "M-14_grants_bind_to_app_identity_as_service_principal" {
+  command = plan
+
+  assert {
+    condition     = azurerm_role_assignment.app_openai_user.principal_type == "ServicePrincipal" && azurerm_role_assignment.app_evidence.principal_type == "ServicePrincipal" && azurerm_role_assignment.app_telemetry.principal_type == "ServicePrincipal"
+    error_message = "Every app grant must be a service-principal grant to the app workload identity."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.migration_sql.principal_type == "ServicePrincipal" && azurerm_role_assignment.migration_sql.role_definition_name == "SQL DB Contributor"
+    error_message = "Migration SQL grant must be a service-principal SQL management grant only."
+  }
+
+  assert {
+    condition     = contains(output.app_sql_grant_statements, "GRANT SELECT ON SCHEMA::audit TO [id-airline-app];") && !contains(output.app_sql_grant_statements, "GRANT UPDATE ON SCHEMA::audit TO [id-airline-app];")
+    error_message = "App SQL grants must be attached to the app identity name and never widen audit UPDATE."
+  }
+}
+
+run "M-14_app_sql_statements_deny_ddl_and_audit_mutation" {
+  command = plan
+
+  assert {
+    condition     = contains(output.app_sql_grant_statements, "DENY UPDATE ON SCHEMA::audit TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY DELETE ON SCHEMA::audit TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY ALTER ON SCHEMA::dbo TO [id-airline-app];")
+    error_message = "App SQL statements must deny audit UPDATE/DELETE and DDL to the app identity."
+  }
+
+  assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "GRANT") && strcontains(s, "SCHEMA::audit") && (strcontains(s, "UPDATE") || strcontains(s, "DELETE") || strcontains(s, "ALTER") || strcontains(s, "CONTROL"))]) == 0
+    error_message = "No grant may widen audit tables to UPDATE, DELETE, ALTER or CONTROL."
+  }
+
+  assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "db_owner") || strcontains(s, "db_ddladmin") || strcontains(s, "CONTROL SERVER")]) == 0
+    error_message = "App SQL statements must not grant privileged database roles."
   }
 }
 
@@ -168,7 +212,7 @@ run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
   }
 
   assert {
-    condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action) == 1])
+    condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action) == 1 && length(a.action[0].action_groups) == 1])
     error_message = "Every security alert must route through exactly one action group, the named owner group."
   }
 }
