@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -112,13 +113,76 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.True(body.GetProperty("authorizesAcceptance").GetBoolean());
         Assert.DoesNotContain(EvidenceText, body.GetRawText());
 
+        var recorded = body.GetProperty("decisions").EnumerateArray().Single();
+        Assert.True(recorded.GetProperty("sequence").GetInt64() > 0);
+        Assert.NotEqual(default, recorded.GetProperty("at").GetDateTimeOffset());
+        Assert.False(string.IsNullOrEmpty(recorded.GetProperty("traceId").GetString()));
+
         var decision = Store.ReadAudit(Store.AuthorizeExistingCase("case-001")).Last();
         Assert.Equal(TechnicalReviewEndpoints.DecisionAction, decision.Action);
         Assert.Equal("reviewer", decision.Actor);
         Assert.Equal(revision + 1, decision.Revision);
+        Assert.Equal(decision.Sequence, recorded.GetProperty("sequence").GetInt64());
+        Assert.NotEqual(default, decision.At);
         Assert.Contains("Evidence supports release.", decision.Detail);
         Assert.Contains(basis.BasisDigest, decision.Detail);
+        Assert.Contains(recorded.GetProperty("traceId").GetString()!, decision.Detail);
         Assert.DoesNotContain(EvidenceText, decision.Detail);
+    }
+
+    [Fact]
+    public async Task Forged_role_actor_and_case_fields_from_non_reviewer_are_denied_without_mutation()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var presenter = await SignInAsync("presenter", ct);
+        var revision = Revision("case-001");
+        var basis = CurrentBasis("case-001");
+
+        using var response = await DecideAsync(presenter, "case-001", new
+        {
+            expectedRevision = revision,
+            decision = "accept",
+            reason = "Evidence supports release.",
+            basisVersion = basis.Version,
+            basisDigest = basis.BasisDigest,
+            role = CaseEndpoints.ReviewerRole,
+            actor = "reviewer",
+            caseId = "case-002",
+        }, ct);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(revision, Revision("case-001"));
+        Assert.Equal(0, DecisionCount("case-001"));
+        Assert.Equal(0, DecisionCount("case-002"));
+    }
+
+    [Fact]
+    public async Task Forged_actor_and_case_fields_from_reviewer_are_ignored()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var reviewer = await SignInAsync("reviewer", ct);
+        var revision = Revision("case-001");
+        var basis = CurrentBasis("case-001");
+        var otherRevision = Revision("case-002");
+
+        using var response = await DecideAsync(reviewer, "case-001", new
+        {
+            expectedRevision = revision,
+            decision = "accept",
+            reason = "Evidence supports release.",
+            basisVersion = basis.Version,
+            basisDigest = basis.BasisDigest,
+            actor = "presenter",
+            reviewerId = "presenter",
+            role = "presenter",
+            caseId = "case-002",
+        }, ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var decision = Store.ReadAudit(Store.AuthorizeExistingCase("case-001")).Last();
+        Assert.Equal("reviewer", decision.Actor);
+        Assert.Equal(otherRevision, Revision("case-002"));
+        Assert.Equal(0, DecisionCount("case-002"));
     }
 
     [Fact]

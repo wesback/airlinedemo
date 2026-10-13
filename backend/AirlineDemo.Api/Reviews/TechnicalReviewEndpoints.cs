@@ -91,7 +91,7 @@ public static class TechnicalReviewEndpoints
                 reason,
                 latest.Version,
                 latest.BasisDigest,
-                Activity.Current?.TraceId.ToString()));
+                Activity.Current?.TraceId.ToString() ?? http.TraceIdentifier));
             var result = cases.Commit(scope, body.ExpectedRevision, new CaseCommit(null, null, session.User.Id, DecisionAction, detail));
             return Results.Ok(Project(result.State));
         }
