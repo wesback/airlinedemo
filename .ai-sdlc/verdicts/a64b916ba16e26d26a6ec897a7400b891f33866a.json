@@ -1,0 +1,334 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 149,
+  "branch": "ai-sdlc/issue-149",
+  "commitSha": "a64b916ba16e26d26a6ec897a7400b891f33866a",
+  "round": 2,
+  "pipelineVersion": "f9929ba",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds redaction and telemetry helpers, identity configuration, and alert rules, but raw identifier-shaped content can still reach telemetry. SQL grants are not applied, telemetry helpers are not connected to application events, and the grant-scope regression test does not detect a widened scope.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 88,
+          "message": "Allowlisted identifier-shaped values can carry raw content through redaction. Validate these fields against defined identifiers or redact untrusted values before emission.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Redact returns any allowed value unchanged when it matches IdentifierPattern. InvestigationTrace passes citation IDs, model deployment, and other caller-provided values through that check.",
+            "failureScenario": "A caller supplies `CANARY-DOC-9b21` as a citation ID. It matches the identifier pattern and is emitted unchanged, exposing canary content in telemetry despite M-07. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 55,
+          "message": "The SQL grants are only exported as text and are never applied to the app identity.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Terraform exports SQL grant statements as an output, but this diff adds no resource, migration step, or deployment hook that executes them.",
+            "failureScenario": "Applying this Terraform configuration without a separate manual grant step leaves the app identity without the required SQL permissions, so required SQL operations are denied."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 145,
+          "message": "The new trace and security event helpers are not connected to application event paths, leaving M-08 correlation and M-15 alert signals inactive.",
+          "confidence": 0.89,
+          "category": "design",
+          "evidence": {
+            "codePathTraced": "EmitInvestigationTrace and EmitSecurityEvent provide logging helpers, but the diff adds no calls from investigation completion or auth, integrity, and budget failure paths.",
+            "failureScenario": "An investigation completes or a security failure occurs through the application; no changed application path calls these helpers, so the trace or event never reaches AppTraces and the corresponding alert cannot fire."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 60,
+          "message": "The M-14 test does not detect an overly broad role assignment scope.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-14 assertions check role names and the evidence container name, but do not assert the role assignment scope.",
+            "failureScenario": "If the evidence role assignment keeps its role but is widened from the evidence container to the storage account, the test still passes despite the acceptance criterion requiring it to fail when a grant widens."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds useful redaction and telemetry helpers, but short identifier-shaped content can still pass through, and neither investigation traces nor security events are connected to application execution paths. SQL grants are exported rather than applied, and the alert-routing test does not enforce the configured owner.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 76,
+          "message": "M-07 can leak raw content when it is a short identifier-shaped value under an allowlisted key.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Redact retains allowlisted values that match IdentifierPattern. That pattern accepts short strings of letters, digits, and hyphens without checking whether they contain raw content.",
+            "failureScenario": "A caller passes `CANARY-PROMPT-7f3a` as `investigation.outcome`; it matches the pattern and is returned unchanged in telemetry, violating M-07. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 127,
+          "message": "The investigation trace emitter is not connected to an investigation path, so real investigations do not produce the required correlated trace.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff defines EmitInvestigationTrace, but adds no call from an investigation execution path; the test constructs a synthetic record and invokes the helper directly.",
+            "failureScenario": "When an investigation runs, no changed application path calls this helper, so the real investigation emits no correlated trace with the required fields. M-08 is not implemented end to end."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 139,
+          "message": "The security event emitter is not connected to the failure paths that the M-15 alerts monitor.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "EmitSecurityEvent can log the configured event names, but the diff adds no call from authentication, integrity, or budget failure paths.",
+            "failureScenario": "An auth/scope failure, integrity failure, or exhausted budget occurs; no changed application path emits the corresponding event, so the alert query has no matching event to count."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 53,
+          "message": "M-14 exports SQL grant statements but does not apply them, leaving the app identity without the required SQL permissions after deployment.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The app SQL permissions are emitted as output strings; this configuration contains no resource or execution step that applies those statements.",
+            "failureScenario": "Terraform is deployed without a separate manual grant step; the app identity has no required SQL grants, so its required SQL operations are denied."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 230,
+          "message": "The M-15 test does not verify that each alert routes to the configured security owner group.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-15 test checks that each alert has one action group, but does not compare that group ID with azurerm_monitor_action_group.security_owner.id.",
+            "failureScenario": "If an alert is changed to route to a different action group, the test still passes although the configured response owner receives no alert."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The redaction helper can preserve identifier-shaped raw content, and the new security event emitter is not connected to failure paths needed by the alert rules.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 75,
+          "message": "M-07 can leak raw content that happens to match the identifier pattern. For example, an allowed field containing `CANARY-DOC-9b21` survives redaction.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Redact keeps allowlisted keys when their values match IdentifierPattern. That pattern accepts arbitrary short strings containing letters, digits, and punctuation, including content shaped like an identifier.",
+            "failureScenario": "A caller passes a single-token prompt or document canary such as `CANARY-DOC-9b21` as `investigation.outcome`; Redact preserves it and the caller can emit it to telemetry, violating M-07. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 153,
+          "message": "M-15 alert signals are not connected to application failure paths, so the configured alerts can remain silent when security failures occur.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "EmitSecurityEvent logs an event only when called. The diff defines this helper but adds no call from an authentication, integrity, or budget failure path; Terraform alert queries depend on these event names.",
+            "failureScenario": "When an auth/scope failure, integrity failure, or exhausted budget occurs through the application, no matching event is emitted by the changed code, so the alert query has no event to count and the configured owner receives no alert. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 100,
+      "total": 101,
+      "percent": 99,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 100,
+          "total": 101,
+          "missed": [
+            164
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

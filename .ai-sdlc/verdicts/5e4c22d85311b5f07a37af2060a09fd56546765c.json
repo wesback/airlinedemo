@@ -1,0 +1,250 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 160,
+  "branch": "ai-sdlc/issue-160",
+  "commitSha": "5e4c22d85311b5f07a37af2060a09fd56546765c",
+  "round": 2,
+  "pipelineVersion": "9266dd9",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 1,
+        "suggestion": 0
+      },
+      "summary": "The reset endpoint checks session and run ownership, and the tests cover reset isolation, audit preservation, evaluator isolation, and fallback metadata. An existing target run ID still escapes as an unhandled exception at the API boundary.",
+      "findingList": [
+        {
+          "severity": "minor",
+          "file": "backend/AirlineDemo.Api/Runs/DemoRunResetEndpoints.cs",
+          "line": 24,
+          "message": "Handle an existing new run ID at the endpoint so an ID collision returns a controlled client error instead of an unhandled server error.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The endpoint calls reset.Reset, which calls CaseStateStore.CreateCase. The tests show that CreateCase throws InvalidOperationException when the requested new run ID already exists; the endpoint catches CaseAccessDeniedException and DemoRunResetException but not InvalidOperationException.",
+            "failureScenario": "If a client retries with a newRunId that another run already uses, the request reaches CreateCase and the endpoint returns an unhandled server error instead of a conflict response."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Reset isolation and preservation are covered by the tests. The fallback tests exercise a standalone helper, but the application reset path never uses it or returns fallback metadata.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Runs/DemoRunReset.cs",
+          "line": 17,
+          "message": "Fallback metadata validation is not connected to the reset flow, so the required traceable fallback is never recorded or enforced.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The reset endpoint calls Reset, which creates a new CaseState and returns it. ResolveFallback is not called by Reset or any other changed application path, and the reset result contains no fallback metadata.",
+            "failureScenario": "When the demo uses the reset flow, it can return a new run without recording a reproducible fixture or application version; missing version metadata therefore cannot block fallback selection through this flow, despite the standalone helper test passing."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No reachable security vulnerability is evident in the changed code. The reset endpoint requires an authenticated session, validates anti-forgery, checks the selected run’s session scope, and the reset service verifies ownership before creating a new run.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 1,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DemoRunResetTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 29,
+      "total": 44,
+      "percent": 65.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/DemoRunReset.cs",
+          "covered": 21,
+          "total": 21,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/DemoRunResetEndpoints.cs",
+          "covered": 4,
+          "total": 19,
+          "missed": [
+            6,
+            17,
+            18,
+            19,
+            20,
+            21,
+            24,
+            25,
+            27,
+            28,
+            29,
+            31,
+            32,
+            33,
+            35
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 6,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -1,0 +1,316 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 149,
+  "branch": "ai-sdlc/issue-149",
+  "commitSha": "2a53441227ab0ccbb266776326aed48665bdcb9c",
+  "round": 5,
+  "pipelineVersion": "f9929ba",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The SQL grant step lacks a demonstrated database-authorized migration identity and can fail during deployment. The Terraform tests also miss the required grant-scope and alert-owner routing regressions, and the logging path is not connected to the provisioned telemetry identity.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 75,
+          "message": "The SQL grant provisioner runs as a migration identity that has no demonstrated SQL data-plane authority. SQL DB Contributor grants Azure management-plane access; it does not authorize these database statements.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The local-exec command connects as the migration managed identity. The migration identity receives SQL DB Contributor at the server scope, but the change does not create a database principal for that identity or grant it SQL data-plane permissions.",
+            "failureScenario": "On a fresh deployment, sqlcmd attempts to run CREATE USER and the app grants as the migration identity. SQL rejects the connection or statements because that identity has no database principal with grant authority, so Terraform apply fails."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 60,
+          "message": "The M-14 test does not detect a widened evidence grant scope.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-14 test checks the evidence role name and container name, but does not assert that app_evidence.scope equals the evidence container resource ID.",
+            "failureScenario": "If app_evidence.scope is widened to the storage account, the existing assertions still pass, despite the acceptance criterion requiring the test to fail when a grant widens."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 245,
+          "message": "The M-15 test does not verify that alerts route to the configured owner group.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-15 assertions check that each alert has one action group and that the configured owner group has the expected email, but do not compare the alert action group ID with security_owner.id.",
+            "failureScenario": "If an alert routes to a different action group, the owner group still exists and each alert still has one action group, so the test passes while the configured owner receives no alert."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 189,
+          "message": "The diagnostics emission path does not use the provisioned workload identity, so the configured identity and telemetry role do not establish authenticated telemetry ingestion.",
+          "confidence": 0.85,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Emit logs through ILogger, while the change only creates an application identity and role assignment; it does not attach that identity to the application host or configure a telemetry exporter to authenticate with it.",
+            "failureScenario": "When the application emits a trace, the logger uses its existing provider and credentials rather than the newly created app identity. With Application Insights local authentication disabled, the emitted trace is not ingested using the specified workload identity."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several identity, telemetry, and alert behaviors, but they miss two explicit regression checks: detecting widened evidence grants and ensuring alerts reach the configured owner.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 105,
+          "message": "M-14's test does not detect a widened evidence grant scope.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-14 assertions check role names and the evidence container name, but do not assert the role assignments' scopes.",
+            "failureScenario": "If app_evidence is widened from the evidence container to the storage account, the assertions still pass, despite M-14 requiring the test to fail when a grant widens."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 263,
+          "message": "M-15's test does not verify that alerts route to the configured owner.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-15 test checks that each alert has one action group and that the configured owner group exists, but does not compare each alert's action group ID with azurerm_monitor_action_group.security_owner.id.",
+            "failureScenario": "If an alert is routed to a different action group, the assertions still pass although the configured owner receives no alert."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable through the changed code. Telemetry values are constrained to allowlisted fields and validated formats, and the security event names are fixed; the Terraform SQL grant statements use a fixed app identity name.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 5,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+      "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 166,
+      "total": 175,
+      "percent": 94.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 31,
+          "total": 36,
+          "missed": [
+            65,
+            66,
+            67,
+            68,
+            69
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "covered": 7,
+          "total": 7,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 128,
+          "total": 132,
+          "missed": [
+            93,
+            94,
+            95,
+            104
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

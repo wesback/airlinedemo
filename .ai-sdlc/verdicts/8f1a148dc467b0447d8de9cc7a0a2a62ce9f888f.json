@@ -1,0 +1,335 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 149,
+  "branch": "ai-sdlc/issue-149",
+  "commitSha": "8f1a148dc467b0447d8de9cc7a0a2a62ce9f888f",
+  "round": 1,
+  "pipelineVersion": "f9929ba",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The SQL grant script gives the app broader operational access than the issue specifies. The budget alert also counts locked sign-in attempts as exhausted investigation or model budgets.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 47,
+          "message": "The app's operational SQL grants cover all of dbo instead of only the case tables specified in the issue.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The operational SQL grants target SCHEMA::dbo, which covers every table in that schema; the issue's scope notes limit these permissions to case tables.",
+            "failureScenario": "If dbo contains tables beyond the case tables, the app identity can SELECT, INSERT, and UPDATE those unrelated tables after the migration applies the exported script. This exceeds the specified least privilege. OWASP A01:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "line": 49,
+          "message": "The budget exhaustion alert signal is emitted for passcode throttling, so repeated sign-in failures can trigger an investigation/model budget alert.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When PasscodeThrottle reports a locked sign-in source, SignIn emits the security.budget_exhausted event. The Terraform alert for that event is described as tracking exhausted investigation or model budgets.",
+            "failureScenario": "After repeated failed sign-ins, further requests from the locked source emit enough budget_exhausted events to trigger the budget alert, even though no investigation or model budget was exhausted. This misreports the alert signal. OWASP A09:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds criterion-linked tests for trace emission, identity scopes, and alert routing. However, the SQL permissions extend beyond the specified case tables, and telemetry emission can expose an unvalidated environment value.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 48,
+          "message": "The app SQL grants cover all dbo tables, rather than only the case tables specified in the scope notes.",
+          "confidence": 0.89,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The migration step runs the exported statements, which grant SELECT, INSERT, and UPDATE on the entire dbo schema.",
+            "failureScenario": "If dbo contains a table outside the case tables, the app identity can read or modify it despite the scope note limiting these grants to case tables. This exceeds least privilege. OWASP A01:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 204,
+          "message": "Resource attributes bypass value validation, allowing an untrusted or malformed deployment environment value to appear in telemetry.",
+          "confidence": 0.85,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "InvestigationTrace and EmitSecurityEvent add ResourceAttributes directly; ResourceAttributes copies the environment string without applying Redact or its value rules.",
+            "failureScenario": "When Telemetry:Environment is set to a canary such as CANARY-DOC-9b21, a real review trace or security event emits it unchanged as deployment.environment. OWASP A09:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The app identity receives SELECT, INSERT, and UPDATE across the entire dbo schema, broader than the specified case-table permissions.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 49,
+          "message": "The app SQL grants cover all dbo tables instead of only case tables, violating least privilege (OWASP A01:2025).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The operational SQL grant list is applied to the entire dbo schema, which includes every table in that schema, rather than only the case tables specified in the issue's scope notes.",
+            "failureScenario": "If the app identity is compromised, it can read and modify unrelated dbo tables as well as case data. This grants broader access than required. OWASP A01:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 5,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+      "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 166,
+      "total": 175,
+      "percent": 94.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 31,
+          "total": 36,
+          "missed": [
+            65,
+            66,
+            67,
+            68,
+            69
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "covered": 7,
+          "total": 7,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 128,
+          "total": 132,
+          "missed": [
+            93,
+            94,
+            95,
+            104
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

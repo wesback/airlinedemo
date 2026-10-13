@@ -1,0 +1,314 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 149,
+  "branch": "ai-sdlc/issue-149",
+  "commitSha": "b34cec4085daf56abc91c86a7fe47be3d042f2b1",
+  "round": 1,
+  "pipelineVersion": "f9929ba",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change declares SQL permissions without applying them and adds telemetry helpers and alert rules without wiring application events into telemetry. The identity test also does not enforce the required grant scope and principal.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 40,
+          "message": "M-14 declares SQL privileges but does not grant them to the app identity. The plan test checks the local values, not effective SQL permissions.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The app_sql_grants local only declares SQL privileges; it is not applied to the app identity. The comment says grants are handled elsewhere, but this diff adds no SQL grant resource or migration step.",
+            "failureScenario": "Deploying this Terraform configuration without a separate grant step leaves the app identity without the required SQL access, so its required SQL operations are denied."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 89,
+          "message": "The new trace helper and security event names are not wired to telemetry emission, leaving M-08 trace correlation and M-15 alert signals inactive.",
+          "confidence": 0.93,
+          "category": "design",
+          "evidence": {
+            "codePathTraced": "InvestigationTrace returns an attribute dictionary, but the diff adds no call site that emits it to telemetry. The alert rules query AppTraces for security event names, while the new code only declares those names and does not emit them.",
+            "failureScenario": "When an investigation completes or a security failure occurs, no correlated trace or matching security event reaches AppTraces; the investigation cannot be correlated and the configured alert remains silent. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 75,
+          "message": "The M-14 test does not verify assignment scope or principal, so it will not catch widened grants or grants attached to the wrong identity.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-14 assertions check role names and the evidence container name, but do not assert the role assignments' scope or principal_id.",
+            "failureScenario": "If the evidence role assignment is widened to the storage account or attached to another principal, the current assertions still pass, despite the acceptance criterion requiring the test to fail when a grant widens."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 6,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds useful redaction and Terraform helpers, but raw content can pass through allowlisted fields, the investigation trace and security events are not connected to application telemetry, and the SQL grants are not applied. The Terraform tests also miss the required grant-scope and alert-routing regressions.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 67,
+          "message": "M-07 can leak raw prompt or document content through allowlisted telemetry fields.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Redact keeps allowlisted keys and sends their values to Sanitize. Sanitize removes recognized secrets, emails, and control characters, but leaves ordinary text unchanged.",
+            "failureScenario": "A caller passes a raw prompt or document canary as investigation.decision or investigation.outcome; Redact returns the canary in telemetry. This violates M-07. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 86,
+          "message": "The investigation trace helper is not connected to an investigation or telemetry emission path.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "InvestigationTrace builds correlated attributes, but the diff adds no application telemetry emission that calls this helper.",
+            "failureScenario": "When an investigation runs through the existing application path, this method is never called, so no real investigation trace contains the required correlation fields. M-08 is not implemented."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 47,
+          "message": "M-14's SQL permissions are only declared as unused local values, so this change does not provision or enforce the app identity's required SQL access.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The app SQL permissions are represented only by local.app_sql_grants, and no resource or migration grant in this diff applies them to the app identity.",
+            "failureScenario": "After deploying this configuration without an external grant step, the app identity has no configured SQL permissions for required operations. The local values do not grant access or enforce the audit-table restrictions required by M-14."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/identity-and-telemetry.tf",
+          "line": 111,
+          "message": "M-15 alerts watch security event names that this change never emits.",
+          "confidence": 0.93,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The scheduled queries count AppTraces with event.name values declared in the security_alerts local, but the diff adds no application code that emits those events.",
+            "failureScenario": "When an auth/scope failure, integrity failure, or exhausted budget occurs, no matching event is emitted through the changed application code; the query has no matching trace to count and the alert does not trigger. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 77,
+          "message": "The M-14 test does not detect widened grant scopes or assignments to the wrong identity.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-14 assertions check role names and the evidence container name, but do not compare role assignment scopes or principal IDs to the app identity and evidence container.",
+            "failureScenario": "If app_evidence is widened to the storage account scope or assigned to a different principal, the current assertions still pass. The acceptance criterion requires the test to fail if a grant widens."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 126,
+          "message": "The M-15 test does not verify that each alert routes to the configured owner action group.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The alert test checks that each rule has one action block and that the security owner group has the expected email, but does not assert that each rule references that group.",
+            "failureScenario": "If a rule's action_groups is changed to another group, the owner group still exists and each rule still has one action block, so the test passes even though alerts no longer reach the configured owner."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The trace helper allows arbitrary decision text into telemetry, where the sanitizer does not remove ordinary prompt or document content. This violates the requirement to keep raw content out of diagnostics.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 94,
+          "message": "The investigation trace can emit raw business content through the decision field. Constrain it to defined decision identifiers or otherwise prevent free-text values from reaching telemetry.",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "InvestigationTrace places trace.Decision in the allowlisted investigation.decision attribute. Redact passes allowed values to Sanitize, which only removes recognized secret patterns, emails, and control characters; it does not remove ordinary text.",
+            "failureScenario": "If an investigation supplies raw prompt or document text as its decision value, that text is emitted unchanged in telemetry. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 72,
+      "total": 72,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 72,
+          "total": 72,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

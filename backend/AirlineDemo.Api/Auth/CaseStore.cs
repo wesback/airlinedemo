@@ -4,7 +4,7 @@ public sealed record CaseRecord(string Id, int Revision, string Status);
 
 public enum ReviewOutcome { Recorded, NotFound, Stale }
 
-public sealed class CaseStore
+public class CaseStore
 {
     private readonly Lock _gate = new();
     private readonly Dictionary<string, CaseRecord> _cases = new()
@@ -19,7 +19,7 @@ public sealed class CaseStore
         lock (_gate) return _cases.GetValueOrDefault(id);
     }
 
-    public ReviewOutcome RecordReview(string id, int expectedRevision, string decision, out CaseRecord? updated)
+    public virtual ReviewOutcome RecordReview(string id, int expectedRevision, string decision, out CaseRecord? updated)
     {
         lock (_gate)
         {

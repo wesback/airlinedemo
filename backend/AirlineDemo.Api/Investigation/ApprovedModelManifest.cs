@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AirlineDemo.Api.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Investigation;
 
@@ -327,5 +329,26 @@ public static class ModelCallGate
         }
 
         return requests.Select(request => Authorize(manifest, request, registry)).ToList();
+    }
+
+    /// <summary>A scored run over the call budget emits the budget security event and is refused before any model call.</summary>
+    public static IReadOnlyList<ModelCallTrace> AuthorizeScoredRunWithinBudget(
+        ApprovedModelManifest manifest,
+        IReadOnlyList<ModelRequest> requests,
+        SyntheticContentRegistry registry,
+        int maxModelCalls,
+        ILogger logger,
+        string serviceVersion,
+        string environment)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (requests.Count > maxModelCalls)
+        {
+            TelemetryRedaction.EmitSecurityEvent(logger, TelemetryRedaction.SecurityEvents.BudgetExhausted, serviceVersion, environment);
+            throw new ModelGateException("scored run refused: model call budget exhausted");
+        }
+
+        return AuthorizeScoredRun(manifest, requests, registry);
     }
 }

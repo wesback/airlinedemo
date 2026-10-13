@@ -1,0 +1,248 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 151,
+  "branch": "ai-sdlc/issue-151",
+  "commitSha": "68ddc83849a3fef2250537d148538fa251954da0",
+  "round": 3,
+  "pipelineVersion": "5401b35",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow does not ensure product-owner approval when the environment lists other reviewers, and it does not configure the trust needed for Notation to verify the signing certificate.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 47,
+          "message": "The preflight accepts an environment with additional required reviewers, even though any one listed reviewer can approve. Require configuration that ensures the product owner must approve.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The preflight only checks that the product owner appears among the environment's required reviewers. GitHub can let any one listed reviewer approve an environment, so this check does not require the product owner to approve.",
+            "failureScenario": "If production-release lists the product owner and another reviewer, that other reviewer can approve the release and let it deploy without product-owner approval, violating M-12. This is OWASP A01:2025 Broken Access Control."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 203,
+          "message": "Configure Notation's trust policy and trusted certificate before verification; otherwise the fresh-runner release cannot verify the signing certificate.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The release job installs Notation and the Azure Key Vault plugin, then calls `notation verify`, but does not configure a Notation trust policy or trust store on the fresh hosted runner.",
+            "failureScenario": "On a fresh runner without trust policy and trusted certificate configuration, Notation cannot establish that the signing certificate is trusted, so verification fails and the release cannot deploy."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The signature verification test checks for the command and its order, but can still pass when verification failures are ignored. That leaves the required rejection of unsigned images untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SignedReleaseWorkflowTests.cs",
+          "line": 80,
+          "message": "The signature verification test does not verify fail-closed behavior. Assert that a failed `notation verify` prevents deployment, so the test catches an ignored verification failure.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Deploy_is_gated_by_signature_and_digest_verification checks that the workflow contains `notation verify` and that verification appears before deployment, but it does not check that a verification failure stops the job.",
+            "failureScenario": "If the workflow changes to `notation verify ... || true`, this test still passes and deployment can proceed after an unsigned image fails verification, violating the acceptance criterion that unsigned images are rejected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The release preflight does not guarantee product-owner approval when the environment lists additional reviewers.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 41,
+          "message": "The preflight only checks that the product owner is among the required reviewers. Restrict the approval rule to the product owner or otherwise ensure only the product owner can approve.",
+          "confidence": 0.95,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The preflight passes when the required-reviewer list contains the product owner, but does not reject additional reviewers. GitHub allows any one reviewer in that list to approve the environment.",
+            "failureScenario": "If the environment lists both the product owner and another user or team, that other reviewer can approve the release and let deployment proceed without product-owner approval, violating M-12. OWASP A01:2025 — Broken Access Control."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 2,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/release.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SignedReleaseWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
