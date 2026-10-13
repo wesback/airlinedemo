@@ -124,6 +124,8 @@ public static class ModelCallGate
         new(@"(?i)\bbearer\s+[A-Za-z0-9._\-]+", RegexOptions.Compiled),
         new(@"(?i)AccountKey=|SharedAccessSignature=|\bsk-[A-Za-z0-9]{8,}", RegexOptions.Compiled),
         new(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", RegexOptions.Compiled),
+        new(@"(?<!\d)(\+\d{7,15}|\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4})(?!\d)", RegexOptions.Compiled),
+        new(@"\bN\d{1,5}[A-Z]{0,2}\b", RegexOptions.Compiled),
     ];
 
     /// <summary>Throws unless the manifest is usable and the request is allowed; returns the trace to record.</summary>

@@ -144,9 +144,18 @@ public class ApprovedModelManifestTests
     [InlineData("Authorization Bearer eyJhbGciOi")]
     [InlineData("AccountKey=Zm9vYmFy")]
     [InlineData("passenger jane.doe@example.com booked seat 12A")]
+    [InlineData("call the passenger on +447700900123")]
+    [InlineData("passenger phone 555-867-5309 on file")]
+    [InlineData("aircraft N123AB returned to gate")]
     public void Synthetic_request_containing_credentials_or_identifiers_is_refused(string content)
     {
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), Synthetic(content)));
+    }
+
+    [Fact]
+    public void Empty_manifest_document_is_refused_explicitly()
+    {
+        Assert.Throws<ModelGateException>(() => ApprovedModelManifest.Parse("null"));
     }
 
     [Fact]
@@ -160,10 +169,12 @@ public class ApprovedModelManifestTests
     [Fact]
     public void Non_synthetic_content_in_approved_region_is_still_scanned_for_identifiers()
     {
-        var inRegion = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "EASTUS2", "Aircraft N123 record.");
+        var inRegion = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "EASTUS2", "Aircraft record v1.");
         var withEmail = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "eastus2", "Contact jane.doe@example.com");
+        var withTailNumber = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "eastus2", "Aircraft N123 record.");
 
         Assert.Equal("evidence-v1", ModelCallGate.Authorize(Approved(), inRegion).EvidenceVersion);
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), withEmail));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), withTailNumber));
     }
 }
