@@ -108,6 +108,22 @@ public sealed class CaseStateStore
         }
     }
 
+    /// <summary>
+    /// Issues a scope for an existing case. Callers must first check the actor's case scope; this only proves the case exists.
+    /// </summary>
+    public CaseScope AuthorizeExistingCase(string caseId)
+    {
+        lock (_gate)
+        {
+            if (string.IsNullOrEmpty(caseId) || !_cases.ContainsKey(caseId))
+            {
+                throw new CaseAccessDeniedException();
+            }
+
+            return new CaseScope(caseId);
+        }
+    }
+
     public CaseScope CreateCase(string caseId, string owner)
     {
         if (string.IsNullOrWhiteSpace(caseId))
