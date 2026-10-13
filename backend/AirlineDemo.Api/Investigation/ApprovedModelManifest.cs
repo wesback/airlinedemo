@@ -1,0 +1,160 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
+namespace AirlineDemo.Api.Investigation;
+
+public sealed class ModelGateException(string message) : Exception(message);
+
+/// <summary>
+/// Non-secret, versioned model configuration. Ships with STUB values and approved=false, so it is refused until a
+/// reviewer replaces every value and sets approved=true. No deployment identifiers or credentials are guessed.
+/// </summary>
+public sealed record ApprovedModelManifest(
+    string? ManifestVersion,
+    bool Approved,
+    string? Arm,
+    string? DeploymentName,
+    string? Model,
+    string? ApiVersion,
+    string? Region,
+    string? ContentFilter)
+{
+    public const string StubMarker = "STUB";
+    public const string LiveArm = "investigation-live";
+    public const string EnabledContentFilter = "enabled";
+
+    private static readonly string[] SupportedArms = [LiveArm];
+
+    public static ApprovedModelManifest Parse(string json)
+    {
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            return JsonSerializer.Deserialize<ApprovedModelManifest>(json, options)
+                ?? throw new ModelGateException("model manifest is empty");
+        }
+        catch (JsonException ex)
+        {
+            throw new ModelGateException($"model manifest is not valid JSON: {ex.Message}");
+        }
+    }
+
+    public static ApprovedModelManifest Load(string path) => Parse(File.ReadAllText(path));
+
+    public IReadOnlyList<string> Validate()
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(ManifestVersion))
+        {
+            errors.Add("manifestVersion is missing");
+        }
+
+        if (!Approved)
+        {
+            errors.Add("manifest is not approved");
+        }
+
+        foreach (var (name, value) in Values())
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                errors.Add($"{name} is missing");
+            }
+            else if (value.Contains(StubMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add($"{name} is still a stub value");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(Arm) && !SupportedArms.Contains(Arm))
+        {
+            errors.Add($"arm '{Arm}' is not supported");
+        }
+
+        if (!string.IsNullOrWhiteSpace(ContentFilter) && ContentFilter != EnabledContentFilter)
+        {
+            errors.Add($"contentFilter must be '{EnabledContentFilter}'");
+        }
+
+        return errors;
+    }
+
+    /// <summary>Returns this manifest when usable; otherwise throws, listing every refusal reason.</summary>
+    public ApprovedModelManifest RequireUsable()
+    {
+        var errors = Validate();
+        if (errors.Count > 0)
+        {
+            throw new ModelGateException("model manifest refused: " + string.Join("; ", errors));
+        }
+
+        return this;
+    }
+
+    private IEnumerable<(string Name, string? Value)> Values() =>
+    [
+        ("arm", Arm),
+        ("deploymentName", DeploymentName),
+        ("model", Model),
+        ("apiVersion", ApiVersion),
+        ("region", Region),
+        ("contentFilter", ContentFilter),
+    ];
+}
+
+/// <summary>Model input. Only versioned evidence is allowed; no raw prompts are stored in traces.</summary>
+public sealed record ModelRequest(string? EvidenceVersion, bool IsSynthetic, string? DataRegion, string Content);
+
+/// <summary>Trace of an authorized call. Carries the manifest version and settings only, never prompt or document text.</summary>
+public sealed record ModelCallTrace(
+    string ManifestVersion,
+    string Arm,
+    string DeploymentName,
+    string Model,
+    string ApiVersion,
+    string Region,
+    string ContentFilter,
+    string EvidenceVersion);
+
+public static class ModelCallGate
+{
+    private static readonly Regex[] CredentialOrIdentifierPatterns =
+    [
+        new(@"(?i)\b(api[-_]?key|password|secret|token|authorization)\s*[:=]", RegexOptions.Compiled),
+        new(@"(?i)\bbearer\s+[A-Za-z0-9._\-]+", RegexOptions.Compiled),
+        new(@"(?i)AccountKey=|SharedAccessSignature=|\bsk-[A-Za-z0-9]{8,}", RegexOptions.Compiled),
+        new(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", RegexOptions.Compiled),
+    ];
+
+    /// <summary>Throws unless the manifest is usable and the request is allowed; returns the trace to record.</summary>
+    public static ModelCallTrace Authorize(ApprovedModelManifest manifest, ModelRequest request)
+    {
+        manifest.RequireUsable();
+
+        if (string.IsNullOrWhiteSpace(request.EvidenceVersion))
+        {
+            throw new ModelGateException("model request refused: no versioned evidence");
+        }
+
+        if (!request.IsSynthetic &&
+            !string.Equals(request.DataRegion, manifest.Region, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ModelGateException("model request refused: non-synthetic content outside the approved region");
+        }
+
+        if (CredentialOrIdentifierPatterns.Any(p => p.IsMatch(request.Content)))
+        {
+            throw new ModelGateException("model request refused: content contains a credential or personal identifier");
+        }
+
+        return new ModelCallTrace(
+            manifest.ManifestVersion!,
+            manifest.Arm!,
+            manifest.DeploymentName!,
+            manifest.Model!,
+            manifest.ApiVersion!,
+            manifest.Region!,
+            manifest.ContentFilter!,
+            request.EvidenceVersion);
+    }
+}
