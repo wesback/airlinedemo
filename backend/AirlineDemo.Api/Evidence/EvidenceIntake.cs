@@ -12,6 +12,9 @@ public static class EvidenceLimits
     public const long MaxDocumentBytes = 10L * 1024 * 1024;
     public const long MaxPackageBytes = 50L * 1024 * 1024;
     public const int MaxPagesPerDocument = 200;
+
+    // Bounds the decoded text produced per document, so compressed content cannot expand without limit.
+    public const int MaxExtractedCharactersPerDocument = 1_000_000;
 }
 
 public enum EvidenceFailureKind
@@ -158,7 +161,7 @@ public static class EvidenceIntake
     private static void RejectActiveContent(string name, PdfDocument pdf)
     {
         var catalog = pdf.Structure.Catalog.CatalogDictionary.Data;
-        foreach (var key in new[] { "OpenAction", "AA", "AcroForm" })
+        foreach (var key in new[] { "OpenAction", "AA", "AcroForm", "AF" })
         {
             if (catalog.ContainsKey(key))
             {
@@ -166,8 +169,10 @@ public static class EvidenceIntake
             }
         }
 
-        // Name tree entries for JavaScript and embedded files live under the catalog's /Names dictionary.
-        if (catalog.TryGetValue("Names", out var names) && names is DictionaryToken nameTree)
+        // Name tree entries for JavaScript and embedded files live under the catalog's /Names dictionary,
+        // which may itself be an indirect reference.
+        if (catalog.TryGetValue("Names", out var names)
+            && Resolve(pdf, names) is DictionaryToken nameTree)
         {
             foreach (var key in new[] { "JavaScript", "EmbeddedFiles" })
             {
@@ -262,6 +267,11 @@ public static class EvidenceIntake
             for (var page = 1; page <= pages; page++)
             {
                 var pdfPage = pdf.GetPage(page);
+                if (pdfPage.Dictionary.Data.ContainsKey("AF"))
+                {
+                    throw ActiveContentFailure(document.Name, $"/AF on page {page}");
+                }
+
                 RejectAnnotationContent(document.Name, pdf, pdfPage);
                 // Decoded content streams expose inline images even when compressed; reject them as image payloads.
                 if (pdfPage.GetImages().Any())
@@ -273,6 +283,13 @@ public static class EvidenceIntake
                 }
 
                 text.AppendLine(pdfPage.Text);
+                if (text.Length > EvidenceLimits.MaxExtractedCharactersPerDocument)
+                {
+                    throw new EvidenceIntakeException(
+                        $"Document '{document.Name}' extracts more than {EvidenceLimits.MaxExtractedCharactersPerDocument} characters; it is rejected.",
+                        EvidenceFailureKind.LimitExceeded,
+                        true);
+                }
             }
 
             if (string.IsNullOrWhiteSpace(text.ToString()))

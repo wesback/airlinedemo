@@ -16,12 +16,12 @@ public sealed class EvidenceIntakeTests
     private const string SyntheticContent = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
 
     // asciiHex encodes each content stream with ASCIIHexDecode so raw bytes hide its operators.
-    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "", string pageExtra = "")
+    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "", string pageExtra = "", string extraObject = "")
     {
         var pad = 0;
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra, pageExtra);
+            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra, pageExtra, extraObject);
             if (padToBytes == 0 || bytes.LongLength == padToBytes)
             {
                 return bytes;
@@ -33,7 +33,7 @@ public sealed class EvidenceIntakeTests
         throw new InvalidOperationException("Could not pad the synthetic PDF to the requested size.");
     }
 
-    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra, string pageExtra)
+    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra, string pageExtra, string extraObject)
     {
         var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{4 + (2 * i)} 0 R"));
         var objects = new List<string>
@@ -48,6 +48,11 @@ public sealed class EvidenceIntakeTests
             var body = asciiHex ? Convert.ToHexString(Encoding.ASCII.GetBytes(content)) + ">" : content;
             var filter = asciiHex ? " /Filter /ASCIIHexDecode" : string.Empty;
             objects.Add($"<< /Length {body.Length}{filter} >>\nstream\n{body}\nendstream");
+        }
+
+        if (extraObject.Length > 0)
+        {
+            objects.Add(extraObject);
         }
 
         var sb = new StringBuilder("%PDF-1.4\n");
@@ -215,6 +220,49 @@ public sealed class EvidenceIntakeTests
     public void DocumentOverPageLimitIsRejected()
     {
         var result = EvidenceIntake.Process([new("long.pdf", PdfWithPages(EvidenceLimits.MaxPagesPerDocument + 1))]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: an associated file on the catalog or a page is rejected, even when the page has no annotations.
+    [Theory]
+    [InlineData("/AF [] ", "")]
+    [InlineData("", "/AF [] ")]
+    public void AssociatedFileIsRejectedOnCatalogOrPage(string catalogExtra, string pageExtra)
+    {
+        var result = EvidenceIntake.Process([new("assoc.pdf", PdfWithPages(1, catalogExtra: catalogExtra, pageExtra: pageExtra))]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: an indirect /Names dictionary is resolved, so an embedded-files name tree behind it is rejected.
+    [Fact]
+    public void EmbeddedFilesBehindIndirectNamesIsRejected()
+    {
+        var pdf = PdfWithPages(1, catalogExtra: "/Names 6 0 R ", extraObject: "<< /EmbeddedFiles << /Names [(a.txt) 7 0 R] >> >>");
+
+        var result = EvidenceIntake.Process([new("indirect-names.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: decoded text is capped, so a small compressed-looking stream cannot expand without bound.
+    [Fact]
+    public void ExpandedTextOverCharacterLimitIsRejectedRetryably()
+    {
+        var showText = string.Concat(Enumerable.Repeat("(" + new string('a', 100) + ") Tj ", 20_000));
+        var pdf = PdfWithPages(1, content: "BT /F1 12 Tf 72 720 Td " + showText + " ET", asciiHex: true);
+
+        var result = EvidenceIntake.Process([new("expanded.pdf", pdf)]);
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
