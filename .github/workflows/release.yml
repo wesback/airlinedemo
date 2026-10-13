@@ -56,7 +56,8 @@ jobs:
 
   release:
     needs: preflight
-    runs-on: ubuntu-latest
+    # Hosted runners cannot reach the private-only ACR endpoint; release runs on a runner inside the private network.
+    runs-on: [self-hosted, linux, x64, private-acr]
     timeout-minutes: 30
     # GitHub holds every job until the environment's required reviewers (product owner) approve.
     # The preflight job above verifies that rule is configured on production-release (see docs/prd/aircraft-return-readiness.md).
@@ -181,17 +182,17 @@ jobs:
           test -s artifacts/signature/notation-inspect.txt
           # Export the COSE signature from the registry's OCI referrers API (Notation signatures are referrers of the digest).
           token="$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)"
-          index="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.index.v1+json" \
+          index="$(curl -fsSL -u "00000000-0000-0000-0000-000000000000:$token" -H "Accept: application/vnd.oci.image.index.v1+json" \
             "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/referrers/$IMAGE_DIGEST?artifactType=application/vnd.cncf.notary.signature")"
           sig_manifest_digest="$(jq -r '[.manifests[]? | select(.artifactType == "application/vnd.cncf.notary.signature")][0].digest // empty' <<<"$index")"
           if [[ -z "$sig_manifest_digest" ]]; then
             echo "::error::no Notation signature referrer found for $IMAGE_DIGEST"
             exit 1
           fi
-          sig_manifest="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+          sig_manifest="$(curl -fsSL -u "00000000-0000-0000-0000-000000000000:$token" -H "Accept: application/vnd.oci.image.manifest.v1+json" \
             "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/manifests/$sig_manifest_digest")"
           sig_blob_digest="$(jq -r '.layers[0].digest' <<<"$sig_manifest")"
-          curl -fsSL -H "Authorization: Bearer $token" -o artifacts/signature/signature.cose \
+          curl -fsSL -u "00000000-0000-0000-0000-000000000000:$token" -o artifacts/signature/signature.cose \
             "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/blobs/$sig_blob_digest"
           if [[ "sha256:$(sha256sum artifacts/signature/signature.cose | cut -d' ' -f1)" != "$sig_blob_digest" ]]; then
             echo "::error::exported signature does not match its registry digest $sig_blob_digest"

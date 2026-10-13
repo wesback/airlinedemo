@@ -99,7 +99,7 @@ public sealed class SignedReleaseWorkflowTests
         var verify = StepBody(workflow, "Verify signature and digest");
         var deploy = StepBody(workflow, "Deploy signed digest");
 
-        Assert.Contains("notation verify", verify);
+        Assert.Contains("notation verify \"$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST\"", verify);
         Assert.Contains("digest mismatch", verify);
 
         // Fail closed: the verify step runs with strict shell errors, no step in the workflow may ignore a failure,
@@ -137,6 +137,27 @@ public sealed class SignedReleaseWorkflowTests
         Assert.Contains("private endpoint is required", step);
         Assert.Contains("resolves to public address", step);
         Assert.Contains("10\\.", step);
+    }
+
+    // AC: private registry use. The release job must run on a private-network runner, not a hosted runner.
+    [Fact]
+    public void Release_job_runs_on_private_network_runner()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Contains("needs: preflight\n    # Hosted runners cannot reach the private-only ACR endpoint", workflow);
+        Assert.Contains("runs-on: [self-hosted, linux, x64, private-acr]", workflow);
+        Assert.DoesNotContain("runs-on: ubuntu-latest\n    timeout-minutes: 30", workflow);
+    }
+
+    // AC: the signature export authenticates with the registry token via Basic auth, never as a raw Bearer token.
+    [Fact]
+    public void Signature_export_uses_registry_basic_auth_not_bearer()
+    {
+        var step = StepBody(ReadWorkflow(), "Sign image digest");
+
+        Assert.Contains("-u \"00000000-0000-0000-0000-000000000000:$token\"", step);
+        Assert.DoesNotContain("Bearer", step, StringComparison.OrdinalIgnoreCase);
     }
 
     // AC: SBOM, audit output, and signature retained for 90 days; missing artifacts fail the release.
