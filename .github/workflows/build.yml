@@ -49,7 +49,7 @@ jobs:
       - name: SBOM (.NET)
         run: |
           mkdir -p artifacts/sbom
-          dotnet CycloneDX AirlineDemo.sln -j -fn dotnet-sbom.cdx.json -o artifacts/sbom
+          CycloneDX AirlineDemo.sln -j -fn dotnet-sbom.cdx.json -o artifacts/sbom
           test -s artifacts/sbom/dotnet-sbom.cdx.json
 
       - name: SBOM (npm)
@@ -90,7 +90,7 @@ jobs:
 
       - name: Secret scan
         run: |
-          pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}'
+          pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@"]+:[^/[:space:]@"]+@'
           if git grep -l -I -E "$pattern" -- . ':!frontend/package-lock.json'; then
             echo "::error::Committed credential or connection string found in the files listed above"
             exit 1
@@ -104,13 +104,18 @@ jobs:
           const file = 'docs/security/dependency-audit-exceptions.json';
           const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
           if (!Array.isArray(doc.exceptions)) throw new Error(file + ': exceptions must be an array');
+          const isRealDate = (s) => {
+            if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+            const d = new Date(s + 'T00:00:00Z');
+            return !isNaN(d) && d.toISOString().slice(0, 10) === s;
+          };
           const errors = [];
           doc.exceptions.forEach((e, i) => {
             for (const key of ['package', 'reason', 'expires']) {
               if (typeof e[key] !== 'string' || e[key].trim() === '') errors.push(`exception ${i}: missing ${key}`);
             }
-            if (typeof e.expires !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.expires)) {
-              errors.push(`exception ${e.package}: expires must be YYYY-MM-DD`);
+            if (!isRealDate(e.expires)) {
+              errors.push(`exception ${e.package}: expires must be a real calendar date in YYYY-MM-DD form`);
             } else if (e.expires < today) {
               errors.push(`exception ${e.package}: expired on ${e.expires}`);
             }

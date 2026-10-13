@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace AirlineDemo.Api.Tests;
@@ -42,7 +43,8 @@ public sealed class SupplyChainWorkflowTests
     {
         var step = StepBody(ReadWorkflow(), "SBOM (.NET)");
 
-        Assert.Contains("dotnet CycloneDX", step);
+        Assert.Contains("CycloneDX AirlineDemo.sln", step);
+        Assert.DoesNotContain("dotnet CycloneDX", step);
         Assert.Contains("test -s artifacts/sbom/dotnet-sbom.cdx.json", step);
     }
 
@@ -74,28 +76,130 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("test -s ../artifacts/audit/npm-audit.json", step);
     }
 
+    // M-12: an unexcepted high/critical finding blocks the release candidate.
     [Fact]
-    public void Severity_gate_blocks_unexcepted_high_and_critical_findings()
+    public void M12_gate_blocks_unexcepted_npm_high_finding()
     {
-        var step = StepBody(ReadWorkflow(), "Severity gate");
+        var (exitCode, _) = RunSeverityGate(NoExceptions, NpmAudit("high"), DotnetListing(null));
 
-        Assert.Contains("'high'", step);
-        Assert.Contains("'critical'", step);
-        Assert.Contains("(High|Critical)", step);
-        Assert.Contains("process.exit(1)", step);
-        Assert.Contains(ExceptionsPath, step);
+        Assert.NotEqual(0, exitCode);
     }
 
     [Fact]
-    public void Exception_validation_rejects_missing_expired_or_incomplete_exceptions()
+    public void M12_gate_blocks_unexcepted_npm_critical_finding()
     {
-        var step = StepBody(ReadWorkflow(), "Exception validation");
+        var (exitCode, _) = RunSeverityGate(NoExceptions, NpmAudit("critical"), DotnetListing(null));
 
-        Assert.Contains(ExceptionsPath, step);
-        Assert.Contains("'reason'", step);
-        Assert.Contains("'expires'", step);
-        Assert.Contains("expired on", step);
-        Assert.Contains("process.exit(1)", step);
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
+    public void M12_gate_blocks_unexcepted_dotnet_high_finding()
+    {
+        var (exitCode, _) = RunSeverityGate(NoExceptions, NpmAudit(null), DotnetListing("High"));
+
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
+    public void M12_gate_allows_low_severity_findings_without_exception()
+    {
+        var (exitCode, _) = RunSeverityGate(NoExceptions, NpmAudit("low"), DotnetListing(null));
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public void M12_gate_fails_when_npm_audit_output_reports_an_error()
+    {
+        var (exitCode, _) = RunSeverityGate(NoExceptions, "{\"error\":{\"code\":\"ENOTFOUND\",\"summary\":\"offline\"}}", DotnetListing(null));
+
+        Assert.NotEqual(0, exitCode);
+    }
+
+    // Exceptions: accepted only with a documented reason and a future expiry.
+    [Fact]
+    public void Exception_with_future_expiry_allows_matching_npm_high_finding()
+    {
+        var (exitCode, _) = RunSeverityGate(Exception("pkg-a", FutureDate), NpmAudit("high"), DotnetListing(null));
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public void Expired_exception_does_not_allow_matching_finding()
+    {
+        var (exitCode, _) = RunSeverityGate(Exception("pkg-a", PastDate), NpmAudit("high"), DotnetListing(null));
+
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
+    public void Exception_for_other_package_does_not_allow_finding()
+    {
+        var (exitCode, _) = RunSeverityGate(Exception("other-pkg", FutureDate), NpmAudit("high"), DotnetListing(null));
+
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
+    public void Exception_validation_accepts_complete_exception_with_future_expiry()
+    {
+        var (exitCode, _) = RunExceptionValidation(Exception("pkg-a", FutureDate));
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public void Exception_validation_rejects_impossible_calendar_date()
+    {
+        var (exitCode, output) = RunExceptionValidation(Exception("pkg-a", "2999-02-30"));
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("real calendar date", output);
+    }
+
+    [Fact]
+    public void Exception_validation_rejects_non_date_expiry()
+    {
+        var (exitCode, _) = RunExceptionValidation(Exception("pkg-a", "next-year"));
+
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
+    public void Exception_validation_rejects_expired_exception()
+    {
+        var (exitCode, output) = RunExceptionValidation(Exception("pkg-a", PastDate));
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("expired on", output);
+    }
+
+    [Fact]
+    public void Exception_validation_rejects_missing_reason()
+    {
+        var (exitCode, output) = RunExceptionValidation("{\"exceptions\":[{\"package\":\"pkg-a\",\"expires\":\"" + FutureDate + "\"}]}");
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("missing reason", output);
+    }
+
+    [Fact]
+    public void Exception_validation_rejects_missing_expiry()
+    {
+        var (exitCode, output) = RunExceptionValidation("{\"exceptions\":[{\"package\":\"pkg-a\",\"reason\":\"Tracked in ADR-7\"}]}");
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("real calendar date", output);
+    }
+
+    [Fact]
+    public void Exception_validation_rejects_non_array_exceptions()
+    {
+        var (exitCode, _) = RunExceptionValidation("{\"exceptions\":{}}");
+
+        Assert.NotEqual(0, exitCode);
     }
 
     [Fact]
@@ -129,6 +233,138 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("AccountKey", step);
         Assert.Contains("Server=", step);
         Assert.Contains("exit 1", step);
+    }
+
+    // M-14: committed credentials, including URI-form connection strings, fail the secret scan.
+    // Credential fixtures are split so this file never contains a full credential that the secret scan would flag.
+    [Theory]
+    [InlineData("postgres://" + "admin:s3cret-pass@db.internal/app")]
+    [InlineData("https://" + "deploy:tokenvalue@feeds.example.com/index.json")]
+    [InlineData("Server=tcp:db.internal;Database=app;User=sa;" + "Pass" + "word=hunter2222")]
+    [InlineData("DefaultEndpointsProtocol=https;" + "Account" + "Key=abcdefgh12345678")]
+    public void M14_secret_scan_fails_on_committed_credentials(string content)
+    {
+        Assert.True(SecretPatternMatches(content));
+    }
+
+    [Theory]
+    [InlineData("https://api.nuget.org/v3/index.json")]
+    [InlineData("https://registry.npmjs.org/react/-/react-18.2.0.tgz")]
+    [InlineData("git@github.com:owner/repo.git")]
+    public void M14_secret_scan_ignores_plain_urls(string content)
+    {
+        Assert.False(SecretPatternMatches(content));
+    }
+
+    private static string NoExceptions => "{\"exceptions\":[]}";
+
+    private static string FutureDate => "2999-12-31";
+
+    private static string PastDate => "2000-01-01";
+
+    private static string Exception(string package, string expires) =>
+        "{\"exceptions\":[{\"package\":\"" + package + "\",\"reason\":\"Tracked in ADR-7\",\"expires\":\"" + expires + "\"}]}";
+
+    private static string NpmAudit(string? severity) =>
+        severity is null
+            ? "{\"metadata\":{},\"vulnerabilities\":{}}"
+            : "{\"metadata\":{},\"vulnerabilities\":{\"pkg-a\":{\"severity\":\"" + severity + "\"}}}";
+
+    private static string DotnetListing(string? severity) =>
+        severity is null
+            ? "Project 'AirlineDemo.Api' has no vulnerable packages.\n"
+            : "Project 'AirlineDemo.Api' has the following vulnerable packages\n   [net10.0]:\n   > Foo.Bar  1.0.0  1.0.0  " + severity + "  https://example.test/advisory\n";
+
+    private static (int ExitCode, string Output) RunExceptionValidation(string exceptions) =>
+        RunStep("Exception validation", repo => repo.Write(ExceptionsPath, exceptions));
+
+    private static (int ExitCode, string Output) RunSeverityGate(string exceptions, string npmAudit, string dotnetListing) =>
+        RunStep("Severity gate", repo =>
+        {
+            repo.Write(ExceptionsPath, exceptions);
+            repo.Write("artifacts/audit/npm-audit.json", npmAudit);
+            repo.Write("artifacts/audit/dotnet-vulnerable.txt", dotnetListing);
+        });
+
+    private static (int ExitCode, string Output) RunStep(string stepName, Action<TempRepo> arrange)
+    {
+        var script = ExtractHeredoc(StepBody(ReadWorkflow(), stepName));
+        using var repo = new TempRepo();
+        arrange(repo);
+        return RunNode(script, repo.Root);
+    }
+
+    private static string ExtractHeredoc(string step)
+    {
+        var lines = step.Split('\n');
+        var start = Array.FindIndex(lines, l => l.Contains("node <<'EOF'", StringComparison.Ordinal));
+        Assert.True(start >= 0, "Step has no node heredoc.");
+        var end = Array.FindIndex(lines, start + 1, l => l.Trim() == "EOF");
+        Assert.True(end > start, "Node heredoc is not terminated.");
+
+        // Workflow run blocks are indented by 10 spaces; strip that to get the script.
+        return string.Join('\n', lines[(start + 1)..end].Select(l => l.Length >= 10 ? l[10..] : l));
+    }
+
+    private static (int ExitCode, string Output) RunNode(string script, string workDir)
+    {
+        var scriptPath = Path.Combine(workDir, "check.js");
+        File.WriteAllText(scriptPath, script);
+        var psi = new ProcessStartInfo("node", scriptPath)
+        {
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("node could not be started.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode, stdout.Result + stderr);
+    }
+
+    private static bool SecretPatternMatches(string content)
+    {
+        var workflow = ReadWorkflow();
+        var line = workflow.Split('\n').Single(l => l.TrimStart().StartsWith("pattern='", StringComparison.Ordinal)).Trim();
+        var pattern = line[(line.IndexOf('\'') + 1)..line.LastIndexOf('\'')];
+
+        using var repo = new TempRepo();
+        repo.Write("probe.txt", content);
+        var psi = new ProcessStartInfo("grep")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("-E");
+        psi.ArgumentList.Add("-q");
+        psi.ArgumentList.Add("-e");
+        psi.ArgumentList.Add(pattern);
+        psi.ArgumentList.Add(Path.Combine(repo.Root, "probe.txt"));
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("grep could not be started.");
+        process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return process.ExitCode == 0;
+    }
+
+    private sealed class TempRepo : IDisposable
+    {
+        public TempRepo()
+        {
+            Root = Path.Combine(Path.GetTempPath(), "supply-chain-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Root);
+        }
+
+        public string Root { get; }
+
+        public void Write(string relativePath, string content)
+        {
+            var path = Path.Combine(Root, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, content);
+        }
+
+        public void Dispose() => Directory.Delete(Root, recursive: true);
     }
 
     private static string ReadWorkflow() =>
