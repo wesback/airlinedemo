@@ -250,6 +250,10 @@ public class ReserveCalculationTests
         var record = ReserveCalculator.Review(draft, FinanceDecisionKind.Return, Reviewer, "need usage", At);
 
         Assert.Equal(FinanceDecisionKind.Return, record.Decision);
+        Assert.Equal("fin-1", record.ActorId);
+        Assert.Equal("need usage", record.Reason);
+        Assert.Equal(At, record.DecidedAt);
+        Assert.Equal(ReserveCalculator.CalculationBasis, record.CalculationBasis);
         Assert.Null(record.PayableTotal);
         Assert.False(record.InvoiceIssued);
     }
