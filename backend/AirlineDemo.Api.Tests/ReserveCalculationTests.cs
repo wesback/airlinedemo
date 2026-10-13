@@ -6,7 +6,6 @@ public class ReserveCalculationTests
 {
     private const string Period = "2026-09";
     private static readonly FinanceActor Reviewer = new("fin-1");
-    private static readonly IReadOnlySet<string> Roster = new HashSet<string>(StringComparer.Ordinal) { "fin-1" };
     private static readonly DateTimeOffset At = new(2026, 10, 13, 1, 0, 0, TimeSpan.Zero);
 
     private static UsageReport Usage(params UsageEntry[] entries) => new("USE-2026-09", Period, entries);
@@ -52,7 +51,7 @@ public class ReserveCalculationTests
         Assert.Equal(0.20m, draft.Lines[0].Amount);
         Assert.Single(draft.Discrepancies);
         Assert.Throws<InvalidOperationException>(() =>
-            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, Roster, "ok", At));
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, "ok", At));
     }
 
     [Fact]
@@ -64,7 +63,7 @@ public class ReserveCalculationTests
         Assert.Equal(ReserveDraftStatus.Discrepancy, draft.Status);
         Assert.Contains(draft.Discrepancies, d => d.StartsWith("Total:", StringComparison.Ordinal));
         Assert.Throws<InvalidOperationException>(() =>
-            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, Roster, "ok", At));
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, "ok", At));
     }
 
     [Fact]
@@ -91,7 +90,7 @@ public class ReserveCalculationTests
         Assert.Null(draft.PayableTotal);
         Assert.Null(draft.UsageReportId);
         Assert.Throws<InvalidOperationException>(() =>
-            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, Roster, "ok", At));
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, "ok", At));
     }
 
     [Fact]
@@ -158,9 +157,9 @@ public class ReserveCalculationTests
         var presenter = new FinanceActor("pres-1");
 
         Assert.Throws<UnauthorizedAccessException>(() =>
-            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, presenter, Roster, "ok", At));
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, presenter, "ok", At));
         Assert.Throws<UnauthorizedAccessException>(() =>
-            ReserveCalculator.Review(draft, FinanceDecisionKind.Return, presenter, Roster, "ok", At));
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Return, presenter, "ok", At));
     }
 
     [Fact]
@@ -170,7 +169,7 @@ public class ReserveCalculationTests
         var claimant = new FinanceActor("fin-2");
 
         Assert.Throws<UnauthorizedAccessException>(() =>
-            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, claimant, Roster, "ok", At));
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, claimant, "ok", At));
     }
 
     [Fact]
@@ -179,7 +178,7 @@ public class ReserveCalculationTests
         var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            ReserveCalculator.Review(draft, (FinanceDecisionKind)99, Reviewer, Roster, "ok", At));
+            ReserveCalculator.Review(draft, (FinanceDecisionKind)99, Reviewer, "ok", At));
     }
 
     [Fact]
@@ -187,7 +186,7 @@ public class ReserveCalculationTests
     {
         var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
 
-        var record = ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, Roster, " reviewed ", At);
+        var record = ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, " reviewed ", At);
 
         Assert.Equal(FinanceDecisionKind.Approve, record.Decision);
         Assert.Equal("fin-1", record.ActorId);
@@ -205,7 +204,7 @@ public class ReserveCalculationTests
     {
         var draft = Calc(null, StandardRates());
 
-        var record = ReserveCalculator.Review(draft, FinanceDecisionKind.Return, Reviewer, Roster, "need usage", At);
+        var record = ReserveCalculator.Review(draft, FinanceDecisionKind.Return, Reviewer, "need usage", At);
 
         Assert.Equal(FinanceDecisionKind.Return, record.Decision);
         Assert.Null(record.PayableTotal);
@@ -222,9 +221,9 @@ public class ReserveCalculationTests
         Assert.Equal(ReserveDraftStatus.ReadyForReview, corrected.Status);
         Assert.Equal(2, corrected.Version);
 
-        var record = ReserveCalculator.Review(corrected, FinanceDecisionKind.Approve, Reviewer, Roster, "corrected", At);
+        var record = ReserveCalculator.Review(corrected, FinanceDecisionKind.Approve, Reviewer, "corrected", At);
         Assert.Equal(2, record.DraftVersion);
         Assert.Throws<InvalidOperationException>(() =>
-            ReserveCalculator.Review(first, FinanceDecisionKind.Approve, Reviewer, Roster, "stale", At));
+            ReserveCalculator.Review(first, FinanceDecisionKind.Approve, Reviewer, "stale", At));
     }
 }

@@ -154,21 +154,20 @@ public static class ReserveCalculator
     }
 
     /// <summary>
-    /// Records a simulated finance decision. Authority comes only from <paramref name="authorizedReviewerIds"/>,
-    /// the server-held reviewer roster; the caller cannot assert a role.
+    /// Records a simulated finance decision. Authority comes only from the server-held
+    /// <see cref="AuthorizedReviewerIds"/> roster; the caller cannot supply or assert a role.
     /// </summary>
     public static FinanceReviewRecord Review(ReserveDraft draft, FinanceDecisionKind decision, FinanceActor actor,
-        IReadOnlySet<string> authorizedReviewerIds, string reason, DateTimeOffset decidedAt)
+        string reason, DateTimeOffset decidedAt)
     {
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(actor);
-        ArgumentNullException.ThrowIfNull(authorizedReviewerIds);
         if (!Enum.IsDefined(decision))
         {
             throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown finance decision.");
         }
         ValidateNonBlank(actor.Id, nameof(actor));
-        if (!authorizedReviewerIds.Contains(actor.Id))
+        if (!AuthorizedReviewerIds.Contains(actor.Id))
         {
             throw new UnauthorizedAccessException("Only a finance reviewer may record a finance decision.");
         }
@@ -181,6 +180,10 @@ public static class ReserveCalculator
         return new FinanceReviewRecord(draft.DraftId, draft.Version, decision, actor.Id, reason.Trim(),
             decidedAt, draft.CalculationBasis, draft.PayableTotal, Simulated: true, InvoiceIssued: false);
     }
+
+    /// <summary>Server-held finance reviewer roster. Simulated decisions are only accepted from these actors.</summary>
+    public static IReadOnlySet<string> AuthorizedReviewerIds { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "fin-1" };
 
     private static decimal Cents(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
