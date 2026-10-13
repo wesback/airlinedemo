@@ -42,6 +42,13 @@ const visit = (node) => {
   }
 };
 visit(lock);
+// Installable entries must name a registry URL; links and bundled entries are not fetched from a registry.
+for (const [key, entry] of Object.entries(lock.packages ?? {})) {
+  if (key === '' || entry?.link === true || entry?.inBundle === true) continue;
+  if (typeof entry?.resolved !== 'string') {
+    problems.push(`npm package has no resolved URL, so its source is unchecked: ${key}`);
+  }
+}
 if (npmResolved === 0) {
   problems.push('frontend/package-lock.json has no resolved npm packages');
 }

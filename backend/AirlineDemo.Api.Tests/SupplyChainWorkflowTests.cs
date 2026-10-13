@@ -335,6 +335,19 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("npm package resolved outside npmjs.org", output);
     }
 
+    // AC: M-14. An installable lockfile entry with no resolved URL must fail, since npm could fetch it from any registry.
+    [Fact]
+    public void Source_restriction_rejects_installable_npm_package_without_resolved()
+    {
+        var lockfile = "{\"packages\":{\"node_modules/react\":{\"resolved\": \"https://registry.npmjs.org/react/-/react-18.2.0.tgz\"},"
+            + "\"node_modules/unpinned\":{\"version\": \"1.0.0\"}}}\n";
+
+        var (exitCode, output) = RunShellStep("Source restriction", repo => repo.Write(LockPath, lockfile), NugetOrgListing);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("no resolved URL", output);
+    }
+
     [Fact]
     public void Source_restriction_rejects_lockfile_without_npmjs_packages()
     {
