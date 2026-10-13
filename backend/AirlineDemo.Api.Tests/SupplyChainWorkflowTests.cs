@@ -421,10 +421,15 @@ public sealed class SupplyChainWorkflowTests
     // M-14: committed credentials that gitleaks' default rules detect fail the secret scan.
     // Fixtures are joined from pieces so this file never contains a full credential literal.
     // AC: M-14. Each fixture is committed to a temp repo, and the real workflow secret scan step must fail on it.
+    // Split so no source line holds the key name, separator and value together; gitleaks would flag this file otherwise.
+    private const string StorageKeyName = "Account" + "Key";
+    private const string StorageSeparator = "=";
+    private const string StorageValue = "abcd" + "efgh12345678";
+
     [Theory]
     [InlineData("gh" + "p_" + "Q7xR2mK9pL4vN8sT1wY6zB3cD5fG0hJ2kE7a")]
     [InlineData("AKIA" + "ABCDEFGHIJKLMNOP")]
-    [InlineData("DefaultEndpointsProtocol=https;" + "Account" + "Key=abcdefgh12345678")]
+    [InlineData("DefaultEndpointsProtocol=https;" + StorageKeyName + StorageSeparator + StorageValue)]
     public void M14_secret_scan_fails_on_committed_credentials(string content)
     {
         var (exitCode, output) = RunShellStep("Secret scan", repo =>
