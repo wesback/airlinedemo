@@ -250,6 +250,41 @@ public sealed class TechnicalReviewTests : IDisposable
     }
 
     [Fact]
+    public async Task Endpoint_ignores_forged_actor_role_and_case_identity_without_mutation()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var path = Path.Combine(_dir, "cases.json");
+        SeedCases(path);
+        using var factory = CreateFactory(path);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter", ct);
+        var reviewer = await SignInAsync(client, "reviewer", ct);
+
+        var forged = new
+        {
+            expectedRevision = 1,
+            expectedBasisVersion = 1,
+            decision = "accept",
+            reason = "Evidence supports return.",
+            actorId = "reviewer",
+            actor = "reviewer",
+            role = "reviewer",
+            userRole = "reviewer",
+            caseId = OtherCase,
+            caseScope = OtherCase,
+        };
+        using var post = await SendAsync(client, HttpMethod.Post, DecisionUrl(HttpCase), presenter, true, forged, ct);
+        using var postOther = await SendAsync(client, HttpMethod.Post, DecisionUrl(OtherCase), reviewer, true, forged, ct);
+
+        Assert.Equal(HttpStatusCode.Forbidden, post.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, postOther.StatusCode);
+        Assert.DoesNotContain("decisions", await post.Content.ReadAsStringAsync(ct));
+        Assert.Equal(1, ReadCase(path, HttpCase).Revision);
+        Assert.Empty(TechnicalReviewPolicy.Decisions(ReadCase(path, HttpCase)));
+        Assert.Empty(ReadCase(path, OtherCase).Audit);
+    }
+
+    [Fact]
     public async Task Endpoint_hides_out_of_scope_case_on_read_and_write_without_mutation()
     {
         var ct = TestContext.Current.CancellationToken;
