@@ -148,14 +148,40 @@ public static class ClaimValidator
             return "witness quote shows requirement resolved";
         }
 
-        // Silence or an unlisted "satisfied" wording is not a gap: the quote must positively state an open item.
-        if (kind == ClaimKind.MissingRequirement && !OpenGap.IsMatch(witness.Quote))
+        // A waived, exempted or withdrawn requirement is no longer required, even if the quote also calls it pending.
+        if (kind == ClaimKind.MissingRequirement && Waived.IsMatch(witness.Quote))
+        {
+            return "witness quote shows requirement waived";
+        }
+
+        // Document text that addresses the reader or policy is an embedded instruction, never evidence of a gap.
+        if (kind == ClaimKind.MissingRequirement && EmbeddedInstruction.IsMatch(witness.Quote))
+        {
+            return "witness quote contains embedded instruction";
+        }
+
+        // Silence or an unlisted "satisfied" wording is not a gap: the clause stating the typed value must itself state an open item.
+        if (kind == ClaimKind.MissingRequirement && !StatesOpenGap(witness.Quote, typedValue))
         {
             return "witness quote does not state an open gap";
         }
 
         return null;
     }
+
+    private static bool StatesOpenGap(string quote, string typedValue) =>
+        ClauseSplit.Split(quote).Any(clause =>
+            clause.Contains(typedValue, StringComparison.Ordinal) && OpenGap.IsMatch(clause));
+
+    private static readonly Regex ClauseSplit = new(@"[.;,!?\r\n]+", RegexOptions.CultureInvariant);
+
+    private static readonly Regex Waived = new(
+        @"\b(?:waive[ds]?|waiver|waiving|exempt(?:ed|ion)?|deferred|superseded|withdrawn|cancell?ed|rescinded|dropped|removed|deleted|concession|deviation|not applicable|n/a|no longer)\b|n/a",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex EmbeddedInstruction = new(
+        @"\b(?:ignore|disregard|override|overrides|bypass|instructions?|system|assistant|prompt|policy|recipient|send|forward|email|notify|must|should|please|execute|invoke|tool|permission|permissions|base64)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly Regex OpenGap = new(
         @"\b(?:pending|outstanding|missing|required|requires?|open|overdue|awaiting|unresolved|incomplete|expired|due|needed|needs?|unfulfilled|unsatisfied)\b",
