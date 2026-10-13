@@ -119,6 +119,7 @@ public sealed class TechnicalReviewTests : IDisposable
     private static object Decide(long revision, int basis = 1, string decision = "accept", string? reason = "Checked against basis.") =>
         new { expectedRevision = revision, basisVersion = basis, decision, reason };
 
+    // Covers M-08.
     [Fact]
     public async Task Authorized_reviewer_records_reasoned_decision_with_audit_provenance()
     {
@@ -140,6 +141,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.True(TechnicalReviewEndpoints.AuthorizesAcceptance(state));
     }
 
+    // Covers M-02, M-08.
     [Fact]
     public async Task Unauthorized_role_is_denied_and_creates_no_decision()
     {
@@ -152,6 +154,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
     }
 
+    // Covers M-08.
     [Fact]
     public async Task Missing_reason_is_denied_without_decision()
     {
@@ -164,6 +167,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
     }
 
+    // Covers M-02.
     [Fact]
     public async Task Missing_anti_forgery_token_is_denied_without_decision()
     {
@@ -176,6 +180,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
     }
 
+    // Covers M-02.
     [Fact]
     public async Task Decision_on_stale_basis_is_denied()
     {
@@ -188,6 +193,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
     }
 
+    // Covers M-02.
     [Fact]
     public async Task Out_of_scope_case_reveals_nothing()
     {
@@ -200,6 +206,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    // Covers M-10.
     [Fact]
     public async Task Later_basis_keeps_prior_decision_but_marks_it_non_current()
     {
@@ -231,6 +238,7 @@ public sealed class TechnicalReviewTests : IDisposable
         return await client.SendAsync(request);
     }
 
+    // Covers M-02.
     [Fact]
     public async Task Cross_case_read_reveals_nothing()
     {
@@ -285,6 +293,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
     }
 
+    // Covers M-02.
     [Fact]
     public async Task Stale_revision_is_denied_without_decision()
     {
@@ -297,6 +306,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
     }
 
+    // Covers M-08, M-10.
     [Fact]
     public async Task Decision_records_time_sequence_and_correlated_trace_without_content()
     {
@@ -319,6 +329,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.DoesNotContain("evidence-1", entry.Detail);
     }
 
+    // Covers M-10.
     [Fact]
     public async Task Decision_emits_trace_correlated_by_trace_id_without_content()
     {
@@ -340,6 +351,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.DoesNotContain("evidence-1", string.Join(' ', trace.Attributes.Values));
     }
 
+    // Covers M-10.
     [Fact]
     public async Task Legacy_acceptance_without_current_decision_is_denied()
     {
@@ -358,6 +370,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
+    // Covers M-02.
     [Fact]
     public async Task Forged_role_and_case_fields_are_ignored_and_create_no_mutation()
     {
@@ -385,6 +398,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Null(TechnicalReviewEndpoints.CurrentDecision(after));
     }
 
+    // Covers M-10.
     [Fact]
     public async Task Acceptance_after_later_basis_is_denied_by_stale_prior_decision()
     {
@@ -415,5 +429,29 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(before.Revision, after.Revision);
         Assert.Equal(before.Audit.Count, after.Audit.Count);
         Assert.False(TechnicalReviewEndpoints.AuthorizesAcceptance(after));
+    }
+
+    // Covers M-10: a basis committed by another store instance (another process) must be seen by the acceptance check.
+    [Fact]
+    public void Acceptance_check_sees_basis_committed_by_another_store_instance()
+    {
+        var path = SeedAcceptedDecision();
+        try
+        {
+            var first = new CaseStateStore(path);
+            var second = new CaseStateStore(path);
+            var scope = first.AuthorizeCase(CaseId, "presenter");
+            Assert.True(first.WithCurrentState(scope, TechnicalReviewEndpoints.AuthorizesAcceptance));
+
+            var secondScope = second.AuthorizeCase(CaseId, "presenter");
+            var basis2 = CaseStateStore.CreateBasisVersion(2, "evidence-2", second.GetBasisVersion(secondScope, 1).BasisDigest);
+            second.Commit(secondScope, second.Read(secondScope).Revision, new CaseCommit(basis2, null, "presenter", "submit-package", "basis 2"));
+
+            Assert.False(first.WithCurrentState(scope, TechnicalReviewEndpoints.AuthorizesAcceptance));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
     }
 }

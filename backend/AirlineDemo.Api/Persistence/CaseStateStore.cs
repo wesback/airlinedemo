@@ -165,11 +165,16 @@ public sealed class CaseStateStore
         }
     }
 
-    /// <summary>Runs <paramref name="action"/> on the current state while holding the store gate, so no commit can interleave.</summary>
+    /// <summary>
+    /// Runs <paramref name="action"/> on the latest persisted state while holding the store gate and the file lock,
+    /// so no commit from this or another process can interleave.
+    /// </summary>
     public T WithCurrentState<T>(CaseScope scope, Func<CaseState, T> action)
     {
         lock (_gate)
         {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
             return action(Current(scope));
         }
     }
