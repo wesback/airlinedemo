@@ -11,7 +11,7 @@ public static class CaseEndpoints
     public const string ReviewerRole = "technical-reviewer";
 
     // Per-process key: actor pseudonyms correlate within a run and are not reversible from traces.
-    private static readonly byte[] ActorKey = RandomNumberGenerator.GetBytes(32);
+    internal static readonly byte[] ActorKey = RandomNumberGenerator.GetBytes(32);
 
     public static IEndpointRouteBuilder MapCaseEndpoints(this IEndpointRouteBuilder app)
     {
