@@ -312,11 +312,21 @@ run "M-07_telemetry_retention_and_no_public_access" {
 }
 
 run "M-07_telemetry_reader_is_read_only_group" {
-  command = plan
+  command = apply
 
   assert {
     condition     = azurerm_role_assignment.telemetry_reader.role_definition_name == "Log Analytics Reader" && azurerm_role_assignment.telemetry_reader.principal_type == "Group"
     error_message = "Telemetry reader must be a named group with read-only Log Analytics access."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.telemetry_reader.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.OperationalInsights/workspaces/log-airline-telemetry"
+    error_message = "Telemetry reader scope must equal the telemetry workspace id exactly; a widened or different scope must fail."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.telemetry_reader.principal_id == var.telemetry_reader_group_id
+    error_message = "Telemetry reader must be bound to the configured reader group id; a different group must fail."
   }
 }
 
