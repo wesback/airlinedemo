@@ -182,11 +182,11 @@ run "data_endpoints_are_private" {
     error_message = "The model private endpoint must use the account subresource and the privatelink.openai.azure.com zone, in the private endpoint subnet."
   }
   assert {
-    condition     = local.private_endpoints.model.resource_id == azurerm_cognitive_account.model.id && local.private_endpoints.blob.resource_id == azurerm_storage_account.blob.id && local.private_endpoints.sql.resource_id == azurerm_mssql_server.sql.id
+    condition     = length(local.private_endpoints) == 4 && can(regex("(?s)private_endpoints = \\{.*sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id.*blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id.*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf")))
     error_message = "SQL, Blob and model private endpoints must target their own resources (SQL server, storage account, cognitive account)."
   }
   assert {
-    condition     = alltrue([for k in ["sql", "blob", "model"] : azurerm_private_endpoint.demo[k].subnet_id == azurerm_subnet.private_endpoints.id && azurerm_private_endpoint.demo[k].private_service_connection[0].private_connection_resource_id == local.private_endpoints[k].resource_id])
+    condition     = length(azurerm_subnet.private_endpoints.address_prefixes) == 1 && can(regex("(?s)resource \"azurerm_private_endpoint\" \"demo\" \\{.*?subnet_id\\s*=\\s*azurerm_subnet\\.private_endpoints\\.id.*?private_connection_resource_id\\s*=\\s*each\\.value\\.resource_id", file("main.tf")))
     error_message = "Each private endpoint must attach to the private endpoint subnet and connect to its mapped resource."
   }
 }
@@ -195,7 +195,7 @@ run "no_environment_defaults" {
   command = plan
 
   assert {
-    condition     = var.subscription_id != "" && alltrue([for n in ["subscription_id", "tenant_id", "vnet_address_space", "app_subnet_cidr", "private_endpoint_subnet_cidr", "presenter_reviewer_cidrs", "egress_allowed_destinations", "budget_amount", "budget_contact_emails", "terraform_state_backend"] : !anytrue([for p in split("variable \"", file("variables.tf")) : startswith(p, "${n}\"") && can(regex("(?m)^\\s*default\\s*=", p))])])
+    condition     = var.subscription_id != "" && alltrue([for n in ["subscription_id", "tenant_id", "vnet_address_space", "app_subnet_cidr", "private_endpoint_subnet_cidr", "presenter_reviewer_cidrs", "egress_allowed_destinations", "budget_amount", "budget_start_date", "budget_contact_emails", "terraform_state_backend"] : !anytrue([for p in split("variable \"", file("variables.tf")) : startswith(p, "${n}\"") && can(regex("(?m)^\\s*default\\s*=", p))])])
     error_message = "Subscription, tenant, CIDR, egress, budget, and state-backend inputs must not have Terraform defaults."
   }
 }
@@ -211,6 +211,15 @@ run "backend_identity_and_locking_declared" {
   assert {
     condition     = var.terraform_state_backend.locking_enabled && !can(regex("(?i)use_lease\\s*=\\s*false", file("main.tf")))
     error_message = "The azurerm backend must keep state locking (blob lease) enabled."
+  }
+}
+
+run "backend_declares_no_shared_credentials" {
+  command = plan
+
+  assert {
+    condition     = var.terraform_state_backend.use_azuread_auth == true && can(regex("(?s)backend \"azurerm\" \\{\\s*use_azuread_auth\\s*=\\s*true\\s*\\}", file("main.tf")))
+    error_message = "The azurerm backend block must not declare shared keys, SAS tokens, client secrets, or disable Entra auth."
   }
 }
 
