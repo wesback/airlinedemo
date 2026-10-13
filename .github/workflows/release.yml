@@ -1,0 +1,247 @@
+name: release
+
+# Promotes and deploys one exact signed image digest. Tags are never accepted.
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "Image digest produced by CI, as sha256:<64 hex>. Mutable tags are rejected."
+        required: true
+        type: string
+      build_run_id:
+        description: "Build workflow run ID that produced the supply-chain-evidence artifact."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Fails closed unless production-release lists the product owner (PRODUCT_OWNER_LOGIN) as a required reviewer.
+  # Runs outside the environment so the check can execute before any approval-gated step. Reading environment
+  # protection rules needs a token with environment read access, supplied as RELEASE_GOVERNANCE_TOKEN (not a cloud credential).
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Verify production-release requires product-owner approval
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GOVERNANCE_TOKEN }}
+          REPO: ${{ github.repository }}
+          PRODUCT_OWNER_LOGIN: ${{ vars.PRODUCT_OWNER_LOGIN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::RELEASE_GOVERNANCE_TOKEN is required to read production-release protection rules; release fails closed"
+            exit 1
+          fi
+          if [[ -z "$PRODUCT_OWNER_LOGIN" ]]; then
+            echo "::error::PRODUCT_OWNER_LOGIN variable is required to identify the product-owner reviewer; release fails closed"
+            exit 1
+          fi
+          env_json="$(gh api "repos/$REPO/environments/production-release")"
+          reviewers="$(jq -c '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?]' <<<"$env_json")"
+          owner_count="$(jq --arg owner "$PRODUCT_OWNER_LOGIN" '[.[] | select(.type == "User" and .reviewer.login == $owner)] | length' <<<"$reviewers")"
+          total_count="$(jq 'length' <<<"$reviewers")"
+          if [[ "$owner_count" -ne 1 || "$total_count" -ne 1 ]]; then
+            echo "::error::environment production-release must require exactly one reviewer, the product owner $PRODUCT_OWNER_LOGIN; product-owner approval is not enforced"
+            exit 1
+          fi
+
+  release:
+    needs: preflight
+    # Hosted runners cannot reach the private-only ACR endpoint; release runs on a runner inside the private network.
+    runs-on: [self-hosted, linux, x64, private-acr]
+    timeout-minutes: 30
+    # GitHub holds every job until the environment's required reviewers (product owner) approve.
+    # The preflight job above verifies that rule is configured on production-release (see docs/prd/aircraft-return-readiness.md).
+    environment: production-release
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    env:
+      IMAGE_DIGEST: ${{ inputs.image_digest }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+      IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+      SIGNING_KEY_ID: ${{ vars.AZURE_KV_SIGNING_KEY_ID }}
+      APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+    steps:
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::image_digest must be sha256:<64 hex>; tags and other references are rejected"
+            exit 1
+          fi
+          if [[ ! "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::build_run_id must be numeric"
+            exit 1
+          fi
+
+      - name: Private registry connectivity
+        run: |
+          set -euo pipefail
+          ip="$(getent hosts "$ACR_LOGIN_SERVER" | awk 'NR==1{print $1}')"
+          if [[ -z "$ip" ]]; then
+            echo "::error::ACR login server does not resolve; private endpoint is required"
+            exit 1
+          fi
+          if [[ ! "$ip" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; then
+            echo "::error::ACR resolves to public address $ip; release requires the private endpoint"
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Registry login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Verify build run provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "repos/$REPO/actions/runs/$BUILD_RUN_ID")"
+          path="$(jq -r .path <<<"$run_json")"
+          event="$(jq -r .event <<<"$run_json")"
+          branch="$(jq -r .head_branch <<<"$run_json")"
+          conclusion="$(jq -r .conclusion <<<"$run_json")"
+          if [[ "$path" != ".github/workflows/build.yml" || "$event" != "push" || "$branch" != "main" || "$conclusion" != "success" ]]; then
+            echo "::error::build run $BUILD_RUN_ID is not a successful push build of main from .github/workflows/build.yml (path=$path event=$event branch=$branch conclusion=$conclusion)"
+            exit 1
+          fi
+
+      - name: Download build evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: evidence
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify build evidence present
+        run: |
+          set -euo pipefail
+          test -s evidence/sbom/dotnet-sbom.cdx.json
+          test -s evidence/sbom/npm-sbom.cdx.json
+          test -s evidence/audit/dotnet-vulnerable.txt
+          test -s evidence/audit/npm-audit.json
+          test -s evidence/image/digest.txt
+          built="$(tr -d '[:space:]' < evidence/image/digest.txt)"
+          if [[ "$built" != "$IMAGE_DIGEST" ]]; then
+            echo "::error::image digest $IMAGE_DIGEST was not produced by build run $BUILD_RUN_ID (build recorded $built)"
+            exit 1
+          fi
+
+      - name: Install Notation and Azure Key Vault plugin
+        env:
+          NOTATION_VERSION: "1.3.2"
+          NOTATION_SHA256: "e1a0f060308086bf8020b2d31defb7c5348f133ca0dba6a1a7820ef3cbb6dfe5"
+          AZURE_KV_PLUGIN_VERSION: "1.2.0"
+          AZURE_KV_PLUGIN_SHA256: "06bb5198af31ce11b08c4557ae4c2cbfb09878dfa6b637b7407ebc2d57b87b34"
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/notation"
+          mkdir -p "$work"
+          curl -fsSL -o "$work/notation.tar.gz" "https://github.com/notaryproject/notation/releases/download/v${NOTATION_VERSION}/notation_${NOTATION_VERSION}_linux_amd64.tar.gz"
+          echo "$NOTATION_SHA256  $work/notation.tar.gz" | sha256sum -c -
+          tar -xzf "$work/notation.tar.gz" -C "$work" notation
+          sudo install -m 0755 "$work/notation" /usr/local/bin/notation
+          curl -fsSL -o "$work/azure-kv.tar.gz" "https://github.com/Azure/notation-azure-kv/releases/download/v${AZURE_KV_PLUGIN_VERSION}/notation-azure-kv_${AZURE_KV_PLUGIN_VERSION}_linux_amd64.tar.gz"
+          echo "$AZURE_KV_PLUGIN_SHA256  $work/azure-kv.tar.gz" | sha256sum -c -
+          plugin_dir="$HOME/.config/notation/plugins/azure-kv"
+          mkdir -p "$plugin_dir"
+          tar -xzf "$work/azure-kv.tar.gz" -C "$plugin_dir" notation-azure-kv
+          notation version
+          notation plugin ls
+
+      - name: Sign image digest
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/signature
+          notation sign "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" \
+            --id "$SIGNING_KEY_ID" --plugin azure-kv --signature-format cose \
+            --allow-referrers-api
+          notation inspect "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" > artifacts/signature/notation-inspect.txt
+          test -s artifacts/signature/notation-inspect.txt
+          # Export the COSE signature from the registry's OCI referrers API (Notation signatures are referrers of the digest).
+          token="$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)"
+          index="$(curl -fsSL -u "00000000-0000-0000-0000-000000000000:$token" -H "Accept: application/vnd.oci.image.index.v1+json" \
+            "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/referrers/$IMAGE_DIGEST?artifactType=application/vnd.cncf.notary.signature")"
+          sig_manifest_digest="$(jq -r '[.manifests[]? | select(.artifactType == "application/vnd.cncf.notary.signature")][0].digest // empty' <<<"$index")"
+          if [[ -z "$sig_manifest_digest" ]]; then
+            echo "::error::no Notation signature referrer found for $IMAGE_DIGEST"
+            exit 1
+          fi
+          sig_manifest="$(curl -fsSL -u "00000000-0000-0000-0000-000000000000:$token" -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+            "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/manifests/$sig_manifest_digest")"
+          sig_blob_digest="$(jq -r '.layers[0].digest' <<<"$sig_manifest")"
+          curl -fsSL -u "00000000-0000-0000-0000-000000000000:$token" -o artifacts/signature/signature.cose \
+            "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/blobs/$sig_blob_digest"
+          if [[ "sha256:$(sha256sum artifacts/signature/signature.cose | cut -d' ' -f1)" != "$sig_blob_digest" ]]; then
+            echo "::error::exported signature does not match its registry digest $sig_blob_digest"
+            exit 1
+          fi
+          test -s artifacts/signature/signature.cose
+
+      - name: Verify signature and digest
+        env:
+          KV_NAME: ${{ vars.AZURE_KV_NAME }}
+          SIGNING_CERT_NAME: ${{ vars.AZURE_KV_SIGNING_CERT_NAME }}
+          SIGNING_CERT_SUBJECT: ${{ vars.AZURE_KV_SIGNING_CERT_SUBJECT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SIGNING_CERT_SUBJECT" || -z "$SIGNING_CERT_NAME" || -z "$KV_NAME" ]]; then
+            echo "::error::AZURE_KV_NAME, AZURE_KV_SIGNING_CERT_NAME and AZURE_KV_SIGNING_CERT_SUBJECT are required to trust the signing certificate; release fails closed"
+            exit 1
+          fi
+          cert="$RUNNER_TEMP/signing-cert.pem"
+          az keyvault certificate download --vault-name "$KV_NAME" --name "$SIGNING_CERT_NAME" --encoding PEM --file "$cert"
+          test -s "$cert"
+          notation cert add --type ca --store airlinedemo "$cert"
+          mkdir -p "$HOME/.config/notation"
+          jq -n --arg scope "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY" --arg subject "$SIGNING_CERT_SUBJECT" \
+            '{version: "1.0", trustPolicies: [{name: "airlinedemo-release", registryScopes: [$scope], signatureVerification: {level: "strict"}, trustStores: ["ca:airlinedemo"], trustedIdentities: ["x509.subject: \($subject)"]}]}' \
+            > "$HOME/.config/notation/trustpolicy.json"
+          notation verify "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+          actual="$(az acr repository show --name "$ACR_NAME" --image "$IMAGE_REPOSITORY@$IMAGE_DIGEST" --query digest -o tsv)"
+          if [[ "$actual" != "$IMAGE_DIGEST" ]]; then
+            echo "::error::digest mismatch: expected $IMAGE_DIGEST, registry has $actual"
+            exit 1
+          fi
+
+      - name: Deploy signed digest
+        run: |
+          set -euo pipefail
+          az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+
+      - name: Retain release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.run_id }}
+          path: |
+            evidence/sbom/dotnet-sbom.cdx.json
+            evidence/sbom/npm-sbom.cdx.json
+            evidence/audit/dotnet-vulnerable.txt
+            evidence/audit/npm-audit.json
+            artifacts/signature/
+          retention-days: 90
+          if-no-files-found: error

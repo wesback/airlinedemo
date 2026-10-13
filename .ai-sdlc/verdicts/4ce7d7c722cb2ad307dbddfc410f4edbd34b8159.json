@@ -1,0 +1,248 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 151,
+  "branch": "ai-sdlc/issue-151",
+  "commitSha": "4ce7d7c722cb2ad307dbddfc410f4edbd34b8159",
+  "round": 1,
+  "pipelineVersion": "5401b35",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow can sign and deploy a digest based on caller-selected artifact contents without confirming trusted CI provenance. It also relies on an unverified GitHub environment setting for the required approval gate.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 98,
+          "message": "Bind the digest to a successful run of the trusted CI workflow before signing; matching caller-selected artifact text does not establish CI provenance.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The workflow downloads an artifact from the caller-supplied run ID and compares its digest.txt value with the caller-supplied image digest. It does not verify that the run is the trusted CI workflow or that the run succeeded.",
+            "failureScenario": "A user with dispatch access selects another run that uploaded a supply-chain-evidence artifact containing the digest of an existing untrusted ACR image. The comparison passes, and the workflow signs and deploys that image. This is an OWASP A08:2025 software integrity failure."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 26,
+          "message": "The workflow does not ensure the required product-owner approval gate. Referencing an environment name alone does not require approval, so the M-12 behavior and its test are not guaranteed.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The job references the production-release environment, but required reviewers are configured in GitHub environment settings and are not established by this workflow. The test Release_job_runs_in_protected_environment_requiring_approval checks only the environment name.",
+            "failureScenario": "If production-release has no required-reviewer rule, a dispatch proceeds through signing and deployment without product-owner approval, while the named test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow test suite checks that the release job references an environment, but does not verify that the environment actually requires product-owner approval. The other acceptance criteria have corresponding checks in this change.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SignedReleaseWorkflowTests.cs",
+          "line": 12,
+          "message": "M-12 is not meaningfully tested: this test passes when the referenced environment has no required approval rule. Add a check that fails when the approval gate is absent or bypassed.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The approval test checks only that the workflow names the production-release environment. Required reviewers are configured in GitHub environment settings, which this test does not inspect.",
+            "failureScenario": "If production-release has no required reviewers, the test still passes and the release job can deploy without product-owner approval, violating M-12."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The supplied run ID and its artifact are not authenticated as a trusted CI build before their digest is signed. The approval gate also depends on external environment protection that this change neither establishes nor verifies.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 98,
+          "message": "Verify that the specified run is a trusted CI build and that its evidence is authentic before signing the digest. Matching a caller-selected digest to a caller-selected run's artifact does not establish provenance.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The workflow downloads an artifact from the caller-supplied run ID and trusts its digest.txt after comparing it with the caller-supplied image digest. It does not verify that the run is a trusted CI build.",
+            "failureScenario": "A user able to trigger a run that uploads a supply-chain-evidence artifact can provide that run ID and an image digest matching its digest.txt. The release workflow then signs and deploys that image as CI-produced. This is OWASP A08:2025, Software or Data Integrity Failures."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 28,
+          "message": "The workflow does not ensure that production-release requires product-owner approval. The environment name alone does not enforce the M-12 approval gate.",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The release job names the production-release environment, but required reviewers are configured outside this workflow and the test only checks the environment name.",
+            "failureScenario": "If production-release has no required-reviewer protection rule, a dispatch can proceed to deployment without product-owner approval. This fails the M-12 approval requirement and is an OWASP A01:2025 Broken Access Control risk."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 2,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/release.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SignedReleaseWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
