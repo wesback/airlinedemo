@@ -11,20 +11,43 @@ public sealed class EvidenceIntakeTests
     private static EvidenceDocument Fixture(string name) =>
         new(name, File.ReadAllBytes(FixturePath(name)));
 
-    private static byte[] PdfWithPages(int pages)
+    // Synthetic text PDF with one text-bearing content stream per page. Leading whitespace pads the
+    // file to padToBytes; offsets are computed after padding, so the cross-reference table stays valid.
+    private static byte[] PdfWithPages(int pages, long padToBytes = 0)
     {
-        var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{i + 3} 0 R"));
+        var pad = 0;
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            var bytes = BuildPdf(pages, pad);
+            if (padToBytes == 0 || bytes.LongLength == padToBytes)
+            {
+                return bytes;
+            }
+
+            pad += (int)(padToBytes - bytes.LongLength);
+        }
+
+        throw new InvalidOperationException("Could not pad the synthetic PDF to the requested size.");
+    }
+
+    private static byte[] BuildPdf(int pages, int pad)
+    {
+        const string content = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
+        var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{4 + (2 * i)} 0 R"));
         var objects = new List<string>
         {
             "<< /Type /Catalog /Pages 2 0 R >>",
             $"<< /Type /Pages /Kids [{kids}] /Count {pages} >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         };
         for (var i = 0; i < pages; i++)
         {
-            objects.Add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {5 + (2 * i)} 0 R /Resources << /Font << /F1 3 0 R >> >> >>");
+            objects.Add($"<< /Length {content.Length} >>\nstream\n{content}\nendstream");
         }
 
         var sb = new StringBuilder("%PDF-1.4\n");
+        sb.Append(' ', pad);
         var offsets = new List<int>();
         for (var i = 0; i < objects.Count; i++)
         {
@@ -88,12 +111,71 @@ public sealed class EvidenceIntakeTests
         Assert.True(result.Failure.Retryable);
     }
 
+    // AC M-09: inputs exactly at the byte, package-byte, and page limits are accepted.
     [Fact]
-    public void DocumentAtByteLimitIsNotRejectedForSize()
+    public void DocumentAtByteLimitIsAccepted()
     {
-        var result = EvidenceIntake.Process([new("at-limit.pdf", PaddedPdf(EvidenceLimits.MaxDocumentBytes))]);
+        var pdf = PdfWithPages(1, EvidenceLimits.MaxDocumentBytes);
 
-        Assert.NotEqual(EvidenceFailureKind.LimitExceeded, result.Failure?.Kind);
+        var result = EvidenceIntake.Process([new("at-limit.pdf", pdf)]);
+
+        Assert.Equal(EvidenceLimits.MaxDocumentBytes, pdf.LongLength);
+        Assert.Equal(EvidenceProcessingState.Complete, result.State);
+        Assert.Null(result.Failure);
+    }
+
+    [Fact]
+    public void PackageAtTotalByteLimitIsAccepted()
+    {
+        var docs = Enumerable.Range(0, 5)
+            .Select(i => new EvidenceDocument($"part-{i}.pdf", PdfWithPages(1, EvidenceLimits.MaxDocumentBytes)))
+            .ToList();
+
+        var result = EvidenceIntake.Process(docs);
+
+        Assert.Equal(EvidenceLimits.MaxPackageBytes, docs.Sum(d => d.Bytes.LongLength));
+        Assert.Equal(EvidenceProcessingState.Complete, result.State);
+    }
+
+    [Fact]
+    public void DocumentAtPageLimitIsAccepted()
+    {
+        var result = EvidenceIntake.Process([new("at-page-limit.pdf", PdfWithPages(EvidenceLimits.MaxPagesPerDocument))]);
+
+        Assert.Equal(EvidenceProcessingState.Complete, result.State);
+        Assert.Contains($"({EvidenceLimits.MaxPagesPerDocument} pages)", result.Content);
+    }
+
+    // AC: image payloads are rejected even when valid PDF whitespace separates /Subtype and /Image.
+    [Theory]
+    [InlineData("/Subtype\n/Image")]
+    [InlineData("/Subtype\t/Image")]
+    [InlineData("/Subtype\r\n\f/Image")]
+    [InlineData("/Subtype/Image")]
+    public void ImagePayloadIsRejectedRegardlessOfWhitespace(string subtype)
+    {
+        var pdf = Encoding.ASCII.GetBytes($"%PDF-1.4\n1 0 obj << /Type /XObject {subtype} >> endobj\n%%EOF\n");
+
+        var result = EvidenceIntake.Process([new("image.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: object streams can hide actions in compressed data, so they are rejected rather than inspected.
+    [Fact]
+    public void ObjectStreamIsRejectedRetryably()
+    {
+        var pdf = Encoding.ASCII.GetBytes("%PDF-1.5\n1 0 obj << /Type /ObjStm /N 1 /First 4 /Length 0 >> stream\n\nendstream endobj\n%%EOF\n");
+
+        var result = EvidenceIntake.Process([new("objstm.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
     }
 
     [Fact]
@@ -129,6 +211,7 @@ public sealed class EvidenceIntakeTests
         Assert.Null(result.Content);
     }
 
+    // AC M-07: a failed (truncated) intake is never a complete package and creates no basis.
     [Fact]
     public void TruncatedPdfFailsRetryablyAndCreatesNoBasis()
     {
@@ -143,6 +226,7 @@ public sealed class EvidenceIntakeTests
         Assert.Empty(store.Versions("case-1"));
     }
 
+    // AC M-07: a failed (malformed) intake yields no digest and is never evidence.
     [Fact]
     public void MalformedPdfFailsRetryablyWithoutEvidence()
     {
@@ -193,6 +277,8 @@ public sealed class EvidenceIntakeTests
         Assert.Null(result.Content);
     }
 
+    // AC M-10: new content is a new immutable version; prior content is never overwritten, and a
+    // witness whose digest differs from the stored basis is rejected.
     [Fact]
     public void StoredVersionsAreAppendOnlyAndWitnessMustMatch()
     {

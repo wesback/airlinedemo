@@ -62,8 +62,12 @@ public static class EvidenceIntake
     private static readonly string[] ActiveContentMarkers =
     [
         "/JavaScript", "/JS", "/Launch", "/EmbeddedFile", "/AcroForm", "/XFA", "/RichMedia",
-        "/Subtype /Image", "/Subtype/Image",
+        // Object streams hide dictionaries (and their actions) inside compressed data, so they are rejected, not inspected.
+        "/ObjStm",
     ];
+
+    // Image XObjects; PDF allows any whitespace between the /Subtype key and the /Image name.
+    private static readonly Regex ImageSubtype = new(@"/Subtype[\x00\t\n\f\r ]*/Image\b", RegexOptions.Compiled);
 
     public static EvidenceIntakeResult Process(IReadOnlyList<EvidenceDocument> documents)
     {
@@ -170,6 +174,14 @@ public static class EvidenceIntake
                     EvidenceFailureKind.ActiveContent,
                     true);
             }
+        }
+
+        if (ImageSubtype.IsMatch(text))
+        {
+            throw new EvidenceIntakeException(
+                $"Document '{document.Name}' contains an image payload (/Subtype /Image); it is rejected.",
+                EvidenceFailureKind.ActiveContent,
+                true);
         }
     }
 
