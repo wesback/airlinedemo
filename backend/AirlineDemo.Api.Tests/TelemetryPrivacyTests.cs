@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Investigation;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -231,6 +232,24 @@ public sealed class TelemetryPrivacyTests
     {
         Assert.Throws<ArgumentException>(() =>
             TelemetryRedaction.EmitSecurityEvent(new CapturingLogger(), "security.made_up", "1.2.3", "demo"));
+    }
+
+    [Fact]
+    public void Exhausted_model_budget_emits_budget_alert_event_and_refuses_the_run()
+    {
+        var logger = new CapturingLogger();
+        var requests = new[]
+        {
+            new ModelRequest("v1", "uksouth", "SYNTHETIC EVIDENCE: one"),
+            new ModelRequest("v1", "uksouth", "SYNTHETIC EVIDENCE: two"),
+        };
+
+        var ex = Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.AuthorizeScoredRunWithinBudget(null!, requests, null!, 1, logger, "1.2.3", "demo"));
+
+        Assert.Contains("budget exhausted", ex.Message);
+        var properties = Assert.Single(logger.States).ToDictionary(kv => kv.Key, kv => kv.Value?.ToString());
+        Assert.Equal(TelemetryRedaction.SecurityEvents.BudgetExhausted, properties["event.name"]);
     }
 
     [Fact]

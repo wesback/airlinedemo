@@ -147,8 +147,8 @@ run "M-14_app_identity_grants_are_exact" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::audit") && !(strcontains(s, "SELECT") || strcontains(s, "INSERT"))]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::audit")]) == 2
-    error_message = "Audit schema may only be granted SELECT and INSERT to the app identity."
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::audit.case_events") && !(strcontains(s, "SELECT") || strcontains(s, "INSERT"))]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::audit.case_events")]) == 2
+    error_message = "The audit table audit.case_events may only be granted SELECT and INSERT to the app identity, never the whole schema."
   }
 
   assert {
@@ -157,7 +157,7 @@ run "M-14_app_identity_grants_are_exact" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "DENY") && strcontains(s, "SCHEMA::audit")]) == 4
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "DENY") && strcontains(s, "OBJECT::audit.case_events")]) == 4
     error_message = "Audit UPDATE, DELETE, ALTER and CONTROL must stay explicitly denied to the app identity."
   }
 
@@ -231,8 +231,27 @@ run "M-14_grants_bind_to_app_identity_as_service_principal" {
   }
 
   assert {
-    condition     = contains(output.app_sql_grant_statements, "GRANT SELECT ON SCHEMA::audit TO [id-airline-app];") && !contains(output.app_sql_grant_statements, "GRANT UPDATE ON SCHEMA::audit TO [id-airline-app];")
+    condition     = contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::audit.case_events TO [id-airline-app];") && !contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::audit.case_events TO [id-airline-app];")
     error_message = "App SQL grants must be attached to the app identity name and never widen audit UPDATE."
+  }
+
+  assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "SCHEMA::audit")]) == 0
+    error_message = "No app SQL grant or deny may target the whole audit schema; only audit.case_events."
+  }
+}
+
+run "M-14_app_grants_bind_to_app_principal_not_migration" {
+  command = apply
+
+  assert {
+    condition     = azurerm_role_assignment.app_openai_user.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_evidence.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_telemetry.principal_id == azurerm_user_assigned_identity.app.principal_id
+    error_message = "Every app role assignment must be bound to the app workload identity principal."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.migration_sql.principal_id == azurerm_user_assigned_identity.migration.principal_id
+    error_message = "The migration identity grant must be bound to the migration identity principal."
   }
 }
 
@@ -240,12 +259,12 @@ run "M-14_app_sql_statements_deny_ddl_and_audit_mutation" {
   command = plan
 
   assert {
-    condition     = contains(output.app_sql_grant_statements, "DENY UPDATE ON SCHEMA::audit TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY DELETE ON SCHEMA::audit TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY ALTER ON SCHEMA::dbo TO [id-airline-app];")
+    condition     = contains(output.app_sql_grant_statements, "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY ALTER ON SCHEMA::dbo TO [id-airline-app];")
     error_message = "App SQL statements must deny audit UPDATE/DELETE and DDL to the app identity."
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "GRANT") && strcontains(s, "SCHEMA::audit") && (strcontains(s, "UPDATE") || strcontains(s, "DELETE") || strcontains(s, "ALTER") || strcontains(s, "CONTROL"))]) == 0
+    condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "GRANT") && strcontains(s, "OBJECT::audit.case_events") && (strcontains(s, "UPDATE") || strcontains(s, "DELETE") || strcontains(s, "ALTER") || strcontains(s, "CONTROL"))]) == 0
     error_message = "No grant may widen audit tables to UPDATE, DELETE, ALTER or CONTROL."
   }
 
