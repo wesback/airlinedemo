@@ -84,6 +84,9 @@ public class ClaimValidationPolicyTests
     [InlineData("Return readiness is not pending reserve approval.")]
     [InlineData("There is no pending reserve approval.")]
     [InlineData("Return readiness isn't pending reserve approval.")]
+    [InlineData("Zero outstanding items: pending reserve approval.")]
+    [InlineData("Nil outstanding requirements: pending reserve approval.")]
+    [InlineData("Return readiness is free of pending reserve approval, which is absent.")]
     public void Negated_quote_cannot_establish_missing_requirement(string negated)
     {
         var basis = new Dictionary<string, BasisDocument>
@@ -97,6 +100,23 @@ public class ClaimValidationPolicyTests
         Assert.Equal(ClaimStatus.Downgraded, result.Status);
         Assert.Equal("witness quote negates claim", result.Reason);
         Assert.Equal(0, decision.RequestCount);
+    }
+
+    [Fact]
+    public void Page_text_containing_old_separator_cannot_shift_boundaries_past_digest()
+    {
+        var original = BasisDocument.Create("return-status", ["a\u001Fb", "c"]);
+        var shifted = BasisDocument.Create("return-status", ["a", "b\u001Fc"]);
+
+        Assert.NotEqual(original.ContentDigest, shifted.ContentDigest);
+
+        var tampered = new Dictionary<string, BasisDocument>
+        {
+            ["return-status"] = new("return-status", original.ContentDigest, ["Return readiness is pending reserve approval.\u001Fx", "y"]),
+        };
+        var result = ClaimValidator.Validate(Claim("return-status", 1, Quote), ClaimKind.MissingRequirement, tampered, TypedValue);
+
+        Assert.Equal("content digest mismatch", result.Reason);
     }
 
     [Fact]

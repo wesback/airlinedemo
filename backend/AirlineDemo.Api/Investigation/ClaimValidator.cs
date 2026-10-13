@@ -23,7 +23,8 @@ public sealed record BasisDocument(string DocumentId, string ContentDigest, IRea
         new(documentId, PagesDigest(pages), pages);
 
     internal static string PagesDigest(IReadOnlyList<string> pages) =>
-        SyntheticContentRegistry.Sha256Hex(string.Join('\u001F', pages));
+        SyntheticContentRegistry.Sha256Hex(
+            string.Concat(pages.Select(page => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{page.Length}:{page};"))));
 }
 
 /// <summary>
@@ -145,6 +146,6 @@ public static class ClaimValidator
     }
 
     private static readonly Regex Negation = new(
-        @"\b(?:not|no|never|none|without|neither|nor|cannot|denied|denies|rejected|disproves?)\b|n['’]t\b",
+        @"\b(?:not|no|never|none|nil|zero|nothing|without|neither|nor|cannot|denied|denies|deny|denying|rejected|disproves?|absent|absence|lacks?|lacking)\b|n['’]t\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }
