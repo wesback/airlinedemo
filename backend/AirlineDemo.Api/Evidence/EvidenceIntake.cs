@@ -66,8 +66,10 @@ public static class EvidenceIntake
         "/ObjStm",
     ];
 
-    // Image XObjects; PDF allows any whitespace between the /Subtype key and the /Image name.
-    private static readonly Regex ImageSubtype = new(@"/Subtype[\x00\t\n\f\r ]*/Image\b", RegexOptions.Compiled);
+    // Image XObjects; PDF allows whitespace and comments (%...EOL) between the /Subtype key and the /Image name.
+    private static readonly Regex ImageSubtype = new(
+        @"/Subtype(?:[\x00\t\n\f\r ]|%[^\r\n]*[\r\n])*/Image\b",
+        RegexOptions.Compiled);
 
     public static EvidenceIntakeResult Process(IReadOnlyList<EvidenceDocument> documents)
     {

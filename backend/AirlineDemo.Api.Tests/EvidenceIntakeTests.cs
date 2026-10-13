@@ -152,7 +152,9 @@ public sealed class EvidenceIntakeTests
     [InlineData("/Subtype\t/Image")]
     [InlineData("/Subtype\r\n\f/Image")]
     [InlineData("/Subtype/Image")]
-    public void ImagePayloadIsRejectedRegardlessOfWhitespace(string subtype)
+    [InlineData("/Subtype%comment\n/Image")]
+    [InlineData("/Subtype %c1\r\n%c2\n/Image")]
+    public void ImagePayloadIsRejectedRegardlessOfWhitespaceOrComments(string subtype)
     {
         var pdf = Encoding.ASCII.GetBytes($"%PDF-1.4\n1 0 obj << /Type /XObject {subtype} >> endobj\n%%EOF\n");
 
@@ -185,6 +187,7 @@ public sealed class EvidenceIntakeTests
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
 
@@ -198,6 +201,7 @@ public sealed class EvidenceIntakeTests
         var result = EvidenceIntake.Process(docs);
 
         Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
 
@@ -208,6 +212,7 @@ public sealed class EvidenceIntakeTests
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
 
