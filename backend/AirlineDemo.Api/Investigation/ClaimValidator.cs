@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace AirlineDemo.Api.Investigation;
 
 /// <summary>Kinds of investigator claim that policy routes differently.</summary>
@@ -73,7 +75,7 @@ public static class ClaimValidator
 
         foreach (var witness in claim.Witnesses)
         {
-            var problem = WitnessProblem(witness, basis, typedValue);
+            var problem = WitnessProblem(witness, kind, basis, typedValue);
             if (problem is not null)
             {
                 return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, problem);
@@ -95,7 +97,7 @@ public static class ClaimValidator
         return new ValidatedClaim(claim, kind, ClaimStatus.Supported, null);
     }
 
-    private static string? WitnessProblem(DocumentWitness? witness, IReadOnlyDictionary<string, BasisDocument> basis, string typedValue)
+    private static string? WitnessProblem(DocumentWitness? witness, ClaimKind kind, IReadOnlyDictionary<string, BasisDocument> basis, string typedValue)
     {
         if (witness is null || string.IsNullOrEmpty(witness.DocumentId))
         {
@@ -105,6 +107,11 @@ public static class ClaimValidator
         if (!basis.TryGetValue(witness.DocumentId, out var document) || document.Pages is null)
         {
             return "document not in current inventory";
+        }
+
+        if (!string.Equals(document.DocumentId, witness.DocumentId, StringComparison.Ordinal))
+        {
+            return "document identity mismatch";
         }
 
         if (BasisDocument.PagesDigest(document.Pages) != document.ContentDigest)
@@ -128,6 +135,16 @@ public static class ClaimValidator
             return "claim value not in witness quote";
         }
 
+        // A quote that negates its statement cannot support a baseline or missing-requirement claim; conflicts may quote denials.
+        if (kind != ClaimKind.Conflict && Negation.IsMatch(witness.Quote))
+        {
+            return "witness quote negates claim";
+        }
+
         return null;
     }
+
+    private static readonly Regex Negation = new(
+        @"\b(?:not|no|never|none|without|neither|nor|cannot|denied|denies|rejected|disproves?)\b|n['’]t\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }

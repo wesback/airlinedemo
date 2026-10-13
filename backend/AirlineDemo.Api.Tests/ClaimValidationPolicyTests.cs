@@ -65,6 +65,41 @@ public class ClaimValidationPolicyTests
     }
 
     [Fact]
+    public void Basis_entry_whose_record_names_another_document_is_downgraded()
+    {
+        var swapped = new Dictionary<string, BasisDocument>
+        {
+            ["return-status"] = BasisDocument.Create("history", [Quote, "Page two text."]),
+        };
+
+        var result = ClaimValidator.Validate(Claim("return-status", 1, Quote), ClaimKind.MissingRequirement, swapped, TypedValue);
+        var decision = FindingRouter.Route(Complete, [result], identityAmbiguous: false);
+
+        Assert.Equal(ClaimStatus.Downgraded, result.Status);
+        Assert.Equal("document identity mismatch", result.Reason);
+        Assert.Equal(0, decision.RequestCount);
+    }
+
+    [Theory]
+    [InlineData("Return readiness is not pending reserve approval.")]
+    [InlineData("There is no pending reserve approval.")]
+    [InlineData("Return readiness isn't pending reserve approval.")]
+    public void Negated_quote_cannot_establish_missing_requirement(string negated)
+    {
+        var basis = new Dictionary<string, BasisDocument>
+        {
+            ["return-status"] = BasisDocument.Create("return-status", [negated]),
+        };
+
+        var result = ClaimValidator.Validate(Claim("return-status", 1, negated, negated), ClaimKind.MissingRequirement, basis, TypedValue);
+        var decision = FindingRouter.Route(Complete, [result], identityAmbiguous: false);
+
+        Assert.Equal(ClaimStatus.Downgraded, result.Status);
+        Assert.Equal("witness quote negates claim", result.Reason);
+        Assert.Equal(0, decision.RequestCount);
+    }
+
+    [Fact]
     public void Claim_without_witness_is_downgraded()
     {
         var result = ClaimValidator.Validate(new InvestigationClaim("no proof", []), ClaimKind.MissingRequirement, Basis(), TypedValue);
