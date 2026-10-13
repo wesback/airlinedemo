@@ -1,0 +1,360 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "fedce0be9c21a11918604850d648b8b982667d9f",
+  "round": 2,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake has a reachable false rejection: ordinary text containing `/ObjStm` is treated as unsupported PDF structure. This prevents valid text-only evidence from being accepted.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 172,
+          "message": "The raw `/ObjStm` scan rejects valid text that happens to contain that literal. Parse the PDF structure when deciding whether it uses object streams, or otherwise avoid treating text content as a structural marker.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ValidateBytes calls RejectCompressedStructure before parsing. That method applies NameRegex to the entire raw PDF, without distinguishing PDF names from text strings.",
+            "failureScenario": "A valid text-only PDF contains the literal `/ObjStm` in page text. The scan matches it and returns UnsupportedFormat before PdfPig parses the document, so ordinary text evidence is rejected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover many intake and storage behaviors, but do not verify rejection of a valid PDF containing a Form XObject.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 115,
+          "message": "Add a criterion-linked test using a valid text PDF with a /Form XObject; current tests do not protect the required Form XObject rejection behavior.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The page-content acceptance criterion requires rejecting /Resources /XObject entries with subtype /Form. The image theory uses malformed PDF stubs that fail as Corrupt, and the inline-image test does not exercise a Form XObject.",
+            "failureScenario": "If Form XObject rejection is removed, a valid text PDF with a /Form XObject can still pass the existing tests and be returned as Complete. The required XObject rule therefore lacks a test that fails when its handling is broken."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete, reachable security vulnerability in the changed application code. The diff’s pipeline evidence files are outside the review scope.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 275,
+      "total": 336,
+      "percent": 81.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 275,
+          "total": 336,
+          "missed": [
+            92,
+            93,
+            148,
+            149,
+            150,
+            151,
+            152,
+            236,
+            237,
+            238,
+            239,
+            240,
+            241,
+            242,
+            243,
+            245,
+            246,
+            253,
+            254,
+            260,
+            261,
+            277,
+            278,
+            279,
+            280,
+            281,
+            302,
+            303,
+            304,
+            305,
+            306,
+            325,
+            326,
+            327,
+            328,
+            329,
+            330,
+            331,
+            334,
+            340,
+            341,
+            346,
+            356,
+            357,
+            362,
+            363,
+            364,
+            396,
+            397,
+            398,
+            399,
+            400,
+            430,
+            431,
+            432,
+            433,
+            434,
+            455,
+            456,
+            462,
+            463
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
