@@ -110,6 +110,27 @@ public class ApprovedModelManifestTests
     }
 
     [Fact]
+    public void Stub_manifest_version_is_refused_even_when_approved()
+    {
+        var manifest = Approved("manifestVersion", "STUB-1.0.0");
+
+        Assert.Contains("manifestVersion is still a stub value", manifest.Validate());
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
+    }
+
+    [Theory]
+    [InlineData("jane.smith@example.com")]
+    [InlineData("evidence v1")]
+    [InlineData("name O'Brien")]
+    public void Evidence_version_that_is_not_a_plain_identifier_is_refused(string evidenceVersion)
+    {
+        var request = new ModelRequest(evidenceVersion, ApprovedRegion, Marked(DefaultBody));
+
+        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request, Registry()));
+        Assert.Contains("plain version identifier", ex.Message);
+    }
+
+    [Fact]
     public void Unsupported_arm_and_disabled_content_filter_are_refused()
     {
         Assert.Contains("arm 'shadow-run' is not supported", Approved("arm", "shadow-run").Validate());

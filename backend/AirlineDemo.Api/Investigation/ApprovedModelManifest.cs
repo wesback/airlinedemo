@@ -50,6 +50,10 @@ public sealed record ApprovedModelManifest(
         {
             errors.Add("manifestVersion is missing");
         }
+        else if (ManifestVersion.Contains(StubMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("manifestVersion is still a stub value");
+        }
 
         if (!Approved)
         {
@@ -184,6 +188,10 @@ public static class ModelCallGate
     private static readonly Regex SyntheticBodyPattern =
         new(@"^SYNTHETIC EVIDENCE: [A-Za-z0-9 .,:;'()\-]*\z", RegexOptions.Compiled);
 
+    // The evidence version is recorded in the trace, so it must be a short plain identifier, never free text.
+    private static readonly Regex EvidenceVersionPattern =
+        new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\z", RegexOptions.Compiled);
+
     /// <summary>True when content carries the synthetic marker. Used to vet fixtures; not an authorization decision.</summary>
     internal static bool IsMarkedSynthetic(string content) => content.StartsWith(SyntheticMarker, StringComparison.Ordinal);
 
@@ -199,6 +207,11 @@ public static class ModelCallGate
         if (string.IsNullOrWhiteSpace(request.EvidenceVersion))
         {
             throw new ModelGateException("model request refused: no versioned evidence");
+        }
+
+        if (!EvidenceVersionPattern.IsMatch(request.EvidenceVersion))
+        {
+            throw new ModelGateException("model request refused: evidence version is not a plain version identifier");
         }
 
         // Region applies to every request.
