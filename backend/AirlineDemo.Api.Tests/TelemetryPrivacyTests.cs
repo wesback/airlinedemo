@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -314,6 +316,50 @@ public sealed class TelemetryPrivacyTests
         Assert.Matches("^actor-[0-9a-f]{16}$", properties["enduser.pseudo.id"]!);
         Assert.False(string.IsNullOrWhiteSpace(properties["investigation.outcome"]));
         Assert.DoesNotContain("reviewer", string.Join("|", properties.Values));
+    }
+
+    [Fact]
+    public async Task Case_integrity_failure_emits_integrity_alert_event_through_the_app()
+    {
+        var logger = new CapturingLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger));
+                services.AddSingleton<CaseStore, IntegrityFailingCaseStore>();
+            });
+        });
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        using var signIn = await client.PostAsJsonAsync("/api/auth/sign-in", new { userId = "reviewer", passcode = AppPasscode }, ct);
+        signIn.EnsureSuccessStatusCode();
+        var cookie = signIn.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var csrf = (await signIn.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("csrfToken").GetString()!;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/cases/case-001/reviews")
+        {
+            Content = JsonContent.Create(new { expectedRevision = 1, decision = "accept" }),
+        };
+        request.Headers.Add("Cookie", cookie);
+        request.Headers.Add("X-CSRF-Token", csrf);
+        using var response = await client.SendAsync(request, ct);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        var alerts = logger.States
+            .Select(ToProperties)
+            .Where(p => p.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.IntegritySignatureFailure)
+            .ToList();
+        Assert.Single(alerts);
+    }
+
+    private sealed class IntegrityFailingCaseStore : CaseStore
+    {
+        public override ReviewOutcome RecordReview(string id, int expectedRevision, string decision, out CaseRecord? updated) =>
+            throw new BasisIntegrityException("Forced integrity failure for alert-path test.");
     }
 
     private static Dictionary<string, string?> ToProperties(IReadOnlyList<KeyValuePair<string, object?>> state) =>
