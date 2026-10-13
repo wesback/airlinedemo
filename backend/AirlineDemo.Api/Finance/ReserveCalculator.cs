@@ -215,6 +215,7 @@ public static class ReserveCalculator
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in usage.Entries)
         {
+            ArgumentNullException.ThrowIfNull(entry, nameof(usage));
             ValidateNonBlank(entry.ContractLine, nameof(usage));
             if (!seen.Add(entry.ContractLine))
             {
@@ -234,6 +235,7 @@ public static class ReserveCalculator
         ArgumentNullException.ThrowIfNull(rates.Entries, nameof(rates));
         foreach (var entry in rates.Entries)
         {
+            ArgumentNullException.ThrowIfNull(entry, nameof(rates));
             ValidateNonBlank(entry.ContractLine, nameof(rates));
             ValidatePeriod(entry.Period, nameof(rates));
             if (entry.UnitRate < 0)

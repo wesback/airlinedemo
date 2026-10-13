@@ -5,6 +5,26 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AirlineDemo.Api.Tests;
 
+/// <summary>
+/// Criterion-to-test map (issue #146):
+/// AC1 rounding: Lines_round_before_totals_with_midpoints_away_from_zero, Hand_calculated_line_and_total_match,
+///     Mismatched_line_is_discrepancy_not_approved_and_usage_is_unchanged, Mismatched_total_is_discrepancy_not_approved.
+/// AC2 discrepancy provenance: Mismatched_line_is_discrepancy_not_approved_and_usage_is_unchanged,
+///     Discrepancy_keeps_source_reports_period_rates_and_basis.
+/// AC3 blocked inputs: Missing_usage_report_is_blocked_with_no_charge_lines_or_total, Wrong_period_usage_is_blocked,
+///     Missing_required_usage_is_blocked_not_treated_as_zero, Missing_rate_coverage_is_blocked,
+///     Overlapping_rate_coverage_is_blocked, Omitted_required_usage_line_is_blocked_not_treated_as_zero,
+///     Missing_rate_report_is_blocked_with_no_charge_lines_or_total_and_refuses_approval,
+///     Wrong_period_rate_report_is_blocked_with_no_charge_lines_or_total_and_refuses_approval.
+/// AC4 validation and authorization: Malformed_inputs_fail_validation, Null_entries_in_reports_fail_validation_instead_of_throwing_NullReference,
+///     Unauthorized_actor_cannot_record_decision, Actor_not_on_server_roster_is_refused_even_when_claiming_reviewer_identity,
+///     Request_without_session_cannot_name_itself_reviewer, Forged_session_cookie_naming_reviewer_is_refused,
+///     Caller_supplied_identity_cannot_elevate_a_non_reviewer_session, Undefined_decision_value_is_rejected,
+///     Correction_creates_new_version_without_inherited_approval.
+/// AC4 simulated decision, provenance, no invoice: Approve_records_simulated_decision_with_provenance_and_no_invoice,
+///     Return_records_decision_for_blocked_draft_without_payable_total.
+/// AC5 (suite fails when a guarded behaviour is removed): every test above.
+/// </summary>
 public class ReserveCalculationTests
 {
     private const string Period = "2026-09";
@@ -214,6 +234,13 @@ public class ReserveCalculationTests
             Calc(Usage(new UsageEntry("FH-A", 1m), new UsageEntry("FH-A", 2m)), StandardRates()));
         Assert.Throws<ArgumentException>(() => ReserveCalculator.Calculate(" ", 1, Period, Usage(), StandardRates()));
         Assert.Throws<ArgumentException>(() => ReserveCalculator.Calculate("DRAFT-1", 0, Period, Usage(), StandardRates()));
+    }
+
+    [Fact]
+    public void Null_entries_in_reports_fail_validation_instead_of_throwing_NullReference()
+    {
+        Assert.Throws<ArgumentNullException>(() => Calc(Usage((UsageEntry)null!), StandardRates()));
+        Assert.Throws<ArgumentNullException>(() => Calc(Usage(), Rates((RateEntry)null!)));
     }
 
     [Fact]
