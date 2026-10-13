@@ -1,0 +1,275 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 145,
+  "branch": "ai-sdlc/issue-145",
+  "commitSha": "0c98886bd90820656b255dc83673b2341a7810dc",
+  "round": 1,
+  "pipelineVersion": "9266dd9",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The review endpoints cover the main authorization and audit paths, but acceptance can race with a basis update, and the tests do not verify the M-10 trace metadata requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "line": 83,
+          "message": "The acceptance check can race with a basis update. Make the current-basis check and acceptance mutation atomic so a stale decision cannot authorize acceptance.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "RecordReview checks AcceptanceAuthorized by reading CaseStateStore, then updates acceptance in the separate CaseStore. The read and write are not atomic.",
+            "failureScenario": "A current accept decision passes the check; before RecordReview commits acceptance, another request adds a newer evidence basis. The old decision is now non-current, but the case is still accepted. This bypasses M-10's current-decision gate. OWASP A01:2025 Broken Access Control."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 274,
+          "message": "M-10 lacks a test for emitted trace metadata. Assert that a successful decision emits a trace correlated by trace ID and that it contains no raw document or prompt content.",
+          "confidence": 0.93,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The decision test checks the trace ID in the response and audit detail, but does not capture or assert the emitted investigation trace.",
+            "failureScenario": "If EmitInvestigationTrace is removed, or the emitted trace includes raw document or prompt content, this test still passes. M-10 requires correlated trace metadata without that content."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several authorization, current-basis, and audit behaviors. They do not verify that the decision produces safe, correlated trace metadata as required by M-10.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 267,
+          "message": "M-10 is not verified: add assertions against the emitted trace to check correlation with the business decision and absence of raw document or prompt content.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-10 test checks that the response traceId matches the decision's traceId and that audit detail omits evidence text. It does not capture or inspect the emitted telemetry trace.",
+            "failureScenario": "If EmitInvestigationTrace stops emitting a trace, or emits one that cannot be correlated with the decision or contains raw document or prompt content, this test still passes. M-10 requires reconstruction from correlated trace metadata without that content."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The acceptance check and case update use separate stores without an atomic guard. A concurrent basis update can make the decision stale between authorization and acceptance.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "line": 80,
+          "message": "Acceptance authorization can race with a basis update, allowing acceptance after the technical decision becomes stale.",
+          "confidence": 0.78,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "AcceptanceAuthorized reads the technical decision from CaseStateStore, then RecordReview updates the separate CaseStore. The authorization check and acceptance write are not atomic.",
+            "failureScenario": "A reviewer with a current accept decision submits acceptance while another request commits a newer evidence basis after the check but before the CaseStore update. The case is accepted using a decision that is no longer current, contrary to M-10. OWASP A01:2025 Broken Access Control."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 4,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 119,
+      "total": 128,
+      "percent": 93,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 7,
+          "total": 10,
+          "missed": [
+            53,
+            54,
+            55
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 3,
+          "total": 3,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "covered": 99,
+          "total": 105,
+          "missed": [
+            70,
+            71,
+            72,
+            133,
+            134,
+            135
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
