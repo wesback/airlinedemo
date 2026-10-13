@@ -1,0 +1,287 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 148,
+  "branch": "ai-sdlc/issue-148",
+  "commitSha": "14b72dd01b3daf59025dc9af5d8a9b80eca35f72",
+  "round": 2,
+  "pipelineVersion": "bdb6534",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The backend authentication boundary is overrideable, and the private endpoint tests do not catch misrouted endpoints. Both leave stated acceptance criteria insufficiently enforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 12,
+          "message": "The backend's Entra-only requirement can be bypassed with an init-time configuration override.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The backend block sets use_azuread_auth = true, but Terraform accepts backend configuration overrides during init. The terraform_state_backend variable is separately validated and does not constrain the actual backend.",
+            "failureScenario": "An operator runs terraform init with -backend-config=use_azuread_auth=false and supplies access-key credentials. The backend can then use non-Entra authentication despite the stated identity requirement (OWASP A07:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 164,
+          "message": "The private endpoint assertions do not verify the intended target and subnet, so the M-13/M-18 routing test can pass for a misrouted endpoint.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-13/M-18 test checks private endpoint presence, subresource names, and DNS zone group properties, but does not assert each endpoint's target resource ID or subnet ID.",
+            "failureScenario": "If the model endpoint targets the wrong resource or is attached to the app subnet, the mock-plan assertions can still pass even though the approved private route required by M-13 and M-18 is broken."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The backend's Entra authentication can be overridden at initialization. The mock-plan tests also leave gaps in model endpoint routing and CIDR default coverage.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 12,
+          "message": "The backend's Entra identity requirement can be overridden during initialization, so the configuration does not enforce the required authentication boundary.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The azurerm backend sets use_azuread_auth = true, but Terraform accepts backend settings through -backend-config. The separate terraform_state_backend variable does not constrain those settings.",
+            "failureScenario": "An operator initializes Terraform with use_azuread_auth=false and access-key credentials. The backend can then use non-Entra authentication, contrary to the backend identity criterion (OWASP A07:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 177,
+          "message": "M-18's test does not verify the model private endpoint's subnet attachment or target resource, so a misrouted endpoint can pass.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The private endpoint assertions check endpoint count, subresource names, and some DNS configuration, but do not assert each endpoint's subnet_id or private_connection_resource_id.",
+            "failureScenario": "If the model endpoint is attached to the app subnet or targets a different resource, the mock-plan assertions still pass, although M-18 requires the model endpoint's private routing to be asserted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 231,
+          "message": "The no-environment-specific-defaults test omits required CIDR inputs, so it does not enforce the full no-defaults criterion.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The no_environment_defaults assertion checks a fixed list of variables that omits vnet_address_space, app_subnet_cidr, and private_endpoint_subnet_cidr.",
+            "failureScenario": "If a Terraform default is added to one of those CIDR variables, the current assertion still passes, despite the criterion requiring CIDRs to have no environment-specific defaults."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The backend configuration permits an initialization override that can switch state access from Entra authentication to access-key authentication.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 12,
+          "message": "The backend's Entra-only authentication requirement can be overridden during initialization.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The azurerm backend sets use_azuread_auth = true, but Terraform accepts backend settings through -backend-config. The separately validated terraform_state_backend variable does not constrain backend initialization.",
+            "failureScenario": "An operator initializes Terraform with -backend-config=use_azuread_auth=false and access-key credentials. The backend can then authenticate without Entra identity, contrary to the stated backend boundary (OWASP A07:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
