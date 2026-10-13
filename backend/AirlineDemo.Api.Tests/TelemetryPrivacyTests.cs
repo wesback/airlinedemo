@@ -80,6 +80,8 @@ public sealed class TelemetryPrivacyTests
     [InlineData("Authorization: Bearer CANARY-BEARER-5a1e")]
     [InlineData("authorization: Basic CANARY-BEARER-5a1e")]
     [InlineData("set-cookie: session=CANARY-BEARER-5a1e")]
+    [InlineData("cookie: session=harmless; auth=CANARY-BEARER-5a1e")]
+    [InlineData("Cookie: a=1; b=2; auth=CANARY-BEARER-5a1e; c=3")]
     public void Authorization_and_cookie_headers_redact_the_credential(string input)
     {
         var sanitized = TelemetryRedaction.Sanitize(input);

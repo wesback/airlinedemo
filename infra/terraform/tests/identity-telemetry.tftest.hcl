@@ -244,6 +244,25 @@ run "M-14_grants_bind_to_app_identity_as_service_principal" {
 run "M-14_app_grants_bind_to_app_principal_not_migration" {
   command = apply
 
+  override_resource {
+    target = azurerm_user_assigned_identity.app
+    values = {
+      principal_id = "55555555-5555-5555-5555-555555555555"
+    }
+  }
+
+  override_resource {
+    target = azurerm_user_assigned_identity.migration
+    values = {
+      principal_id = "66666666-6666-6666-6666-666666666666"
+    }
+  }
+
+  assert {
+    condition     = azurerm_user_assigned_identity.app.principal_id != azurerm_user_assigned_identity.migration.principal_id
+    error_message = "App and migration identities must have distinct principals for the grant binding test to be meaningful."
+  }
+
   assert {
     condition     = azurerm_role_assignment.app_openai_user.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_evidence.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_telemetry.principal_id == azurerm_user_assigned_identity.app.principal_id
     error_message = "Every app role assignment must be bound to the app workload identity principal."

@@ -61,7 +61,8 @@ public static partial class TelemetryRedaction
     [GeneratedRegex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")]
     private static partial Regex EmailPattern();
 
-    [GeneratedRegex(@"(?i)(authorization:\s*(?:[A-Za-z]+\s+)?|bearer\s+|token=|passcode=|cookie:\s*|set-cookie:\s*)\S+")]
+    // Cookie and Set-Cookie headers carry several pairs separated by ';', so the whole header value is redacted.
+    [GeneratedRegex(@"(?i)(?:authorization:\s*(?:[A-Za-z]+\s+)?|bearer\s+|token=|passcode=)\S+|(?:set-)?cookie:[^\r\n]*")]
     private static partial Regex SecretPattern();
 
     [GeneratedRegex(@"[\p{Cc}\p{Cf}]")]
