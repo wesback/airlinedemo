@@ -71,8 +71,11 @@ public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvest
     }
 
     // Document-derived tool output reaches the model only inside the untrusted-data delimiter (M-05).
+    // Text that carries a delimiter marker is refused rather than wrapped, so it cannot close the wrapper early.
     private static string Untrusted(string text) =>
-        $"{BoundedInvestigator.UntrustedBegin}\n{text}\n{BoundedInvestigator.UntrustedEnd}";
+        text.Contains(BoundedInvestigator.UntrustedBegin, StringComparison.Ordinal) || text.Contains(BoundedInvestigator.UntrustedEnd, StringComparison.Ordinal)
+            ? "denied: document text contains an untrusted-data delimiter"
+            : $"{BoundedInvestigator.UntrustedBegin}\n{text}\n{BoundedInvestigator.UntrustedEnd}";
 
     private async Task<string> GetStatusAsync(CancellationToken cancellationToken)
     {
