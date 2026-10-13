@@ -21,29 +21,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Fails closed unless production-release has required reviewers (product owner). Runs outside the
-  # environment so the check can execute before any approval-gated step. Reading environment protection
-  # rules needs a token with environment read access, supplied as RELEASE_GOVERNANCE_TOKEN (not a cloud credential).
+  # Fails closed unless production-release lists the product owner (PRODUCT_OWNER_LOGIN) as a required reviewer.
+  # Runs outside the environment so the check can execute before any approval-gated step. Reading environment
+  # protection rules needs a token with environment read access, supplied as RELEASE_GOVERNANCE_TOKEN (not a cloud credential).
   preflight:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      - name: Verify production-release requires reviewer approval
+      - name: Verify production-release requires product-owner approval
         env:
           GH_TOKEN: ${{ secrets.RELEASE_GOVERNANCE_TOKEN }}
           REPO: ${{ github.repository }}
+          PRODUCT_OWNER_LOGIN: ${{ vars.PRODUCT_OWNER_LOGIN }}
         run: |
           set -euo pipefail
           if [[ -z "$GH_TOKEN" ]]; then
             echo "::error::RELEASE_GOVERNANCE_TOKEN is required to read production-release protection rules; release fails closed"
             exit 1
           fi
+          if [[ -z "$PRODUCT_OWNER_LOGIN" ]]; then
+            echo "::error::PRODUCT_OWNER_LOGIN variable is required to identify the product-owner reviewer; release fails closed"
+            exit 1
+          fi
           env_json="$(gh api "repos/$REPO/environments/production-release")"
-          reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length' <<<"$env_json")"
-          if [[ "$reviewers" -lt 1 ]]; then
-            echo "::error::environment production-release has no required reviewers; product-owner approval is not enforced"
+          approvers="$(jq --arg owner "$PRODUCT_OWNER_LOGIN" '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]? | select(.type == "User" and .reviewer.login == $owner)] | length' <<<"$env_json")"
+          if [[ "$approvers" -lt 1 ]]; then
+            echo "::error::environment production-release does not list product owner $PRODUCT_OWNER_LOGIN as a required reviewer; product-owner approval is not enforced"
             exit 1
           fi
 
@@ -170,11 +175,27 @@ jobs:
           notation sign "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" \
             --id "$SIGNING_KEY_ID" --plugin azure-kv --signature-format cose \
             --allow-referrers-api
-          notation download --signature-format cose --output artifacts/signature/signature.cose \
-            "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
           notation inspect "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" > artifacts/signature/notation-inspect.txt
-          test -s artifacts/signature/signature.cose
           test -s artifacts/signature/notation-inspect.txt
+          # Export the COSE signature from the registry's OCI referrers API (Notation signatures are referrers of the digest).
+          token="$(az acr login --name "$ACR_NAME" --expose-token --output tsv --query accessToken)"
+          index="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.index.v1+json" \
+            "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/referrers/$IMAGE_DIGEST?artifactType=application/vnd.cncf.notary.signature")"
+          sig_manifest_digest="$(jq -r '[.manifests[]? | select(.artifactType == "application/vnd.cncf.notary.signature")][0].digest // empty' <<<"$index")"
+          if [[ -z "$sig_manifest_digest" ]]; then
+            echo "::error::no Notation signature referrer found for $IMAGE_DIGEST"
+            exit 1
+          fi
+          sig_manifest="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+            "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/manifests/$sig_manifest_digest")"
+          sig_blob_digest="$(jq -r '.layers[0].digest' <<<"$sig_manifest")"
+          curl -fsSL -H "Authorization: Bearer $token" -o artifacts/signature/signature.cose \
+            "https://$ACR_LOGIN_SERVER/v2/$IMAGE_REPOSITORY/blobs/$sig_blob_digest"
+          if [[ "sha256:$(sha256sum artifacts/signature/signature.cose | cut -d' ' -f1)" != "$sig_blob_digest" ]]; then
+            echo "::error::exported signature does not match its registry digest $sig_blob_digest"
+            exit 1
+          fi
+          test -s artifacts/signature/signature.cose
 
       - name: Verify signature and digest
         run: |

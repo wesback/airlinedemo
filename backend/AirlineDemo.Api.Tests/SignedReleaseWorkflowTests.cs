@@ -21,6 +21,11 @@ public sealed class SignedReleaseWorkflowTests
         var preflight = JobBody(workflow, "preflight");
         Assert.Contains("repos/$REPO/environments/production-release", preflight);
         Assert.Contains("required_reviewers", preflight);
+        Assert.Contains("PRODUCT_OWNER_LOGIN: ${{ vars.PRODUCT_OWNER_LOGIN }}", preflight);
+        Assert.Contains("PRODUCT_OWNER_LOGIN variable is required", preflight);
+        Assert.Contains(".reviewer.login == $owner", preflight);
+        Assert.Contains("select(.type == \"User\"", preflight);
+        Assert.Contains("does not list product owner", preflight);
         Assert.Contains("product-owner approval is not enforced", preflight);
         Assert.Contains("exit 1", preflight);
         Assert.DoesNotContain("environment:", preflight);
@@ -186,8 +191,11 @@ public sealed class SignedReleaseWorkflowTests
     {
         var sign = StepBody(ReadWorkflow(), "Sign image digest");
 
-        Assert.Contains("notation download --signature-format cose", sign);
+        Assert.DoesNotContain("notation download", sign);
+        Assert.Contains("/v2/$IMAGE_REPOSITORY/referrers/$IMAGE_DIGEST", sign);
+        Assert.Contains("application/vnd.cncf.notary.signature", sign);
         Assert.Contains("artifacts/signature/signature.cose", sign);
+        Assert.Contains("exported signature does not match its registry digest", sign);
         Assert.Contains("test -s artifacts/signature/signature.cose", sign);
     }
 
