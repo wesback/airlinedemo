@@ -108,6 +108,24 @@ public sealed class CaseStateStore
         }
     }
 
+    /// <summary>
+    /// Issues a scope for an existing case only when the signed-in user's own case scopes include it.
+    /// </summary>
+    public CaseScope AuthorizeSessionCase(string caseId, IEnumerable<string> sessionCaseScopes)
+    {
+        lock (_gate)
+        {
+            if (string.IsNullOrEmpty(caseId)
+                || !sessionCaseScopes.Contains(caseId, StringComparer.Ordinal)
+                || !_cases.ContainsKey(caseId))
+            {
+                throw new CaseAccessDeniedException();
+            }
+
+            return new CaseScope(caseId);
+        }
+    }
+
     public CaseScope CreateCase(string caseId, string owner)
     {
         if (string.IsNullOrWhiteSpace(caseId))
