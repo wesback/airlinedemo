@@ -1,0 +1,273 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 157,
+  "branch": "ai-sdlc/issue-157",
+  "commitSha": "f64dc2ebcfae553480a073a63acb17f8ccf06d42",
+  "round": 1,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation covers witness freshness, digest checks, coverage gating, and instruction-inert routing. A current quote that directly contradicts a MissingRequirement classification can still produce a request.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 93,
+          "message": "The validator can accept a clear statement that no requirement is missing as a supported MissingRequirement claim. Ensure the evidence supports the claim kind before routing it as a request.",
+          "confidence": 0.89,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "After checking the witness, digest, typed value, and a limited set of negation or resolution terms, Validate marks the claim Supported. FindingRouter routes any supported MissingRequirement claim as a request.",
+            "failureScenario": "With complete coverage, a current document says “Maintenance requirements are current.” An investigator submits that exact quote as the claim, labels it MissingRequirement, and uses “Maintenance requirements” as the typed value. The quote passes the checks, so routing creates a request despite the evidence saying the requirements are current. OWASP A08:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover witness validation, coverage, and uncertainty routing. The acceptance criterion for encoded instructions is not covered by the named test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ClaimValidationPolicyTests.cs",
+          "line": 278,
+          "message": "The instruction-inert test does not cover encoded instructions. Add an encoded-instruction case and assert that it cannot change the routing outcome.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The instruction-inert test compares routing for a literal instruction and a shortened literal quote. It does not exercise encoded instructions or verify that routing is unchanged for them.",
+            "failureScenario": "A document contains an encoded instruction that would alter policy if decoded. No test in this change supplies that input, so the named test can pass without demonstrating the acceptance criterion that encoded instructions cannot change policy."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A MissingRequirement claim can pass witness and digest validation while its quote says the requirement is current. The router then creates a request from that claim.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 137,
+          "message": "The fixed resolution patterns miss clear equivalent statements such as “up to date,” allowing evidence that denies a current gap to establish a MissingRequirement request. Validate that the evidence supports the claim kind before marking it Supported. OWASP A04:2025.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "For MissingRequirement claims, the validator rejects quotes only when they match the fixed Resolution or Negation patterns. It then accepts claim text contained in the quote; FindingRouter routes supported MissingRequirement claims as requests.",
+            "failureScenario": "With complete coverage, an investigator submits the quote “The maintenance requirement is up to date; pending reserve approval is documented.” as the claim text, with typedValue “maintenance requirement” and kind MissingRequirement. Neither pattern matches “up to date”; validation marks the claim Supported and routing returns Request even though the quote says the requirement is current. OWASP A04:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ClaimValidationPolicyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 98,
+      "total": 100,
+      "percent": 98,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "covered": 71,
+          "total": 73,
+          "missed": [
+            104,
+            105
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Policy/FindingRouter.cs",
+          "covered": 27,
+          "total": 27,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
