@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Tokens;
 
 namespace AirlineDemo.Api.Evidence;
 
@@ -58,19 +58,6 @@ internal sealed class EvidenceIntakeException(string message, EvidenceFailureKin
 /// </summary>
 public static class EvidenceIntake
 {
-    // Names that signal scripts, forms, embedded files, images, or launch actions.
-    private static readonly string[] ActiveContentMarkers =
-    [
-        "/JavaScript", "/JS", "/Launch", "/EmbeddedFile", "/AcroForm", "/XFA", "/RichMedia",
-        // Object streams hide dictionaries (and their actions) inside compressed data, so they are rejected, not inspected.
-        "/ObjStm",
-    ];
-
-    // Image XObjects; PDF allows whitespace and comments (%...EOL) between the /Subtype key and the /Image name.
-    private static readonly Regex ImageSubtype = new(
-        @"/Subtype(?:[\x00\t\n\f\r ]|%[^\r\n]*[\r\n])*/Image\b",
-        RegexOptions.Compiled);
-
     public static EvidenceIntakeResult Process(IReadOnlyList<EvidenceDocument> documents)
     {
         try
@@ -163,32 +150,39 @@ public static class EvidenceIntake
                 true);
         }
 
-        // PDF name objects may hex-escape characters (e.g. /J#61vaScript), so decode #xx before matching.
-        var text = NameHexEscape.Replace(
-            Encoding.Latin1.GetString(bytes),
-            m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
-        foreach (var marker in ActiveContentMarkers)
+    }
+
+    // Decides active, embedded, form, and image content from parsed PDF entries, never from raw bytes,
+    // so ordinary text that contains marker words is accepted.
+    private static void RejectActiveContent(string name, PdfDocument pdf)
+    {
+        var catalog = pdf.Structure.Catalog.CatalogDictionary.Data;
+        foreach (var key in new[] { "OpenAction", "AA", "AcroForm" })
         {
-            if (text.Contains(marker, StringComparison.Ordinal))
+            if (catalog.ContainsKey(key))
             {
-                throw new EvidenceIntakeException(
-                    $"Document '{document.Name}' contains active or embedded content ({marker}); it is rejected.",
-                    EvidenceFailureKind.ActiveContent,
-                    true);
+                throw ActiveContentFailure(name, $"/{key} in the document catalog");
             }
         }
 
-        // Inline images (BI ... EI) are detected from decoded page content in ExtractDocument, not raw bytes.
-        if (ImageSubtype.IsMatch(text))
+        // Name tree entries for JavaScript and embedded files live under the catalog's /Names dictionary.
+        if (catalog.TryGetValue("Names", out var names) && names is DictionaryToken nameTree)
         {
-            throw new EvidenceIntakeException(
-                $"Document '{document.Name}' contains an image payload (image XObject or inline image); it is rejected.",
-                EvidenceFailureKind.ActiveContent,
-                true);
+            foreach (var key in new[] { "JavaScript", "EmbeddedFiles" })
+            {
+                if (nameTree.Data.ContainsKey(key))
+                {
+                    throw ActiveContentFailure(name, $"/{key} name tree");
+                }
+            }
         }
     }
 
-    private static readonly Regex NameHexEscape = new("#([0-9A-Fa-f]{2})", RegexOptions.Compiled);
+    private static EvidenceIntakeException ActiveContentFailure(string name, string detail) =>
+        new(
+            $"Document '{name}' contains active, embedded, or form content ({detail}); it is rejected.",
+            EvidenceFailureKind.ActiveContent,
+            true);
 
     private static string ExtractDocument(EvidenceDocument document)
     {
@@ -204,6 +198,8 @@ public static class EvidenceIntake
                     EvidenceFailureKind.LimitExceeded,
                     true);
             }
+
+            RejectActiveContent(document.Name, pdf);
 
             if (pages == 0)
             {

@@ -16,12 +16,12 @@ public sealed class EvidenceIntakeTests
     private const string SyntheticContent = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
 
     // asciiHex encodes each content stream with ASCIIHexDecode so raw bytes hide its operators.
-    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false)
+    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "")
     {
         var pad = 0;
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            var bytes = BuildPdf(pages, pad, content, asciiHex);
+            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra);
             if (padToBytes == 0 || bytes.LongLength == padToBytes)
             {
                 return bytes;
@@ -33,12 +33,12 @@ public sealed class EvidenceIntakeTests
         throw new InvalidOperationException("Could not pad the synthetic PDF to the requested size.");
     }
 
-    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex)
+    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra)
     {
         var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{4 + (2 * i)} 0 R"));
         var objects = new List<string>
         {
-            "<< /Type /Catalog /Pages 2 0 R >>",
+            $"<< /Type /Catalog /Pages 2 0 R {catalogExtra}>>",
             $"<< /Type /Pages /Kids [{kids}] /Count {pages} >>",
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         };
@@ -164,8 +164,9 @@ public sealed class EvidenceIntakeTests
 
         var result = EvidenceIntake.Process([new("image.pdf", pdf)]);
 
+        // Raw-token matching was removed: stub bytes that PdfPig cannot parse fail as Corrupt (retryable, no evidence).
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
-        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.Equal(EvidenceFailureKind.Corrupt, result.Failure!.Kind);
         Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
@@ -178,8 +179,9 @@ public sealed class EvidenceIntakeTests
 
         var result = EvidenceIntake.Process([new("objstm.pdf", pdf)]);
 
+        // Raw-token matching was removed: this stub does not parse, so it fails as Corrupt (retryable, no evidence).
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
-        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.Equal(EvidenceFailureKind.Corrupt, result.Failure!.Kind);
         Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
@@ -251,7 +253,10 @@ public sealed class EvidenceIntakeTests
     [Fact]
     public void ActiveJavaScriptPdfIsRejectedRetryably()
     {
-        var result = EvidenceIntake.Process([Fixture("active-javascript.pdf")]);
+        // Built in-test with a valid xref: the catalog /OpenAction is parsed by PdfPig and rejected.
+        var pdf = PdfWithPages(1, 0, catalogExtra: "/OpenAction << /S /JavaScript /JS (app.alert\\('synthetic'\\)) >> ");
+
+        var result = EvidenceIntake.Process([new("active-javascript.pdf", pdf)]);
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
@@ -267,8 +272,9 @@ public sealed class EvidenceIntakeTests
 
         var result = EvidenceIntake.Process([new("escaped.pdf", pdf)]);
 
+        // Raw-token matching was removed: this stub does not parse, so it fails as Corrupt (retryable, no evidence).
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
-        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.Equal(EvidenceFailureKind.Corrupt, result.Failure!.Kind);
         Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
