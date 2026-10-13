@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using UglyToad.PdfPig;
@@ -218,18 +219,45 @@ public static class EvidenceIntake
                 }
             }
 
-            if (dictionary.TryGetValue("A", out var action)
-                && Resolve(pdf, action) is DictionaryToken actionDictionary
-                && actionDictionary.Data.TryGetValue("S", out var actionType)
-                && actionType is NameToken { Data: "JavaScript" })
+            if (dictionary.TryGetValue("A", out var action))
             {
-                throw ActiveContentFailure(name, "JavaScript action on a page annotation");
+                RejectActionChain(name, pdf, action, 0);
             }
 
             if (dictionary.TryGetValue("Subtype", out var subtype)
                 && Resolve(pdf, subtype) is NameToken { Data: "Widget" or "FileAttachment" } subtypeName)
             {
                 throw ActiveContentFailure(name, $"/{subtypeName.Data} page annotation");
+            }
+        }
+    }
+
+    // Follows an action and its /Next chain; any JavaScript or Launch action in the chain is active content.
+    private static void RejectActionChain(string name, PdfDocument pdf, IToken token, int depth)
+    {
+        if (depth > 16 || Resolve(pdf, token) is not DictionaryToken action)
+        {
+            return;
+        }
+
+        if (action.Data.TryGetValue("S", out var actionType)
+            && Resolve(pdf, actionType) is NameToken { Data: "JavaScript" or "Launch" } activeType)
+        {
+            throw ActiveContentFailure(name, $"/{activeType.Data} action on a page annotation");
+        }
+
+        if (action.Data.TryGetValue("Next", out var next))
+        {
+            if (Resolve(pdf, next) is ArrayToken nextActions)
+            {
+                foreach (var nextAction in nextActions.Data)
+                {
+                    RejectActionChain(name, pdf, nextAction, depth + 1);
+                }
+            }
+            else
+            {
+                RejectActionChain(name, pdf, next, depth + 1);
             }
         }
     }
@@ -251,7 +279,7 @@ public static class EvidenceIntake
 
         foreach (var stream in streams)
         {
-            var decodedLength = stream.Decode(DefaultFilterProvider.Instance).Count;
+            var decodedLength = DecodedLength(name, pdf, stream);
             if (decodedLength > EvidenceLimits.MaxDecodedBytesPerStream)
             {
                 throw new EvidenceIntakeException(
@@ -269,6 +297,58 @@ public static class EvidenceIntake
                     true);
             }
         }
+    }
+
+    // FlateDecode streams are inflated only up to the per-stream limit, so a compression bomb is never fully materialized.
+    private static long DecodedLength(string name, PdfDocument pdf, StreamToken stream)
+    {
+        if (!IsFlateOnly(pdf, stream.StreamDictionary))
+        {
+            return stream.Decode(DefaultFilterProvider.Instance).Count;
+        }
+
+        var limit = EvidenceLimits.MaxDecodedBytesPerStream;
+        var buffer = new byte[64 * 1024];
+        long total = 0;
+        try
+        {
+            using var input = new MemoryStream(stream.Data.ToArray());
+            using var inflater = new ZLibStream(input, CompressionMode.Decompress);
+            int read;
+            while ((read = inflater.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                total += read;
+                if (total > limit)
+                {
+                    return total;
+                }
+            }
+        }
+        catch (InvalidDataException)
+        {
+            throw new EvidenceIntakeException(
+                $"Document '{name}' has a corrupt compressed content stream.",
+                EvidenceFailureKind.Corrupt,
+                true);
+        }
+
+        return total;
+    }
+
+    private static bool IsFlateOnly(PdfDocument pdf, DictionaryToken dictionary)
+    {
+        if (!dictionary.Data.TryGetValue("Filter", out var filter))
+        {
+            return false;
+        }
+
+        var resolved = Resolve(pdf, filter);
+        if (resolved is ArrayToken { Data.Count: 1 } single)
+        {
+            resolved = Resolve(pdf, single.Data[0]);
+        }
+
+        return resolved is NameToken { Data: "FlateDecode" or "Fl" };
     }
 
     private static IToken Resolve(PdfDocument pdf, IToken token) =>

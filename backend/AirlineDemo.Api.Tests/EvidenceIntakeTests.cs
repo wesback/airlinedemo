@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text;
 using AirlineDemo.Api.Evidence;
 
@@ -16,12 +17,12 @@ public sealed class EvidenceIntakeTests
     private const string SyntheticContent = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
 
     // asciiHex encodes each content stream with ASCIIHexDecode so raw bytes hide its operators.
-    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "", string pageExtra = "", string extraObject = "")
+    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "", string pageExtra = "", string extraObject = "", bool flate = false)
     {
         var pad = 0;
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra, pageExtra, extraObject);
+            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra, pageExtra, extraObject, flate);
             if (padToBytes == 0 || bytes.LongLength == padToBytes)
             {
                 return bytes;
@@ -33,7 +34,7 @@ public sealed class EvidenceIntakeTests
         throw new InvalidOperationException("Could not pad the synthetic PDF to the requested size.");
     }
 
-    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra, string pageExtra, string extraObject)
+    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra, string pageExtra, string extraObject, bool flate)
     {
         var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{4 + (2 * i)} 0 R"));
         var objects = new List<string>
@@ -46,7 +47,7 @@ public sealed class EvidenceIntakeTests
         {
             objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {5 + (2 * i)} 0 R /Resources << /Font << /F1 3 0 R >> >> {pageExtra} >>");
             var body = asciiHex ? Convert.ToHexString(Encoding.ASCII.GetBytes(content)) + ">" : content;
-            var filter = asciiHex ? " /Filter /ASCIIHexDecode" : string.Empty;
+            var filter = asciiHex ? " /Filter /ASCIIHexDecode" : flate ? " /Filter /FlateDecode" : string.Empty;
             objects.Add($"<< /Length {body.Length}{filter} >>\nstream\n{body}\nendstream");
         }
 
@@ -72,7 +73,7 @@ public sealed class EvidenceIntakeTests
         }
 
         sb.Append($"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
-        return Encoding.ASCII.GetBytes(sb.ToString());
+        return Encoding.Latin1.GetBytes(sb.ToString());
     }
 
     private static byte[] PaddedPdf(long size)
@@ -337,6 +338,59 @@ public sealed class EvidenceIntakeTests
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: JavaScript chained through an annotation action's /Next entry is rejected, not accepted as evidence.
+    [Fact]
+    public void JavaScriptChainedThroughAnnotationNextIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, pageExtra: "/Annots [<< /Type /Annot /Subtype /Link /A << /S /GoTo /D [0 /Fit] /Next << /S /JavaScript /JS (app.alert('x')) >> >> >>]");
+
+        var result = EvidenceIntake.Process([new("annot-next-js.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: a Launch action on a page annotation, direct or chained through /Next, is rejected as executable content.
+    [Fact]
+    public void LaunchAnnotationActionIsRejectedRetryably()
+    {
+        var direct = PdfWithPages(1, 0, pageExtra: "/Annots [<< /Type /Annot /Subtype /Link /A << /S /Launch /F (synthetic.txt) >> >>]");
+        var chained = PdfWithPages(1, 0, pageExtra: "/Annots [<< /Type /Annot /Subtype /Link /A << /S /GoTo /D [0 /Fit] /Next << /S /Launch /F (synthetic.txt) >> >> >>]");
+
+        foreach (var (name, pdf) in new[] { ("annot-launch.pdf", direct), ("annot-next-launch.pdf", chained) })
+        {
+            var result = EvidenceIntake.Process([new(name, pdf)]);
+
+            Assert.Equal(EvidenceProcessingState.Failed, result.State);
+            Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+            Assert.True(result.Failure.Retryable);
+            Assert.Null(result.Content);
+        }
+    }
+
+    // AC: a Flate content stream that inflates past the per-stream limit is rejected before any text is extracted.
+    [Fact]
+    public void FlateBombContentStreamIsRejectedBeforeExtraction()
+    {
+        var inflated = new byte[EvidenceLimits.MaxDecodedBytesPerStream + 1];
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            zlib.Write(inflated);
+        }
+
+        var pdf = PdfWithPages(1, 0, content: Encoding.Latin1.GetString(compressed.ToArray()), flate: true);
+
+        var result = EvidenceIntake.Process([new("flate-bomb.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
         Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
