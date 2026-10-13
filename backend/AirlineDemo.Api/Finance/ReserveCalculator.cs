@@ -40,7 +40,7 @@ public sealed record ReserveDraft(
     IReadOnlyList<string> Discrepancies,
     string CalculationBasis);
 
-public sealed record FinanceActor(string Id, string Role);
+public sealed record FinanceActor(string Id);
 
 public sealed record FinanceReviewRecord(
     string DraftId,
@@ -56,8 +56,6 @@ public sealed record FinanceReviewRecord(
 
 public static class ReserveCalculator
 {
-    public const string FinanceReviewerRole = "finance-reviewer";
-
     public const string CalculationBasis =
         "Units x unit rate per contract line; each line rounded to cents (midpoint away from zero) before summing; total = sum of rounded lines.";
 
@@ -155,15 +153,25 @@ public static class ReserveCalculator
             lines, total, [], discrepancies, CalculationBasis);
     }
 
-    public static FinanceReviewRecord Review(ReserveDraft draft, FinanceDecisionKind decision, FinanceActor actor, string reason, DateTimeOffset decidedAt)
+    /// <summary>
+    /// Records a simulated finance decision. Authority comes only from <paramref name="authorizedReviewerIds"/>,
+    /// the server-held reviewer roster; the caller cannot assert a role.
+    /// </summary>
+    public static FinanceReviewRecord Review(ReserveDraft draft, FinanceDecisionKind decision, FinanceActor actor,
+        IReadOnlySet<string> authorizedReviewerIds, string reason, DateTimeOffset decidedAt)
     {
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(actor);
-        if (actor.Role != FinanceReviewerRole)
+        ArgumentNullException.ThrowIfNull(authorizedReviewerIds);
+        if (!Enum.IsDefined(decision))
+        {
+            throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown finance decision.");
+        }
+        ValidateNonBlank(actor.Id, nameof(actor));
+        if (!authorizedReviewerIds.Contains(actor.Id))
         {
             throw new UnauthorizedAccessException("Only a finance reviewer may record a finance decision.");
         }
-        ValidateNonBlank(actor.Id, nameof(actor));
         ValidateNonBlank(reason, nameof(reason));
         if (decision == FinanceDecisionKind.Approve && draft.Status != ReserveDraftStatus.ReadyForReview)
         {
