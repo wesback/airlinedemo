@@ -1,6 +1,6 @@
 // Fails when a package source outside nuget.org or npmjs.org is configured or resolved.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const NUGET_ALLOWED = 'https://api.nuget.org/v3/index.json';
 const NPM_ALLOWED_HOST = 'registry.npmjs.org';
@@ -16,6 +16,19 @@ for (let i = 0; i < lines.length; i++) {
   if (url !== NUGET_ALLOWED) {
     problems.push(`NuGet source outside nuget.org: "${header[1]}" ${url}`);
   }
+}
+
+// npm config can redirect registry.npmjs.org URLs elsewhere, so any registry override is rejected.
+for (const rc of ['.npmrc', 'frontend/.npmrc']) {
+  if (!existsSync(rc)) continue;
+  readFileSync(rc, 'utf8').split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith(';')) return;
+    const key = line.split('=')[0].trim().toLowerCase();
+    if (key.includes('registry')) {
+      problems.push(`${rc}:${i + 1} overrides the npm registry, so package sources cannot be verified: ${line}`);
+    }
+  });
 }
 
 const lock = JSON.parse(readFileSync('frontend/package-lock.json', 'utf8'));

@@ -410,7 +410,7 @@ public sealed class SupplyChainWorkflowTests
     {
         var (exitCode, output) = RunShellStep("Secret scan", repo =>
         {
-            repo.Write("backend/appsettings.local.json", "{\"token\": \"" + "gh" + "p_" + new string('a', 36) + "\"}\n");
+            repo.Write("backend/appsettings.local.json", "{\"token\": \"" + "gh" + "p_" + "Q7xR2mK9pL4vN8sT1wY6zB3cD5fG0hJ2kE7a" + "\"}\n");
             GitTrackAll(repo.Root);
         });
 
@@ -422,7 +422,7 @@ public sealed class SupplyChainWorkflowTests
     // Fixtures are joined from pieces so this file never contains a full credential literal.
     // AC: M-14. Each fixture is committed to a temp repo, and the real workflow secret scan step must fail on it.
     [Theory]
-    [InlineData("gh" + "p_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("gh" + "p_" + "Q7xR2mK9pL4vN8sT1wY6zB3cD5fG0hJ2kE7a")]
     [InlineData("AKIA" + "ABCDEFGHIJKLMNOP")]
     [InlineData("DefaultEndpointsProtocol=https;" + "Account" + "Key=abcdefgh12345678")]
     public void M14_secret_scan_fails_on_committed_credentials(string content)
@@ -459,7 +459,7 @@ public sealed class SupplyChainWorkflowTests
     {
         var (exitCode, output) = RunShellStep("Secret scan", repo =>
         {
-            repo.Write(LockPath, "{\"resolved\": \"https://registry.npmjs.org/x/-/x-1.tgz?token=" + "gh" + "p_" + new string('a', 36) + "\"}\n");
+            repo.Write(LockPath, "{\"resolved\": \"https://registry.npmjs.org/x/-/x-1.tgz?token=" + "gh" + "p_" + "Q7xR2mK9pL4vN8sT1wY6zB3cD5fG0hJ2kE7a" + "\"}\n");
             GitTrackAll(repo.Root);
         });
 
@@ -473,12 +473,26 @@ public sealed class SupplyChainWorkflowTests
     {
         var (exitCode, output) = RunShellStep("Secret scan", repo =>
         {
-            repo.Write("--help", "token = " + "gh" + "p_" + new string('a', 36) + "\n");
+            repo.Write("--help", "token = " + "gh" + "p_" + "Q7xR2mK9pL4vN8sT1wY6zB3cD5fG0hJ2kE7a" + "\n");
             GitTrackAll(repo.Root);
         });
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Committed credential", output);
+    }
+
+    // AC: M-14. An .npmrc that overrides the npm registry is rejected, because it can redirect npmjs.org lockfile URLs.
+    [Fact]
+    public void M14_source_restriction_rejects_npmrc_registry_override()
+    {
+        var (exitCode, output) = RunShellStep("Source restriction", repo =>
+        {
+            repo.Write(LockPath, NpmjsOnlyLock);
+            repo.Write(".npmrc", "registry=https://evil.example/\n");
+        }, NugetOrgListing);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("overrides the npm registry", output);
     }
 
     private static string NoExceptions => "{\"exceptions\":[]}";
