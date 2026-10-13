@@ -80,9 +80,16 @@ public static class ClaimValidator
             }
         }
 
-        if (string.IsNullOrEmpty(claim.Text) || !claim.Text.Contains(typedValue, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(claim.Text) || !claim.Text.Contains(typedValue, StringComparison.Ordinal))
         {
             return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim text does not state typed value");
+        }
+
+        // The claim may assert nothing beyond what its witnesses state, so a matching value cannot carry extra claims.
+        var assertion = claim.Text.Trim();
+        if (claim.Witnesses.Any(witness => !witness.Quote.Contains(assertion, StringComparison.Ordinal)))
+        {
+            return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim text not stated by witness quote");
         }
 
         return new ValidatedClaim(claim, kind, ClaimStatus.Supported, null);

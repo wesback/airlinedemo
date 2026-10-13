@@ -171,6 +171,23 @@ public class ClaimValidationPolicyTests
     }
 
     [Fact]
+    public void Matching_value_with_unsupported_extra_assertion_is_downgraded_and_cannot_establish_request()
+    {
+        var mixed = ClaimValidator.Validate(
+            Claim("return-status", 1, Quote, text: $"{Text} Fuel load is missing."),
+            ClaimKind.MissingRequirement,
+            Basis(),
+            TypedValue);
+
+        var decision = FindingRouter.Route(Complete, [mixed], identityAmbiguous: false);
+
+        Assert.Equal(ClaimStatus.Downgraded, mixed.Status);
+        Assert.Equal("claim text not stated by witness quote", mixed.Reason);
+        Assert.Equal(FindingOutcome.Review, decision.Outcome);
+        Assert.Equal(0, decision.RequestCount);
+    }
+
+    [Fact]
     public void Missing_typed_value_is_downgraded_and_cannot_establish_request()
     {
         var result = ClaimValidator.Validate(Claim("return-status", 1, Quote), ClaimKind.MissingRequirement, Basis(), "");
