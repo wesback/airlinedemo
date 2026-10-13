@@ -22,6 +22,24 @@ mock_provider "azurerm" {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
     }
   }
+
+  mock_resource "azurerm_virtual_network" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/virtualNetworks/vnet-demo"
+    }
+  }
+
+  mock_resource "azurerm_subnet" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/virtualNetworks/vnet-demo/subnets/snet-private-endpoints"
+    }
+  }
+
+  mock_resource "azurerm_private_dns_zone" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/privateDnsZones/privatelink.openai.azure.com"
+    }
+  }
 }
 
 variables {
@@ -151,6 +169,18 @@ run "data_endpoints_are_private" {
     condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && length(azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].private_dns_zone_ids) == 1
     error_message = "The model endpoint must register in its DNS zone group with exactly one private DNS zone."
   }
+  assert {
+    condition     = local.private_endpoints.model.zone == "model" && can(regex("(?s)private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
+    error_message = "The model endpoint's DNS zone group must reference the model privatelink.openai.azure.com zone."
+  }
+  assert {
+    condition     = local.private_dns_zones.model == "privatelink.openai.azure.com" && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
+    error_message = "The model privatelink zone must be linked to the demo VNet."
+  }
+  assert {
+    condition     = local.private_endpoints.model.subresource == "account" && local.private_dns_zones[local.private_endpoints.model.zone] == "privatelink.openai.azure.com" && length(azurerm_subnet.private_endpoints.address_prefixes) == 1
+    error_message = "The model private endpoint must use the account subresource and the privatelink.openai.azure.com zone, in the private endpoint subnet."
+  }
 }
 
 run "no_environment_defaults" {
@@ -169,6 +199,11 @@ run "backend_identity_and_locking_declared" {
     condition     = var.terraform_state_backend.use_azuread_auth && can(regex("(?s)backend \"azurerm\" \\{\\s*use_azuread_auth\\s*=\\s*true", file("main.tf")))
     error_message = "The azurerm backend block must declare use_azuread_auth = true (Entra identity)."
   }
+  # The azurerm backend always takes a blob lease for state locking; the block must not opt out of it.
+  assert {
+    condition     = var.terraform_state_backend.locking_enabled && !can(regex("(?i)use_lease\\s*=\\s*false", file("main.tf")))
+    error_message = "The azurerm backend must keep state locking (blob lease) enabled."
+  }
 }
 
 run "encryption_and_no_key_outputs" {
@@ -181,6 +216,10 @@ run "encryption_and_no_key_outputs" {
   assert {
     condition     = azurerm_key_vault.kv.network_acls[0].default_action == "Deny" && azurerm_key_vault.kv.public_network_access_enabled == false
     error_message = "Key Vault network ACL default action must be Deny with public access disabled."
+  }
+  assert {
+    condition     = azurerm_mssql_server_transparent_data_encryption.sql != null && can(regex("(?s)resource \"azurerm_mssql_server_transparent_data_encryption\" \"sql\" \\{\\s*server_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id", file("main.tf")))
+    error_message = "SQL transparent data encryption must be enabled on the SQL server (the TDE resource must exist and target the SQL server)."
   }
   assert {
     condition     = azurerm_mssql_server.sql.minimum_tls_version == "1.2" && azurerm_mssql_server.sql.azuread_administrator[0].azuread_authentication_only == true
