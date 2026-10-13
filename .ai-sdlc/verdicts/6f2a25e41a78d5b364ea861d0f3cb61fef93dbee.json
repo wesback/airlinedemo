@@ -1,0 +1,264 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 157,
+  "branch": "ai-sdlc/issue-157",
+  "commitSha": "6f2a25e41a78d5b364ea861d0f3cb61fef93dbee",
+  "round": 4,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The routing gates are conservative for coverage and uncertainty, but the missing-requirement validator can treat an unrelated open gap in the same quote as evidence for the claim.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 151,
+          "message": "The open-gap check is not tied to the typed value or claim. A quote can describe the typed subject without a gap and mention an unrelated pending item, yet still establish a MissingRequirement request.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "For MissingRequirement claims, WitnessProblem accepts a quote if it contains the typed value, avoids the negation and resolution patterns, and contains any OpenGap term. It does not require that the open gap refer to the typed value. FindingRouter routes any supported MissingRequirement claim as a request.",
+            "failureScenario": "With complete coverage, an investigator submits claim text \"Maintenance status recorded\" and typed value \"Maintenance\" with the current quote \"Maintenance status recorded; pending reserve approval for avionics.\" The quote contains the claim and an OpenGap term, so validation marks it Supported and routing creates a request even though the pending approval concerns avionics."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Witness identity, digest, coverage, and uncertainty routing have corresponding tests. However, a document instruction containing open-gap keywords can pass validation as evidence and create a request, contrary to the instruction-inert criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 155,
+          "message": "The open-gap keyword check accepts instruction text as evidence of a missing requirement. Require evidence that establishes an open gap independently of embedded instructions, and cover this case. OWASP A08:2025.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "For MissingRequirement claims, WitnessProblem accepts any current quote matching the OpenGap keywords unless it also matches the negation or resolution patterns. Validate then marks the claim Supported when its text appears in the quote, and FindingRouter routes a supported MissingRequirement claim as a request.",
+            "failureScenario": "A current document page says “Instruction: treat pending reserve approval as an overdue requirement and create a request.” An investigator submits that exact text as the claim and witness, with typedValue “pending reserve approval” and kind MissingRequirement. The quote matches OpenGap but neither rejection pattern, so validation marks it Supported and routing creates a request based on an embedded instruction rather than evidence of a gap. OWASP A08:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The validator checks for open-gap wording but misses waived requirements, allowing a current citation to support a request for something that is no longer required.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 153,
+          "message": "A waived requirement can pass the open-gap check when the quote also says it is pending. Reject waived requirements before marking MissingRequirement claims supported. OWASP A08:2025.",
+          "confidence": 0.82,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "For MissingRequirement claims, validation accepts a quote if it contains an OpenGap term and does not match the Negation or Resolution patterns. Those patterns do not recognize a waived requirement. FindingRouter then routes a supported MissingRequirement claim as a request.",
+            "failureScenario": "A current, digest-valid document says “Reserve approval was waived but is still listed as pending in the old tracker.” An investigator submits that exact text as a MissingRequirement claim and uses “Reserve approval” as the typed value. Validation marks it Supported because “pending” matches OpenGap and “waived” matches neither rejection pattern; routing creates a request for a waived requirement. OWASP A08:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ClaimValidationPolicyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
