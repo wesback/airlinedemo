@@ -152,6 +152,12 @@ public sealed class BoundedInvestigator(
                 witnesses.Add(new DocumentWitness(witness.DocumentId, witness.Page, witness.Quote));
             }
 
+            // A claim must be supported by a witness quote, so text the model invents (for example a secret) is refused.
+            if (!witnesses.Any(w => w.Quote.Contains(dto.Text, StringComparison.Ordinal)))
+            {
+                throw new InvestigationOutputException("claim text is not supported by its witness quote");
+            }
+
             claims.Add(new InvestigationClaim(dto.Text, witnesses));
         }
 
