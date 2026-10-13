@@ -319,6 +319,32 @@ public sealed class TelemetryPrivacyTests
     private static Dictionary<string, string?> ToProperties(IReadOnlyList<KeyValuePair<string, object?>> state) =>
         state.GroupBy(kv => kv.Key).ToDictionary(g => g.Key, g => g.Last().Value?.ToString());
 
+    [Fact]
+    public async Task Unauthenticated_case_requests_emit_auth_scope_failure_alert_event_through_the_app()
+    {
+        var logger = new CapturingLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+            builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
+        });
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var response = await client.GetAsync("/api/cases/case-001", ct);
+            Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        var alerts = logger.States
+            .Select(state => state.ToDictionary(kv => kv.Key, kv => kv.Value?.ToString()))
+            .Where(properties => properties.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.AuthScopeFailure)
+            .ToList();
+        Assert.Equal(2, alerts.Count);
+    }
+
     private sealed class CapturingLoggerProvider(CapturingLogger logger) : ILoggerProvider
     {
         public ILogger CreateLogger(string categoryName) => logger;

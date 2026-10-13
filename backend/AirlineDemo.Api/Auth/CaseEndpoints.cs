@@ -23,7 +23,11 @@ public static class CaseEndpoints
     private static IResult GetCase(string caseId, HttpContext http, DemoSessionStore sessions, CaseStore cases, IConfiguration config, ILogger<DemoSessionStore> logger)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
-        if (session is null) return DemoAuthEndpoints.Unauthenticated();
+        if (session is null)
+        {
+            EmitScopeFailure(logger, config);
+            return DemoAuthEndpoints.Unauthenticated();
+        }
         if (!session.User.CaseScopes.Contains(caseId))
         {
             EmitScopeFailure(logger, config);
@@ -41,7 +45,11 @@ public static class CaseEndpoints
     private static IResult RecordReview(string caseId, ReviewRequest body, HttpContext http, DemoSessionStore sessions, CaseStore cases, IConfiguration config, ILogger<DemoSessionStore> logger)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
-        if (session is null) return DemoAuthEndpoints.Unauthenticated();
+        if (session is null)
+        {
+            EmitScopeFailure(logger, config);
+            return DemoAuthEndpoints.Unauthenticated();
+        }
         if (!DemoAuthEndpoints.HasValidAntiForgery(http, session)) return DemoAuthEndpoints.AntiForgeryFailed();
         if (session.User.Role != ReviewerRole)
         {
