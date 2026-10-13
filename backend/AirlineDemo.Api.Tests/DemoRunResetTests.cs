@@ -42,12 +42,12 @@ public sealed class DemoRunResetTests : IDisposable
         var runBAfter = store.Read(store.AuthorizeCase("run-b", Owner));
         Assert.Equal(runBBefore.Revision, runBAfter.Revision);
         Assert.Equal(runBBefore.ReceiptIds, runBAfter.ReceiptIds);
-        Assert.Equal(runBBefore.Audit.Count, runBAfter.Audit.Count);
+        Assert.Equal(runBBefore.Audit, runBAfter.Audit);
 
         var runAAfter = store.Read(store.AuthorizeCase("run-a", Owner));
         Assert.Equal(runABefore.Revision, runAAfter.Revision);
         Assert.Equal(runABefore.ReceiptIds, runAAfter.ReceiptIds);
-        Assert.Equal(runABefore.Audit.Count, runAAfter.Audit.Count);
+        Assert.Equal(runABefore.Audit, runAAfter.Audit);
     }
 
     [Fact]
