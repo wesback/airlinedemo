@@ -81,6 +81,11 @@ public class ApprovedModelManifestTests
     [InlineData("region", "east us 2;token=abc")]
     [InlineData("manifestVersion", "2026.10.1 Bearer xyz")]
     [InlineData("apiVersion", "myApiKeyValue")]
+    [InlineData("deploymentName", "Qz7mR2pL9xVb4kTn8WcF")]
+    [InlineData("model", "fixture-model-0a1b2c3d4e5f6g7h8i9j")]
+    [InlineData("region", "janesmith")]
+    [InlineData("region", "Jane Smith")]
+    [InlineData("apiVersion", "2025-01-01-Jane")]
     public void Credential_or_non_identifier_values_are_refused(string field, string value)
     {
         var manifest = Approved(field, value);

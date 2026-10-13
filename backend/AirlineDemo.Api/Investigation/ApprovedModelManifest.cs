@@ -30,11 +30,30 @@ public sealed record ApprovedModelManifest(
     private static readonly Regex PlainIdentifierPattern =
         new(@"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}\z", RegexOptions.Compiled);
 
-    private static readonly Regex CredentialHintPattern =
-        new(@"(?i)(secret|token|passw|pwd|bearer|apikey|api[_-]?key|accountkey|sk-)", RegexOptions.Compiled);
+    // Per-field shapes. Values are copied into every trace, so each field accepts only its own narrow format.
+    private static readonly Regex ManifestVersionPattern =
+        new(@"^\d{1,4}\.\d{1,4}\.\d{1,4}\z", RegexOptions.Compiled);
 
-    private static bool IsPlainIdentifier(string value) =>
-        PlainIdentifierPattern.IsMatch(value) && !CredentialHintPattern.IsMatch(value);
+    private static readonly Regex DeploymentNamePattern =
+        new(@"^[A-Za-z0-9][A-Za-z0-9\-]{0,63}(\.[0-9][A-Za-z0-9\-]{0,15})?\z", RegexOptions.Compiled);
+
+    private static readonly Regex ApiVersionPattern =
+        new(@"^\d{4}-\d{2}-\d{2}(-preview)?\z", RegexOptions.Compiled);
+
+    // Region is a closed list of Azure region names, so free-text (for example a person's name) cannot be recorded.
+    private static readonly Regex RegionPattern =
+        new(@"^(eastus|eastus2|westus|westus2|westus3|centralus|northeurope|westeurope|uksouth|ukwest)\z", RegexOptions.Compiled);
+
+    // Credential shapes and markers, including SAS query parameters, AWS/GitHub/Slack/JWT prefixes.
+    private static readonly Regex CredentialHintPattern =
+        new(@"(?i)(secret|token|passw|pwd|bearer|key|cred|auth|sig=|sv=|sas=|sk-|akia|ghp_|xox|eyj)", RegexOptions.Compiled);
+
+    // A 20+ character letter-and-digit run looks like a generated key, even without a credential marker.
+    private static readonly Regex RandomLookingRunPattern =
+        new(@"(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{20,}", RegexOptions.Compiled);
+
+    private static bool HasValidFormat(Regex format, string value) =>
+        format.IsMatch(value) && !CredentialHintPattern.IsMatch(value) && !RandomLookingRunPattern.IsMatch(value);
 
     public static ApprovedModelManifest Parse(string json)
     {
@@ -63,7 +82,7 @@ public sealed record ApprovedModelManifest(
         {
             errors.Add("manifestVersion is still a stub value");
         }
-        else if (!IsPlainIdentifier(ManifestVersion))
+        else if (!HasValidFormat(ManifestVersionPattern, ManifestVersion))
         {
             errors.Add("manifestVersion is not a plain identifier");
         }
@@ -73,7 +92,7 @@ public sealed record ApprovedModelManifest(
             errors.Add("manifest is not approved");
         }
 
-        foreach (var (name, value) in Values())
+        foreach (var (name, value, format) in Values())
         {
             if (string.IsNullOrWhiteSpace(value))
             {
@@ -83,9 +102,9 @@ public sealed record ApprovedModelManifest(
             {
                 errors.Add($"{name} is still a stub value");
             }
-            else if (!IsPlainIdentifier(value))
+            else if (!HasValidFormat(format, value))
             {
-                // Values are copied into every trace, so only plain identifiers are accepted (no secrets, URLs, or spaces).
+                // Values are copied into every trace, so each must match its field's format (no secrets, names, URLs, or spaces).
                 errors.Add($"{name} is not a plain identifier");
             }
         }
@@ -115,14 +134,14 @@ public sealed record ApprovedModelManifest(
         return this;
     }
 
-    private IEnumerable<(string Name, string? Value)> Values() =>
+    private IEnumerable<(string Name, string? Value, Regex Format)> Values() =>
     [
-        ("arm", Arm),
-        ("deploymentName", DeploymentName),
-        ("model", Model),
-        ("apiVersion", ApiVersion),
-        ("region", Region),
-        ("contentFilter", ContentFilter),
+        ("arm", Arm, PlainIdentifierPattern),
+        ("deploymentName", DeploymentName, DeploymentNamePattern),
+        ("model", Model, DeploymentNamePattern),
+        ("apiVersion", ApiVersion, ApiVersionPattern),
+        ("region", Region, RegionPattern),
+        ("contentFilter", ContentFilter, PlainIdentifierPattern),
     ];
 }
 
