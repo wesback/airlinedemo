@@ -87,6 +87,7 @@ public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvest
     private async Task<string> GetStatusAsync(CancellationToken cancellationToken)
     {
         await limits.BeforeToolCallAsync(cancellationToken);
-        return source.GetProcessingStatus(caseId) ?? "unknown";
+        var status = source.GetProcessingStatus(caseId);
+        return status is null ? "unknown" : Untrusted(status);
     }
 }

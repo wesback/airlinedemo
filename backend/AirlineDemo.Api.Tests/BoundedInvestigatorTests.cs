@@ -343,9 +343,11 @@ public class BoundedInvestigatorTests
         Assert.Equal(
             BoundedInvestigator.UntrustedBegin + "\nreturn-status\n" + BoundedInvestigator.UntrustedEnd,
             Call(CaseReadTools.SearchTool, new AIFunctionArguments { ["query"] = "reserve" }));
+        Assert.Equal(
+            BoundedInvestigator.UntrustedBegin + "\nready for review\n" + BoundedInvestigator.UntrustedEnd,
+            Call(CaseReadTools.StatusTool, none));
         Assert.Equal("no matches", Call(CaseReadTools.SearchTool, new AIFunctionArguments { ["query"] = "zzz-not-present" }));
         Assert.Equal("denied: query must be 1 to 200 characters", Call(CaseReadTools.SearchTool, new AIFunctionArguments { ["query"] = " " }));
-        Assert.Equal("ready for review", Call(CaseReadTools.StatusTool, none));
     }
 
     [Fact]
