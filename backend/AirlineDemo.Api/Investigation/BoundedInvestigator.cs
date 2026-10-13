@@ -97,6 +97,13 @@ public sealed class BoundedInvestigator(
         return prompt.ToString();
     }
 
+    // A claim that repeats a prompt sentence is a prompt-extraction leak, so it is refused rather than returned.
+    private static bool EchoesInstructions(string claimText) =>
+        Instructions.Split('\n', '.')
+            .Select(part => part.Trim())
+            .Where(part => part.Length >= 20)
+            .Any(part => claimText.Contains(part, StringComparison.Ordinal));
+
     private IReadOnlyList<InvestigationClaim> VerifyClaims(string modelText)
     {
         List<ClaimDto>? dtos;
@@ -121,6 +128,11 @@ public sealed class BoundedInvestigator(
             if (string.IsNullOrWhiteSpace(dto.Text) || dto.Witnesses is null || dto.Witnesses.Count == 0)
             {
                 throw new InvestigationOutputException("claim needs text and at least one witness");
+            }
+
+            if (EchoesInstructions(dto.Text))
+            {
+                throw new InvestigationOutputException("claim echoes the investigator prompt");
             }
 
             var witnesses = new List<DocumentWitness>(dto.Witnesses.Count);
