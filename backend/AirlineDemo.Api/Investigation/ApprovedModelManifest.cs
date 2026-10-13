@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -103,7 +105,28 @@ public sealed record ApprovedModelManifest(
 }
 
 /// <summary>Model input. Only versioned evidence is allowed; no raw prompts are stored in traces.</summary>
-public sealed record ModelRequest(string? EvidenceVersion, bool IsSynthetic, string? DataRegion, string Content);
+public sealed record ModelRequest(string? EvidenceVersion, string? DataRegion, string Content);
+
+/// <summary>
+/// Registry of SHA-256 hashes of synthetic evidence items, filled from the committed synthetic fixtures. Only content
+/// whose exact hash is registered may be sent to a model.
+/// </summary>
+public sealed class SyntheticContentRegistry
+{
+    private readonly HashSet<string> _hashes = new(StringComparer.Ordinal);
+
+    public string Register(string content)
+    {
+        var hash = Sha256Hex(content);
+        _hashes.Add(hash);
+        return hash;
+    }
+
+    public bool IsRegistered(string content) => _hashes.Contains(Sha256Hex(content));
+
+    public static string Sha256Hex(string content) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+}
 
 /// <summary>Trace of an authorized call. Carries the manifest version and settings only, never prompt or document text.</summary>
 public sealed record ModelCallTrace(
@@ -118,33 +141,20 @@ public sealed record ModelCallTrace(
 
 public static class ModelCallGate
 {
-    /// <summary>Prefix every synthetic evidence request must carry. The caller's IsSynthetic flag alone is not trusted.</summary>
+    /// <summary>Prefix every synthetic evidence request must carry.</summary>
     public const string SyntheticMarker = "SYNTHETIC EVIDENCE";
 
-    // Positive allowlist: synthetic evidence is plain text, so symbols common in real identifiers (@, +, /, #, =, _) are refused.
+    // Positive character allowlist on the request shape. It is not a personal-data scan and does not decide authorization.
     private static readonly Regex SyntheticBodyPattern =
         new(@"^SYNTHETIC EVIDENCE: [A-Za-z0-9 .,:;'()\-]*\z", RegexOptions.Compiled);
 
-    // Heuristic screen: it cannot prove content is synthetic, so the marker, allowlist and approved region are also required.
-    private static readonly Regex[] CredentialOrIdentifierPatterns =
-    [
-        new(@"(?i)\b(api[-_]?key|password|secret|token|authorization)\s*[:=]", RegexOptions.Compiled),
-        new(@"(?i)\bbearer\s+[A-Za-z0-9._\-]+", RegexOptions.Compiled),
-        new(@"(?i)AccountKey=|SharedAccessSignature=|\bsk-[A-Za-z0-9]{8,}", RegexOptions.Compiled),
-        new(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", RegexOptions.Compiled),
-        new(@"(?<!\d)(\+\d{7,15}|\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4})(?!\d)", RegexOptions.Compiled),
-        new(@"\bN\d{1,5}[A-Z]{0,2}\b", RegexOptions.Compiled),
-        new(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled),
-        new(@"\b\d{4}([ -]?\d{4}){2,3}\b", RegexOptions.Compiled),
-        new(@"\b\d{6,}\b", RegexOptions.Compiled),
-        new(@"(?i)\b(passport|date of birth|dob)\b", RegexOptions.Compiled),
-        new(@"\b(?i:passenger|crew|customer|pilot)\b\s+[A-Z][a-z]+", RegexOptions.Compiled),
-        new(@"\b(Mr|Mrs|Ms|Miss|Dr)\.?\s+[A-Z][a-z]+", RegexOptions.Compiled),
-    ];
-
     /// <summary>Throws unless the manifest is usable and the request is allowed; returns the trace to record.</summary>
-    public static ModelCallTrace Authorize(ApprovedModelManifest manifest, ModelRequest request)
+    public static ModelCallTrace Authorize(
+        ApprovedModelManifest manifest,
+        ModelRequest request,
+        SyntheticContentRegistry registry)
     {
+        ArgumentNullException.ThrowIfNull(registry);
         manifest.RequireUsable();
 
         if (string.IsNullOrWhiteSpace(request.EvidenceVersion))
@@ -152,9 +162,10 @@ public static class ModelCallGate
             throw new ModelGateException("model request refused: no versioned evidence");
         }
 
-        if (!request.IsSynthetic)
+        // Region applies to every request.
+        if (!string.Equals(request.DataRegion, manifest.Region, StringComparison.OrdinalIgnoreCase))
         {
-            throw new ModelGateException("model request refused: only synthetic evidence may be sent to the model");
+            throw new ModelGateException("model request refused: content region is not the approved region");
         }
 
         if (!request.Content.StartsWith(SyntheticMarker, StringComparison.Ordinal))
@@ -167,15 +178,10 @@ public static class ModelCallGate
             throw new ModelGateException("model request refused: content has characters outside the synthetic evidence allowlist");
         }
 
-        // Region applies to every request: the synthetic flag is caller-supplied and cannot waive it.
-        if (!string.Equals(request.DataRegion, manifest.Region, StringComparison.OrdinalIgnoreCase))
+        // The registry is the only synthetic-data guard: unregistered content is refused whatever it looks like.
+        if (!registry.IsRegistered(request.Content))
         {
-            throw new ModelGateException("model request refused: content region is not the approved region");
-        }
-
-        if (CredentialOrIdentifierPatterns.Any(p => p.IsMatch(request.Content)))
-        {
-            throw new ModelGateException("model request refused: content contains a credential or personal identifier");
+            throw new ModelGateException("model request refused: evidence SHA-256 is not registered as synthetic content");
         }
 
         return new ModelCallTrace(
@@ -195,8 +201,10 @@ public static class ModelCallGate
     /// </summary>
     public static IReadOnlyList<ModelCallTrace> AuthorizeScoredRun(
         ApprovedModelManifest manifest,
-        IReadOnlyList<ModelRequest> requests)
+        IReadOnlyList<ModelRequest> requests,
+        SyntheticContentRegistry registry)
     {
+        ArgumentNullException.ThrowIfNull(registry);
         manifest.RequireUsable();
 
         if (requests.Count == 0)
@@ -204,6 +212,6 @@ public static class ModelCallGate
             throw new ModelGateException("scored run refused: no model requests");
         }
 
-        return requests.Select(request => Authorize(manifest, request)).ToList();
+        return requests.Select(request => Authorize(manifest, request, registry)).ToList();
     }
 }

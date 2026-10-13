@@ -2,10 +2,9 @@ using AirlineDemo.Api.Investigation;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-
 namespace AirlineDemo.Api.Tests;
 
-/// <summary>Covers M-18 (manifest gating) and M-07 (synthetic-only, in-region model requests).</summary>
+/// <summary>Covers M-18 (manifest gating) and M-07 (SHA-256 registered synthetic content, in-region model requests).</summary>
 public class ApprovedModelManifestTests
 {
     private const string ApprovedJson = """
@@ -21,6 +20,9 @@ public class ApprovedModelManifestTests
         }
         """;
 
+    private const string ApprovedRegion = "eastus2";
+    private const string DefaultBody = "aircraft evidence v1.";
+
     private static ApprovedModelManifest Approved() => ApprovedModelManifest.Parse(ApprovedJson);
 
     private static ApprovedModelManifest Approved(string field, JsonNode? value)
@@ -30,8 +32,23 @@ public class ApprovedModelManifestTests
         return ApprovedModelManifest.Parse(node.ToJsonString());
     }
 
-    private static ModelRequest Synthetic(string content = "aircraft evidence v1.") =>
-        new("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", ModelCallGate.SyntheticMarker + ": " + content);
+    private static string Marked(string body) => ModelCallGate.SyntheticMarker + ": " + body;
+
+    private static ModelRequest Synthetic(string body = DefaultBody, string region = ApprovedRegion) =>
+        new("evidence-v1", region, Marked(body));
+
+    /// <summary>Registry holding the default synthetic evidence plus any extra bodies, as the committed fixtures would.</summary>
+    private static SyntheticContentRegistry Registry(params string[] bodies)
+    {
+        var registry = new SyntheticContentRegistry();
+        registry.Register(Marked(DefaultBody));
+        foreach (var body in bodies)
+        {
+            registry.Register(Marked(body));
+        }
+
+        return registry;
+    }
 
     private static string ShippedManifestPath()
     {
@@ -56,7 +73,7 @@ public class ApprovedModelManifestTests
         var errors = manifest.Validate();
         Assert.Contains("manifest is not approved", errors);
         Assert.Contains("deploymentName is still a stub value", errors);
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic()));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
     }
 
     [Fact]
@@ -80,7 +97,7 @@ public class ApprovedModelManifestTests
         var manifest = Approved(field, null);
 
         Assert.Contains($"{field} is missing", manifest.Validate());
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic()));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
     }
 
     [Fact]
@@ -89,7 +106,7 @@ public class ApprovedModelManifestTests
         var manifest = Approved("approved", (JsonNode?)false);
 
         Assert.Contains("manifest is not approved", manifest.Validate());
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic()));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
     }
 
     [Fact]
@@ -115,10 +132,16 @@ public class ApprovedModelManifestTests
     }
 
     [Fact]
+    public void Empty_manifest_document_is_refused_explicitly()
+    {
+        Assert.Throws<ModelGateException>(() => ApprovedModelManifest.Parse("null"));
+    }
+
+    [Fact]
     public void Authorized_call_trace_records_manifest_version_and_settings_but_not_content()
     {
-        const string secretishContent = "Synthetic aircraft evidence v1 with reserve figures.";
-        var trace = ModelCallGate.Authorize(Approved(), Synthetic(secretishContent));
+        const string body = "Synthetic aircraft evidence v1 with reserve figures.";
+        var trace = ModelCallGate.Authorize(Approved(), Synthetic(body), Registry(body));
 
         Assert.Equal("2026.10.1", trace.ManifestVersion);
         Assert.Equal("investigation-live", trace.Arm);
@@ -134,29 +157,63 @@ public class ApprovedModelManifestTests
     [Fact]
     public void Request_without_versioned_evidence_is_refused()
     {
-        var request = new ModelRequest(null, IsSynthetic: true, DataRegion: null, "Synthetic evidence.");
+        var request = new ModelRequest(null, DataRegion: null, Marked("evidence."));
 
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request, Registry()));
+    }
+
+    [Fact]
+    public void Registered_synthetic_content_is_authorized()
+    {
+        var trace = ModelCallGate.Authorize(Approved(), Synthetic(), Registry());
+
+        Assert.Equal("evidence-v1", trace.EvidenceVersion);
     }
 
     [Theory]
-    [InlineData("api_key=abc123")]
-    [InlineData("password: hunter2")]
-    [InlineData("Authorization Bearer eyJhbGciOi")]
-    [InlineData("AccountKey=Zm9vYmFy")]
-    [InlineData("passenger jane.doe@example.com booked seat 12A")]
-    [InlineData("call the passenger on +447700900123")]
-    [InlineData("passenger phone 555-867-5309 on file")]
-    [InlineData("aircraft N123AB returned to gate")]
-    [InlineData("crew member SSN 123-45-6789 on record")]
-    [InlineData("payment card 4111 1111 1111 1111 on file")]
     [InlineData("passenger Jane Smith in seat 12A")]
-    [InlineData("date of birth 1990-01-01 recorded")]
+    [InlineData("date of birth 1990 recorded")]
     [InlineData("Mr Jones reviewed the file")]
     [InlineData("booking reference 0012345678")]
-    public void Synthetic_request_containing_credentials_or_identifiers_is_refused(string content)
+    [InlineData("crew member SSN 123 45 6789 on record")]
+    [InlineData("aircraft N123AB returned to gate")]
+    [InlineData("call the passenger on 07700 900123")]
+    [InlineData("password hunter2 for the portal")]
+    public void Unregistered_content_is_refused_whatever_it_looks_like(string body)
     {
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), Synthetic(content)));
+        var ex = Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.Authorize(Approved(), Synthetic(body), Registry()));
+        Assert.Contains("not registered", ex.Message);
+    }
+
+    [Fact]
+    public void Unregistered_content_is_refused_when_registry_is_empty()
+    {
+        var ex = Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.Authorize(Approved(), Synthetic(), new SyntheticContentRegistry()));
+        Assert.Contains("not registered", ex.Message);
+    }
+
+    [Fact]
+    public void Content_differing_by_one_character_from_registered_content_is_refused()
+    {
+        var ex = Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.Authorize(Approved(), Synthetic("aircraft evidence v1 ."), Registry()));
+        Assert.Contains("not registered", ex.Message);
+    }
+
+    [Fact]
+    public void Registry_hashes_content_with_sha256()
+    {
+        Assert.Equal(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            SyntheticContentRegistry.Sha256Hex("abc"));
+
+        var registry = new SyntheticContentRegistry();
+        var hash = registry.Register("abc");
+        Assert.Equal(SyntheticContentRegistry.Sha256Hex("abc"), hash);
+        Assert.True(registry.IsRegistered("abc"));
+        Assert.False(registry.IsRegistered("abd"));
     }
 
     [Theory]
@@ -165,28 +222,20 @@ public class ApprovedModelManifestTests
     [InlineData("reference id_77 pending")]
     [InlineData("status=open")]
     [InlineData("name O'Brien\u00e9 on file")]
-    public void Synthetic_content_outside_the_plain_text_allowlist_is_refused(string content)
+    public void Synthetic_content_outside_the_plain_text_allowlist_is_refused(string body)
     {
-        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), Synthetic(content)));
+        var ex = Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.Authorize(Approved(), Synthetic(body), Registry(body)));
         Assert.Contains("allowlist", ex.Message);
     }
 
     [Fact]
     public void Synthetic_flag_without_synthetic_marker_is_refused()
     {
-        var request = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", "Aircraft record v1.");
+        var request = new ModelRequest("evidence-v1", ApprovedRegion, "aircraft record v1.");
 
-        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
+        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request, Registry()));
         Assert.Contains("not marked as synthetic", ex.Message);
-    }
-
-    [Fact]
-    public void Scored_run_is_refused_when_any_request_lacks_synthetic_marker()
-    {
-        var unmarked = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", "Aircraft record v1.");
-
-        Assert.Throws<ModelGateException>(() =>
-            ModelCallGate.AuthorizeScoredRun(Approved(), [Synthetic(), unmarked]));
     }
 
     [Theory]
@@ -200,78 +249,59 @@ public class ApprovedModelManifestTests
         var manifest = Approved(field, value is null ? null : JsonValue.Create(value));
 
         Assert.NotEmpty(manifest.Validate());
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic()));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
     }
 
     [Fact]
-    public void Synthetic_flag_does_not_waive_the_approved_region()
+    public void Registered_content_does_not_waive_the_approved_region()
     {
-        var request = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "westeurope", "SYNTHETIC EVIDENCE: evidence.");
-
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
+        Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.Authorize(Approved(), Synthetic(region: "westeurope"), Registry()));
     }
 
     [Fact]
-    public void Empty_manifest_document_is_refused_explicitly()
+    public void Region_comparison_is_case_insensitive()
     {
-        Assert.Throws<ModelGateException>(() => ApprovedModelManifest.Parse("null"));
+        var trace = ModelCallGate.Authorize(Approved(), Synthetic(region: "EASTUS2"), Registry());
+
+        Assert.Equal("evidence-v1", trace.EvidenceVersion);
     }
 
     [Fact]
-    public void Non_synthetic_content_outside_approved_region_is_refused()
-    {
-        var request = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "westeurope", "Aircraft N123 record.");
-
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
-    }
-
-    [Fact]
-    public void Non_synthetic_content_is_refused_even_in_approved_region()
-    {
-        var request = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "EASTUS2", "Aircraft record v1.");
-
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
-    }
-
-    [Fact]
-    public void Synthetic_content_with_identifier_pattern_is_refused_in_approved_region()
-    {
-        var withEmail = Synthetic("Contact jane.doe@example.com");
-        var withTailNumber = Synthetic("Aircraft N123 record.");
-
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), withEmail));
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), withTailNumber));
-    }
-
-    [Fact]
-    public void Scored_run_with_all_synthetic_requests_returns_one_trace_per_request()
+    public void Scored_run_with_all_registered_requests_returns_one_trace_per_request()
     {
         var requests = new[] { Synthetic("Synthetic evidence A."), Synthetic("Synthetic evidence B.") };
 
-        var traces = ModelCallGate.AuthorizeScoredRun(Approved(), requests);
+        var traces = ModelCallGate.AuthorizeScoredRun(Approved(), requests, Registry("Synthetic evidence A.", "Synthetic evidence B."));
 
         Assert.Equal(2, traces.Count);
         Assert.All(traces, t => Assert.Equal("2026.10.1", t.ManifestVersion));
     }
 
     [Fact]
-    public void Scored_run_is_refused_when_any_request_is_non_synthetic()
+    public void Scored_run_is_refused_when_any_request_is_unregistered()
     {
-        var requests = new[]
-        {
-            Synthetic("Synthetic evidence A."),
-            new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "eastus2", "Real record."),
-        };
+        var requests = new[] { Synthetic("Synthetic evidence A."), Synthetic("Synthetic evidence B.") };
 
-        Assert.Throws<ModelGateException>(() => ModelCallGate.AuthorizeScoredRun(Approved(), requests));
+        Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.AuthorizeScoredRun(Approved(), requests, Registry("Synthetic evidence A.")));
+    }
+
+    [Fact]
+    public void Scored_run_is_refused_when_any_request_lacks_synthetic_marker()
+    {
+        var unmarked = new ModelRequest("evidence-v1", ApprovedRegion, "aircraft record v1.");
+
+        Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.AuthorizeScoredRun(Approved(), [Synthetic(), unmarked], Registry()));
     }
 
     [Fact]
     public void Scored_run_is_refused_for_unusable_manifest_or_empty_run()
     {
         Assert.Throws<ModelGateException>(() =>
-            ModelCallGate.AuthorizeScoredRun(Approved("approved", (JsonNode?)false), [Synthetic()]));
+            ModelCallGate.AuthorizeScoredRun(Approved("approved", (JsonNode?)false), [Synthetic()], Registry()));
         Assert.Throws<ModelGateException>(() =>
-            ModelCallGate.AuthorizeScoredRun(Approved(), []));
+            ModelCallGate.AuthorizeScoredRun(Approved(), [], Registry()));
     }
 }
