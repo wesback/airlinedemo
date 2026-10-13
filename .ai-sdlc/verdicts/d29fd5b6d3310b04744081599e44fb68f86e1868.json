@@ -1,0 +1,308 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 150,
+  "branch": "ai-sdlc/issue-150",
+  "commitSha": "d29fd5b6d3310b04744081599e44fb68f86e1868",
+  "round": 0,
+  "pipelineVersion": "06ccf84",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow does not implement M-14 as specified: it substitutes grep and a hand-written secret pattern for the required JSON-parsing source checker and pinned gitleaks scan. The tests exercise those substitutes rather than the required implementations.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 50,
+          "message": "A02:2025 — Replace the hand-written secret pattern with the required pinned, SHA-256-verified gitleaks scan; the current scan can miss credential formats.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The Secret scan uses a hand-written regex with git grep. The issue requires downloading gitleaks at a pinned version, verifying its published SHA-256, and scanning tracked files with its default rules.",
+            "failureScenario": "A tracked file contains a credential format the regex does not cover. The scan reports no match and the workflow passes with the credential committed, contrary to M-14 (OWASP A02:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 38,
+          "message": "A08:2025 — Add and run the required JSON-parsing source checker; valid lockfile whitespace lets the current grep guard miss an unapproved package source.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The npm source guard uses grep for the exact text `\"resolved\":` instead of parsing the lockfile as JSON with the required `backend/ci/check-sources.mjs` script.",
+            "failureScenario": "A valid package-lock.json contains an approved npmjs.org resolution and an unapproved resolution formatted as `\"resolved\" : \"https://feeds.example.test/evil.tgz\"`. The grep misses the unapproved entry, so the guard passes and npm ci can fetch it, violating M-14 (OWASP A08:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs",
+          "line": 274,
+          "message": "Add M-14 tests that run the required source-check script and gitleaks command against fixtures; the current tests do not exercise either required implementation.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The source-restriction tests execute the workflow's inline shell block, and the secret-scan tests extract and run its hand-written regex. The acceptance criteria require tests to run the real `check-sources.mjs` script and the gitleaks scan.",
+            "failureScenario": "If the required source-check script or gitleaks scan is absent or broken, these tests still exercise the inline grep and regex instead, so they pass without verifying the required M-14 behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow and tests cover several build, audit, and exception behaviors, but M-14’s required source-checking script and pinned gitleaks scan are absent. The tests exercise the substitute inline checks, so they do not catch that acceptance-criteria gap.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 30,
+          "message": "M-14 is not implemented: run the required JSON-based source checker and pinned, checksum-verified gitleaks scan. The current inline checks do not provide the specified source validation or default secret rules.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The workflow implements source checks inline and scans secrets with a hand-written regex. It does not call `backend/ci/check-sources.mjs` or install and run pinned gitleaks with a verified SHA-256.",
+            "failureScenario": "On a CI run, the required JSON-based source checker and gitleaks default rules never execute. A tracked secret that the inline regex does not recognize can pass the workflow, so M-14 is unmet."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs",
+          "line": 226,
+          "message": "Add AC: M-14 behavior tests for the required source checker and gitleaks scan; the current tests do not exercise either required component.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The source tests execute the inline shell step, while the secret tests exercise the workflow's regex directly. There is no test for `backend/ci/check-sources.mjs` or for the gitleaks command, pinned version, checksum verification, and finding failure behavior.",
+            "failureScenario": "If the required checker or gitleaks scan is removed or bypassed, the current tests can still pass because they only exercise the inline guards and regex; the M-14 behavior is therefore not covered."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The source restriction can miss valid JSON-formatted unapproved npm resolutions, and the secret scan can miss credential formats such as lowercase password assignments.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 39,
+          "message": "A08:2025 — Parse the lockfile as JSON when enforcing the npm source restriction; valid whitespace before the colon lets an unapproved package source pass.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The source guard extracts lockfile resolutions with a text pattern that requires the JSON key to be written exactly as \"resolved\":. It does not parse the lockfile as JSON.",
+            "failureScenario": "A valid package-lock.json contains both an npmjs.org resolution and an unapproved resolution written as \"resolved\" : \"https://feeds.example.test/evil.tgz\". The guard misses the unapproved entry, sees the npmjs.org entry, and passes; npm ci can then fetch the unapproved package (OWASP A08:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 50,
+          "message": "A02:2025 — Replace the incomplete hand-written secret pattern with the required pinned gitleaks scan; lowercase credential assignments currently pass.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The workflow uses a hand-written, case-sensitive credential pattern instead of the pinned gitleaks command required by the acceptance criteria. Its assignment alternatives include `Password` but not lowercase `password`.",
+            "failureScenario": "A tracked configuration file contains `password=[redacted-secret-like] The pattern does not match it, so the secret scan passes with the credential committed (OWASP A02:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 2,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/build.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 6,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
