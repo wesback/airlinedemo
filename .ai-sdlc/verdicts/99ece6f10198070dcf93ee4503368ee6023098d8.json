@@ -1,0 +1,279 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "99ece6f10198070dcf93ee4503368ee6023098d8",
+  "round": 3,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake computes digests for normal processing, but the public basis store accepts caller-constructed completed results with mismatched content and digest. This leaves M-10’s digest and witness guarantee bypassable.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 284,
+          "message": "Append trusts the supplied digest instead of computing or verifying it against the content, allowing an inconsistent basis to be stored and its incorrect digest to pass witness verification.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "EvidenceBasisStore.Append accepts a public EvidenceIntakeResult and checks that it is complete, but stores its ContentDigest without recomputing it from Content. VerifyWitness later compares against that stored digest.",
+            "failureScenario": "A caller constructs a complete result with content \"actual\" and a different digest, then appends it. Append accepts it, and VerifyWitness accepts the supplied incorrect digest, so the stored basis does not have a verified computed digest as M-10 requires."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the named limit, versioning, and failed-intake criteria, but the image check does not account for inline images. The public basis store also accepts completed results whose digest does not match their content.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 64,
+          "message": "The image payload check misses valid PDF inline images, allowing a text PDF that contains an image to be accepted as evidence (A06:2025).",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ValidateBytes rejects image XObjects by matching /Subtype followed by /Image, then passes other PDFs to PdfPig for text extraction.",
+            "failureScenario": "A valid PDF can contain an inline image using BI ... ID ... EI, without a /Subtype /Image marker. If it also contains extractable text, the image check misses the payload and Process can return Complete, contrary to the requirement to reject image payloads (A06:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 273,
+          "message": "Append trusts the caller-supplied digest instead of verifying it against the content, so a fabricated completed result can create a basis with a false digest.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "EvidenceIntakeResult and its Complete state are publicly constructible, and EvidenceBasisStore.Append stores the supplied ContentDigest without recomputing it from Content.",
+            "failureScenario": "A caller constructs a Complete result with content and an unrelated digest, then appends it. The store persists the mismatched pair, and VerifyWitness accepts that supplied digest as proof for the stored content, violating M-10's computed-digest requirement."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake rejects image XObjects, but its marker check misses PDF inline images. Such a document can pass validation and become completed evidence.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 67,
+          "message": "The image check misses PDF inline images, so a PDF containing text and an inline image can be accepted as complete despite the requirement to reject image payloads (A06:2025, Insecure Design).",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ValidateBytes rejects image XObjects by matching `/Subtype ... /Image`, then ExtractDocument accepts PDFs with extractable text. PDF inline images use `BI ... ID ... EI` content-stream syntax and do not require that subtype marker.",
+            "failureScenario": "A submitted PDF contains extractable text plus an inline image in a page content stream. The image check does not match it, PdfPig extracts the text, and Process returns Complete, accepting an image-bearing package as evidence."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 172,
+      "total": 193,
+      "percent": 89.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 172,
+          "total": 193,
+          "missed": [
+            94,
+            95,
+            150,
+            151,
+            152,
+            153,
+            154,
+            208,
+            209,
+            210,
+            211,
+            212,
+            222,
+            223,
+            224,
+            225,
+            226,
+            247,
+            248,
+            254,
+            255
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
