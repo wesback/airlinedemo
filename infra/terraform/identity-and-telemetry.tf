@@ -42,6 +42,15 @@ resource "azurerm_role_assignment" "app_telemetry" {
   principal_type       = "ServicePrincipal"
 }
 
+# Data-plane SQL contract for the app identity (applied by the migration pipeline, asserted in tests).
+# Audit tables are append-only for the app: no UPDATE, DELETE or DDL.
+locals {
+  app_sql_grants = {
+    operational = ["SELECT", "INSERT", "UPDATE", "DELETE", "EXECUTE"]
+    audit       = ["SELECT", "INSERT"]
+  }
+}
+
 # Migration identity: management-plane SQL scope only.
 resource "azurerm_role_assignment" "migration_sql" {
   scope                = azurerm_mssql_server.sql.id
@@ -112,7 +121,8 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "security" {
   window_duration      = "PT${var.security_alert_settings.window_minutes}M"
 
   criteria {
-    query                   = "AppTraces | where TimeGenerated > ago(${var.security_alert_settings.window_minutes}m) | where tostring(Properties[\"event.name\"]) == \"${each.value.event}\" | summarize Count = count()"
+    # One row per matching event; the Count aggregation counts rows, so repeats reach the threshold.
+    query                   = "AppTraces | where TimeGenerated > ago(${var.security_alert_settings.window_minutes}m) | where tostring(Properties[\"event.name\"]) == \"${each.value.event}\" | project TimeGenerated"
     time_aggregation_method = "Count"
     operator                = "GreaterThanOrEqual"
     threshold               = var.security_alert_settings.failure_threshold

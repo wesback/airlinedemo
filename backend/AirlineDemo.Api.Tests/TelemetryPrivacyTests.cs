@@ -41,7 +41,7 @@ public sealed class TelemetryPrivacyTests
             new KeyValuePair<string, object?>("cookie", Canaries[3]),
             new KeyValuePair<string, object?>("token", Canaries[4]),
             new KeyValuePair<string, object?>("user.email", Canaries[5]),
-            new KeyValuePair<string, object?>("detail", $"cookie: {Canaries[3]} token={Canaries[4]} owner {Canaries[5]}"),
+            new KeyValuePair<string, object?>("investigation.decision", $"cookie: {Canaries[3]} token={Canaries[4]} owner {Canaries[5]}"),
         });
 
         var output = string.Join("|", redacted.Values);
@@ -52,6 +52,66 @@ public sealed class TelemetryPrivacyTests
         }
 
         Assert.Contains(TelemetryRedaction.Redacted, output);
+    }
+
+    [Theory]
+    [InlineData("detail")]
+    [InlineData("message")]
+    [InlineData("gen_ai.prompt.text")]
+    public void Unlisted_keys_are_dropped_even_when_value_is_canary(string key)
+    {
+        var redacted = TelemetryRedaction.Redact(new[] { new KeyValuePair<string, object?>(key, Canaries[0]) });
+
+        Assert.Empty(redacted);
+    }
+
+    [Theory]
+    [InlineData("Authorization: Bearer CANARY-BEARER-5a1e")]
+    [InlineData("authorization: Basic CANARY-BEARER-5a1e")]
+    [InlineData("set-cookie: session=CANARY-BEARER-5a1e")]
+    public void Authorization_and_cookie_headers_redact_the_credential(string input)
+    {
+        var sanitized = TelemetryRedaction.Sanitize(input);
+
+        Assert.DoesNotContain("CANARY-BEARER-5a1e", sanitized);
+        Assert.Contains(TelemetryRedaction.Redacted, sanitized);
+    }
+
+    [Fact]
+    public void Investigation_trace_correlates_required_fields_without_raw_content()
+    {
+        var trace = new TelemetryRedaction.InvestigationTraceRecord(
+            TraceId: "trace-0001",
+            BasisVersion: "basis-v3",
+            ModelDeployment: "gpt-demo-deployment",
+            Tools: new[] { "reserve-calc", "citation-search" },
+            CitationIds: new[] { "doc-12#p4", "doc-13#p1" },
+            Decision: "return-ready",
+            ActorId: "synthetic-analyst-01",
+            Outcome: "approved");
+
+        var attributes = TelemetryRedaction.InvestigationTrace(trace, "1.2.3", "demo", TestKey);
+
+        Assert.Equal("trace-0001", attributes["trace.id"]);
+        Assert.Equal("basis-v3", attributes["investigation.basis_version"]);
+        Assert.Equal("gpt-demo-deployment", attributes["gen_ai.request.model"]);
+        Assert.Equal("reserve-calc,citation-search", attributes["investigation.tools"]);
+        Assert.Equal("doc-12#p4,doc-13#p1", attributes["investigation.citations"]);
+        Assert.Equal("return-ready", attributes["investigation.decision"]);
+        Assert.Equal("approved", attributes["investigation.outcome"]);
+        Assert.Equal(TelemetryRedaction.OpaqueActor("synthetic-analyst-01", TestKey), attributes["enduser.pseudo.id"]);
+        Assert.Equal(TelemetryRedaction.ServiceName, attributes["service.name"]);
+        Assert.Equal("1.2.3", attributes["service.version"]);
+        Assert.Equal("demo", attributes["deployment.environment"]);
+        Assert.DoesNotContain("synthetic-analyst-01", string.Join("|", attributes.Values));
+    }
+
+    [Fact]
+    public void Security_event_names_match_alert_contract()
+    {
+        Assert.Equal("security.auth_scope_failure", TelemetryRedaction.SecurityEvents.AuthScopeFailure);
+        Assert.Equal("security.integrity_signature_failure", TelemetryRedaction.SecurityEvents.IntegritySignatureFailure);
+        Assert.Equal("security.budget_exhausted", TelemetryRedaction.SecurityEvents.BudgetExhausted);
     }
 
     [Fact]

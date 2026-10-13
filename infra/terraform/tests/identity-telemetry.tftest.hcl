@@ -86,6 +86,30 @@ run "M-14_app_identity_grants_are_exact" {
     condition     = azurerm_role_assignment.app_telemetry.role_definition_name == "Monitoring Metrics Publisher"
     error_message = "App identity telemetry grant must be publish-only."
   }
+
+  assert {
+    condition     = azurerm_storage_container.evidence.name == "evidence" && azurerm_storage_container.evidence.container_access_type == "private"
+    error_message = "Evidence grant must stay scoped to the private evidence container."
+  }
+
+  assert {
+    condition     = !contains(["Owner", "Contributor", "User Access Administrator", "SQL DB Contributor", "Storage Blob Data Owner"], azurerm_role_assignment.app_evidence.role_definition_name) && !contains(["Owner", "Contributor", "User Access Administrator"], azurerm_role_assignment.app_openai_user.role_definition_name) && !contains(["Owner", "Contributor", "User Access Administrator"], azurerm_role_assignment.app_telemetry.role_definition_name)
+    error_message = "App identity must not hold broad management or ownership roles."
+  }
+}
+
+run "M-14_app_sql_contract_excludes_ddl_and_audit_mutation" {
+  command = plan
+
+  assert {
+    condition     = alltrue([for p in local.app_sql_grants.audit : contains(["SELECT", "INSERT"], p)]) && length(local.app_sql_grants.audit) == 2
+    error_message = "App identity may only SELECT and INSERT audit rows: no UPDATE, DELETE or DDL."
+  }
+
+  assert {
+    condition     = !contains(local.app_sql_grants.audit, "UPDATE") && !contains(local.app_sql_grants.audit, "DELETE")
+    error_message = "Audit tables must not grant UPDATE or DELETE to the app identity."
+  }
 }
 
 run "M-14_migration_identity_has_only_sql_management_scope" {
@@ -131,6 +155,21 @@ run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
   assert {
     condition     = azurerm_monitor_action_group.security_owner.email_receiver[0].email_address == "owner@example.invalid"
     error_message = "Security alerts must reach the named response owner."
+  }
+
+  assert {
+    condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : !strcontains(a.criteria[0].query, "summarize") && a.criteria[0].time_aggregation_method == "Count" && a.criteria[0].threshold == 5])
+    error_message = "Alert queries must return one row per event so the Count threshold detects repeats."
+  }
+
+  assert {
+    condition     = strcontains(azurerm_monitor_scheduled_query_rules_alert_v2.security["auth_scope_failures"].criteria[0].query, "security.auth_scope_failure") && strcontains(azurerm_monitor_scheduled_query_rules_alert_v2.security["integrity_signature_failures"].criteria[0].query, "security.integrity_signature_failure") && strcontains(azurerm_monitor_scheduled_query_rules_alert_v2.security["budget_exhausted"].criteria[0].query, "security.budget_exhausted")
+    error_message = "Each alert must watch its required security event name."
+  }
+
+  assert {
+    condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action) == 1])
+    error_message = "Every security alert must route through exactly one action group, the named owner group."
   }
 }
 
