@@ -46,6 +46,11 @@ variable "egress_allowed_destinations" {
   }
 }
 
+variable "sql_database_name" {
+  type    = string
+  default = "airlinedemo"
+}
+
 variable "sql_server_name" {
   type = string
 }
@@ -89,6 +94,44 @@ variable "budget_start_date" {
 
 variable "budget_contact_emails" {
   type = list(string)
+}
+
+variable "telemetry_reader_group_id" {
+  description = "Entra group object id with restricted, read-only access to diagnostics. Required."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.telemetry_reader_group_id))
+    error_message = "telemetry_reader_group_id must be an Entra object id (GUID)."
+  }
+}
+
+variable "security_response_owner" {
+  description = "Named human who receives security alerts. Deployment is blocked until set."
+  type = object({
+    name  = string
+    email = string
+  })
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.security_response_owner.name)) > 0 && can(regex("^[^@\\s]+@[^@\\s]+$", var.security_response_owner.email))
+    error_message = "security_response_owner requires a named person and a valid email address."
+  }
+}
+
+variable "security_alert_settings" {
+  description = "Explicit security alert settings. Alerts must be enabled with positive thresholds before deployment."
+  type = object({
+    enabled                      = bool
+    failure_threshold            = number
+    window_minutes               = number
+    evaluation_frequency_minutes = number
+  })
+  nullable = false
+  validation {
+    condition     = var.security_alert_settings.enabled == true && var.security_alert_settings.failure_threshold >= 1 && var.security_alert_settings.evaluation_frequency_minutes >= 5 && var.security_alert_settings.window_minutes >= var.security_alert_settings.evaluation_frequency_minutes
+    error_message = "security_alert_settings must enable alerts, use a threshold of at least 1, evaluate every 5 minutes or more, and use a window at least as long as the evaluation frequency."
+  }
 }
 
 variable "terraform_state_backend" {

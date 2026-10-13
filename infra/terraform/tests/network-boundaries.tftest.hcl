@@ -63,6 +63,9 @@ variables {
   budget_amount                 = 100
   budget_start_date             = "2026-11-01T00:00:00Z"
   budget_contact_emails         = ["ops@example.invalid"]
+  telemetry_reader_group_id     = "44444444-4444-4444-4444-444444444444"
+  security_response_owner       = { name = "Response Owner", email = "owner@example.invalid" }
+  security_alert_settings       = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
   terraform_state_backend = {
     storage_account_name = "stdemotfstate"
     container_name       = "tfstate"
