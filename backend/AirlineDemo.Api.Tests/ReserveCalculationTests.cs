@@ -414,4 +414,31 @@ public class ReserveCalculationTests
         Assert.Equal(FinanceDecisionKind.Return, record.Decision);
         Assert.False(record.InvoiceIssued);
     }
+
+    [Fact]
+    public void Issued_draft_with_edited_line_list_is_refused_for_approve_and_return()
+    {
+        var issued = Calc(Usage(new UsageEntry("FH-A", 2m)), FhRates());
+        var lines = (List<ReserveLine>)issued.Lines;
+        // Same units, rate and amount (arithmetic still holds), but a different reported amount on the line.
+        lines[0] = lines[0] with { ReportedAmount = 0.40m };
+
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(issued, FinanceDecisionKind.Approve, Reviewer, "edited line", At));
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(issued, FinanceDecisionKind.Return, Reviewer, "edited line", At));
+    }
+
+    [Fact]
+    public void Issued_draft_with_added_or_removed_line_is_refused()
+    {
+        var issued = Calc(Usage(new UsageEntry("FH-A", 2m)), FhRates());
+        var lines = (List<ReserveLine>)issued.Lines;
+        lines.Add(new ReserveLine("FH-B", 1m, 0.10m, 0.10m, null));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(issued, FinanceDecisionKind.Approve, Reviewer, "added line", At));
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(issued, FinanceDecisionKind.Return, Reviewer, "added line", At));
+    }
 }

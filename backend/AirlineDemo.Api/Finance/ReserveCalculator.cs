@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using AirlineDemo.Api.Auth;
 using Microsoft.AspNetCore.Http;
@@ -63,9 +64,11 @@ public static class ReserveCalculator
 
     private static readonly Regex PeriodPattern = new(@"^\d{4}-(0[1-9]|1[0-2])$", RegexOptions.CultureInvariant);
 
-    /// <summary>Drafts returned by <see cref="Calculate"/>, by reference. Hand-built or copied (<c>with</c>) drafts are not members.</summary>
-    private static readonly ConditionalWeakTable<ReserveDraft, object> IssuedDrafts = new();
-    private static readonly object IssuedMarker = new();
+    /// <summary>
+    /// Drafts returned by <see cref="Calculate"/>, by reference, with a snapshot of their full contents taken at issue time.
+    /// Hand-built or copied (<c>with</c>) drafts are not members; drafts whose lines or fields were edited afterwards no longer match the snapshot.
+    /// </summary>
+    private static readonly ConditionalWeakTable<ReserveDraft, string> IssuedDrafts = new();
 
     public static ReserveDraft Calculate(string draftId, int version, string period, UsageReport? usage, RateReport? rates)
     {
@@ -213,18 +216,24 @@ public static class ReserveCalculator
 
     private static ReserveDraft Issue(ReserveDraft draft)
     {
-        IssuedDrafts.AddOrUpdate(draft, IssuedMarker);
+        IssuedDrafts.AddOrUpdate(draft, Snapshot(draft));
         return draft;
     }
 
-    /// <summary>Refuses any draft that was not returned by <see cref="Calculate"/> unchanged, so fabricated or edited drafts cannot be recorded.</summary>
+    /// <summary>
+    /// Refuses any draft that was not returned by <see cref="Calculate"/> unchanged, so fabricated or edited drafts
+    /// (including edits made through the exposed mutable line list) cannot be recorded.
+    /// </summary>
     private static void RequireCalculatorDraft(ReserveDraft draft)
     {
-        if (!IssuedDrafts.TryGetValue(draft, out _) || !Enum.IsDefined(draft.Status))
+        if (!IssuedDrafts.TryGetValue(draft, out var issuedSnapshot) || !Enum.IsDefined(draft.Status)
+            || issuedSnapshot != Snapshot(draft))
         {
             throw new InvalidOperationException("Draft was not produced unchanged by ReserveCalculator.Calculate; provenance cannot be verified.");
         }
     }
+
+    private static string Snapshot(ReserveDraft draft) => JsonSerializer.Serialize(draft);
 
     private static decimal Cents(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
