@@ -11,6 +11,12 @@ mock_provider "azurerm" {
     }
   }
 
+  mock_resource "azurerm_storage_container" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/evidence"
+    }
+  }
+
   mock_resource "azurerm_cognitive_account" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.CognitiveServices/accounts/aoai-demo-test"
@@ -124,9 +130,19 @@ run "M-14_app_identity_grants_are_exact" {
     error_message = "Evidence container name must stay evidence."
   }
 
+
   assert {
     condition     = !contains(["Owner", "Contributor", "User Access Administrator", "SQL DB Contributor", "Storage Blob Data Owner"], azurerm_role_assignment.app_evidence.role_definition_name) && !contains(["Owner", "Contributor", "User Access Administrator"], azurerm_role_assignment.app_openai_user.role_definition_name) && !contains(["Owner", "Contributor", "User Access Administrator"], azurerm_role_assignment.app_telemetry.role_definition_name)
     error_message = "App identity must not hold broad management or ownership roles."
+  }
+}
+
+run "M-14_evidence_scope_is_exact_container" {
+  command = plan
+
+  assert {
+    condition     = azurerm_role_assignment.app_evidence.scope == "/subscriptions/${var.subscription_id}/resourceGroups/${var.resource_group_name}/providers/Microsoft.Storage/storageAccounts/${var.storage_account_name}/blobServices/default/containers/evidence"
+    error_message = "Evidence role assignment scope must equal the evidence container resource id exactly, not the account or a parent scope."
   }
 }
 
@@ -217,6 +233,13 @@ run "M-07_telemetry_reader_is_read_only_group" {
 run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
   command = plan
 
+  override_resource {
+    target = azurerm_monitor_action_group.security_owner
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Insights/actionGroups/ag-security-owner"
+    }
+  }
+
   assert {
     condition     = length(azurerm_monitor_scheduled_query_rules_alert_v2.security) == 3 && alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : a.severity == 1])
     error_message = "Auth/scope, integrity/signature and budget alerts must each exist at severity 1."
@@ -243,7 +266,12 @@ run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
   }
 
   assert {
-    condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action[0].action_groups) == 1]) && azurerm_monitor_action_group.security_owner.email_receiver[0].email_address == var.security_response_owner.email && azurerm_monitor_action_group.security_owner.email_receiver[0].name == "response-owner"
+    condition     = azurerm_monitor_action_group.security_owner.name == "ag-security-owner" && alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action[0].action_groups) == 1])
+    error_message = "Each security alert must reference the single owner action group built from the owner variable."
+  }
+
+  assert {
+    condition     = azurerm_monitor_action_group.security_owner.email_receiver[0].email_address == var.security_response_owner.email && azurerm_monitor_action_group.security_owner.email_receiver[0].name == "response-owner"
     error_message = "Security alerts must route to the action group whose receiver is the configured named response owner."
   }
 

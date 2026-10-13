@@ -29,7 +29,7 @@ resource "azurerm_role_assignment" "app_openai_user" {
 }
 
 resource "azurerm_role_assignment" "app_evidence" {
-  scope                = "${azurerm_storage_account.blob.id}/blobServices/default/containers/${azurerm_storage_container.evidence.name}"
+  scope                = "/subscriptions/${var.subscription_id}/resourceGroups/${var.resource_group_name}/providers/Microsoft.Storage/storageAccounts/${var.storage_account_name}/blobServices/default/containers/${azurerm_storage_container.evidence.name}"
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.app.principal_id
   principal_type       = "ServicePrincipal"
@@ -60,23 +60,8 @@ locals {
   )
 }
 
-# Applies the exact app SQL contract (creating the app database principal first). Re-runs whenever the contract
-# changes. Runs as the migration identity (managed identity on the runner), never as the Terraform identity; the
-# app identity itself never runs these statements.
-resource "terraform_data" "app_sql_grants" {
-  triggers_replace = local.app_sql_grant_statements
-
-  provisioner "local-exec" {
-    environment = {
-      SQL_SERVER          = azurerm_mssql_server.sql.fully_qualified_domain_name
-      SQL_DATABASE        = var.sql_database_name
-      SQL_GRANTS          = join(" ", local.app_sql_grant_statements)
-      MIGRATION_CLIENT_ID = azurerm_user_assigned_identity.migration.client_id
-    }
-    command = "sqlcmd -S \"$SQL_SERVER\" -d \"$SQL_DATABASE\" --authentication-method ActiveDirectoryManagedIdentity -U \"$MIGRATION_CLIENT_ID\" -b -Q \"$SQL_GRANTS\""
-  }
-}
-
+# Terraform does not execute these statements. The migration step of the SQL adapter story (#179) runs them under
+# the migration identity, so Terraform needs no SQL data-plane authority.
 output "app_sql_grant_statements" {
   description = "T-SQL the migration identity runs to grant the app identity its exact SQL data-plane rights."
   value       = local.app_sql_grant_statements
