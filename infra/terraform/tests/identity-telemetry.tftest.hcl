@@ -44,6 +44,8 @@ mock_provider "azurerm" {
   mock_resource "azurerm_user_assigned_identity" {
     defaults = {
       principal_id = "55555555-5555-5555-5555-555555555555"
+      client_id    = "77777777-7777-7777-7777-777777777777"
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-mock"
     }
   }
 
@@ -242,7 +244,8 @@ run "M-14_grants_bind_to_app_identity_as_service_principal" {
 }
 
 run "M-14_app_grants_bind_to_app_principal_not_migration" {
-  command = apply
+  command   = apply
+  state_key = "m14-principal-binding"
 
   override_resource {
     target = azurerm_user_assigned_identity.app
