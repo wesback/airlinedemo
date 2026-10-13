@@ -15,6 +15,9 @@
     <ProjectReference Include="../AirlineDemo.Api/AirlineDemo.Api.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Fixtures/PdfCorpus/*.pdf" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>
