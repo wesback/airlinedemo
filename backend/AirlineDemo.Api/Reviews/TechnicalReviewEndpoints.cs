@@ -81,9 +81,12 @@ public static class TechnicalReviewPolicy
             .Select(a => ToDecision(a, JsonSerializer.Deserialize<DecisionDetail>(a.Detail)!, state))
             .ToList();
 
-    /// <summary>True only when a current-basis acceptance exists; decisions on superseded bases never authorize.</summary>
+    /// <summary>
+    /// True only when the latest current-basis decision is an acceptance. A later rejection on the same basis
+    /// revokes an earlier acceptance; decisions on superseded bases never authorize.
+    /// </summary>
     public static bool AuthorizesRequest(CaseState state) =>
-        Decisions(state).Any(d => d.Current && d.Decision == "accept");
+        Decisions(state).LastOrDefault(d => d.Current) is { Decision: "accept" };
 
     public static CaseScope? ScopeFor(CaseStateStore store, IEnumerable<string> caseScopes, string caseId)
     {

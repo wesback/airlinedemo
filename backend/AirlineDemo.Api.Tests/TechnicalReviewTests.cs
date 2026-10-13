@@ -139,6 +139,24 @@ public sealed class TechnicalReviewTests : IDisposable
     }
 
     [Fact]
+    public void Later_rejection_on_same_basis_revokes_earlier_acceptance()
+    {
+        var store = NewStore();
+        var (_, rev) = WithBasis(store, "evidence v1");
+        var accepted = TechnicalReviewPolicy.Decide(store, InScope, CaseEndpoints.ReviewerRole, Reviewer, CaseId,
+            Accept(rev, 1), "trace-1");
+        Assert.True(TechnicalReviewPolicy.AuthorizesRequest(store.Read(store.AuthorizeCase(CaseId, Owner))));
+
+        var rejected = TechnicalReviewPolicy.Decide(store, InScope, CaseEndpoints.ReviewerRole, Reviewer, CaseId,
+            new TechnicalReviewCommand(accepted.Decision!.Revision, 1, "reject", "Evidence no longer supports return."), "trace-2");
+
+        Assert.Equal(TechnicalReviewOutcome.Recorded, rejected.Outcome);
+        var state = store.Read(store.AuthorizeCase(CaseId, Owner));
+        Assert.Equal(2, TechnicalReviewPolicy.Decisions(state).Count);
+        Assert.False(TechnicalReviewPolicy.AuthorizesRequest(state));
+    }
+
+    [Fact]
     public void Decision_on_superseded_basis_cannot_be_recorded()
     {
         var store = NewStore();
