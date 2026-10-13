@@ -1,5 +1,7 @@
 namespace AirlineDemo.Api.Tests;
 
+using System.Text.RegularExpressions;
+
 public sealed class SignedReleaseWorkflowTests
 {
     private const string WorkflowPath = ".github/workflows/release.yml";
@@ -13,6 +15,38 @@ public sealed class SignedReleaseWorkflowTests
 
         Assert.Matches(@"environment:\s*production-release", workflow);
         Assert.DoesNotContain("environment: ''", workflow);
+
+        // The environment must be shown to require reviewers: a preflight job fails the run otherwise,
+        // and the release job cannot start before preflight passes.
+        var preflight = JobBody(workflow, "preflight");
+        Assert.Contains("repos/$REPO/environments/production-release", preflight);
+        Assert.Contains("required_reviewers", preflight);
+        Assert.Contains("product-owner approval is not enforced", preflight);
+        Assert.Contains("exit 1", preflight);
+        Assert.DoesNotContain("environment:", preflight);
+
+        var release = JobBody(workflow, "release");
+        Assert.Contains("needs: preflight", release);
+        Assert.Matches(@"environment:\s*production-release", release);
+    }
+
+    // AC: M-12. Deployment only follows a successful build of trusted CI: the build run must be a
+    // successful push to main from .github/workflows/build.yml, checked via the Actions API before signing.
+    [Fact]
+    public void Release_verifies_build_run_is_trusted_ci_before_signing()
+    {
+        var workflow = ReadWorkflow();
+        var provenance = StepBody(workflow, "Verify build run provenance");
+
+        Assert.Contains("repos/$REPO/actions/runs/$BUILD_RUN_ID", provenance);
+        Assert.Contains(".github/workflows/build.yml", provenance);
+        Assert.Contains("\"$event\" != \"push\"", provenance);
+        Assert.Contains("\"$branch\" != \"main\"", provenance);
+        Assert.Contains("\"$conclusion\" != \"success\"", provenance);
+        Assert.Contains("exit 1", provenance);
+        Assert.True(workflow.IndexOf("- name: Verify build run provenance", StringComparison.Ordinal)
+            < workflow.IndexOf("- name: Sign image digest", StringComparison.Ordinal),
+            "Build run provenance must be verified before the digest is signed.");
     }
 
     // AC: M-12. OIDC: federated credentials only, no stored cloud secrets.
@@ -26,7 +60,7 @@ public sealed class SignedReleaseWorkflowTests
         Assert.DoesNotContain("creds:", workflow);
         Assert.DoesNotContain("client-secret", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("AZURE_CREDENTIALS", workflow);
-        Assert.DoesNotContain("secrets.", workflow);
+        Assert.DoesNotContain("secrets.AZURE", workflow, StringComparison.OrdinalIgnoreCase);
     }
 
     // AC: M-12. Mutable tags are rejected: the input must be a sha256 digest.
@@ -159,6 +193,16 @@ public sealed class SignedReleaseWorkflowTests
 
     private static string ReadWorkflow() =>
         File.ReadAllText(Path.Combine(FindRepoRoot(), WorkflowPath));
+
+    private static string JobBody(string workflow, string jobName)
+    {
+        var header = $"\n  {jobName}:\n";
+        var start = workflow.IndexOf(header, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Workflow job '{jobName}' is missing.");
+
+        var next = Regex.Match(workflow[(start + header.Length)..], @"\n  [A-Za-z][\w-]*:\n");
+        return next.Success ? workflow.Substring(start, header.Length + next.Index) : workflow[start..];
+    }
 
     private static string StepBody(string workflow, string stepName)
     {

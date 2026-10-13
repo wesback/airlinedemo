@@ -21,11 +21,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Fails closed unless production-release has required reviewers (product owner). Runs outside the
+  # environment so the check can execute before any approval-gated step. Reading environment protection
+  # rules needs a token with environment read access, supplied as RELEASE_GOVERNANCE_TOKEN (not a cloud credential).
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Verify production-release requires reviewer approval
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GOVERNANCE_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::RELEASE_GOVERNANCE_TOKEN is required to read production-release protection rules; release fails closed"
+            exit 1
+          fi
+          env_json="$(gh api "repos/$REPO/environments/production-release")"
+          reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length' <<<"$env_json")"
+          if [[ "$reviewers" -lt 1 ]]; then
+            echo "::error::environment production-release has no required reviewers; product-owner approval is not enforced"
+            exit 1
+          fi
+
   release:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # GitHub holds every job until the environment's required reviewers (product owner) approve.
-    # That rule is a repository setting; it must be configured on production-release (see docs/prd/aircraft-return-readiness.md).
+    # The preflight job above verifies that rule is configured on production-release (see docs/prd/aircraft-return-readiness.md).
     environment: production-release
     permissions:
       contents: read
@@ -75,6 +102,22 @@ jobs:
 
       - name: Registry login
         run: az acr login --name "$ACR_NAME"
+
+      - name: Verify build run provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "repos/$REPO/actions/runs/$BUILD_RUN_ID")"
+          path="$(jq -r .path <<<"$run_json")"
+          event="$(jq -r .event <<<"$run_json")"
+          branch="$(jq -r .head_branch <<<"$run_json")"
+          conclusion="$(jq -r .conclusion <<<"$run_json")"
+          if [[ "$path" != ".github/workflows/build.yml" || "$event" != "push" || "$branch" != "main" || "$conclusion" != "success" ]]; then
+            echo "::error::build run $BUILD_RUN_ID is not a successful push build of main from .github/workflows/build.yml (path=$path event=$event branch=$branch conclusion=$conclusion)"
+            exit 1
+          fi
 
       - name: Download build evidence
         uses: actions/download-artifact@v4
