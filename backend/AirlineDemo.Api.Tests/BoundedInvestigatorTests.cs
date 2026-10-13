@@ -109,7 +109,13 @@ public class BoundedInvestigatorTests
     {
         public int Models { get; private set; }
 
-        public ValueTask BeforeToolCallAsync(CancellationToken cancellationToken) => default;
+        public int Tools { get; private set; }
+
+        public ValueTask BeforeToolCallAsync(CancellationToken cancellationToken)
+        {
+            Tools++;
+            return default;
+        }
 
         public ValueTask BeforeModelCallAsync(CancellationToken cancellationToken)
         {
@@ -325,7 +331,9 @@ public class BoundedInvestigatorTests
 
         string? Call(string name, AIFunctionArguments args) => tools.Functions.Single(f => f.Name == name).InvokeAsync(args).AsTask().Result?.ToString();
 
-        Assert.Equal("injection-direct\nreturn-status", Call(CaseReadTools.InventoryTool, none));
+        Assert.Equal(
+            BoundedInvestigator.UntrustedBegin + "\ninjection-direct\nreturn-status\n" + BoundedInvestigator.UntrustedEnd,
+            Call(CaseReadTools.InventoryTool, none));
         Assert.Equal(
             BoundedInvestigator.UntrustedBegin + "\nReserve approval is required.\n" + BoundedInvestigator.UntrustedEnd,
             Call(CaseReadTools.RequirementsTool, none));
@@ -416,6 +424,35 @@ public class BoundedInvestigatorTests
 
         Assert.Equal(model.Requests.Count, result.ModelCalls.Count);
         Assert.Equal(model.Requests.Count, limits.Models);
+    }
+
+    [Fact]
+    public async Task Every_read_tool_call_passes_the_limit_hook()
+    {
+        var limits = new CountingLimits();
+        var tools = new CaseReadTools(CaseId, new MemorySource(), limits);
+
+        await tools.Functions.Single(f => f.Name == CaseReadTools.InventoryTool).InvokeAsync();
+        await tools.Functions.Single(f => f.Name == CaseReadTools.RequirementsTool).InvokeAsync();
+        await tools.Functions.Single(f => f.Name == CaseReadTools.SourcePageTool).InvokeAsync(new AIFunctionArguments { ["documentId"] = "return-status", ["page"] = 1 });
+        await tools.Functions.Single(f => f.Name == CaseReadTools.SearchTool).InvokeAsync(new AIFunctionArguments { ["query"] = "pending" });
+        await tools.Functions.Single(f => f.Name == CaseReadTools.StatusTool).InvokeAsync();
+
+        Assert.Equal(5, limits.Tools);
+    }
+
+    [Fact]
+    public async Task Fetched_page_content_is_authorized_by_the_gate_before_the_next_model_call()
+    {
+        var model = new ScriptedChatClient((messages, _) =>
+            messages.Any(m => m.Contents.OfType<FunctionResultContent>().Any())
+                ? Reply(ClaimsJson)
+                : new ChatResponse(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-1", CaseReadTools.SourcePageTool, new Dictionary<string, object?> { ["documentId"] = "return-status", ["page"] = 1 })])));
+        var investigator = new BoundedInvestigator(CaseId, new PageSource("Unregistered page text."), Approved(), SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model);
+
+        await Assert.ThrowsAsync<ModelGateException>(() => investigator.InvestigateAsync([ReturnStatusText]));
+
+        Assert.Single(model.Requests);
     }
 
 }

@@ -16,7 +16,7 @@ public interface ICaseReadSource
 /// The five case-scoped read tools offered to the investigator. The case is bound at construction and is never a
 /// tool argument, so the model cannot name another case. There are no write, approval, recipient or dispatch tools.
 /// </summary>
-public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvestigationLimits limits)
+public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvestigationLimits limits, Action<string>? onDocumentText = null)
 {
     public const string InventoryTool = "get_case_inventory";
     public const string RequirementsTool = "get_approved_requirements";
@@ -41,7 +41,7 @@ public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvest
     {
         await limits.BeforeToolCallAsync(cancellationToken);
         var ids = source.GetInventory(caseId);
-        return ids.Count == 0 ? "no documents" : string.Join('\n', ids);
+        return ids.Count == 0 ? "no documents" : Untrusted(string.Join('\n', ids));
     }
 
     private async Task<string> GetRequirementsAsync(CancellationToken cancellationToken)
@@ -72,10 +72,17 @@ public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvest
 
     // Document-derived tool output reaches the model only inside the untrusted-data delimiter (M-05).
     // Text that carries a delimiter marker is refused rather than wrapped, so it cannot close the wrapper early.
-    private static string Untrusted(string text) =>
-        text.Contains(BoundedInvestigator.UntrustedBegin, StringComparison.Ordinal) || text.Contains(BoundedInvestigator.UntrustedEnd, StringComparison.Ordinal)
-            ? "denied: document text contains an untrusted-data delimiter"
-            : $"{BoundedInvestigator.UntrustedBegin}\n{text}\n{BoundedInvestigator.UntrustedEnd}";
+    // The raw text is also reported to onDocumentText so the model gate authorizes it before the next model call.
+    private string Untrusted(string text)
+    {
+        if (text.Contains(BoundedInvestigator.UntrustedBegin, StringComparison.Ordinal) || text.Contains(BoundedInvestigator.UntrustedEnd, StringComparison.Ordinal))
+        {
+            return "denied: document text contains an untrusted-data delimiter";
+        }
+
+        onDocumentText?.Invoke(text);
+        return $"{BoundedInvestigator.UntrustedBegin}\n{text}\n{BoundedInvestigator.UntrustedEnd}";
+    }
 
     private async Task<string> GetStatusAsync(CancellationToken cancellationToken)
     {

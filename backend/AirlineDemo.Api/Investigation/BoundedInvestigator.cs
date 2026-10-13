@@ -75,9 +75,11 @@ public sealed class BoundedInvestigator(
             }
         }
 
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, documents, _limits);
+        // Every document text that reaches the model, including tool results, is added here before the next call is gated.
+        var evidence = new List<string>(documents);
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, _limits);
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
-        var tools = new CaseReadTools(caseId, source, _limits);
+        var tools = new CaseReadTools(caseId, source, _limits, evidence.Add);
         var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
 
         var response = await agent.RunAsync(BuildPrompt(documents), cancellationToken: cancellationToken);
