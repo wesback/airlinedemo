@@ -52,6 +52,7 @@ locals {
   }
   app_sql_user = azurerm_user_assigned_identity.app.name
   app_sql_grant_statements = concat(
+    ["IF DATABASE_PRINCIPAL_ID('${local.app_sql_user}') IS NULL CREATE USER [${local.app_sql_user}] FROM EXTERNAL PROVIDER;"],
     [for p in local.app_sql_grants.operational : "GRANT ${p} ON SCHEMA::dbo TO [${local.app_sql_user}];"],
     [for p in local.app_sql_grants.audit : "GRANT ${p} ON SCHEMA::audit TO [${local.app_sql_user}];"],
     [for p in ["UPDATE", "DELETE", "ALTER", "CONTROL"] : "DENY ${p} ON SCHEMA::audit TO [${local.app_sql_user}];"],
@@ -59,18 +60,20 @@ locals {
   )
 }
 
-# Applies the exact app SQL contract. Re-runs whenever the contract changes. Requires sqlcmd on the runner and
-# Entra ID rights on the SQL server; the app identity itself never runs these statements.
+# Applies the exact app SQL contract (creating the app database principal first). Re-runs whenever the contract
+# changes. Runs as the migration identity (managed identity on the runner), never as the Terraform identity; the
+# app identity itself never runs these statements.
 resource "terraform_data" "app_sql_grants" {
   triggers_replace = local.app_sql_grant_statements
 
   provisioner "local-exec" {
     environment = {
-      SQL_SERVER   = azurerm_mssql_server.sql.fully_qualified_domain_name
-      SQL_DATABASE = var.sql_database_name
-      SQL_GRANTS   = join(" ", local.app_sql_grant_statements)
+      SQL_SERVER          = azurerm_mssql_server.sql.fully_qualified_domain_name
+      SQL_DATABASE        = var.sql_database_name
+      SQL_GRANTS          = join(" ", local.app_sql_grant_statements)
+      MIGRATION_CLIENT_ID = azurerm_user_assigned_identity.migration.client_id
     }
-    command = "sqlcmd -S \"$SQL_SERVER\" -d \"$SQL_DATABASE\" -G -b -Q \"$SQL_GRANTS\""
+    command = "sqlcmd -S \"$SQL_SERVER\" -d \"$SQL_DATABASE\" --authentication-method ActiveDirectoryManagedIdentity -U \"$MIGRATION_CLIENT_ID\" -b -Q \"$SQL_GRANTS\""
   }
 }
 

@@ -89,6 +89,11 @@ run "M-14_app_identity_grants_are_exact" {
   }
 
   assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "CREATE USER [id-airline-app] FROM EXTERNAL PROVIDER")]) == 1
+    error_message = "The app database principal must be created from the Entra identity before grants run."
+  }
+
+  assert {
     condition     = azurerm_role_assignment.app_telemetry.role_definition_name == "Monitoring Metrics Publisher"
     error_message = "App identity telemetry grant must be publish-only."
   }
@@ -112,6 +117,11 @@ run "M-14_app_identity_grants_are_exact" {
   assert {
     condition     = azurerm_storage_container.evidence.name == "evidence" && azurerm_storage_container.evidence.container_access_type == "private"
     error_message = "Evidence grant must stay scoped to the private evidence container."
+  }
+
+  assert {
+    condition     = azurerm_storage_container.evidence.name == "evidence"
+    error_message = "Evidence container name must stay evidence."
   }
 
   assert {
@@ -230,6 +240,11 @@ run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
   assert {
     condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action) == 1 && length(a.action[0].action_groups) == 1])
     error_message = "Every security alert must route through exactly one action group, the named owner group."
+  }
+
+  assert {
+    condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action[0].action_groups) == 1]) && azurerm_monitor_action_group.security_owner.email_receiver[0].email_address == var.security_response_owner.email && azurerm_monitor_action_group.security_owner.email_receiver[0].name == "response-owner"
+    error_message = "Security alerts must route to the action group whose receiver is the configured named response owner."
   }
 
   assert {
