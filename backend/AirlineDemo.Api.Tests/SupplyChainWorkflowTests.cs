@@ -93,6 +93,47 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("test -s ../artifacts/audit/npm-audit.json", step);
     }
 
+    // AC: the downstream supply-chain steps run in CI. Each shell script must parse, and each command uses the
+    // options verified against the tools (dotnet-CycloneDX 6.3.1 help, cyclonedx-npm@4 help, dotnet list, npm audit).
+    [Theory]
+    [InlineData("SBOM (.NET)")]
+    [InlineData("SBOM (npm)")]
+    [InlineData("Audit (.NET)")]
+    [InlineData("Audit (npm)")]
+    public void Supply_chain_step_script_has_valid_shell_syntax(string stepName)
+    {
+        var script = RunBlock(StepBody(ReadWorkflow(), stepName));
+        var path = Path.Combine(Path.GetTempPath(), $"supply-chain-{Guid.NewGuid():N}.sh");
+        File.WriteAllText(path, script);
+        try
+        {
+            var psi = new ProcessStartInfo("bash", new[] { "-n", path })
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var process = Process.Start(psi) ?? throw new InvalidOperationException("bash could not be started.");
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            Assert.True(process.ExitCode == 0, $"Step '{stepName}' has a shell syntax error: {stderr}");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Supply_chain_commands_use_verified_options()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Contains("dotnet-CycloneDX AirlineDemo.sln -F Json -fn dotnet-sbom.cdx.json -o artifacts/sbom", StepBody(workflow, "SBOM (.NET)"));
+        Assert.Contains("npx --yes @cyclonedx/cyclonedx-npm@4 --output-format JSON --output-file ../artifacts/sbom/npm-sbom.cdx.json", StepBody(workflow, "SBOM (npm)"));
+        Assert.Contains("dotnet list AirlineDemo.sln package --vulnerable --include-transitive > artifacts/audit/dotnet-vulnerable.txt", StepBody(workflow, "Audit (.NET)"));
+        Assert.Contains("npm audit --json > ../artifacts/audit/npm-audit.json || true", StepBody(workflow, "Audit (npm)"));
+    }
+
     // M-14: source and secret guards run before any dependency is restored or installed.
     [Fact]
     public void Source_and_secret_guards_run_before_dependency_install()
