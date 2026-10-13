@@ -98,6 +98,33 @@ public sealed class TechnicalReviewTests : IDisposable
         new { expectedRevision = revision, decision, reason, basisVersion = basis.Version, basisDigest = basis.BasisDigest };
 
     [Fact]
+    public async Task Authorized_reviewer_rejection_is_recorded_and_does_not_authorize_acceptance()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var reviewer = await SignInAsync("reviewer", ct);
+        var revision = Revision("case-001");
+        var basis = CurrentBasis("case-001");
+
+        using var response = await DecideAsync(reviewer, "case-001", Command(revision, basis, "reject", "Evidence does not support release."), ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal("rejected", body.GetProperty("disposition").GetString());
+        Assert.False(body.GetProperty("authorizesAcceptance").GetBoolean());
+        Assert.DoesNotContain(EvidenceText, body.GetRawText());
+
+        var recorded = body.GetProperty("decisions").EnumerateArray().Single();
+        Assert.Equal("reject", recorded.GetProperty("outcome").GetString());
+        Assert.True(recorded.GetProperty("current").GetBoolean());
+
+        var decision = Store.ReadAudit(Store.AuthorizeExistingCase("case-001")).Last();
+        Assert.Equal(TechnicalReviewEndpoints.DecisionAction, decision.Action);
+        Assert.Equal("reviewer", decision.Actor);
+        Assert.Contains("Evidence does not support release.", decision.Detail);
+        Assert.DoesNotContain(EvidenceText, decision.Detail);
+    }
+
+    [Fact]
     public async Task Authorized_reviewer_records_reasoned_decision_against_current_basis()
     {
         var ct = TestContext.Current.CancellationToken;
