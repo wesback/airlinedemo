@@ -99,6 +99,7 @@ public sealed class SupplyChainWorkflowTests
     }
 
     // M-12: an unexcepted high/critical finding blocks the release candidate.
+    // AC: criterion 2 (severity gate: unexcepted high/critical blocks, low passes).
     [Fact]
     public void M12_gate_blocks_unexcepted_npm_high_finding()
     {
@@ -140,6 +141,7 @@ public sealed class SupplyChainWorkflowTests
     }
 
     // Exceptions: accepted only with a documented reason and a future expiry.
+    // AC: criterion 2 (exception validation: missing, expired, or incomplete exceptions fail).
     [Fact]
     public void Exception_with_future_expiry_allows_matching_npm_high_finding()
     {
