@@ -262,6 +262,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("exit 1", step);
     }
 
+    // M-14: approved sources pass; the gate exits 0 only when every enabled NuGet source is nuget.org.
     [Fact]
     public void Source_restriction_accepts_nuget_org_and_npmjs_org_only()
     {
@@ -337,6 +338,20 @@ public sealed class SupplyChainWorkflowTests
         Assert.NotEqual(0, exitCode);
     }
 
+    // M-14: NuGet sources that only resemble nuget.org, or use another scheme, are rejected.
+    [Theory]
+    [InlineData("https://api.nuget.org.example.test/v3/index.json")]
+    [InlineData("http://api.nuget.org/v3/index.json")]
+    public void Source_restriction_rejects_lookalike_nuget_sources(string url)
+    {
+        var listing = "Registered Sources:\n\n  1.  nuget.org [Enabled]\n      " + url + "\n";
+
+        var (exitCode, output) = RunShellStep("Source restriction", repo => repo.Write(LockPath, NpmjsOnlyLock), listing);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("NuGet source outside nuget.org", output);
+    }
+
     // M-14: tracked repository content is scanned for committed credentials.
     [Fact]
     public void Secret_scan_checks_tracked_content_and_fails_on_matches()
@@ -378,6 +393,7 @@ public sealed class SupplyChainWorkflowTests
     // M-14: committed credentials, including URI-form connection strings, fail the secret scan.
     // Credential fixtures are split so this file never contains a full credential that the secret scan would flag.
     [Theory]
+    [InlineData("AWS_SECRET_" + "ACCESS_KEY=wJalrXUtnFEMI/K7MDENG")]
     [InlineData("postgres://" + "admin:s3cret-pass@db.internal/app")]
     [InlineData("https://" + "deploy:tokenvalue@feeds.example.com/index.json")]
     [InlineData("Server=tcp:db.internal;Database=app;User=sa;" + "Pass" + "word=hunter2222")]

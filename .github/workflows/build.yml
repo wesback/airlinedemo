@@ -48,7 +48,7 @@ jobs:
 
       - name: Secret scan
         run: |
-          pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@"]+:[^/[:space:]@"]+@'
+          pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey|AWS_SECRET_ACCESS_KEY)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@"]+:[^/[:space:]@"]+@'
           if git grep -l -I -E "$pattern" -- .; then
             echo "::error::Committed credential or connection string found in the files listed above"
             exit 1
