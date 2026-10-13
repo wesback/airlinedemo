@@ -341,6 +341,20 @@ public sealed class EvidenceIntakeTests
         Assert.Null(result.Content);
     }
 
+    // AC: a page-level additional action (/AA) carrying JavaScript is rejected, not accepted as complete evidence.
+    [Fact]
+    public void PageAdditionalActionJavaScriptIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, pageExtra: "/AA << /O << /S /JavaScript /JS (app.alert('x')) >> >>");
+
+        var result = EvidenceIntake.Process([new("page-aa.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
     // AC: form fields (AcroForm) and form widget annotations are ignored or rejected, never counted as evidence.
     [Fact]
     public void AcroFormIsRejectedRetryably()

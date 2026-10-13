@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Filters;
 using UglyToad.PdfPig.Tokens;
 
 namespace AirlineDemo.Api.Evidence;
@@ -15,6 +16,10 @@ public static class EvidenceLimits
 
     // Bounds the decoded text produced per document, so compressed content cannot expand without limit.
     public const int MaxExtractedCharactersPerDocument = 1_000_000;
+
+    // Bounds decoded content streams before PdfPig materialises any page text.
+    public const long MaxDecodedBytesPerStream = 10L * 1024 * 1024;
+    public const long MaxDecodedBytesPerDocument = 50L * 1024 * 1024;
 }
 
 public enum EvidenceFailureKind
@@ -229,6 +234,43 @@ public static class EvidenceIntake
         }
     }
 
+    // Decodes the page's content streams and enforces decoded-size bounds before PdfPig extracts any text.
+    private static void MeasureDecodedContent(string name, PdfDocument pdf, Page page, ref long decodedTotal)
+    {
+        if (!page.Dictionary.Data.TryGetValue("Contents", out var contents))
+        {
+            return;
+        }
+
+        var streams = Resolve(pdf, contents) switch
+        {
+            StreamToken single => new[] { single },
+            ArrayToken array => array.Data.Select(entry => Resolve(pdf, entry)).OfType<StreamToken>().ToArray(),
+            _ => Array.Empty<StreamToken>(),
+        };
+
+        foreach (var stream in streams)
+        {
+            var decodedLength = stream.Decode(DefaultFilterProvider.Instance).Count;
+            if (decodedLength > EvidenceLimits.MaxDecodedBytesPerStream)
+            {
+                throw new EvidenceIntakeException(
+                    $"Document '{name}' has a content stream that decodes to more than {EvidenceLimits.MaxDecodedBytesPerStream} bytes; it is rejected.",
+                    EvidenceFailureKind.LimitExceeded,
+                    true);
+            }
+
+            decodedTotal += decodedLength;
+            if (decodedTotal > EvidenceLimits.MaxDecodedBytesPerDocument)
+            {
+                throw new EvidenceIntakeException(
+                    $"Document '{name}' decodes to more than {EvidenceLimits.MaxDecodedBytesPerDocument} bytes of content; it is rejected.",
+                    EvidenceFailureKind.LimitExceeded,
+                    true);
+            }
+        }
+    }
+
     private static IToken Resolve(PdfDocument pdf, IToken token) =>
         token is IndirectReferenceToken reference ? pdf.Structure.GetObject(reference.Data).Data : token;
 
@@ -264,15 +306,20 @@ public static class EvidenceIntake
             }
 
             var text = new StringBuilder();
+            long decodedTotal = 0;
             for (var page = 1; page <= pages; page++)
             {
                 var pdfPage = pdf.GetPage(page);
-                if (pdfPage.Dictionary.Data.ContainsKey("AF"))
+                foreach (var key in new[] { "AF", "AA" })
                 {
-                    throw ActiveContentFailure(document.Name, $"/AF on page {page}");
+                    if (pdfPage.Dictionary.Data.ContainsKey(key))
+                    {
+                        throw ActiveContentFailure(document.Name, $"/{key} on page {page}");
+                    }
                 }
 
                 RejectAnnotationContent(document.Name, pdf, pdfPage);
+                MeasureDecodedContent(document.Name, pdf, pdfPage, ref decodedTotal);
                 // Decoded content streams expose inline images even when compressed; reject them as image payloads.
                 if (pdfPage.GetImages().Any())
                 {
