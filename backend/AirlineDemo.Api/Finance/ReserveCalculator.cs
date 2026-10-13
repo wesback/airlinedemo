@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using AirlineDemo.Api.Auth;
 using Microsoft.AspNetCore.Http;
@@ -61,6 +62,10 @@ public static class ReserveCalculator
         "Units x unit rate per contract line; each line rounded to cents (midpoint away from zero) before summing; total = sum of rounded lines.";
 
     private static readonly Regex PeriodPattern = new(@"^\d{4}-(0[1-9]|1[0-2])$", RegexOptions.CultureInvariant);
+
+    /// <summary>Drafts returned by <see cref="Calculate"/>, by reference. Hand-built or copied (<c>with</c>) drafts are not members.</summary>
+    private static readonly ConditionalWeakTable<ReserveDraft, object> IssuedDrafts = new();
+    private static readonly object IssuedMarker = new();
 
     public static ReserveDraft Calculate(string draftId, int version, string period, UsageReport? usage, RateReport? rates)
     {
@@ -138,8 +143,8 @@ public static class ReserveCalculator
 
         if (usage is null || rates is null || blockers.Count > 0)
         {
-            return new ReserveDraft(draftId, version, period, ReserveDraftStatus.Blocked,
-                usage?.ReportId, rates?.ReportId, [], null, blockers, [], CalculationBasis);
+            return Issue(new ReserveDraft(draftId, version, period, ReserveDraftStatus.Blocked,
+                usage?.ReportId, rates?.ReportId, [], null, blockers, [], CalculationBasis));
         }
 
         var lines = new List<ReserveLine>();
@@ -163,8 +168,8 @@ public static class ReserveCalculator
         }
 
         var status = discrepancies.Count > 0 ? ReserveDraftStatus.Discrepancy : ReserveDraftStatus.ReadyForReview;
-        return new ReserveDraft(draftId, version, period, status, usage.ReportId, rates.ReportId,
-            lines, total, [], discrepancies, CalculationBasis);
+        return Issue(new ReserveDraft(draftId, version, period, status, usage.ReportId, rates.ReportId,
+            lines, total, [], discrepancies, CalculationBasis));
     }
 
     /// <summary>
@@ -189,6 +194,7 @@ public static class ReserveCalculator
             throw new UnauthorizedAccessException("Only an authenticated finance reviewer may record a finance decision.");
         }
         ValidateNonBlank(reason, nameof(reason));
+        RequireCalculatorDraft(draft);
         if (decision == FinanceDecisionKind.Approve && draft.Status != ReserveDraftStatus.ReadyForReview)
         {
             throw new InvalidOperationException($"Approval refused: draft {draft.DraftId} v{draft.Version} is {draft.Status}.");
@@ -204,6 +210,21 @@ public static class ReserveCalculator
 
     /// <summary>Server-held finance reviewer roster; immutable, so callers cannot add reviewers at runtime.</summary>
     private static readonly FrozenSet<string> AuthorizedReviewerIds = new[] { "fin-1" }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static ReserveDraft Issue(ReserveDraft draft)
+    {
+        IssuedDrafts.AddOrUpdate(draft, IssuedMarker);
+        return draft;
+    }
+
+    /// <summary>Refuses any draft that was not returned by <see cref="Calculate"/> unchanged, so fabricated or edited drafts cannot be recorded.</summary>
+    private static void RequireCalculatorDraft(ReserveDraft draft)
+    {
+        if (!IssuedDrafts.TryGetValue(draft, out _) || !Enum.IsDefined(draft.Status))
+        {
+            throw new InvalidOperationException("Draft was not produced unchanged by ReserveCalculator.Calculate; provenance cannot be verified.");
+        }
+    }
 
     private static decimal Cents(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 

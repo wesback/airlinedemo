@@ -388,7 +388,30 @@ public class ReserveCalculationTests
 
         var consistent = new ReserveDraft("draft-z", 1, "2026-03", ReserveDraftStatus.ReadyForReview,
             "U-1", "R-1", [line], 0.40m, [], [], ReserveCalculator.CalculationBasis);
-        var record = ReserveCalculator.Review(consistent, FinanceDecisionKind.Approve, Reviewer, "ok", At);
-        Assert.Equal(0.40m, record.PayableTotal);
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(consistent, FinanceDecisionKind.Approve, Reviewer, "hand-built but self-consistent", At));
+
+        var copied = Calc(Usage(new UsageEntry("FH-A", 2m)), FhRates()) with { Status = ReserveDraftStatus.ReadyForReview };
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(copied, FinanceDecisionKind.Approve, Reviewer, "copied draft", At));
+    }
+
+    [Fact]
+    public void Return_refuses_hand_built_or_copied_draft()
+    {
+        var line = new ReserveLine("FH-A", 2m, 0.20m, 0.40m, null);
+        var handBuilt = new ReserveDraft("draft-r", 1, "2026-03", ReserveDraftStatus.ReadyForReview,
+            "U-1", "R-1", [line], 0.40m, [], [], ReserveCalculator.CalculationBasis);
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(handBuilt, FinanceDecisionKind.Return, Reviewer, "malformed", At));
+
+        var calculated = Calc(Usage(new UsageEntry("FH-A", 2m)), FhRates());
+        var copied = calculated with { PayableTotal = 9.99m };
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(copied, FinanceDecisionKind.Return, Reviewer, "tampered", At));
+
+        var record = ReserveCalculator.Review(calculated, FinanceDecisionKind.Return, Reviewer, "needs rework", At);
+        Assert.Equal(FinanceDecisionKind.Return, record.Decision);
+        Assert.False(record.InvoiceIssued);
     }
 }
