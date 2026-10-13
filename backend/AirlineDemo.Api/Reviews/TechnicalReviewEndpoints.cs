@@ -60,9 +60,10 @@ public static class TechnicalReviewPolicy
 
         var detail = new DecisionDetail(command.Decision, reason, basis.Version, basis.BasisDigest, traceId,
             command.Decision == "accept" ? "approved" : "rejected");
+        CommitResult committed;
         try
         {
-            store.Commit(scope, command.ExpectedRevision,
+            committed = store.Commit(scope, command.ExpectedRevision,
                 new CaseCommit(null, null, actorId, DecisionAction, JsonSerializer.Serialize(detail)));
         }
         catch (RevisionConflictException)
@@ -70,8 +71,8 @@ public static class TechnicalReviewPolicy
             return new(TechnicalReviewOutcome.Stale);
         }
 
-        var latest = store.Read(scope);
-        return new(TechnicalReviewOutcome.Recorded, Decision: ToDecision(latest.Audit[^1], detail, latest));
+        // The state returned by this commit ends with the decision's own audit event, even if other activity follows.
+        return new(TechnicalReviewOutcome.Recorded, Decision: ToDecision(committed.State.Audit[^1], detail, committed.State));
     }
 
     /// <summary>Every recorded decision for the case, marked current only when it was made against the latest basis.</summary>
