@@ -1,0 +1,296 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 150,
+  "branch": "ai-sdlc/issue-150",
+  "commitSha": "cc11d14ea500d6c04ea7ce38d00318f6818f936b",
+  "round": 0,
+  "pipelineVersion": "d1406c0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow can accept an exception with an impossible expiry and can miss URI-form credentials in tracked content. Its tests also lack the required acceptance-criterion mapping and do not exercise the severity gate behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 104,
+          "message": "A03:2025 — Validate that exception expiry is a real calendar date; impossible dates can bypass the dependency severity gate.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Exception validation checks the expiry string's YYYY-MM-DD shape and compares it lexically with today's date. The severity gate uses the same lexical comparison to decide whether an exception is valid.",
+            "failureScenario": "An exception with expires set to 2027-99-99 passes validation and compares later than today, so a matching high or critical dependency finding is suppressed even though the exception has no real future expiry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 84,
+          "message": "A02:2025 — The secret scan misses URI-form connection strings with embedded credentials.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The tracked-content scan searches for assignment patterns, private-key headers, AWS key prefixes, and GitHub token prefixes. It does not match URI-form connection strings with embedded credentials.",
+            "failureScenario": "A contributor commits postgres://app:secret@db.example/app. The scan finds no match, so the workflow passes with the credential in tracked content, contrary to M-14."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs",
+          "line": 10,
+          "message": "Add criterion-linked behavior tests for M-12, exception validation, and M-14; the current text-presence checks do not verify those behaviors or identify which criteria they cover.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The tests inspect workflow text, but none names or comments on M-12, the exception behavior criterion, or M-14. The severity test checks for strings such as 'high', 'critical', and process.exit(1), rather than executing the gate behavior.",
+            "failureScenario": "If the severity gate retains those strings but is changed to allow every high or critical finding, the assertions can still pass. The acceptance criteria also cannot be mapped to these tests under the review policy because the tests identify no criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow’s .NET SBOM command cannot invoke the installed tool, invalid calendar dates can keep exceptions valid, and URI-form credentials evade the secret scan. The tests assert workflow text rather than criterion-linked behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 53,
+          "message": "Use the installed CycloneDX executable to generate the .NET SBOM; the current command fails in CI. [CycloneDX usage](https://github.com/CycloneDX/cyclonedx-dotnet/blob/master/README.md)",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The workflow installs the CycloneDX global .NET tool, then invokes it with `dotnet CycloneDX`. The tool’s documented executable is `dotnet-CycloneDX`.",
+            "failureScenario": "On a CI run, this command cannot invoke the installed tool, so the .NET SBOM is not generated and M-12 is unmet. The test checks for the incorrect command text and passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 104,
+          "message": "Validate that exception expiry is a real calendar date before accepting it. Impossible dates can bypass the dependency severity gate (OWASP A02:2025).",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Exception validation checks the expiry string’s YYYY-MM-DD shape and compares it lexically with today’s date; the severity gate uses the same comparison.",
+            "failureScenario": "An exception with `expires` set to `2027-99-99` passes validation and compares later than today, allowing a matching high or critical dependency finding to be suppressed without a valid future expiry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 84,
+          "message": "The secret scan misses URI-form connection strings with embedded credentials, allowing committed credentials to pass the workflow (OWASP A02:2025).",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The tracked-content scan checks assignment patterns, private-key headers, AWS access-key prefixes, and GitHub token prefixes; it does not match URI credentials.",
+            "failureScenario": "A tracked file contains `postgres://app:secret@db.example/app`. It matches none of the patterns, so `git grep` finds no match and the workflow passes with the credential committed."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs",
+          "line": 64,
+          "message": "Add criterion-linked behavior tests for M-12 and M-14. The current text-presence tests do not verify gate behavior and do not identify which acceptance criteria they cover.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests inspect workflow text for command fragments, but none identifies M-12 or M-14, and none executes the severity gate, exception validation, source restriction, or secret scan behavior.",
+            "failureScenario": "If the severity gate is changed to accept every finding while retaining the asserted strings, `Severity_gate_blocks_unexcepted_high_and_critical_findings` still passes. The M-12 and M-14 behavior criteria have no criterion-linked behavior tests."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow's expiry check accepts impossible dates, allowing dependency exceptions to suppress findings, and its secret scan misses URI-form credentials.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 106,
+          "message": "A03:2025 — Validate that exception expiries are real calendar dates before allowing them to suppress dependency findings.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Exception validation checks only the YYYY-MM-DD shape, and the severity gate later compares expiry strings lexically with today's date.",
+            "failureScenario": "A dependency exception with expires set to 9999-99-99 passes validation and is treated as unexpired, suppressing a matching high or critical finding."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 84,
+          "message": "A02:2025 — The secret scan misses URI-form connection strings with embedded credentials, so committed credentials can pass the workflow.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The tracked-content scan searches assignment patterns and several token formats, but has no pattern for URI-form connection strings.",
+            "failureScenario": "A contributor commits a value such as postgres://app:secret@db.example/app; it matches none of the scan patterns, so the workflow passes with the credential in tracked content."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 2,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/build.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 5,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

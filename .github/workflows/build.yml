@@ -1,0 +1,182 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The checker and scans run PR-supplied code; do not leave the token in .git/config.
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # M-14: source and secret guards run before any dependency is restored or installed.
+      - name: Source restriction
+        run: |
+          set -euo pipefail
+          node backend/ci/check-sources.mjs
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          version=8.18.4
+          sha256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
+          dir=$(mktemp -d)
+          curl -sSfL -o "$dir/gitleaks.tar.gz" "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          echo "${sha256}  $dir/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Secret scan
+        run: |
+          set -euo pipefail
+          # Only tracked files are scanned. Each is copied to a neutral name (f<n>) so gitleaks' default
+          # path allowlist (which skips files such as package-lock.json) cannot hide its content.
+          # `cp --` stops a tracked name beginning with "-" being read as an option.
+          work=$(mktemp -d)
+          scan_dir="$work/scan"
+          mkdir "$scan_dir"
+          map="$work/map.tsv"
+          : > "$map"
+          git ls-files -z > "$work/files.z"
+          n=0
+          while IFS= read -r -d '' f; do
+            n=$((n + 1))
+            cp -- "$f" "$scan_dir/f$n"
+            printf 'f%s\t%s\n' "$n" "$f" >> "$map"
+          done < "$work/files.z"
+          if ! gitleaks detect --no-git --source "$scan_dir" --redact --exit-code 1; then
+            echo "::error::Committed credential found by gitleaks; scanned copies mapped to tracked paths:"
+            cat "$map"
+            exit 1
+          fi
+
+      - name: Restore and build .NET
+        run: |
+          dotnet restore AirlineDemo.sln
+          dotnet build AirlineDemo.sln --no-restore --configuration Release
+
+      - name: Test .NET
+        run: dotnet test AirlineDemo.sln --no-build --configuration Release
+
+      - name: Build and test React app
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npm test -- --run
+
+      - name: Install CycloneDX tool
+        run: dotnet tool install --global CycloneDX
+
+      - name: SBOM (.NET)
+        run: |
+          mkdir -p artifacts/sbom
+          dotnet-CycloneDX AirlineDemo.sln -j -fn dotnet-sbom.cdx.json -o artifacts/sbom
+          test -s artifacts/sbom/dotnet-sbom.cdx.json
+
+      - name: SBOM (npm)
+        working-directory: frontend
+        run: |
+          mkdir -p ../artifacts/sbom
+          npx --yes @cyclonedx/cyclonedx-npm@4 --output-format JSON --output-file ../artifacts/sbom/npm-sbom.cdx.json
+          test -s ../artifacts/sbom/npm-sbom.cdx.json
+
+      - name: Audit (.NET)
+        run: |
+          mkdir -p artifacts/audit
+          dotnet list AirlineDemo.sln package --vulnerable --include-transitive > artifacts/audit/dotnet-vulnerable.txt
+          test -s artifacts/audit/dotnet-vulnerable.txt
+
+      - name: Audit (npm)
+        working-directory: frontend
+        run: |
+          mkdir -p ../artifacts/audit
+          npm audit --json > ../artifacts/audit/npm-audit.json || true
+          test -s ../artifacts/audit/npm-audit.json
+
+      - name: Exception validation
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const today = new Date().toISOString().slice(0, 10);
+          const file = 'docs/security/dependency-audit-exceptions.json';
+          const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (!Array.isArray(doc.exceptions)) throw new Error(file + ': exceptions must be an array');
+          const isRealDate = (s) => {
+            if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+            const d = new Date(s + 'T00:00:00Z');
+            return !isNaN(d) && d.toISOString().slice(0, 10) === s;
+          };
+          const errors = [];
+          doc.exceptions.forEach((e, i) => {
+            for (const key of ['package', 'reason', 'expires']) {
+              if (typeof e[key] !== 'string' || e[key].trim() === '') errors.push(`exception ${i}: missing ${key}`);
+            }
+            if (!isRealDate(e.expires)) {
+              errors.push(`exception ${e.package}: expires must be a real calendar date in YYYY-MM-DD form`);
+            } else if (e.expires <= today) {
+              errors.push(`exception ${e.package}: expired on ${e.expires}`);
+            }
+          });
+          if (errors.length) {
+            console.error(errors.join('\n'));
+            process.exit(1);
+          }
+          console.log(`${doc.exceptions.length} exception(s) valid`);
+          EOF
+
+      - name: Severity gate
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const today = new Date().toISOString().slice(0, 10);
+          const exceptions = JSON.parse(fs.readFileSync('docs/security/dependency-audit-exceptions.json', 'utf8')).exceptions;
+          const npm = JSON.parse(fs.readFileSync('artifacts/audit/npm-audit.json', 'utf8'));
+          if (npm.error) throw new Error('npm audit failed: ' + (npm.error.summary || npm.error.code));
+          if (!npm.metadata) throw new Error('npm audit output has no metadata');
+          const findings = [];
+          for (const [name, v] of Object.entries(npm.vulnerabilities || {})) {
+            if (v.severity === 'high' || v.severity === 'critical') findings.push({ source: 'npm', package: name, severity: v.severity });
+          }
+          const dotnetLines = fs.readFileSync('artifacts/audit/dotnet-vulnerable.txt', 'utf8').split('\n');
+          for (const line of dotnetLines) {
+            const m = line.match(/^\s*>\s+(\S+)\s+\S+\s+\S+\s+(High|Critical)\b/i);
+            if (m) findings.push({ source: 'dotnet', package: m[1], severity: m[2].toLowerCase() });
+          }
+          const blocked = findings.filter(f => !exceptions.some(e => e.package === f.package && e.expires > today));
+          if (blocked.length) {
+            for (const f of blocked) console.error(`::error::${f.source} ${f.package} has a ${f.severity} finding with no valid exception`);
+            process.exit(1);
+          }
+          console.log(`${findings.length} high/critical finding(s), all covered by valid exceptions`);
+          EOF
+
+      - name: Upload supply-chain evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: artifacts/
+          retention-days: 90

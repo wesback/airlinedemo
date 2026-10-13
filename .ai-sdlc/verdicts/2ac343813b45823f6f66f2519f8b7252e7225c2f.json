@@ -1,0 +1,236 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 150,
+  "branch": "ai-sdlc/issue-150",
+  "commitSha": "2ac343813b45823f6f66f2519f8b7252e7225c2f",
+  "round": 2,
+  "pipelineVersion": "d1406c0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow covers the requested build, audit, SBOM, exception, and secret-scan paths, but the NuGet source restriction can be bypassed by an enabled local feed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 79,
+          "message": "A08:2025 — Check every enabled NuGet source, including local folder feeds; the URL-only filter lets an unapproved local feed bypass M-14.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The NuGet source check first filters `dotnet nuget list source` output to lines containing `http://` or `https://`. A configured local folder source has no URL, so it never reaches the allowlist check.",
+            "failureScenario": "If the repository configures an enabled local NuGet feed such as `./packages`, the check ignores it and CI proceeds with that source, violating M-14's restriction to nuget.org (OWASP A08:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow has tests for the requested supply-chain steps, but the M-12 and M-14 criterion-to-test mapping is incomplete under the review policy.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs",
+          "line": 32,
+          "message": "Link the build, SBOM, audit, and source-restriction tests to M-12 and M-14 in their names or comments so each criterion’s behavior coverage is identifiable.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-12 criterion requires building and testing both applications, generating both SBOMs, and running both audits. Tests for those steps exist, but none identifies M-12 in its name or a comment; the M12-labeled tests cover only severity-gate behavior. The M-14-labeled tests cover secret-pattern matching, while the source-restriction tests are not linked to M-14.",
+            "failureScenario": "Under the review policy, tests that cannot be tied to an acceptance criterion do not count toward its coverage. If the build, SBOM, audit, or source-restriction checks regress, the criterion-to-test review cannot establish that these behaviors are covered."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The source restriction can be bypassed with Git-based npm dependency URLs. This leaves the workflow able to accept a lockfile that fetches dependencies outside npmjs.org.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 84,
+          "message": "A03:2025 — Reject Git-based and other non-npmjs dependency sources in the lockfile; the current check can allow packages fetched from an unapproved host.",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The npm source check matches resolved URLs beginning with http:// or https://, but does not match Git URL schemes such as git+https://.",
+            "failureScenario": "If frontend/package-lock.json contains a dependency resolved from git+https://evil.example/repo.git and also contains an npmjs.org resolution, the check misses the unapproved source and passes; npm ci can then fetch that dependency."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 2,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/build.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 6,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
