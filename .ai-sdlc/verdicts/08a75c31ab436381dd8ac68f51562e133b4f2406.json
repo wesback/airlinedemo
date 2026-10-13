@@ -1,0 +1,282 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 145,
+  "branch": "ai-sdlc/issue-145",
+  "commitSha": "08a75c31ab436381dd8ac68f51562e133b4f2406",
+  "round": 4,
+  "pipelineVersion": "9266dd9",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A concurrent basis update can be missed by the decision endpoint’s in-memory basis check, allowing a stale-basis decision to be recorded.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "line": 118,
+          "message": "Recheck the basis version atomically with the decision commit. A stale process can record a decision against an outdated basis when the request supplies the latest revision (OWASP A01:2025).",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RecordDecision checks BasisVersion against cases.Read(scope), then separately calls cases.Commit. Read uses the store's in-memory state, while Commit reloads persisted state under the file lock; it does not recheck BasisVersion against that state.",
+            "failureScenario": "With two API processes sharing the state file, one process can retain basis version 1 while the other commits version 2. A request to the stale process with basisVersion 1 and the latest expectedRevision passes the check and commits a decision against the outdated basis. This violates the current-basis decision requirement. OWASP A01:2025 Broken Access Control."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the listed authorization denials, stale-basis behavior, audit provenance, and trace privacy. They do not verify that a valid current accept decision permits acceptance.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "line": 96,
+          "message": "M-08 lacks a criterion-linked test for successful acceptance. Add a test that submits acceptance with a current accept decision and verifies the case state changes.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The acceptance endpoint calls AcceptIfAuthorized for an accept decision, which should record the review when a current accept decision exists. TechnicalReviewTests exercises acceptance denial when there is no current decision or the prior decision is stale, but never exercises successful acceptance.",
+            "failureScenario": "If AcceptIfAuthorized is changed to reject every request, the existing acceptance tests still pass. A reviewer with a current accept decision could not record acceptance, contrary to M-08's requirement that the visible next state changes after valid authorization."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A concurrent basis update can let a decision command succeed against a basis that is already stale. The basis validation needs to be atomic with the decision commit.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "line": 124,
+          "message": "The basis check and decision commit can race when ExpectedRevision matches the revision created by a concurrent basis update. Revalidate the basis atomically with the commit.",
+          "confidence": 0.83,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RecordDecision reads the current basis, checks BasisVersion, then commits using the client-supplied ExpectedRevision without rechecking the basis.",
+            "failureScenario": "If the request reads revision 1 with basis version 1 and a concurrent basis update commits revision 2, a request that supplied expectedRevision 2 and basisVersion 1 can then commit successfully against the stale basis. The server records and returns a decision instead of rejecting the stale-basis command. OWASP A08:2025 Software and Data Integrity Failures."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 4,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 136,
+      "total": 146,
+      "percent": 93.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 17,
+          "total": 21,
+          "missed": [
+            62,
+            63,
+            64,
+            65
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 17,
+          "total": 17,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 3,
+          "total": 3,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "covered": 99,
+          "total": 105,
+          "missed": [
+            70,
+            71,
+            72,
+            133,
+            134,
+            135
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
