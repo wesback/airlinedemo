@@ -46,9 +46,19 @@ public sealed class SupplyChainWorkflowTests
     {
         var step = StepBody(ReadWorkflow(), "SBOM (.NET)");
 
-        Assert.Contains("dotnet-CycloneDX AirlineDemo.sln", step);
+        Assert.Contains("dotnet-CycloneDX AirlineDemo.sln -F Json", step);
         Assert.DoesNotContain("dotnet CycloneDX", step);
+        Assert.DoesNotContain(" -j ", step);
         Assert.Contains("test -s artifacts/sbom/dotnet-sbom.cdx.json", step);
+    }
+
+    // M-12: the CycloneDX tool used by the .NET SBOM step is pinned, so a change of version fails this test.
+    [Fact]
+    public void SBOM_step_installs_pinned_cyclonedx_tool()
+    {
+        var step = StepBody(ReadWorkflow(), "Install CycloneDX tool");
+
+        Assert.Contains("dotnet tool install --global CycloneDX --version 6.3.1", step);
     }
 
     [Fact]
@@ -81,6 +91,60 @@ public sealed class SupplyChainWorkflowTests
 
         Assert.Contains("npm audit --json", step);
         Assert.Contains("test -s ../artifacts/audit/npm-audit.json", step);
+    }
+
+    // AC: the downstream supply-chain steps run in CI. Each shell script must parse, and each command uses the
+    // options verified against the tools (dotnet-CycloneDX 6.3.1 help, cyclonedx-npm@4 help, dotnet list, npm audit).
+    [Theory]
+    [InlineData("SBOM (.NET)")]
+    [InlineData("SBOM (npm)")]
+    [InlineData("Audit (.NET)")]
+    [InlineData("Audit (npm)")]
+    [InlineData("Exception validation")]
+    [InlineData("Severity gate")]
+    public void Supply_chain_step_script_has_valid_shell_syntax(string stepName)
+    {
+        var script = RunBlock(StepBody(ReadWorkflow(), stepName));
+        var path = Path.Combine(Path.GetTempPath(), $"supply-chain-{Guid.NewGuid():N}.sh");
+        File.WriteAllText(path, script);
+        try
+        {
+            var psi = new ProcessStartInfo("bash", new[] { "-n", path })
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var process = Process.Start(psi) ?? throw new InvalidOperationException("bash could not be started.");
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            Assert.True(process.ExitCode == 0, $"Step '{stepName}' has a shell syntax error: {stderr}");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    // AC: the evidence upload runs on every outcome and uploads the artifacts directory the audit steps write.
+    [Fact]
+    public void Upload_step_publishes_artifacts_even_on_failure()
+    {
+        var step = StepBody(ReadWorkflow(), "Upload supply-chain evidence");
+
+        Assert.Contains("if: always()", step);
+        Assert.Contains("uses: actions/upload-artifact@v4", step);
+        Assert.Contains("path: artifacts/", step);
+    }
+
+    [Fact]
+    public void Supply_chain_commands_use_verified_options()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Contains("dotnet-CycloneDX AirlineDemo.sln -F Json -fn dotnet-sbom.cdx.json -o artifacts/sbom", StepBody(workflow, "SBOM (.NET)"));
+        Assert.Contains("npx --yes @cyclonedx/cyclonedx-npm@4 --output-format JSON --output-file ../artifacts/sbom/npm-sbom.cdx.json", StepBody(workflow, "SBOM (npm)"));
+        Assert.Contains("dotnet list AirlineDemo.sln package --vulnerable --include-transitive > artifacts/audit/dotnet-vulnerable.txt", StepBody(workflow, "Audit (.NET)"));
+        Assert.Contains("npm audit --json > ../artifacts/audit/npm-audit.json || true", StepBody(workflow, "Audit (npm)"));
     }
 
     // M-14: source and secret guards run before any dependency is restored or installed.
@@ -392,6 +456,26 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("sha256sum -c -", step);
     }
 
+    // AC: M-14. The real secret scan step exits 0 on every tracked file of this repository.
+    [Fact]
+    public void Secret_scan_passes_on_repository_tracked_files()
+    {
+        var root = FindRepoRoot();
+        var (exitCode, output) = RunShellStep("Secret scan", repo =>
+        {
+            foreach (var path in TrackedFiles(root))
+            {
+                var target = Path.Combine(repo.Root, path);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(Path.Combine(root, path), target);
+            }
+
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.True(exitCode == 0, output);
+    }
+
     // Clean baseline: the lockfile is tracked and holds no credential, so the scan passes.
     [Fact]
     public void Secret_scan_passes_on_clean_tracked_content()
@@ -421,10 +505,15 @@ public sealed class SupplyChainWorkflowTests
     // M-14: committed credentials that gitleaks' default rules detect fail the secret scan.
     // Fixtures are joined from pieces so this file never contains a full credential literal.
     // AC: M-14. Each fixture is committed to a temp repo, and the real workflow secret scan step must fail on it.
+    // Split so no source line holds the key name, separator and value together; gitleaks would flag this file otherwise.
+    private const string StorageKeyName = "Account" + "Key";
+    private const string StorageSeparator = "=";
+    private const string StorageValue = "abcd" + "efgh12345678";
+
     [Theory]
     [InlineData("gh" + "p_" + "Q7xR2mK9pL4vN8sT1wY6zB3cD5fG0hJ2kE7a")]
     [InlineData("AKIA" + "ABCDEFGHIJKLMNOP")]
-    [InlineData("DefaultEndpointsProtocol=https;" + "Account" + "Key=abcdefgh12345678")]
+    [InlineData("DefaultEndpointsProtocol=https;" + StorageKeyName + StorageSeparator + StorageValue)]
     public void M14_secret_scan_fails_on_committed_credentials(string content)
     {
         var (exitCode, output) = RunShellStep("Secret scan", repo =>
@@ -598,6 +687,26 @@ public sealed class SupplyChainWorkflowTests
 
         // Workflow run blocks are indented by 10 spaces; strip that to get the script.
         return string.Join('\n', lines[(start + 1)..].Select(l => l.Length >= 10 ? l[10..] : l.TrimStart()));
+    }
+
+    private static IEnumerable<string> TrackedFiles(string workDir)
+    {
+        var psi = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("ls-files");
+        psi.ArgumentList.Add("-z");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("git could not be started.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+        return stdout.Result.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Where(path => File.Exists(Path.Combine(workDir, path)))
+            .ToList();
     }
 
     private static void GitTrackAll(string workDir)
