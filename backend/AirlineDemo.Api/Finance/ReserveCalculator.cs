@@ -193,6 +193,10 @@ public static class ReserveCalculator
         {
             throw new InvalidOperationException($"Approval refused: draft {draft.DraftId} v{draft.Version} is {draft.Status}.");
         }
+        if (decision == FinanceDecisionKind.Approve && !IsConsistentCalculation(draft))
+        {
+            throw new InvalidOperationException($"Approval refused: draft {draft.DraftId} v{draft.Version} does not match its calculation.");
+        }
 
         return new FinanceReviewRecord(draft.DraftId, draft.Version, decision, actorId, reason.Trim(),
             decidedAt, draft.CalculationBasis, draft.PayableTotal, Simulated: true, InvoiceIssued: false);
@@ -202,6 +206,36 @@ public static class ReserveCalculator
     private static readonly FrozenSet<string> AuthorizedReviewerIds = new[] { "fin-1" }.ToFrozenSet(StringComparer.Ordinal);
 
     private static decimal Cents(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// Re-derives every line amount and the payable total from the draft's own units and rates, so a draft whose
+    /// fields were edited or built by hand after calculation cannot be approved.
+    /// </summary>
+    private static bool IsConsistentCalculation(ReserveDraft draft)
+    {
+        if (draft.Blockers.Count > 0 || draft.Discrepancies.Count > 0 || draft.Lines.Count == 0)
+        {
+            return false;
+        }
+        if (draft.CalculationBasis != CalculationBasis || draft.PayableTotal is not decimal payable)
+        {
+            return false;
+        }
+        decimal total = 0m;
+        foreach (var line in draft.Lines)
+        {
+            if (line.Units < 0 || line.UnitRate < 0 || line.Amount != Cents(line.Units * line.UnitRate))
+            {
+                return false;
+            }
+            if (line.ReportedAmount is decimal reported && reported != line.Amount)
+            {
+                return false;
+            }
+            total += line.Amount;
+        }
+        return payable == total;
+    }
 
     private static void ValidateUsage(UsageReport usage)
     {

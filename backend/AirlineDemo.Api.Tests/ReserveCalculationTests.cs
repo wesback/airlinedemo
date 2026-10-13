@@ -332,6 +332,7 @@ public class ReserveCalculationTests
         var record = ReserveCalculator.Review(draft, FinanceDecisionKind.Return, Reviewer, "need usage", At);
 
         Assert.Equal(FinanceDecisionKind.Return, record.Decision);
+        Assert.True(record.Simulated);
         Assert.Equal("fin-1", record.ActorId);
         Assert.Equal("need usage", record.Reason);
         Assert.Equal(At, record.DecidedAt);
@@ -368,5 +369,26 @@ public class ReserveCalculationTests
         Assert.Equal(ReserveDraftStatus.Blocked, blockedV3.Status);
         Assert.Throws<InvalidOperationException>(() =>
             ReserveCalculator.Review(blockedV3, FinanceDecisionKind.Approve, Reviewer, "no inherited approval", At));
+    }
+
+    [Fact]
+    public void Approve_refuses_hand_built_or_tampered_draft()
+    {
+        var line = new ReserveLine("FH-A", 2m, 0.20m, 0.40m, null);
+        var fabricated = new ReserveDraft("draft-x", 1, "2026-03", ReserveDraftStatus.ReadyForReview,
+            "U-1", "R-1", [line], 9.99m, [], [], ReserveCalculator.CalculationBasis);
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(fabricated, FinanceDecisionKind.Approve, Reviewer, "forged total", At));
+
+        var wrongLine = new ReserveLine("FH-A", 2m, 0.20m, 9.99m, null);
+        var tamperedLine = new ReserveDraft("draft-y", 1, "2026-03", ReserveDraftStatus.ReadyForReview,
+            "U-1", "R-1", [wrongLine], 9.99m, [], [], ReserveCalculator.CalculationBasis);
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(tamperedLine, FinanceDecisionKind.Approve, Reviewer, "forged line", At));
+
+        var consistent = new ReserveDraft("draft-z", 1, "2026-03", ReserveDraftStatus.ReadyForReview,
+            "U-1", "R-1", [line], 0.40m, [], [], ReserveCalculator.CalculationBasis);
+        var record = ReserveCalculator.Review(consistent, FinanceDecisionKind.Approve, Reviewer, "ok", At);
+        Assert.Equal(0.40m, record.PayableTotal);
     }
 }
