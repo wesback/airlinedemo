@@ -1,0 +1,286 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 155,
+  "branch": "ai-sdlc/issue-155",
+  "commitSha": "b63cc9f244fc1cfd38231b8ea3a712e383a5fbb7",
+  "round": 0,
+  "pipelineVersion": "d1406c0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The manifest validation and trace helpers are present, but the gate does not enforce M-07's required evidence-hash registry. The tests cover heuristic content checks and would not detect that missing registry behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 151,
+          "message": "M-07 requires every evidence item's SHA-256 to be registered before authorization. The gate instead accepts unregistered content based on caller-supplied flags and text checks.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Authorize validates a caller-supplied evidence version, synthetic flag, marker, text allowlist, and region, but never hashes evidence items or checks a SyntheticContentRegistry.",
+            "failureScenario": "With an approved manifest, a caller submits an unregistered evidence item with a non-empty version, the synthetic flag, the required marker, allowlisted text, and the approved region. Authorize returns a trace and permits it despite the missing registry entry, contrary to M-07. The marker and flag do not prove the content is synthetic; this risks sensitive information disclosure (OWASP LLM02:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs",
+          "line": 117,
+          "message": "M-07 has no test for authorization of registered evidence versus refusal of unregistered evidence. Add a test that fails when the SHA-256 registry check is missing.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The synthetic-content tests exercise marker, allowlist, and identifier-pattern checks, but no test checks registration of evidence hashes.",
+            "failureScenario": "If the required hash-registry check is absent, the existing tests can still pass because they only test the heuristic checks. Unregistered evidence can then be authorized without a test detecting the M-07 violation."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The manifest validation and trace behavior have direct tests. M-07’s required SHA-256 registry check is absent, and no test exercises registry-based authorization or refusal.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 158,
+          "message": "M-07 requires every evidence item’s SHA-256 to be registered and explicitly rejects unregistered content; the gate instead relies on text heuristics and can authorize unregistered evidence.",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ModelCallGate.Authorize checks a caller-supplied synthetic flag, a text marker, an allowlist, and identifier patterns. It does not hash evidence items or check a SyntheticContentRegistry.",
+            "failureScenario": "A caller submits unregistered content such as \"SYNTHETIC EVIDENCE: aircraft evidence v1.\" with the approved manifest and region. The content passes the current checks and Authorize returns a trace, allowing unregistered evidence to be sent. This risks sensitive information disclosure (OWASP LLM02:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs",
+          "line": 119,
+          "message": "M-07 has no test proving that registered evidence is authorized and unregistered evidence is refused; the current tests cover heuristic pattern checks instead.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-07 tests exercise marker, allowlist, and identifier-pattern checks, but none registers evidence hashes or submits unregistered evidence to the gate.",
+            "failureScenario": "If the gate continues to authorize unregistered evidence, the current tests still pass. They do not cover M-07’s required registry check or its refusal of unregistered content."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The gate does not enforce M-07’s synthetic-content registry requirement. Caller-provided content can pass its marker and heuristic checks without being registered.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 176,
+          "message": "M-07 requires registry verification by evidence-item SHA-256, but the gate relies on caller-controlled markers and heuristic scans; unregistered personal information can pass.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ModelCallGate.Authorize accepts caller-provided content after checking a synthetic marker, a character allowlist, and heuristic identifier patterns. It does not hash evidence items or verify them against SyntheticContentRegistry, as M-07 requires.",
+            "failureScenario": "A caller submits \"SYNTHETIC EVIDENCE: Jane Doe booking for flight 42\" with IsSynthetic=true, a non-empty evidence version, and the approved region. The text passes the allowlist and identifier patterns, so Authorize permits unregistered content containing personal information. This risks sensitive information disclosure (LLM02:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 128,
+      "total": 131,
+      "percent": 97.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "covered": 128,
+          "total": 131,
+          "missed": [
+            48,
+            49,
+            50
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
