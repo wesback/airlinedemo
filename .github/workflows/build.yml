@@ -88,12 +88,12 @@ jobs:
           npm test -- --run
 
       - name: Install CycloneDX tool
-        run: dotnet tool install --global CycloneDX
+        run: dotnet tool install --global CycloneDX --version 6.3.1
 
       - name: SBOM (.NET)
         run: |
           mkdir -p artifacts/sbom
-          dotnet-CycloneDX AirlineDemo.sln -j -fn dotnet-sbom.cdx.json -o artifacts/sbom
+          dotnet-CycloneDX AirlineDemo.sln -F Json -fn dotnet-sbom.cdx.json -o artifacts/sbom
           test -s artifacts/sbom/dotnet-sbom.cdx.json
 
       - name: SBOM (npm)

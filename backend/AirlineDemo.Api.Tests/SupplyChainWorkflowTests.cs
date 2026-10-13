@@ -46,8 +46,9 @@ public sealed class SupplyChainWorkflowTests
     {
         var step = StepBody(ReadWorkflow(), "SBOM (.NET)");
 
-        Assert.Contains("dotnet-CycloneDX AirlineDemo.sln", step);
+        Assert.Contains("dotnet-CycloneDX AirlineDemo.sln -F Json", step);
         Assert.DoesNotContain("dotnet CycloneDX", step);
+        Assert.DoesNotContain(" -j ", step);
         Assert.Contains("test -s artifacts/sbom/dotnet-sbom.cdx.json", step);
     }
 
