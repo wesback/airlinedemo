@@ -43,17 +43,29 @@ public static class CaseEndpoints
         TelemetryRedaction.EmitSecurityEvent(logger, TelemetryRedaction.SecurityEvents.AuthScopeFailure,
             TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
 
-    private static bool AcceptanceAuthorized(CaseStateStore states, DemoSession session, string caseId)
+    /// <summary>
+    /// Checks the current technical decision and records the acceptance while holding the case-state gate,
+    /// so a basis change cannot land between the check and the mutation. Returns null when not authorized.
+    /// </summary>
+    private static ReviewOutcome? AcceptIfAuthorized(CaseStateStore states, CaseStore cases, DemoSession session, string caseId, int expectedRevision, out CaseRecord? updated)
     {
+        CaseRecord? record = null;
+        ReviewOutcome? outcome;
         try
         {
-            return TechnicalReviewEndpoints.AuthorizesAcceptance(
-                states.Read(states.AuthorizeSessionCase(caseId, session.User.CaseScopes)));
+            var scope = states.AuthorizeSessionCase(caseId, session.User.CaseScopes);
+            outcome = states.WithCurrentState<ReviewOutcome?>(scope, state =>
+                TechnicalReviewEndpoints.AuthorizesAcceptance(state)
+                    ? cases.RecordReview(caseId, expectedRevision, "accept", out record)
+                    : (ReviewOutcome?)null);
         }
         catch (CaseAccessDeniedException)
         {
-            return false;
+            outcome = null;
         }
+
+        updated = record;
+        return outcome;
     }
 
     private static IResult RecordReview(string caseId, ReviewRequest body, HttpContext http, DemoSessionStore sessions, CaseStore cases, CaseStateStore states, IConfiguration config, ILogger<DemoSessionStore> logger)
@@ -77,14 +89,13 @@ public static class CaseEndpoints
         }
         if (body.Decision is not ("accept" or "reject"))
             return Results.BadRequest(new { error = "Decision must be accept or reject." });
-        if (body.Decision == "accept" && !AcceptanceAuthorized(states, session, caseId))
-            return Results.Json(new { error = "A current technical review decision is required before acceptance." }, statusCode: StatusCodes.Status409Conflict);
-
         CaseRecord? updated;
-        ReviewOutcome outcome;
+        ReviewOutcome? outcome;
         try
         {
-            outcome = cases.RecordReview(caseId, body.ExpectedRevision, body.Decision, out updated);
+            outcome = body.Decision == "accept"
+                ? AcceptIfAuthorized(states, cases, session, caseId, body.ExpectedRevision, out updated)
+                : cases.RecordReview(caseId, body.ExpectedRevision, body.Decision, out updated);
         }
         catch (BasisIntegrityException)
         {
@@ -92,6 +103,9 @@ public static class CaseEndpoints
                 TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
             return Results.Json(new { error = "Case integrity check failed." }, statusCode: StatusCodes.Status409Conflict);
         }
+
+        if (outcome is null)
+            return Results.Json(new { error = "A current technical review decision is required before acceptance." }, statusCode: StatusCodes.Status409Conflict);
 
         if (outcome == ReviewOutcome.Recorded && updated is not null)
         {

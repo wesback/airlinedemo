@@ -6,6 +6,7 @@ using AirlineDemo.Api.Reviews;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -15,17 +16,45 @@ public sealed class TechnicalReviewTests : IDisposable
     private const string CaseId = "case-001";
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "tech-review-" + Guid.NewGuid().ToString("N"));
+    private readonly CapturingLoggerProvider _logs = new();
     private readonly WebApplicationFactory<Program> _factory;
 
     public TechnicalReviewTests()
     {
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services => services.AddLogging(logging => logging.AddProvider(_logs)));
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Demo:Passcode"] = Passcode,
                     ["CaseState:Path"] = Path.Combine(_dir, "cases.json"),
-                })));
+                }));
+        });
+    }
+
+    /// <summary>Keeps every log entry with its event name, attributes, and rendered message so tests can inspect emitted traces.</summary>
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        public List<(string EventName, Dictionary<string, string> Attributes, string Message)> Entries { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => new Logger(this);
+
+        public void Dispose() { }
+
+        private sealed class Logger(CapturingLoggerProvider owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (state is not IEnumerable<KeyValuePair<string, object?>> pairs) return;
+                var attributes = pairs.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value!.ToString() ?? string.Empty, StringComparer.Ordinal);
+                lock (owner.Entries) owner.Entries.Add((eventId.Name ?? string.Empty, attributes, formatter(state, exception)));
+            }
+        }
     }
 
     public void Dispose()
@@ -288,6 +317,27 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.StartsWith("trace-", decision.TraceId);
         Assert.Equal(decision.TraceId, posted.GetProperty("traceId").GetString());
         Assert.DoesNotContain("evidence-1", entry.Detail);
+    }
+
+    [Fact]
+    public async Task Decision_emits_trace_correlated_by_trace_id_without_content()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+
+        using var response = await PostDecisionAsync(CaseId, reviewer, withCsrf: true, Decide(revision, decision: "reject", reason: "Evidence-1 is insufficient."));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var posted = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var traceId = posted.GetProperty("traceId").GetString();
+        var traces = _logs.Entries.Where(e => e.EventName == "review.completed"
+            && e.Attributes.TryGetValue("trace.id", out var id) && id == traceId).ToList();
+        var trace = Assert.Single(traces);
+        Assert.Equal("basis-v1", trace.Attributes["investigation.basis_version"]);
+        Assert.Equal("rejected", trace.Attributes["investigation.outcome"]);
+        Assert.DoesNotContain("evidence-1", trace.Message);
+        Assert.DoesNotContain("Evidence-1 is insufficient", trace.Message);
+        Assert.DoesNotContain("evidence-1", string.Join(' ', trace.Attributes.Values));
     }
 
     [Fact]

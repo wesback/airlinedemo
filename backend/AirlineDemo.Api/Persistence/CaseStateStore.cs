@@ -165,6 +165,15 @@ public sealed class CaseStateStore
         }
     }
 
+    /// <summary>Runs <paramref name="action"/> on the current state while holding the store gate, so no commit can interleave.</summary>
+    public T WithCurrentState<T>(CaseScope scope, Func<CaseState, T> action)
+    {
+        lock (_gate)
+        {
+            return action(Current(scope));
+        }
+    }
+
     public BasisVersion GetBasisVersion(CaseScope scope, int version)
     {
         lock (_gate)
