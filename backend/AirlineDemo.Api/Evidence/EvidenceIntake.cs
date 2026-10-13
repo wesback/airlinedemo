@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
 
 namespace AirlineDemo.Api.Evidence;
@@ -93,7 +94,7 @@ public static class EvidenceIntake
             throw new EvidenceIntakeException(
                 $"Package has {documents.Count} documents; the limit is {EvidenceLimits.MaxDocuments}.",
                 EvidenceFailureKind.LimitExceeded,
-                false);
+                true);
         }
 
         long total = 0;
@@ -104,7 +105,7 @@ public static class EvidenceIntake
                 throw new EvidenceIntakeException(
                     $"Document '{document.Name}' exceeds the {EvidenceLimits.MaxDocumentBytes} byte limit.",
                     EvidenceFailureKind.LimitExceeded,
-                    false);
+                    true);
             }
 
             total += document.Bytes.LongLength;
@@ -115,7 +116,7 @@ public static class EvidenceIntake
             throw new EvidenceIntakeException(
                 $"Package exceeds the {EvidenceLimits.MaxPackageBytes} byte limit.",
                 EvidenceFailureKind.LimitExceeded,
-                false);
+                true);
         }
 
         foreach (var document in documents)
@@ -136,7 +137,7 @@ public static class EvidenceIntake
             throw new EvidenceIntakeException(
                 $"Document '{document.Name}' is a nested archive; archives are rejected.",
                 EvidenceFailureKind.UnsupportedFormat,
-                false);
+                true);
         }
 
         if (!StartsWithAscii(bytes, "%PDF-"))
@@ -144,7 +145,7 @@ public static class EvidenceIntake
             throw new EvidenceIntakeException(
                 $"Document '{document.Name}' is not a PDF.",
                 EvidenceFailureKind.UnsupportedFormat,
-                false);
+                true);
         }
 
         var tail = Encoding.Latin1.GetString(bytes, Math.Max(0, bytes.Length - 1024), Math.Min(1024, bytes.Length));
@@ -156,7 +157,10 @@ public static class EvidenceIntake
                 true);
         }
 
-        var text = Encoding.Latin1.GetString(bytes);
+        // PDF name objects may hex-escape characters (e.g. /J#61vaScript), so decode #xx before matching.
+        var text = NameHexEscape.Replace(
+            Encoding.Latin1.GetString(bytes),
+            m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
         foreach (var marker in ActiveContentMarkers)
         {
             if (text.Contains(marker, StringComparison.Ordinal))
@@ -164,10 +168,12 @@ public static class EvidenceIntake
                 throw new EvidenceIntakeException(
                     $"Document '{document.Name}' contains active or embedded content ({marker}); it is rejected.",
                     EvidenceFailureKind.ActiveContent,
-                    false);
+                    true);
             }
         }
     }
+
+    private static readonly Regex NameHexEscape = new("#([0-9A-Fa-f]{2})", RegexOptions.Compiled);
 
     private static string ExtractDocument(EvidenceDocument document)
     {
@@ -181,7 +187,7 @@ public static class EvidenceIntake
                 throw new EvidenceIntakeException(
                     $"Document '{document.Name}' has {pages} pages; the limit is {EvidenceLimits.MaxPagesPerDocument}.",
                     EvidenceFailureKind.LimitExceeded,
-                    false);
+                    true);
             }
 
             if (pages == 0)

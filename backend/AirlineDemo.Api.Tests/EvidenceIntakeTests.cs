@@ -74,6 +74,7 @@ public sealed class EvidenceIntakeTests
         Assert.Equal(EvidenceProcessingState.Complete, result.State);
     }
 
+    // AC M-09: a package over the document-count limit is rejected before parsing, with no content.
     [Fact]
     public void PackageOverDocumentCountLimitIsRejectedWithoutContent()
     {
@@ -84,7 +85,7 @@ public sealed class EvidenceIntakeTests
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
         Assert.Null(result.Content);
-        Assert.False(result.Failure.Retryable);
+        Assert.True(result.Failure.Retryable);
     }
 
     [Fact]
@@ -153,25 +154,43 @@ public sealed class EvidenceIntakeTests
         Assert.Null(result.ContentDigest);
     }
 
+    // AC: active-content payloads fail visibly and retryably and never become evidence.
     [Fact]
-    public void ActiveJavaScriptPdfIsRejectedNonRetryably()
+    public void ActiveJavaScriptPdfIsRejectedRetryably()
     {
         var result = EvidenceIntake.Process([Fixture("active-javascript.pdf")]);
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
-        Assert.False(result.Failure.Retryable);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
     }
 
+    // AC: PDF name hex-escapes (e.g. /J#61vaScript) must not hide active content.
     [Fact]
-    public void NestedArchiveIsRejected()
+    public void HexEscapedJavaScriptNameIsRejected()
+    {
+        var pdf = Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj << /Names << /J#61vaScript 2 0 R >> >> endobj\n%%EOF\n");
+
+        var result = EvidenceIntake.Process([new("escaped.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: nested archives are rejected visibly and retryably.
+    [Fact]
+    public void NestedArchiveIsRejectedRetryably()
     {
         var zip = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0 };
 
         var result = EvidenceIntake.Process([new("bundle.zip", zip)]);
 
         Assert.Equal(EvidenceFailureKind.UnsupportedFormat, result.Failure!.Kind);
-        Assert.False(result.Failure.Retryable);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
     }
 
     [Fact]
