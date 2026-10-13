@@ -1,0 +1,306 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 148,
+  "branch": "ai-sdlc/issue-148",
+  "commitSha": "26e1f79542f7d061df27f8b7a8d81b2fc92d4ac5",
+  "round": 0,
+  "pipelineVersion": "bdb6534",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform backend can be initialized with non-Entra authentication despite the stated boundary. The mock-plan tests also leave ingress allowlist completeness, model private DNS routing, and the no-defaults criterion unenforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 12,
+          "message": "The backend's Entra requirement is not enforced: an init-time backend-config override can disable it, and the validated input does not constrain the actual backend.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The backend block sets use_azuread_auth, while terraform_state_backend is a separate validated variable. Terraform initialization accepts backend-config overrides.",
+            "failureScenario": "An operator runs terraform init with use_azuread_auth=false and access-key credentials. The backend can then use non-Entra authentication, although the variable validation still passes, violating the required identity boundary (OWASP A07:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 61,
+          "message": "M-13's test does not establish that configured presenter/reviewer CIDRs are the only ingress allow rules; an unapproved allow rule could be added without failing it.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The ingress test checks the configured CIDR at index 0 and the deny-all rule, but does not assert that every ingress allow rule matches a configured CIDR.",
+            "failureScenario": "If an additional allow rule is added for an unapproved source, the current assertions still pass, so the test does not enforce M-13's requirement that ingress accepts only configured CIDRs."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 120,
+          "message": "M-18's private routing test omits the DNS associations and VNet links needed to verify private name resolution.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The private endpoint tests check target resources, subresources, and subnet placement, but do not assert the private DNS zone groups or VNet links.",
+            "failureScenario": "If the model endpoint loses its DNS zone association or the zone is no longer linked to the VNet, the existing assertions still pass even though private name resolution required for M-18 can fail."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 31,
+          "message": "The no-environment-specific-defaults criterion has no test that fails when a required deployment input gains a default.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Every test run supplies environment-specific variables, and no run checks behavior when required inputs are omitted.",
+            "failureScenario": "If a Terraform default is added to a required deployment variable, all current runs still pass because they provide explicit values; the no-environment-specific-defaults criterion is not tested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The mock-plan tests cover several network and encryption settings, but leave required ingress, defaults, backend, private DNS, and secret-output boundaries unenforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 60,
+          "message": "M-13: The ingress test does not verify that only configured presenter/reviewer CIDRs are allowed. Assert the complete inbound allow-rule set so an unapproved source makes the test fail.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The ingress test checks the configured CIDR's allow rule and that a deny rule exists, but it does not assert that the configured CIDRs are the only inbound allow rules.",
+            "failureScenario": "If an extra ingress allow rule for an unapproved source is added, the assertions still pass and that source can reach the app subnet, contrary to M-13."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 26,
+          "message": "The no-environment-specific-defaults criterion has no test. Add a test that fails when a required deployment input can be omitted.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Every mock-plan run supplies environment-specific values, and no test checks whether Terraform rejects omitted values.",
+            "failureScenario": "If a default is added to subscription_id, a CIDR, budget, or state-backend name, the tests still pass because they provide those values explicitly, contrary to the no-defaults criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 190,
+          "message": "The backend tests validate a disconnected input rather than the actual backend identity and locking boundary. Add checks that fail when either requirement is missing.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The backend tests validate terraform_state_backend input values, which are not connected to the azurerm backend block or its locking behavior.",
+            "failureScenario": "If the backend's Entra setting is overridden during terraform init, or a state operation runs with locking disabled, the variable validation tests still pass and do not establish the required backend identity and locking boundary."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 104,
+          "message": "M-18: The tests do not verify the model endpoint's private DNS association and VNet link. Assert those links so broken private name resolution fails the mock plan.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The private endpoint assertions check target resources, subresources, and subnet placement, but do not check the private DNS zone group or the zone's VNet link.",
+            "failureScenario": "If the model endpoint loses its DNS zone association or VNet link, the current assertions still pass while approved private clients may fail to resolve the model endpoint through private routing, contrary to M-18."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 174,
+          "message": "M-14: The output test cannot detect secrets emitted by a separate output. Assert that no declared output contains access keys or connection strings.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The no-secret assertion inspects only output.model_endpoint and does not inspect other declared outputs.",
+            "failureScenario": "If a storage access key or connection string is added as a separate Terraform output, the current assertion still passes, contrary to M-14."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The backend enables Entra authentication by default, but an initialization override can switch it to access-key authentication. The separate variable validation does not prevent that override.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 12,
+          "message": "The backend’s Entra authentication requirement can be overridden at initialization, so this configuration does not enforce the required identity boundary.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The backend block sets use_azuread_auth = true, but Terraform accepts backend settings through -backend-config. The separately validated terraform_state_backend variable does not constrain those settings.",
+            "failureScenario": "An operator runs terraform init with use_azuread_auth=false and access-key credentials. The backend can then use key authentication despite the stated Entra-only boundary (OWASP A07:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
