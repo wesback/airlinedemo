@@ -1,0 +1,279 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "63825ff42e0d2199a71984d37e97bdb06a3775ff",
+  "round": 5,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake implements the stated limits and version checks, but its image marker scan can reject a valid text-only PDF when page text contains the matching literal.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 158,
+          "message": "The raw PDF scan can mistake text content for an image XObject and reject valid text-only evidence.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ValidateBytes scans the entire PDF text for the /Subtype ... /Image pattern before parsing, without distinguishing PDF dictionaries from text strings in content streams.",
+            "failureScenario": "A valid text-only PDF whose page text contains the literal `/Subtype /Image` matches ImageSubtype and is rejected as an image payload, so the package fails despite containing no image."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover limit boundaries, retryable failures for several input types, versioning, and failed intake. Form and embedded-file rejection remain unprotected by tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 1,
+          "message": "The tests do not cover form or embedded-file rejection. Add criterion-mapped cases that assert these inputs fail retryably and produce no evidence.",
+          "confidence": 0.87,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The implementation rejects forms and embedded files through the /AcroForm, /XFA, and /EmbeddedFile markers, but the named test file has no tests for those payloads.",
+            "failureScenario": "If those markers are removed, the current tests for JavaScript and images still pass, while PDFs containing forms or embedded files can be accepted. The acceptance criterion requires those payloads to fail visibly and retryably."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The input size limits do not establish a bound on resources consumed while PdfPig processes compressed PDF content. The resulting denial-of-service scenario is plausible, though PdfPig's exact allocation behavior should be confirmed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 223,
+          "message": "PDF byte and page limits do not bound decompressed stream or image allocations during PdfPig processing, so a small crafted PDF may exhaust service memory.",
+          "confidence": 0.77,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The byte and page limits constrain the PDF input but not the size of its decoded streams. ExtractDocument passes each page to PdfPig and calls GetImages() without a decoded-size or resource budget.",
+            "failureScenario": "A caller submits a PDF under the 10 MB limit with a highly compressed stream or image declaring very large dimensions. If PdfPig expands or allocates for that content during page processing, it can exhaust the service's memory before intake returns a failure, disrupting processing for other requests. This is an unbounded-resource risk (A06:2025, Insecure Design)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 182,
+      "total": 203,
+      "percent": 89.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 182,
+          "total": 203,
+          "missed": [
+            94,
+            95,
+            150,
+            151,
+            152,
+            153,
+            154,
+            209,
+            210,
+            211,
+            212,
+            213,
+            233,
+            234,
+            235,
+            236,
+            237,
+            258,
+            259,
+            265,
+            266
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
