@@ -1,0 +1,270 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 156,
+  "branch": "ai-sdlc/issue-156",
+  "commitSha": "68cb40a0aad4d4514423a17b7e1d3fbba168b065",
+  "round": 0,
+  "pipelineVersion": "f9929ba",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The initial document prompt is delimited, but source-page reads return raw document text to the model. That tool path bypasses the untrusted-data boundary required by M-05.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/CaseReadTools.cs",
+          "line": 52,
+          "message": "Wrap source-page tool results in the untrusted-data delimiters before they reach the model. Returning raw page text violates M-05 and leaves a reachable prompt-injection path (LLM01:2025).",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "BoundedInvestigator supplies GetSourcePageAsync as a tool; its result is returned directly to the Agent Framework, which can pass the function result back to the model.",
+            "failureScenario": "When a case page contains an instruction such as “ignore previous instructions,” the model receives it in the tool result outside the untrusted-data delimiters. It can then follow that instruction and alter or fabricate its claims."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named test file is included in the repository’s `dotnet test AirlineDemo.sln` command. The initial prompt delimits documents, but source-page tool results bypass that delimiter and can reach a later model call as raw text.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/CaseReadTools.cs",
+          "line": 56,
+          "message": "M-05 is not met for document text returned by the source-page tool: delimiter the page text before returning it so every model call receives it as untrusted data. This is an LLM01:2025 prompt-injection risk.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The agent exposes GetSourcePageAsync as a tool, and it returns source page text directly. FunctionInvokingChatClient can pass that result into a subsequent model call.",
+            "failureScenario": "If the investigator calls get_source_page for a page containing an instruction such as “Ignore previous instructions,” that text reaches the next model call outside the untrusted-data delimiters. The model can treat the document instruction as active and produce claims that do not follow the fixed task or scope."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Fetched source pages reach the model without the required untrusted-data delimiter, creating a reachable prompt-injection path. The tests also do not fail if the fixed prompt authority is removed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/CaseReadTools.cs",
+          "line": 53,
+          "message": "LLM01:2025 Prompt Injection: source-page text reaches the model outside the untrusted-data delimiter, so document instructions can influence the investigation.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The get_source_page tool returns source.GetSourcePage(...) directly; the Agent Framework sends that tool result back to the model without the untrusted-data delimiters used by BoundedInvestigator.BuildPrompt.",
+            "failureScenario": "An attacker places instructions in a case document. When the model fetches that page, it receives the instructions outside the delimiter and may follow them when generating claims, for example producing a misleading claim with a quote taken from the malicious text."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+          "line": 162,
+          "message": "The tests do not protect the acceptance criterion that task, identity, scope, and policy stay fixed in the prompt; assert that document instructions cannot replace those constraints.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Prompt_is_public_and_holds_no_secret_or_authority checks only that the canary string is absent. The direct-instruction test checks that send_to_recipient is not among the offered tools, which remains true even if the fixed task, identity, scope, and policy instructions are removed.",
+            "failureScenario": "If BoundedInvestigator.Instructions loses its fixed task and scope text, both tests still pass, so the stated prompt-authority protection can be removed without this acceptance test failing."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 95,
+      "total": 122,
+      "percent": 77.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 76,
+          "total": 88,
+          "missed": [
+            66,
+            67,
+            73,
+            74,
+            105,
+            106,
+            107,
+            111,
+            112,
+            128,
+            129,
+            179
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/CaseReadTools.cs",
+          "covered": 19,
+          "total": 34,
+          "missed": [
+            41,
+            42,
+            43,
+            44,
+            45,
+            48,
+            49,
+            50,
+            51,
+            67,
+            68,
+            72,
+            73,
+            74,
+            75
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 6,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
