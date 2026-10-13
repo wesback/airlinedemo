@@ -126,6 +126,10 @@ public static class ModelCallGate
         new(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", RegexOptions.Compiled),
         new(@"(?<!\d)(\+\d{7,15}|\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4})(?!\d)", RegexOptions.Compiled),
         new(@"\bN\d{1,5}[A-Z]{0,2}\b", RegexOptions.Compiled),
+        new(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled),
+        new(@"\b\d{4}([ -]?\d{4}){2,3}\b", RegexOptions.Compiled),
+        new(@"(?i)\b(passport|date of birth|dob)\b", RegexOptions.Compiled),
+        new(@"\b(?i:passenger|crew|customer|pilot)\b\s+[A-Z][a-z]+", RegexOptions.Compiled),
     ];
 
     /// <summary>Throws unless the manifest is usable and the request is allowed; returns the trace to record.</summary>
@@ -138,10 +142,10 @@ public static class ModelCallGate
             throw new ModelGateException("model request refused: no versioned evidence");
         }
 
-        if (!request.IsSynthetic &&
-            !string.Equals(request.DataRegion, manifest.Region, StringComparison.OrdinalIgnoreCase))
+        // Region applies to every request: the synthetic flag is caller-supplied and cannot waive it.
+        if (!string.Equals(request.DataRegion, manifest.Region, StringComparison.OrdinalIgnoreCase))
         {
-            throw new ModelGateException("model request refused: non-synthetic content outside the approved region");
+            throw new ModelGateException("model request refused: content region is not the approved region");
         }
 
         if (CredentialOrIdentifierPatterns.Any(p => p.IsMatch(request.Content)))

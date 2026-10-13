@@ -2,6 +2,7 @@ using AirlineDemo.Api.Investigation;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+
 namespace AirlineDemo.Api.Tests;
 
 /// <summary>Covers M-18 (manifest gating) and M-07 (synthetic-only, in-region model requests).</summary>
@@ -30,7 +31,7 @@ public class ApprovedModelManifestTests
     }
 
     private static ModelRequest Synthetic(string content = "Synthetic aircraft evidence v1.") =>
-        new("evidence-v1", IsSynthetic: true, DataRegion: null, content);
+        new("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", content);
 
     private static string ShippedManifestPath()
     {
@@ -147,9 +148,35 @@ public class ApprovedModelManifestTests
     [InlineData("call the passenger on +447700900123")]
     [InlineData("passenger phone 555-867-5309 on file")]
     [InlineData("aircraft N123AB returned to gate")]
+    [InlineData("crew member SSN 123-45-6789 on record")]
+    [InlineData("payment card 4111 1111 1111 1111 on file")]
+    [InlineData("passenger Jane Smith in seat 12A")]
+    [InlineData("date of birth 1990-01-01 recorded")]
     public void Synthetic_request_containing_credentials_or_identifiers_is_refused(string content)
     {
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), Synthetic(content)));
+    }
+
+    [Theory]
+    [InlineData("model", "STUB-model")]
+    [InlineData("arm", "shadow-run")]
+    [InlineData("contentFilter", "disabled")]
+    [InlineData("approved", false)]
+    [InlineData("deploymentName", null)]
+    public void Every_unusable_manifest_refuses_model_call_before_data_is_sent(string field, object? value)
+    {
+        var manifest = Approved(field, value is null ? null : JsonValue.Create(value));
+
+        Assert.NotEmpty(manifest.Validate());
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic()));
+    }
+
+    [Fact]
+    public void Synthetic_flag_does_not_waive_the_approved_region()
+    {
+        var request = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "westeurope", "Synthetic evidence.");
+
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
     }
 
     [Fact]
