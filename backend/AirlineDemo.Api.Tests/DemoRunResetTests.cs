@@ -27,12 +27,21 @@ public sealed class DemoRunResetTests : IDisposable
         store.Commit(scope, 0, new CaseCommit(null, receipt, owner, "open", "opened " + runId));
     }
 
+    private static void Append(CaseStateStore store, string runId, string receipt, string actor, string action)
+    {
+        var scope = store.AuthorizeCase(runId, Owner);
+        store.Commit(scope, store.Read(scope).Revision, new CaseCommit(null, receipt, actor, action, action + " " + runId));
+    }
+
     [Fact]
     public void Reset_leaves_other_run_and_selected_run_history_unchanged()
     {
         var store = new CaseStateStore(PathFor());
         Seed(store, "run-a", Owner, "receipt-a");
         Seed(store, "run-b", Owner, "receipt-b");
+        Append(store, "run-b", "finding-b", "reviewer", "finding");
+        Append(store, "run-b", "request-b", Owner, "request");
+        Append(store, "run-b", "decision-b", "reviewer", "decision");
         var runBBefore = store.Read(store.AuthorizeCase("run-b", Owner));
         var runABefore = store.Read(store.AuthorizeCase("run-a", Owner));
 
@@ -42,7 +51,11 @@ public sealed class DemoRunResetTests : IDisposable
         var runBAfter = store.Read(store.AuthorizeCase("run-b", Owner));
         Assert.Equal(runBBefore.Revision, runBAfter.Revision);
         Assert.Equal(runBBefore.ReceiptIds, runBAfter.ReceiptIds);
+        Assert.Contains("finding-b", runBAfter.ReceiptIds);
+        Assert.Contains("request-b", runBAfter.ReceiptIds);
+        Assert.Contains("decision-b", runBAfter.ReceiptIds);
         Assert.Equal(runBBefore.Audit, runBAfter.Audit);
+        Assert.Equal(runBBefore.ReceiptFingerprints, runBAfter.ReceiptFingerprints);
 
         var runAAfter = store.Read(store.AuthorizeCase("run-a", Owner));
         Assert.Equal(runABefore.Revision, runAAfter.Revision);
