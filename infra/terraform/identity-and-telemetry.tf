@@ -29,7 +29,7 @@ resource "azurerm_role_assignment" "app_openai_user" {
 }
 
 resource "azurerm_role_assignment" "app_evidence" {
-  scope                = "/subscriptions/${var.subscription_id}/resourceGroups/${var.resource_group_name}/providers/Microsoft.Storage/storageAccounts/${var.storage_account_name}/blobServices/default/containers/${azurerm_storage_container.evidence.name}"
+  scope                = azurerm_storage_container.evidence.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.app.principal_id
   principal_type       = "ServicePrincipal"
@@ -47,7 +47,7 @@ resource "azurerm_role_assignment" "app_telemetry" {
 # Audit tables are append-only for the app: GRANT SELECT/INSERT only, UPDATE/DELETE/ALTER/CONTROL denied.
 locals {
   app_sql_grants = {
-    operational = ["SELECT", "INSERT", "UPDATE", "DELETE", "EXECUTE"]
+    operational = ["SELECT", "INSERT", "UPDATE"]
     audit       = ["SELECT", "INSERT"]
   }
   app_sql_user = azurerm_user_assigned_identity.app.name

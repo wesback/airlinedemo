@@ -46,6 +46,48 @@ mock_provider "azurerm" {
       principal_id = "55555555-5555-5555-5555-555555555555"
     }
   }
+
+  mock_resource "azurerm_resource_group" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_virtual_network" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/virtualNetworks/vnet-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_subnet" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/virtualNetworks/vnet-demo-test/subnets/snet-app"
+    }
+  }
+
+  mock_resource "azurerm_network_security_group" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/networkSecurityGroups/nsg-app"
+    }
+  }
+
+  mock_resource "azurerm_private_dns_zone" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/privateDnsZones/privatelink.database.windows.net"
+    }
+  }
+
+  mock_resource "azurerm_private_endpoint" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/privateEndpoints/pe-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_key_vault" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
+    }
+  }
 }
 
 variables {
@@ -82,7 +124,7 @@ variables {
 }
 
 run "M-14_app_identity_grants_are_exact" {
-  command = plan
+  command = apply
 
   assert {
     condition     = azurerm_role_assignment.app_openai_user.role_definition_name == "Cognitive Services OpenAI User"
@@ -138,16 +180,45 @@ run "M-14_app_identity_grants_are_exact" {
 }
 
 run "M-14_evidence_scope_is_exact_container" {
-  command = plan
+  command = apply
 
   assert {
-    condition     = azurerm_role_assignment.app_evidence.scope == "/subscriptions/${var.subscription_id}/resourceGroups/${var.resource_group_name}/providers/Microsoft.Storage/storageAccounts/${var.storage_account_name}/blobServices/default/containers/evidence"
+    condition     = azurerm_role_assignment.app_evidence.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/evidence"
     error_message = "Evidence role assignment scope must equal the evidence container resource id exactly, not the account or a parent scope."
   }
 }
 
+run "M-14_app_role_scopes_are_exact_literals" {
+  command = apply
+
+  assert {
+    condition     = azurerm_role_assignment.app_openai_user.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.CognitiveServices/accounts/aoai-demo-test"
+    error_message = "Azure OpenAI User must be scoped to exactly the model account, not a parent scope."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.app_telemetry.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Insights/components/appi-airline-telemetry"
+    error_message = "Monitoring Metrics Publisher must be scoped to exactly the Application Insights component."
+  }
+
+  assert {
+    condition     = length(setintersection([azurerm_role_assignment.app_openai_user.scope, azurerm_role_assignment.app_evidence.scope, azurerm_role_assignment.app_telemetry.scope], ["/subscriptions/00000000-0000-0000-0000-000000000000", "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test", "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest"])) == 0
+    error_message = "No app identity role assignment may sit at subscription, resource group or storage account scope."
+  }
+
+  assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && (strcontains(s, "DELETE") || strcontains(s, "EXECUTE"))]) == 0
+    error_message = "App SQL grants must not include DELETE or EXECUTE."
+  }
+
+  assert {
+    condition     = contains(output.app_sql_grant_statements, "GRANT SELECT ON SCHEMA::dbo TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT INSERT ON SCHEMA::dbo TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON SCHEMA::dbo TO [id-airline-app];") && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 3
+    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE."
+  }
+}
+
 run "M-14_grants_bind_to_app_identity_as_service_principal" {
-  command = plan
+  command = apply
 
   assert {
     condition     = azurerm_role_assignment.app_openai_user.principal_type == "ServicePrincipal" && azurerm_role_assignment.app_evidence.principal_type == "ServicePrincipal" && azurerm_role_assignment.app_telemetry.principal_type == "ServicePrincipal"
@@ -231,14 +302,7 @@ run "M-07_telemetry_reader_is_read_only_group" {
 }
 
 run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
-  command = plan
-
-  override_resource {
-    target = azurerm_monitor_action_group.security_owner
-    values = {
-      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Insights/actionGroups/ag-security-owner"
-    }
-  }
+  command = apply
 
   assert {
     condition     = length(azurerm_monitor_scheduled_query_rules_alert_v2.security) == 3 && alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : a.severity == 1])
@@ -266,7 +330,7 @@ run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
   }
 
   assert {
-    condition     = azurerm_monitor_action_group.security_owner.name == "ag-security-owner" && alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action[0].action_groups) == 1])
+    condition     = azurerm_monitor_action_group.security_owner.name == "ag-security-owner" && alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : a.action[0].action_groups[0] == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Insights/actionGroups/ag-security-owner"])
     error_message = "Each security alert must reference the single owner action group built from the owner variable."
   }
 
