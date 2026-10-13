@@ -112,6 +112,15 @@ run "ingress_allows_exactly_configured_cidrs" {
   }
 }
 
+run "app_subnet_uses_the_nsg" {
+  command = plan
+
+  assert {
+    condition     = azurerm_subnet_network_security_group_association.app != null && can(regex("(?s)resource \"azurerm_subnet_network_security_group_association\" \"app\" \\{\\s*subnet_id\\s*=\\s*azurerm_subnet\\.app\\.id\\s*network_security_group_id\\s*=\\s*azurerm_network_security_group\\.app\\.id\\s*\\}", file("main.tf")))
+    error_message = "The app subnet must be associated with the app NSG (subnet_id = azurerm_subnet.app.id, network_security_group_id = azurerm_network_security_group.app.id)."
+  }
+}
+
 run "empty_allowlists_deny_everything" {
   command = plan
 
@@ -195,7 +204,7 @@ run "no_environment_defaults" {
   command = plan
 
   assert {
-    condition     = var.subscription_id != "" && alltrue([for n in ["subscription_id", "tenant_id", "vnet_address_space", "app_subnet_cidr", "private_endpoint_subnet_cidr", "presenter_reviewer_cidrs", "egress_allowed_destinations", "budget_amount", "budget_start_date", "budget_contact_emails", "terraform_state_backend"] : !anytrue([for p in split("variable \"", file("variables.tf")) : startswith(p, "${n}\"") && can(regex("(?m)^\\s*default\\s*=", p))])])
+    condition     = var.subscription_id != "" && alltrue([for n in ["subscription_id", "tenant_id", "vnet_address_space", "app_subnet_cidr", "private_endpoint_subnet_cidr", "presenter_reviewer_cidrs", "egress_allowed_destinations", "budget_amount", "budget_start_date", "budget_contact_emails", "terraform_state_backend", "location", "resource_group_name"] : !anytrue([for p in split("variable \"", file("variables.tf")) : startswith(p, "${n}\"") && can(regex("(?m)^\\s*default\\s*=", p))])])
     error_message = "Subscription, tenant, CIDR, egress, budget, and state-backend inputs must not have Terraform defaults."
   }
 }
