@@ -81,18 +81,19 @@ public static class TechnicalReviewEndpoints
         try
         {
             var scope = cases.AuthorizeExistingCase(caseId);
-            var latest = cases.Read(scope).Basis.LastOrDefault();
-            if (latest is null || latest.Version != body.BasisVersion || latest.BasisDigest != body.BasisDigest)
-                return Problem(StatusCodes.Status409Conflict, "Evidence basis is not current; no decision was recorded.");
 
-            // Commit re-checks the revision under the file lock, so a basis change after this read is rejected there.
+            // The basis is checked again under the file lock inside Commit, so a concurrent basis change cannot slip in between.
             var detail = JsonSerializer.Serialize(new DecisionDetail(
                 body.Decision,
                 reason,
-                latest.Version,
-                latest.BasisDigest,
+                body.BasisVersion ?? 0,
+                body.BasisDigest ?? string.Empty,
                 Activity.Current?.TraceId.ToString() ?? http.TraceIdentifier));
-            var result = cases.Commit(scope, body.ExpectedRevision, new CaseCommit(null, null, session.User.Id, DecisionAction, detail));
+            var result = cases.Commit(
+                scope,
+                body.ExpectedRevision,
+                new CaseCommit(null, null, session.User.Id, DecisionAction, detail),
+                state => IsCurrentBasis(state, body.BasisVersion, body.BasisDigest));
             return Results.Ok(Project(result.State));
         }
         catch (CaseAccessDeniedException)
@@ -103,6 +104,16 @@ public static class TechnicalReviewEndpoints
         {
             return Problem(StatusCodes.Status409Conflict, "Case revision is stale; no decision was recorded.");
         }
+        catch (PreconditionFailedException)
+        {
+            return Problem(StatusCodes.Status409Conflict, "Evidence basis is not current; no decision was recorded.");
+        }
+    }
+
+    private static bool IsCurrentBasis(CaseState state, int? basisVersion, string? basisDigest)
+    {
+        var latest = state.Basis.LastOrDefault();
+        return latest is not null && latest.Version == basisVersion && latest.BasisDigest == basisDigest;
     }
 
     private static TechnicalReviewView Project(CaseState state)

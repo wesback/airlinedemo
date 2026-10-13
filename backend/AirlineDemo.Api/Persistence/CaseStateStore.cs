@@ -57,6 +57,9 @@ public sealed record CaseCommit(
 
 public sealed record CommitResult(CaseState State, bool Replayed);
 
+/// <summary>Thrown when a commit's precondition, evaluated under the file lock, no longer holds.</summary>
+public sealed class PreconditionFailedException() : Exception("Commit precondition no longer holds.");
+
 internal sealed record CaseStoreDocument(int SchemaVersion, List<CaseState> Cases);
 
 /// <summary>
@@ -195,7 +198,7 @@ public sealed class CaseStateStore
     /// The only mutation path. Rejects forged scope, stale revision, and invalid basis.
     /// An exact receipt already recorded for the case is replayed without a new revision or audit event.
     /// </summary>
-    public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
+    public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit, Func<CaseState, bool>? precondition = null)
     {
         lock (_gate)
         {
@@ -217,6 +220,11 @@ public sealed class CaseStateStore
             if (expectedRevision != current.Revision)
             {
                 throw new RevisionConflictException();
+            }
+
+            if (precondition is not null && !precondition(current))
+            {
+                throw new PreconditionFailedException();
             }
 
             var basis = current.Basis.ToList();
