@@ -17,12 +17,12 @@ public sealed class EvidenceIntakeTests
     private const string SyntheticContent = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
 
     // asciiHex encodes each content stream with ASCIIHexDecode so raw bytes hide its operators.
-    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "", string pageExtra = "", string extraObject = "", bool flate = false)
+    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "", string pageExtra = "", string extraObject = "", bool flate = false, string resources = "")
     {
         var pad = 0;
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra, pageExtra, extraObject, flate);
+            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra, pageExtra, extraObject, flate, resources);
             if (padToBytes == 0 || bytes.LongLength == padToBytes)
             {
                 return bytes;
@@ -34,7 +34,7 @@ public sealed class EvidenceIntakeTests
         throw new InvalidOperationException("Could not pad the synthetic PDF to the requested size.");
     }
 
-    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra, string pageExtra, string extraObject, bool flate)
+    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra, string pageExtra, string extraObject, bool flate, string resources)
     {
         var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{4 + (2 * i)} 0 R"));
         var objects = new List<string>
@@ -45,7 +45,7 @@ public sealed class EvidenceIntakeTests
         };
         for (var i = 0; i < pages; i++)
         {
-            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {5 + (2 * i)} 0 R /Resources << /Font << /F1 3 0 R >> >> {pageExtra} >>");
+            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {5 + (2 * i)} 0 R /Resources << /Font << /F1 3 0 R >> {resources} >> {pageExtra} >>");
             var body = asciiHex ? Convert.ToHexString(Encoding.ASCII.GetBytes(content)) + ">" : content;
             var filter = asciiHex ? " /Filter /ASCIIHexDecode" : flate ? " /Filter /FlateDecode" : string.Empty;
             objects.Add($"<< /Length {body.Length}{filter} >>\nstream\n{body}\nendstream");
@@ -446,6 +446,36 @@ public sealed class EvidenceIntakeTests
         var pdf = PdfWithPages(1, 0, catalogExtra: "/AcroForm << /Fields [] >> ");
 
         var result = EvidenceIntake.Process([new("form.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // Ordinary text that contains structural marker words is accepted; only real object streams are rejected.
+    [Fact]
+    public void TextContainingObjStmAndXRefNamesIsAccepted()
+    {
+        var pdf = PdfWithPages(1, 0, content: "BT /F1 12 Tf 72 720 Td (/ObjStm /XRef) Tj ET");
+
+        var result = EvidenceIntake.Process([new("text-objstm.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Complete, result.State);
+        Assert.Null(result.Failure);
+    }
+
+    // AC: a valid text PDF whose page references a /Form XObject is rejected retryably, with no evidence.
+    [Fact]
+    public void FormXObjectOnPageIsRejectedRetryably()
+    {
+        // The page's /Resources references a valid Form XObject (object 6); the text itself is otherwise ordinary.
+        var pdf = PdfWithPages(
+            1,
+            resources: "/XObject << /X1 6 0 R >>",
+            extraObject: "<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Length 0 >>\nstream\n\nendstream");
+
+        var result = EvidenceIntake.Process([new("form-xobject.pdf", pdf)]);
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);

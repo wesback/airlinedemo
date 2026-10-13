@@ -166,11 +166,15 @@ public static class EvidenceIntake
 
     private static readonly Regex NameRegex = new(@"/([^\s/\[\]<>(){}%]+)", RegexOptions.Compiled);
 
+    // A stream body starts right after a dictionary end (">> stream"). Bodies are page content or other data, so they
+    // are removed before the scan: ordinary text containing "/ObjStm" is then accepted, while stream dictionaries are kept.
+    private static readonly Regex StreamBodyRegex = new(@">>\s*stream\r?\n.*?endstream", RegexOptions.Compiled | RegexOptions.Singleline);
+
     // Object and xref streams are compressed structure that PdfPig inflates while opening the file, before any
     // pre-parse limit can apply. They are rejected by their /Type name (with #xx escapes decoded), so the limits hold.
     private static void RejectCompressedStructure(EvidenceDocument document)
     {
-        var text = Encoding.Latin1.GetString(document.Bytes);
+        var text = StreamBodyRegex.Replace(Encoding.Latin1.GetString(document.Bytes), ">> ");
         foreach (Match match in NameRegex.Matches(text))
         {
             var name = Regex.Replace(match.Groups[1].Value, "#([0-9A-Fa-f]{2})", m =>
