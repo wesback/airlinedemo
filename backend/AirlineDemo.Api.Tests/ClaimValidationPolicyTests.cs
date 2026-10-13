@@ -86,6 +86,7 @@ public class ClaimValidationPolicyTests
     [InlineData("Return readiness isn't pending reserve approval.")]
     [InlineData("Zero outstanding items: pending reserve approval.")]
     [InlineData("Nil outstanding requirements: pending reserve approval.")]
+    [InlineData("0 outstanding requirements: pending reserve approval.")]
     [InlineData("Return readiness is free of pending reserve approval, which is absent.")]
     public void Negated_quote_cannot_establish_missing_requirement(string negated)
     {
@@ -100,6 +101,42 @@ public class ClaimValidationPolicyTests
         Assert.Equal(ClaimStatus.Downgraded, result.Status);
         Assert.Equal("witness quote negates claim", result.Reason);
         Assert.Equal(0, decision.RequestCount);
+    }
+
+    [Theory]
+    [InlineData("Return readiness is green: pending reserve approval.")]
+    [InlineData("Return readiness is serviceable with pending reserve approval.")]
+    public void Unlisted_satisfied_wording_cannot_establish_missing_requirement(string satisfied)
+    {
+        var basis = new Dictionary<string, BasisDocument> { ["return-status"] = BasisDocument.Create("return-status", [satisfied]) };
+
+        var result = ClaimValidator.Validate(Claim("return-status", 1, satisfied, satisfied), ClaimKind.MissingRequirement, basis, TypedValue);
+
+        Assert.Equal(ClaimStatus.Downgraded, result.Status);
+        Assert.Equal(0, FindingRouter.Route(Complete, [result], identityAmbiguous: false).RequestCount);
+    }
+
+    [Fact]
+    public void Missing_requirement_quote_without_an_open_gap_statement_is_downgraded()
+    {
+        const string signedOff = "Reserve approval is signed off by the inspector.";
+        var basis = new Dictionary<string, BasisDocument> { ["return-status"] = BasisDocument.Create("return-status", [signedOff]) };
+
+        var result = ClaimValidator.Validate(Claim("return-status", 1, signedOff, signedOff), ClaimKind.MissingRequirement, basis, "Reserve approval");
+
+        Assert.Equal(ClaimStatus.Downgraded, result.Status);
+        Assert.Equal("witness quote does not state an open gap", result.Reason);
+        Assert.Equal(0, FindingRouter.Route(Complete, [result], identityAmbiguous: false).RequestCount);
+    }
+
+    [Fact]
+    public void Policy_decision_exposes_no_permission_or_tool_controls()
+    {
+        var decisionProperties = typeof(FindingDecision).GetProperties().Select(p => p.Name).Order().ToArray();
+        var routeParameters = typeof(FindingRouter).GetMethod(nameof(FindingRouter.Route))!.GetParameters().Select(p => p.ParameterType).ToArray();
+
+        Assert.Equal(new[] { "AutoAccepted", "Outcome", "Reason", "RequestCount" }, decisionProperties);
+        Assert.Equal(new[] { typeof(ProcessingCoverage), typeof(IReadOnlyList<ValidatedClaim>), typeof(bool) }, routeParameters);
     }
 
     [Theory]

@@ -148,14 +148,24 @@ public static class ClaimValidator
             return "witness quote shows requirement resolved";
         }
 
+        // Silence or an unlisted "satisfied" wording is not a gap: the quote must positively state an open item.
+        if (kind == ClaimKind.MissingRequirement && !OpenGap.IsMatch(witness.Quote))
+        {
+            return "witness quote does not state an open gap";
+        }
+
         return null;
     }
 
+    private static readonly Regex OpenGap = new(
+        @"\b(?:pending|outstanding|missing|required|requires?|open|overdue|awaiting|unresolved|incomplete|expired|due|needed|needs?|unfulfilled|unsatisfied)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     private static readonly Regex Negation = new(
-        @"\b(?:not|no|never|none|nil|zero|nothing|without|neither|nor|cannot|denied|denies|deny|denying|rejected|disproves?|absent|absence|lacks?|lacking)\b|n['’]t\b",
+        @"\b(?:not|no|never|none|nil|zero|nothing|without|neither|nor|cannot|denied|denies|deny|denying|rejected|disproves?|absent|absence|lacks?|lacking)\b|n['’]t\b|(?<![\w.])0+(?![\w])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly Regex Resolution = new(
-        @"\b(?:satisfied|satisfies|satisfy|satisfying|completed|completes|complete|completion|resolved|resolves|resolving|fulfilled|fulfils|fulfills|cleared|closed|met|historical|historically|previously|formerly|already|done|ready|approved|accepted|passed|passes|compliant|valid|effective|addressed|remedied|corrected|meets|meet|meeting|current|currently)\b|up[- ]to[- ]date|in place",
+        @"\b(?:satisfied|satisfies|satisfy|satisfying|completed|completes|complete|completion|resolved|resolves|resolving|fulfilled|fulfils|fulfills|cleared|closed|met|historical|historically|previously|formerly|already|done|ready|approved|accepted|passed|passes|compliant|valid|effective|addressed|remedied|corrected|meets|meet|meeting|current|currently|green|clear|ok|okay|good|nominal|serviceable)\b|up[- ]to[- ]date|in place",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }
