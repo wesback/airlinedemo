@@ -279,6 +279,12 @@ public sealed class TelemetryPrivacyTests
         Assert.Equal(TelemetryRedaction.ServiceName, properties["service.name"]);
         Assert.Equal(TelemetryRedaction.ServiceVersion, properties["service.version"]);
         Assert.Equal("demo", properties["deployment.environment"]);
+        Assert.Matches("^basis-v[0-9]{1,4}$", properties["investigation.basis_version"]!);
+        Assert.False(string.IsNullOrWhiteSpace(properties["gen_ai.request.model"]));
+        Assert.True(properties.ContainsKey("investigation.tools"));
+        Assert.True(properties.ContainsKey("investigation.citations"));
+        Assert.Matches("^actor-[0-9a-f]{16}$", properties["enduser.pseudo.id"]!);
+        Assert.False(string.IsNullOrWhiteSpace(properties["investigation.outcome"]));
         Assert.DoesNotContain("reviewer", string.Join("|", properties.Values));
     }
 
