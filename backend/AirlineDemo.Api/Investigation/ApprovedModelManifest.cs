@@ -118,6 +118,10 @@ public sealed record ModelCallTrace(
 
 public static class ModelCallGate
 {
+    /// <summary>Prefix every synthetic evidence request must carry. The caller's IsSynthetic flag alone is not trusted.</summary>
+    public const string SyntheticMarker = "SYNTHETIC EVIDENCE";
+
+    // Heuristic screen: it cannot prove content is synthetic, so the marker and the approved region are also required.
     private static readonly Regex[] CredentialOrIdentifierPatterns =
     [
         new(@"(?i)\b(api[-_]?key|password|secret|token|authorization)\s*[:=]", RegexOptions.Compiled),
@@ -128,8 +132,10 @@ public static class ModelCallGate
         new(@"\bN\d{1,5}[A-Z]{0,2}\b", RegexOptions.Compiled),
         new(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled),
         new(@"\b\d{4}([ -]?\d{4}){2,3}\b", RegexOptions.Compiled),
+        new(@"\b\d{6,}\b", RegexOptions.Compiled),
         new(@"(?i)\b(passport|date of birth|dob)\b", RegexOptions.Compiled),
         new(@"\b(?i:passenger|crew|customer|pilot)\b\s+[A-Z][a-z]+", RegexOptions.Compiled),
+        new(@"\b(Mr|Mrs|Ms|Miss|Dr)\.?\s+[A-Z][a-z]+", RegexOptions.Compiled),
     ];
 
     /// <summary>Throws unless the manifest is usable and the request is allowed; returns the trace to record.</summary>
@@ -145,6 +151,11 @@ public static class ModelCallGate
         if (!request.IsSynthetic)
         {
             throw new ModelGateException("model request refused: only synthetic evidence may be sent to the model");
+        }
+
+        if (!request.Content.StartsWith(SyntheticMarker, StringComparison.Ordinal))
+        {
+            throw new ModelGateException("model request refused: content is not marked as synthetic evidence");
         }
 
         // Region applies to every request: the synthetic flag is caller-supplied and cannot waive it.

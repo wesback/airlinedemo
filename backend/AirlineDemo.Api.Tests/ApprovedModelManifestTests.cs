@@ -30,8 +30,8 @@ public class ApprovedModelManifestTests
         return ApprovedModelManifest.Parse(node.ToJsonString());
     }
 
-    private static ModelRequest Synthetic(string content = "Synthetic aircraft evidence v1.") =>
-        new("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", content);
+    private static ModelRequest Synthetic(string content = "aircraft evidence v1.") =>
+        new("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", ModelCallGate.SyntheticMarker + ": " + content);
 
     private static string ShippedManifestPath()
     {
@@ -152,9 +152,29 @@ public class ApprovedModelManifestTests
     [InlineData("payment card 4111 1111 1111 1111 on file")]
     [InlineData("passenger Jane Smith in seat 12A")]
     [InlineData("date of birth 1990-01-01 recorded")]
+    [InlineData("Mr Jones reviewed the file")]
+    [InlineData("booking reference 0012345678")]
     public void Synthetic_request_containing_credentials_or_identifiers_is_refused(string content)
     {
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), Synthetic(content)));
+    }
+
+    [Fact]
+    public void Synthetic_flag_without_synthetic_marker_is_refused()
+    {
+        var request = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", "Aircraft record v1.");
+
+        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
+        Assert.Contains("not marked as synthetic", ex.Message);
+    }
+
+    [Fact]
+    public void Scored_run_is_refused_when_any_request_lacks_synthetic_marker()
+    {
+        var unmarked = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "eastus2", "Aircraft record v1.");
+
+        Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.AuthorizeScoredRun(Approved(), [Synthetic(), unmarked]));
     }
 
     [Theory]
@@ -174,7 +194,7 @@ public class ApprovedModelManifestTests
     [Fact]
     public void Synthetic_flag_does_not_waive_the_approved_region()
     {
-        var request = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "westeurope", "Synthetic evidence.");
+        var request = new ModelRequest("evidence-v1", IsSynthetic: true, DataRegion: "westeurope", "SYNTHETIC EVIDENCE: evidence.");
 
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
     }
