@@ -233,6 +233,23 @@ public sealed class DemoRunResetEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task Reset_makes_new_run_available_to_the_same_session_only()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var session = await SignInAsync(client, "presenter");
+        using var reset = await ResetAsync(client, "case-001", session, true, new { newRunId = "run-new", fixtureId = Fixture, applicationVersion = "1.4.2" });
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+
+        var other = await SignInAsync(client, "reviewer");
+        using var denied = await ResetAsync(client, "run-new", other, true, new { newRunId = "run-other", fixtureId = Fixture, applicationVersion = "1.4.2" });
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+
+        using var next = await ResetAsync(client, "run-new", session, true, new { newRunId = "run-newer", fixtureId = Fixture, applicationVersion = "1.4.2" });
+        Assert.Equal(HttpStatusCode.OK, next.StatusCode);
+    }
+
+    [Fact]
     public async Task Reset_without_application_version_is_rejected_and_creates_no_run()
     {
         using var factory = CreateFactory();

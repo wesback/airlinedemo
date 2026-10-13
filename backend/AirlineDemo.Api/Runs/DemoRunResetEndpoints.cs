@@ -22,7 +22,9 @@ public static class DemoRunResetEndpoints
 
         try
         {
-            return Results.Ok(reset.Reset(runId, session.User.Id, body.NewRunId, body.FixtureId, body.ApplicationVersion));
+            var result = reset.Reset(runId, session.User.Id, body.NewRunId, body.FixtureId, body.ApplicationVersion);
+            sessions.GrantScope(session.Id, result.NewRunId);
+            return Results.Ok(result);
         }
         catch (CaseAccessDeniedException)
         {
