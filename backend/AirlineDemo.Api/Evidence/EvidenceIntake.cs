@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Tokens;
 
 namespace AirlineDemo.Api.Evidence;
@@ -178,6 +179,54 @@ public static class EvidenceIntake
         }
     }
 
+    // Page annotations can carry scripts, form fields, or file attachments; decided from parsed dictionaries.
+    private static void RejectAnnotationContent(string name, PdfDocument pdf, Page page)
+    {
+        if (!page.Dictionary.Data.TryGetValue("Annots", out var annots))
+        {
+            return;
+        }
+
+        if (Resolve(pdf, annots) is not ArrayToken annotationList)
+        {
+            return;
+        }
+
+        foreach (var entry in annotationList.Data)
+        {
+            if (Resolve(pdf, entry) is not DictionaryToken annotation)
+            {
+                continue;
+            }
+
+            var dictionary = annotation.Data;
+            foreach (var key in new[] { "AA", "JS", "FS" })
+            {
+                if (dictionary.ContainsKey(key))
+                {
+                    throw ActiveContentFailure(name, $"/{key} on a page annotation");
+                }
+            }
+
+            if (dictionary.TryGetValue("A", out var action)
+                && Resolve(pdf, action) is DictionaryToken actionDictionary
+                && actionDictionary.Data.TryGetValue("S", out var actionType)
+                && actionType is NameToken { Data: "JavaScript" })
+            {
+                throw ActiveContentFailure(name, "JavaScript action on a page annotation");
+            }
+
+            if (dictionary.TryGetValue("Subtype", out var subtype)
+                && Resolve(pdf, subtype) is NameToken { Data: "Widget" or "FileAttachment" } subtypeName)
+            {
+                throw ActiveContentFailure(name, $"/{subtypeName.Data} page annotation");
+            }
+        }
+    }
+
+    private static IToken Resolve(PdfDocument pdf, IToken token) =>
+        token is IndirectReferenceToken reference ? pdf.Structure.GetObject(reference.Data).Data : token;
+
     private static EvidenceIntakeException ActiveContentFailure(string name, string detail) =>
         new(
             $"Document '{name}' contains active, embedded, or form content ({detail}); it is rejected.",
@@ -213,6 +262,7 @@ public static class EvidenceIntake
             for (var page = 1; page <= pages; page++)
             {
                 var pdfPage = pdf.GetPage(page);
+                RejectAnnotationContent(document.Name, pdf, pdfPage);
                 // Decoded content streams expose inline images even when compressed; reject them as image payloads.
                 if (pdfPage.GetImages().Any())
                 {

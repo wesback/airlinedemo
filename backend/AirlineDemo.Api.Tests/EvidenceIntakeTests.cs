@@ -16,12 +16,12 @@ public sealed class EvidenceIntakeTests
     private const string SyntheticContent = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
 
     // asciiHex encodes each content stream with ASCIIHexDecode so raw bytes hide its operators.
-    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "")
+    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false, string catalogExtra = "", string pageExtra = "")
     {
         var pad = 0;
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra);
+            var bytes = BuildPdf(pages, pad, content, asciiHex, catalogExtra, pageExtra);
             if (padToBytes == 0 || bytes.LongLength == padToBytes)
             {
                 return bytes;
@@ -33,7 +33,7 @@ public sealed class EvidenceIntakeTests
         throw new InvalidOperationException("Could not pad the synthetic PDF to the requested size.");
     }
 
-    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra)
+    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex, string catalogExtra, string pageExtra)
     {
         var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{4 + (2 * i)} 0 R"));
         var objects = new List<string>
@@ -44,7 +44,7 @@ public sealed class EvidenceIntakeTests
         };
         for (var i = 0; i < pages; i++)
         {
-            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {5 + (2 * i)} 0 R /Resources << /Font << /F1 3 0 R >> >> >>");
+            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {5 + (2 * i)} 0 R /Resources << /Font << /F1 3 0 R >> >> {pageExtra} >>");
             var body = asciiHex ? Convert.ToHexString(Encoding.ASCII.GetBytes(content)) + ">" : content;
             var filter = asciiHex ? " /Filter /ASCIIHexDecode" : string.Empty;
             objects.Add($"<< /Length {body.Length}{filter} >>\nstream\n{body}\nendstream");
@@ -275,6 +275,74 @@ public sealed class EvidenceIntakeTests
         // Raw-token matching was removed: this stub does not parse, so it fails as Corrupt (retryable, no evidence).
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.Corrupt, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: a script carried by a page annotation action is rejected even when the catalog is clean.
+    [Fact]
+    public void JavaScriptPageAnnotationIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, pageExtra: "/Annots [<< /Type /Annot /Subtype /Link /A << /S /JavaScript /JS (app.alert\\('x'\\)) >> >>]");
+
+        var result = EvidenceIntake.Process([new("annot-js.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: form fields (AcroForm) and form widget annotations are ignored or rejected, never counted as evidence.
+    [Fact]
+    public void AcroFormIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, catalogExtra: "/AcroForm << /Fields [] >> ");
+
+        var result = EvidenceIntake.Process([new("form.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    [Fact]
+    public void WidgetFormAnnotationIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, pageExtra: "/Annots [<< /Type /Annot /Subtype /Widget /FT /Tx >>]");
+
+        var result = EvidenceIntake.Process([new("widget.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: embedded files are rejected through the catalog name tree and through a file attachment annotation.
+    [Fact]
+    public void EmbeddedFilesNameTreeIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, catalogExtra: "/Names << /EmbeddedFiles << /Names [] >> >> ");
+
+        var result = EvidenceIntake.Process([new("embedded.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    [Fact]
+    public void FileAttachmentAnnotationIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, pageExtra: "/Annots [<< /Type /Annot /Subtype /FileAttachment /FS << /Type /Filespec /F (a.txt) >> >>]");
+
+        var result = EvidenceIntake.Process([new("attachment.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
         Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
