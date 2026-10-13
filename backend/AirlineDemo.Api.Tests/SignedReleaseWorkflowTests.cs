@@ -25,7 +25,8 @@ public sealed class SignedReleaseWorkflowTests
         Assert.Contains("PRODUCT_OWNER_LOGIN variable is required", preflight);
         Assert.Contains(".reviewer.login == $owner", preflight);
         Assert.Contains("select(.type == \"User\"", preflight);
-        Assert.Contains("does not list product owner", preflight);
+        Assert.Contains("must require exactly one reviewer", preflight);
+        Assert.Contains("\"$owner_count\" -ne 1 || \"$total_count\" -ne 1", preflight);
         Assert.Contains("product-owner approval is not enforced", preflight);
         Assert.Contains("exit 1", preflight);
         Assert.DoesNotContain("environment:", preflight);
@@ -100,6 +101,25 @@ public sealed class SignedReleaseWorkflowTests
 
         Assert.Contains("notation verify", verify);
         Assert.Contains("digest mismatch", verify);
+
+        // Fail closed: the verify step runs with strict shell errors, no step in the workflow may ignore a failure,
+        // and a failing verify stops the job before the deploy step.
+        Assert.Contains("set -euo pipefail", verify);
+        Assert.DoesNotContain("|| true", workflow);
+        Assert.DoesNotContain("continue-on-error", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("if:", verify);
+        Assert.DoesNotContain("if:", deploy);
+
+        // Trust: the signing certificate is downloaded from Key Vault, added to Notation's CA trust store, and a strict
+        // trust policy pins the certificate subject and the registry scope before `notation verify` runs.
+        Assert.Contains("az keyvault certificate download", verify);
+        Assert.Contains("notation cert add --type ca --store airlinedemo", verify);
+        Assert.Contains("trustpolicy.json", verify);
+        Assert.Contains("signatureVerification: {level: \"strict\"}", verify);
+        Assert.Contains("x509.subject: \\($subject)", verify);
+        Assert.Contains("AZURE_KV_SIGNING_CERT_SUBJECT", verify);
+        Assert.True(verify.IndexOf("trustpolicy.json", StringComparison.Ordinal) < verify.IndexOf("notation verify", StringComparison.Ordinal),
+            "The trust policy must be written before notation verify runs.");
         Assert.Contains("az containerapp update", deploy);
         Assert.Contains("@$IMAGE_DIGEST", deploy);
         Assert.True(workflow.IndexOf("- name: Verify signature and digest", StringComparison.Ordinal)

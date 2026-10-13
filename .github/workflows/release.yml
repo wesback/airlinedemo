@@ -46,9 +46,11 @@ jobs:
             exit 1
           fi
           env_json="$(gh api "repos/$REPO/environments/production-release")"
-          approvers="$(jq --arg owner "$PRODUCT_OWNER_LOGIN" '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]? | select(.type == "User" and .reviewer.login == $owner)] | length' <<<"$env_json")"
-          if [[ "$approvers" -lt 1 ]]; then
-            echo "::error::environment production-release does not list product owner $PRODUCT_OWNER_LOGIN as a required reviewer; product-owner approval is not enforced"
+          reviewers="$(jq -c '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?]' <<<"$env_json")"
+          owner_count="$(jq --arg owner "$PRODUCT_OWNER_LOGIN" '[.[] | select(.type == "User" and .reviewer.login == $owner)] | length' <<<"$reviewers")"
+          total_count="$(jq 'length' <<<"$reviewers")"
+          if [[ "$owner_count" -ne 1 || "$total_count" -ne 1 ]]; then
+            echo "::error::environment production-release must require exactly one reviewer, the product owner $PRODUCT_OWNER_LOGIN; product-owner approval is not enforced"
             exit 1
           fi
 
@@ -198,8 +200,24 @@ jobs:
           test -s artifacts/signature/signature.cose
 
       - name: Verify signature and digest
+        env:
+          KV_NAME: ${{ vars.AZURE_KV_NAME }}
+          SIGNING_CERT_NAME: ${{ vars.AZURE_KV_SIGNING_CERT_NAME }}
+          SIGNING_CERT_SUBJECT: ${{ vars.AZURE_KV_SIGNING_CERT_SUBJECT }}
         run: |
           set -euo pipefail
+          if [[ -z "$SIGNING_CERT_SUBJECT" || -z "$SIGNING_CERT_NAME" || -z "$KV_NAME" ]]; then
+            echo "::error::AZURE_KV_NAME, AZURE_KV_SIGNING_CERT_NAME and AZURE_KV_SIGNING_CERT_SUBJECT are required to trust the signing certificate; release fails closed"
+            exit 1
+          fi
+          cert="$RUNNER_TEMP/signing-cert.pem"
+          az keyvault certificate download --vault-name "$KV_NAME" --name "$SIGNING_CERT_NAME" --encoding PEM --file "$cert"
+          test -s "$cert"
+          notation cert add --type ca --store airlinedemo "$cert"
+          mkdir -p "$HOME/.config/notation"
+          jq -n --arg scope "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY" --arg subject "$SIGNING_CERT_SUBJECT" \
+            '{version: "1.0", trustPolicies: [{name: "airlinedemo-release", registryScopes: [$scope], signatureVerification: {level: "strict"}, trustStores: ["ca:airlinedemo"], trustedIdentities: ["x509.subject: \($subject)"]}]}' \
+            > "$HOME/.config/notation/trustpolicy.json"
           notation verify "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
           actual="$(az acr repository show --name "$ACR_NAME" --image "$IMAGE_REPOSITORY@$IMAGE_DIGEST" --query digest -o tsv)"
           if [[ "$actual" != "$IMAGE_DIGEST" ]]; then
