@@ -1,0 +1,241 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 150,
+  "branch": "ai-sdlc/issue-150",
+  "commitSha": "8a7d4c38c5b40a54f9895d9ea0a50d8a295daafb",
+  "round": 1,
+  "pipelineVersion": "d1406c0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow can accept a dependency exception that expires today and skips the tracked npm lockfile during its secret scan.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 120,
+          "message": "A03:2025 — Require exception expiry to be later than today; an expiry equal to today is accepted by both gates.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Exception validation rejects expiries earlier than today, while the severity gate accepts exceptions whose expiry is today or later.",
+            "failureScenario": "If an exception expires today, validation accepts it and the severity gate treats it as valid, allowing a matching high or critical finding through even though the acceptance criterion requires a future expiry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 95,
+          "message": "A02:2025 — Scan frontend/package-lock.json too; the current exclusion lets credentials or connection strings in this tracked file bypass the secret scan.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The secret scan runs git grep over tracked content but explicitly excludes frontend/package-lock.json.",
+            "failureScenario": "If a tracked package-lock.json contains a credential-bearing resolved URL, such as https://user:secret@registry.example/package.tgz, the scan skips that file and the workflow can pass with the committed credential."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The .NET SBOM step uses an executable name the installed CycloneDX tool does not provide, and its test asserts that incorrect command. The source restriction test checks workflow text rather than verifying that an unapproved source is rejected.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 53,
+          "message": "Invoke the installed CycloneDX executable (`dotnet-CycloneDX`) so CI can generate the .NET SBOM.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The workflow installs the CycloneDX .NET global tool, then invokes `CycloneDX`. The tool's documented executable is `dotnet-CycloneDX` ([CycloneDX usage](https://github.com/CycloneDX/cyclonedx-dotnet/blob/master/README.md)). The test asserts the current command text, so it accepts this invalid invocation.",
+            "failureScenario": "On a CI run, `CycloneDX` is not the installed executable, so the step cannot generate the .NET SBOM and M-12 is unmet."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs",
+          "line": 196,
+          "message": "Exercise the source restriction behavior with an unapproved NuGet or npm source; the current text-presence assertions can pass when the guard is bypassed.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`Source_restriction_allows_only_nuget_org_and_npmjs_org` checks for workflow text fragments but does not execute the source restriction logic.",
+            "failureScenario": "If the workflow retains the checked strings but bypasses the guard that exits for an unapproved source, this test still passes while CI accepts that source, violating M-14."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability in the changed code. The workflow validates exception dates as real calendar dates and scans tracked content for URI-form credentials.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 2,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/build.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 6,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
