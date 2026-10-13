@@ -1,0 +1,311 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "fdb38293d08fdf4f15dc775417cb004a6e22374b",
+  "round": 1,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake leaves a reachable path for script-bearing or attachment-bearing PDFs to pass as complete evidence because it does not inspect parsed page annotations.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 134,
+          "message": "Parsed page annotations are not checked for scripts or embedded files, so unsafe PDFs can be accepted as evidence.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RejectActiveContent checks catalog actions and name-tree entries, but does not inspect page annotations or their actions and attachments.",
+            "failureScenario": "A valid text PDF has an annotation with a JavaScript action or an embedded-file attachment. The catalog checks miss it, and text extraction can return the document as Complete, allowing content the acceptance criteria require rejected to count as evidence. OWASP A06:2025 (Insecure Design)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake covers several limits and rejects catalog-level active content, but it can miss active content and attachments referenced through page annotations. The tests also leave forms and embedded files uncovered.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 169,
+          "message": "The active-content checks miss embedded files and scripts attached through page annotations, allowing those PDFs to be accepted as evidence.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "RejectActiveContent checks the catalog and its /Names dictionary, but does not inspect page annotations or their actions and file specifications.",
+            "failureScenario": "A PDF with extractable text and a file-attachment annotation containing an embedded file, or an annotation with a JavaScript action, can pass these checks. ExtractDocument can then return Complete, contrary to the criterion requiring embedded files and scripts to be ignored or rejected."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 1,
+          "message": "The tests do not cover the acceptance criterion requiring forms and embedded files to be ignored or rejected; add criterion-mapped cases for those inputs.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests cover catalog-level JavaScript and image payloads, but contain no cases for forms, embedded files, or annotation actions.",
+            "failureScenario": "If annotation or embedded-file rejection is removed or remains unimplemented, the current tests can still pass while PDFs containing those payloads are accepted. The acceptance criterion for PDF-only text intake therefore lacks mapped behavioral coverage."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The active-content checks omit page annotation actions. A text PDF with a JavaScript annotation can therefore pass intake.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 166,
+          "message": "Page annotation actions are not checked, so a PDF containing a JavaScript annotation can be accepted as complete evidence.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RejectActiveContent checks selected catalog keys and name-tree entries, but does not inspect page annotations or their actions.",
+            "failureScenario": "A valid text PDF with a page annotation whose /A action is /JavaScript can pass these checks. PdfPig can extract its page text, and Process can return Complete while the document still contains executable content, contrary to the requirement to reject scripts (A06:2025, Insecure Design)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 169,
+      "total": 198,
+      "percent": 85.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 169,
+          "total": 198,
+          "missed": [
+            81,
+            82,
+            137,
+            138,
+            139,
+            140,
+            141,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            177,
+            178,
+            205,
+            206,
+            207,
+            208,
+            209,
+            229,
+            230,
+            231,
+            232,
+            233,
+            254,
+            255,
+            261,
+            262
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
