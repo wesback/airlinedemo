@@ -114,6 +114,49 @@ public sealed class SignedReleaseWorkflowTests
         Assert.Contains("run-id: ${{ inputs.build_run_id }}", step);
     }
 
+    // AC: Notation and the Key Vault plugin are installed from pinned, checksum-verified releases before signing.
+    [Fact]
+    public void Release_installs_pinned_notation_and_key_vault_plugin_before_signing()
+    {
+        var workflow = ReadWorkflow();
+        var install = StepBody(workflow, "Install Notation and Azure Key Vault plugin");
+
+        Assert.Matches(@"NOTATION_SHA256:\s*""[0-9a-f]{64}""", install);
+        Assert.Matches(@"AZURE_KV_PLUGIN_SHA256:\s*""[0-9a-f]{64}""", install);
+        Assert.Contains("sha256sum -c -", install);
+        Assert.Contains("/usr/local/bin/notation", install);
+        Assert.Contains("notation-azure-kv", install);
+        Assert.True(workflow.IndexOf("- name: Install Notation and Azure Key Vault plugin", StringComparison.Ordinal)
+            < workflow.IndexOf("- name: Sign image digest", StringComparison.Ordinal),
+            "Notation must be installed before the signing step runs.");
+    }
+
+    // AC: the requested digest must match the digest recorded by the specified CI build run before signing.
+    [Fact]
+    public void Release_binds_requested_digest_to_build_run_before_signing()
+    {
+        var workflow = ReadWorkflow();
+        var check = StepBody(workflow, "Verify build evidence present");
+
+        Assert.Contains("test -s evidence/image/digest.txt", check);
+        Assert.Contains("was not produced by build run", check);
+        Assert.Contains("\"$built\" != \"$IMAGE_DIGEST\"", check);
+        Assert.True(workflow.IndexOf("- name: Verify build evidence present", StringComparison.Ordinal)
+            < workflow.IndexOf("- name: Sign image digest", StringComparison.Ordinal),
+            "Provenance must be checked before the digest is signed.");
+    }
+
+    // AC: the signature itself is exported and retained, not only an inspection report.
+    [Fact]
+    public void Release_exports_signature_artifact_before_retention()
+    {
+        var sign = StepBody(ReadWorkflow(), "Sign image digest");
+
+        Assert.Contains("notation download --signature-format cose", sign);
+        Assert.Contains("artifacts/signature/signature.cose", sign);
+        Assert.Contains("test -s artifacts/signature/signature.cose", sign);
+    }
+
     private static string ReadWorkflow() =>
         File.ReadAllText(Path.Combine(FindRepoRoot(), WorkflowPath));
 

@@ -24,7 +24,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Required reviewers on this environment (product owner) gate every run before any step executes.
+    # GitHub holds every job until the environment's required reviewers (product owner) approve.
+    # That rule is a repository setting; it must be configured on production-release (see docs/prd/aircraft-return-readiness.md).
     environment: production-release
     permissions:
       contents: read
@@ -90,6 +91,34 @@ jobs:
           test -s evidence/sbom/npm-sbom.cdx.json
           test -s evidence/audit/dotnet-vulnerable.txt
           test -s evidence/audit/npm-audit.json
+          test -s evidence/image/digest.txt
+          built="$(tr -d '[:space:]' < evidence/image/digest.txt)"
+          if [[ "$built" != "$IMAGE_DIGEST" ]]; then
+            echo "::error::image digest $IMAGE_DIGEST was not produced by build run $BUILD_RUN_ID (build recorded $built)"
+            exit 1
+          fi
+
+      - name: Install Notation and Azure Key Vault plugin
+        env:
+          NOTATION_VERSION: "1.3.2"
+          NOTATION_SHA256: "e1a0f060308086bf8020b2d31defb7c5348f133ca0dba6a1a7820ef3cbb6dfe5"
+          AZURE_KV_PLUGIN_VERSION: "1.2.0"
+          AZURE_KV_PLUGIN_SHA256: "06bb5198af31ce11b08c4557ae4c2cbfb09878dfa6b637b7407ebc2d57b87b34"
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/notation"
+          mkdir -p "$work"
+          curl -fsSL -o "$work/notation.tar.gz" "https://github.com/notaryproject/notation/releases/download/v${NOTATION_VERSION}/notation_${NOTATION_VERSION}_linux_amd64.tar.gz"
+          echo "$NOTATION_SHA256  $work/notation.tar.gz" | sha256sum -c -
+          tar -xzf "$work/notation.tar.gz" -C "$work" notation
+          sudo install -m 0755 "$work/notation" /usr/local/bin/notation
+          curl -fsSL -o "$work/azure-kv.tar.gz" "https://github.com/Azure/notation-azure-kv/releases/download/v${AZURE_KV_PLUGIN_VERSION}/notation-azure-kv_${AZURE_KV_PLUGIN_VERSION}_linux_amd64.tar.gz"
+          echo "$AZURE_KV_PLUGIN_SHA256  $work/azure-kv.tar.gz" | sha256sum -c -
+          plugin_dir="$HOME/.config/notation/plugins/azure-kv"
+          mkdir -p "$plugin_dir"
+          tar -xzf "$work/azure-kv.tar.gz" -C "$plugin_dir" notation-azure-kv
+          notation version
+          notation plugin ls
 
       - name: Sign image digest
         run: |
@@ -98,7 +127,10 @@ jobs:
           notation sign "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" \
             --id "$SIGNING_KEY_ID" --plugin azure-kv --signature-format cose \
             --allow-referrers-api
+          notation download --signature-format cose --output artifacts/signature/signature.cose \
+            "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
           notation inspect "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" > artifacts/signature/notation-inspect.txt
+          test -s artifacts/signature/signature.cose
           test -s artifacts/signature/notation-inspect.txt
 
       - name: Verify signature and digest
