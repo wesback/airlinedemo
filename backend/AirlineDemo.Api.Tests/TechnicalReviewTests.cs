@@ -74,6 +74,19 @@ public sealed class TechnicalReviewTests : IDisposable
         return await client.SendAsync(request);
     }
 
+    /// <summary>Writes a case-001 store with one basis and a current accept decision, for tests that exercise acceptance.</summary>
+    public static string SeedAcceptedDecision()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "tech-seed-" + Guid.NewGuid().ToString("N"), "cases.json");
+        var store = new CaseStateStore(path);
+        var scope = store.CreateCase(CaseId, "presenter");
+        var basis = CaseStateStore.CreateBasisVersion(1, "evidence-1", string.Empty);
+        var revision = store.Commit(scope, 0, new CaseCommit(basis, null, "presenter", "submit-package", "basis 1")).State.Revision;
+        store.Commit(scope, revision, new CaseCommit(null, null, "reviewer", TechnicalReviewEndpoints.DecisionAction,
+            JsonSerializer.Serialize(new { Outcome = "accept", Reason = "Seeded.", BasisVersion = 1, TraceId = "trace-seed" })));
+        return path;
+    }
+
     private static object Decide(long revision, int basis = 1, string decision = "accept", string? reason = "Checked against basis.") =>
         new { expectedRevision = revision, basisVersion = basis, decision, reason };
 
@@ -179,5 +192,119 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.False(decision.IsCurrent);
         Assert.False(TechnicalReviewEndpoints.AuthorizesAcceptance(state));
         Assert.Contains(state.Audit, a => a.Action == TechnicalReviewEndpoints.DecisionAction);
+    }
+
+    private async Task<HttpResponseMessage> GetDecisionAsync(string caseId, Session? session)
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/cases/{caseId}/technical-review");
+        if (session is not null) request.Headers.Add("Cookie", session.Cookie);
+        return await client.SendAsync(request);
+    }
+
+    [Fact]
+    public async Task Cross_case_read_reveals_nothing()
+    {
+        SeedCaseWithBasis();
+        Store.CreateCase("case-002", "presenter");
+        var reviewer = await SignInAsync("reviewer");
+
+        using var response = await GetDecisionAsync("case-002", reviewer);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain("basisVersion", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Authorized_reviewer_reads_current_decision_for_own_case()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+        using (var post = await PostDecisionAsync(CaseId, reviewer, withCsrf: true, Decide(revision)))
+        {
+            Assert.Equal(HttpStatusCode.OK, post.StatusCode);
+        }
+
+        using var response = await GetDecisionAsync(CaseId, reviewer);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("accept", body.GetProperty("decision").GetProperty("outcome").GetString());
+        Assert.True(body.GetProperty("decision").GetProperty("isCurrent").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Unauthenticated_decision_is_denied_without_decision()
+    {
+        var revision = SeedCaseWithBasis();
+
+        using var response = await PostDecisionAsync(CaseId, null, withCsrf: false, Decide(revision));
+
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
+    }
+
+    [Fact]
+    public async Task Unknown_decision_value_is_rejected_without_decision()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+
+        using var response = await PostDecisionAsync(CaseId, reviewer, withCsrf: true, Decide(revision, decision: "defer"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
+    }
+
+    [Fact]
+    public async Task Stale_revision_is_denied_without_decision()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+
+        using var response = await PostDecisionAsync(CaseId, reviewer, withCsrf: true, Decide(revision - 1));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Null(TechnicalReviewEndpoints.CurrentDecision(Store.Read(Store.AuthorizeCase(CaseId, "presenter"))));
+    }
+
+    [Fact]
+    public async Task Decision_records_time_sequence_and_correlated_trace_without_content()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+        var before = DateTimeOffset.UtcNow;
+
+        using var response = await PostDecisionAsync(CaseId, reviewer, withCsrf: true, Decide(revision));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var posted = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var state = Store.Read(Store.AuthorizeCase(CaseId, "presenter"));
+        var decision = TechnicalReviewEndpoints.CurrentDecision(state)!;
+        var entry = state.Audit[^1];
+        Assert.Equal(state.Audit.Count, decision.Sequence);
+        Assert.Equal(entry.Sequence, decision.Sequence);
+        Assert.InRange(decision.At, before.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));
+        Assert.StartsWith("trace-", decision.TraceId);
+        Assert.Equal(decision.TraceId, posted.GetProperty("traceId").GetString());
+        Assert.DoesNotContain("evidence-1", entry.Detail);
+    }
+
+    [Fact]
+    public async Task Legacy_acceptance_without_current_decision_is_denied()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+        var client = _factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{CaseId}/reviews")
+        {
+            Content = JsonContent.Create(new { expectedRevision = revision, decision = "accept" }),
+        };
+        request.Headers.Add("Cookie", reviewer.Cookie);
+        request.Headers.Add("X-CSRF-Token", reviewer.Csrf);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 }

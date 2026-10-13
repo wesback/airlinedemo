@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Reviews;
 
 namespace AirlineDemo.Api.Auth;
 
@@ -42,7 +43,20 @@ public static class CaseEndpoints
         TelemetryRedaction.EmitSecurityEvent(logger, TelemetryRedaction.SecurityEvents.AuthScopeFailure,
             TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
 
-    private static IResult RecordReview(string caseId, ReviewRequest body, HttpContext http, DemoSessionStore sessions, CaseStore cases, IConfiguration config, ILogger<DemoSessionStore> logger)
+    private static bool AcceptanceAuthorized(CaseStateStore states, DemoSession session, string caseId)
+    {
+        try
+        {
+            return TechnicalReviewEndpoints.AuthorizesAcceptance(
+                states.Read(states.AuthorizeSessionCase(caseId, session.User.CaseScopes)));
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return false;
+        }
+    }
+
+    private static IResult RecordReview(string caseId, ReviewRequest body, HttpContext http, DemoSessionStore sessions, CaseStore cases, CaseStateStore states, IConfiguration config, ILogger<DemoSessionStore> logger)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null)
@@ -63,6 +77,8 @@ public static class CaseEndpoints
         }
         if (body.Decision is not ("accept" or "reject"))
             return Results.BadRequest(new { error = "Decision must be accept or reject." });
+        if (body.Decision == "accept" && !AcceptanceAuthorized(states, session, caseId))
+            return Results.Json(new { error = "A current technical review decision is required before acceptance." }, statusCode: StatusCodes.Status409Conflict);
 
         CaseRecord? updated;
         ReviewOutcome outcome;

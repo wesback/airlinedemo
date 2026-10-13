@@ -281,7 +281,11 @@ public sealed class TelemetryPrivacyTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = AppPasscode,
+                    ["CaseState:Path"] = TechnicalReviewTests.SeedAcceptedDecision(),
+                }));
             builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
         });
         using var client = factory.CreateClient();
@@ -327,7 +331,11 @@ public sealed class TelemetryPrivacyTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = AppPasscode,
+                    ["CaseState:Path"] = TechnicalReviewTests.SeedAcceptedDecision(),
+                }));
             builder.ConfigureServices(services =>
             {
                 services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger));
@@ -404,7 +412,12 @@ public sealed class TelemetryPrivacyTests
 
     private sealed class CapturingLogger : ILogger
     {
-        public List<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = new();
+        private readonly List<IReadOnlyList<KeyValuePair<string, object?>>> _states = new();
+
+        public IReadOnlyList<IReadOnlyList<KeyValuePair<string, object?>>> States
+        {
+            get { lock (_states) return _states.ToList(); }
+        }
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -416,7 +429,7 @@ public sealed class TelemetryPrivacyTests
             if (state is IReadOnlyList<KeyValuePair<string, object?>> list)
             {
                 // Snapshot now: framework state can be backed by request features disposed after the response.
-                States.Add(list.ToList());
+                lock (_states) _states.Add(list.ToList());
             }
         }
     }
