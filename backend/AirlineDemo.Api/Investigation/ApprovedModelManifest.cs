@@ -142,6 +142,11 @@ public static class ModelCallGate
             throw new ModelGateException("model request refused: no versioned evidence");
         }
 
+        if (!request.IsSynthetic)
+        {
+            throw new ModelGateException("model request refused: only synthetic evidence may be sent to the model");
+        }
+
         // Region applies to every request: the synthetic flag is caller-supplied and cannot waive it.
         if (!string.Equals(request.DataRegion, manifest.Region, StringComparison.OrdinalIgnoreCase))
         {
@@ -162,5 +167,23 @@ public static class ModelCallGate
             manifest.Region!,
             manifest.ContentFilter!,
             request.EvidenceVersion);
+    }
+
+    /// <summary>
+    /// Authorizes every request of a scored run before any is sent. One refusal refuses the whole run, and no traces
+    /// are returned unless all requests pass.
+    /// </summary>
+    public static IReadOnlyList<ModelCallTrace> AuthorizeScoredRun(
+        ApprovedModelManifest manifest,
+        IReadOnlyList<ModelRequest> requests)
+    {
+        manifest.RequireUsable();
+
+        if (requests.Count == 0)
+        {
+            throw new ModelGateException("scored run refused: no model requests");
+        }
+
+        return requests.Select(request => Authorize(manifest, request)).ToList();
     }
 }

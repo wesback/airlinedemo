@@ -194,14 +194,52 @@ public class ApprovedModelManifestTests
     }
 
     [Fact]
-    public void Non_synthetic_content_in_approved_region_is_still_scanned_for_identifiers()
+    public void Non_synthetic_content_is_refused_even_in_approved_region()
     {
-        var inRegion = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "EASTUS2", "Aircraft record v1.");
-        var withEmail = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "eastus2", "Contact jane.doe@example.com");
-        var withTailNumber = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "eastus2", "Aircraft N123 record.");
+        var request = new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "EASTUS2", "Aircraft record v1.");
 
-        Assert.Equal("evidence-v1", ModelCallGate.Authorize(Approved(), inRegion).EvidenceVersion);
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request));
+    }
+
+    [Fact]
+    public void Synthetic_content_with_identifier_pattern_is_refused_in_approved_region()
+    {
+        var withEmail = Synthetic("Contact jane.doe@example.com");
+        var withTailNumber = Synthetic("Aircraft N123 record.");
+
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), withEmail));
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), withTailNumber));
+    }
+
+    [Fact]
+    public void Scored_run_with_all_synthetic_requests_returns_one_trace_per_request()
+    {
+        var requests = new[] { Synthetic("Synthetic evidence A."), Synthetic("Synthetic evidence B.") };
+
+        var traces = ModelCallGate.AuthorizeScoredRun(Approved(), requests);
+
+        Assert.Equal(2, traces.Count);
+        Assert.All(traces, t => Assert.Equal("2026.10.1", t.ManifestVersion));
+    }
+
+    [Fact]
+    public void Scored_run_is_refused_when_any_request_is_non_synthetic()
+    {
+        var requests = new[]
+        {
+            Synthetic("Synthetic evidence A."),
+            new ModelRequest("evidence-v1", IsSynthetic: false, DataRegion: "eastus2", "Real record."),
+        };
+
+        Assert.Throws<ModelGateException>(() => ModelCallGate.AuthorizeScoredRun(Approved(), requests));
+    }
+
+    [Fact]
+    public void Scored_run_is_refused_for_unusable_manifest_or_empty_run()
+    {
+        Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.AuthorizeScoredRun(Approved("approved", (JsonNode?)false), [Synthetic()]));
+        Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.AuthorizeScoredRun(Approved(), []));
     }
 }
