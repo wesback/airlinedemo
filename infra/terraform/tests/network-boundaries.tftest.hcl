@@ -72,7 +72,7 @@ variables {
   }
 }
 
-run "ingress_and_egress_allowlists" {
+run "M-13_ingress_and_egress_allowlists" {
   command = plan
 
   assert {
@@ -97,9 +97,14 @@ run "ingress_and_egress_allowlists" {
     condition     = alltrue([for r in values(azurerm_network_security_rule.egress_allow) : r.priority < azurerm_network_security_rule.egress_deny_all.priority])
     error_message = "Every explicit egress allow rule must have higher precedence than the deny-all."
   }
+  # M-13/M-18: app-to-private-endpoint traffic needs this outbound allow, ahead of the deny-all.
+  assert {
+    condition     = azurerm_network_security_rule.egress_private_endpoints.direction == "Outbound" && azurerm_network_security_rule.egress_private_endpoints.access == "Allow" && azurerm_network_security_rule.egress_private_endpoints.protocol == "Tcp" && azurerm_network_security_rule.egress_private_endpoints.destination_port_range == "443" && azurerm_network_security_rule.egress_private_endpoints.source_address_prefix == "10.60.1.0/24" && azurerm_network_security_rule.egress_private_endpoints.destination_address_prefix == "10.60.2.0/24" && azurerm_network_security_rule.egress_private_endpoints.priority < azurerm_network_security_rule.egress_deny_all.priority
+    error_message = "App subnet must have an outbound Allow on TCP 443 to the private endpoint subnet, with higher precedence than the outbound deny-all."
+  }
 }
 
-run "ingress_allows_exactly_configured_cidrs" {
+run "M-13_ingress_allows_exactly_configured_cidrs" {
   command = plan
 
   variables {
@@ -112,7 +117,7 @@ run "ingress_allows_exactly_configured_cidrs" {
   }
 }
 
-run "app_subnet_uses_the_nsg" {
+run "M-13_app_subnet_uses_the_nsg" {
   command = plan
 
   assert {
@@ -121,7 +126,7 @@ run "app_subnet_uses_the_nsg" {
   }
 }
 
-run "empty_allowlists_deny_everything" {
+run "M-13_empty_allowlists_deny_everything" {
   command = plan
 
   variables {
@@ -143,7 +148,7 @@ run "empty_allowlists_deny_everything" {
   }
 }
 
-run "data_endpoints_are_private" {
+run "M-13_data_endpoints_are_private" {
   command = plan
 
   assert {
@@ -200,7 +205,7 @@ run "data_endpoints_are_private" {
   }
 }
 
-run "no_environment_defaults" {
+run "egress_and_config_no_environment_defaults" {
   command = plan
 
   assert {
@@ -210,6 +215,7 @@ run "no_environment_defaults" {
 }
 
 run "backend_identity_and_locking_declared" {
+  # Story criterion: Entra-auth azurerm backend with locking; no shared keys or SAS.
   command = plan
 
   assert {
@@ -232,7 +238,7 @@ run "backend_declares_no_shared_credentials" {
   }
 }
 
-run "encryption_and_no_key_outputs" {
+run "M-14_M-18_encryption_transport_and_no_key_outputs" {
   command = plan
 
   assert {
