@@ -1,0 +1,257 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 145,
+  "branch": "ai-sdlc/issue-145",
+  "commitSha": "1dc09be1521885e9fd122fbd21b79dc549e5145e",
+  "round": 2,
+  "pipelineVersion": "9266dd9",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation binds decisions to the current basis and gates acceptance on a current accept decision. M-02’s forged-ID protections are not covered by a criterion-linked test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 159,
+          "message": "M-02 lacks a criterion-linked test for forged role and case IDs. Add a test that submits forged IDs and verifies no protected data is returned and no mutation occurs.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-02 tests cover an unauthorized role, cross-case requests and reads, a missing anti-forgery token, and a stale revision. None submits forged role or case IDs, as M-02 requires; the tests also do not identify the criteria they cover by ID.",
+            "failureScenario": "If a later change starts trusting role or case IDs supplied in a review command, these tests can still pass while a caller forges those IDs to record a decision or access another case."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover decision authorization, stale-basis rejection, audit provenance, and trace privacy. They do not exercise the acceptance endpoint with a previously valid decision made stale by a later basis, leaving that M-10 behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 193,
+          "message": "M-10 lacks an acceptance-path test for a stale prior decision. After adding a later basis, submit acceptance and assert it is denied without changing the case.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Later_basis_keeps_prior_decision_but_marks_it_non_current checks AuthorizesAcceptance(state), but does not call the acceptance endpoint. Legacy_acceptance_without_current_decision_is_denied tests only the no-decision case.",
+            "failureScenario": "If the acceptance path is changed to allow any recorded accept decision, even when its basis is stale, both tests still pass. M-10 requires proving that a later basis prevents the prior decision from authorizing acceptance."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The decision write checks the current basis and commits against the expected revision, so an intervening basis update causes a conflict. Acceptance checks the current decision while holding the case state gate, preventing a basis update from interleaving with acceptance.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 4,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 134,
+      "total": 144,
+      "percent": 93.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 17,
+          "total": 21,
+          "missed": [
+            62,
+            63,
+            64,
+            65
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 15,
+          "total": 15,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 3,
+          "total": 3,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "covered": 99,
+          "total": 105,
+          "missed": [
+            70,
+            71,
+            72,
+            133,
+            134,
+            135
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
