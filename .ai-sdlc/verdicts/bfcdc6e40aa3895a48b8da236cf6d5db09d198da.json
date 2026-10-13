@@ -1,0 +1,187 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 154,
+  "branch": "ai-sdlc/issue-154",
+  "commitSha": "bfcdc6e40aa3895a48b8da236cf6d5db09d198da",
+  "round": 0,
+  "pipelineVersion": "9266dd9",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation adds the specified CSP and HSTS headers, leaves CORS unconfigured, and rejects the local identity bypass outside Development. The named test file is included in AirlineDemo.sln and runs with the repository’s documented `dotnet test AirlineDemo.sln --no-restore -m:1` command.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the CSP and HSTS response headers, absence of CORS, and bypass behavior in Development and deployed environments. The repository’s CI runs `dotnet test AirlineDemo.sln`, which includes the named test file.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change applies the specified CSP and HSTS headers to responses, leaves CORS unconfigured, and rejects an enabled local identity bypass outside Development. I found no concrete security defect in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": true,
+    "failed": [],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 0,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TransportSecurityTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 24,
+      "total": 24,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Security/TransportSecurity.cs",
+          "covered": 22,
+          "total": 22,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 6,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
