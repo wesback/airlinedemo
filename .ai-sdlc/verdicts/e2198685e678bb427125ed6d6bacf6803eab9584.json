@@ -1,0 +1,216 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 157,
+  "branch": "ai-sdlc/issue-157",
+  "commitSha": "e2198685e678bb427125ed6d6bacf6803eab9584",
+  "round": 0,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Witness and digest checks are present, but validation does not establish that the cited text supports the claim being routed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 48,
+          "message": "A verbatim witness is accepted without verifying that it supports the typed claim, so an unsupported missing-requirement claim can establish a request.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Validate checks that each witness quote appears in the cited page, but never checks the claim text against that quote. FindingRouter then trusts the supplied ClaimKind.",
+            "failureScenario": "An investigator labels an unrelated claim as MissingRequirement and cites a page containing only an instruction such as “send a routine request.” The witness passes validation, and Route returns Request even though the evidence does not support the claim."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Witness and digest checks do not verify that the evidence supports the claim's typed value, so an unrelated valid citation can establish a request. Other reviewed routing cases have corresponding tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 49,
+          "message": "A valid witness does not establish that the claim it accompanies is true. Compare the claim's typed value to the witness before returning Supported; the current test fixture itself pairs \"claim text\" with an unrelated quote and expects support.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Validate checks that each witness quote appears on a page with a matching digest, then returns Supported without comparing the claim's typed value or text to that witness.",
+            "failureScenario": "A MissingRequirement claim asserting an unrelated gap is paired with any valid, unrelated quote. Validate marks it Supported, and FindingRouter can turn it into a request."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The routing path can accept claims whose cited evidence does not support their asserted value, and callers can bypass witness validation by constructing a Supported ValidatedClaim directly. Both paths can produce a missing-evidence request from unsupported claims.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 60,
+          "message": "A valid citation does not establish that the cited text supports the claim. Bind the claim's typed value to its witness before marking it Supported; the current test uses an unbound \"claim text\" and would not catch this mismatch. OWASP A08:2025.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Validate checks that the witness quote occurs on a current document page, then marks the claim Supported without comparing the claim's asserted text or typed value to that quote.",
+            "failureScenario": "An investigator submits a MissingRequirement claim asserting that a maintenance action is overdue and cites a valid page containing only the unrelated quote \"Return readiness is pending reserve approval.\" The claim is marked Supported, and FindingRouter can create a request from it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Policy/FindingRouter.cs",
+          "line": 56,
+          "message": "The public ValidatedClaim constructor lets callers bypass ClaimValidator and establish a request with an unsupported claim. Make the router enforce validation or prevent callers from constructing trusted validated claims. OWASP A08:2025.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "FindingRouter trusts the public ValidatedClaim.Status and Kind fields and checks no witness or validation provenance before routing.",
+            "failureScenario": "A caller constructs a ValidatedClaim with Kind MissingRequirement and Status Supported directly, with no valid witness, then passes it to Route with complete coverage. Route returns Request with RequestCount 1."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ClaimValidationPolicyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
