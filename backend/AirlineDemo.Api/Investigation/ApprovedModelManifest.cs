@@ -108,36 +108,41 @@ public sealed record ApprovedModelManifest(
 public sealed record ModelRequest(string? EvidenceVersion, string? DataRegion, string Content);
 
 /// <summary>
-/// Registry of SHA-256 hashes of synthetic evidence items. The only way to fill it is <see cref="FromFixtureDirectory"/>,
+/// Registry of SHA-256 hashes of synthetic evidence items. The only way to fill it is <see cref="FromCommittedFixtures"/>,
+/// which reads files embedded at build time from Investigation/SyntheticFixtures. No caller can supply a path or content,
 /// so registered content always comes from committed synthetic fixtures. Only content whose exact hash is registered
 /// may be sent to a model.
 /// </summary>
 public sealed class SyntheticContentRegistry
 {
+    private const string FixturePrefix = "AirlineDemo.Api.Investigation.SyntheticFixtures.";
+
     private readonly HashSet<string> _hashes = new(StringComparer.Ordinal);
 
-    /// <summary>Builds the registry from every file in a committed synthetic fixture directory.</summary>
-    public static SyntheticContentRegistry FromFixtureDirectory(string directory)
+    /// <summary>Builds the registry from the committed synthetic fixtures compiled into this assembly.</summary>
+    public static SyntheticContentRegistry FromCommittedFixtures()
     {
-        if (!Directory.Exists(directory))
+        var assembly = typeof(SyntheticContentRegistry).Assembly;
+        var names = assembly.GetManifestResourceNames()
+            .Where(name => name.StartsWith(FixturePrefix, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (names.Length == 0)
         {
-            throw new ModelGateException("synthetic fixture directory not found");
-        }
-
-        var files = Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray();
-        if (files.Length == 0)
-        {
-            throw new ModelGateException("synthetic fixture directory is empty");
+            throw new ModelGateException("committed synthetic fixtures not found");
         }
 
         var registry = new SyntheticContentRegistry();
-        foreach (var file in files)
+        foreach (var name in names)
         {
+            using var stream = assembly.GetManifestResourceStream(name)
+                ?? throw new ModelGateException("committed synthetic fixture unreadable");
+            using var reader = new StreamReader(stream, Encoding.UTF8);
             // Trailing newlines from the file are not part of the evidence item sent to the model.
-            var content = File.ReadAllText(file).TrimEnd('\r', '\n');
+            var content = reader.ReadToEnd().TrimEnd('\r', '\n');
             if (!ModelCallGate.IsMarkedSynthetic(content))
             {
-                throw new ModelGateException($"synthetic fixture '{Path.GetFileName(file)}' is not marked as synthetic evidence");
+                throw new ModelGateException("committed synthetic fixture is not marked as synthetic evidence");
             }
 
             registry.Register(content);

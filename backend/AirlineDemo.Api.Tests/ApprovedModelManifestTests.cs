@@ -37,26 +37,8 @@ public class ApprovedModelManifestTests
     private static ModelRequest Synthetic(string body = DefaultBody, string region = ApprovedRegion) =>
         new("evidence-v1", region, Marked(body));
 
-    /// <summary>Registry built from a fixture directory holding the default synthetic evidence plus any extra bodies.</summary>
-    private static SyntheticContentRegistry Registry(params string[] bodies)
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "synthetic-fixtures-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        try
-        {
-            File.WriteAllText(Path.Combine(dir, "default.txt"), Marked(DefaultBody));
-            for (var i = 0; i < bodies.Length; i++)
-            {
-                File.WriteAllText(Path.Combine(dir, $"extra-{i}.txt"), Marked(bodies[i]));
-            }
-
-            return SyntheticContentRegistry.FromFixtureDirectory(dir);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
-    }
+    /// <summary>Registry built only from the committed synthetic fixtures compiled into the API assembly.</summary>
+    private static SyntheticContentRegistry Registry() => SyntheticContentRegistry.FromCommittedFixtures();
 
     private static string ShippedManifestPath()
     {
@@ -150,7 +132,7 @@ public class ApprovedModelManifestTests
     public void Authorized_call_trace_records_manifest_version_and_settings_but_not_content()
     {
         const string body = "Synthetic aircraft evidence v1 with reserve figures.";
-        var trace = ModelCallGate.Authorize(Approved(), Synthetic(body), Registry(body));
+        var trace = ModelCallGate.Authorize(Approved(), Synthetic(body), Registry());
 
         Assert.Equal("2026.10.1", trace.ManifestVersion);
         Assert.Equal("investigation-live", trace.Arm);
@@ -218,32 +200,29 @@ public class ApprovedModelManifestTests
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
             SyntheticContentRegistry.Sha256Hex("abc"));
 
-        var registry = Registry("abc");
+        var registry = Registry();
         Assert.True(registry.IsRegistered(Marked("abc")));
         Assert.False(registry.IsRegistered(Marked("abd")));
         Assert.False(new SyntheticContentRegistry().IsRegistered(Marked("abc")));
     }
 
     [Fact]
-    public void Registry_only_accepts_marked_content_from_a_fixture_directory()
+    public void Registry_contains_only_committed_marked_fixtures()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "synthetic-fixtures-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        try
-        {
-            Assert.Throws<ModelGateException>(() => SyntheticContentRegistry.FromFixtureDirectory(dir));
+        var registry = Registry();
 
-            File.WriteAllText(Path.Combine(dir, "real.txt"), "passenger Jane Smith in seat 12A");
-            var ex = Assert.Throws<ModelGateException>(() => SyntheticContentRegistry.FromFixtureDirectory(dir));
-            Assert.Contains("not marked as synthetic", ex.Message);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
+        Assert.True(registry.IsRegistered(Marked(DefaultBody)));
+        Assert.True(registry.IsRegistered(Marked("Synthetic evidence A.")));
+        Assert.False(registry.IsRegistered(Marked("passenger Jane Smith in seat 12A")));
+        Assert.False(registry.IsRegistered("passenger Jane Smith in seat 12A"));
+    }
 
-        Assert.Throws<ModelGateException>(() =>
-            SyntheticContentRegistry.FromFixtureDirectory(Path.Combine(dir, "missing")));
+    [Fact]
+    public void Registry_cannot_be_filled_from_a_caller_supplied_directory()
+    {
+        var method = typeof(SyntheticContentRegistry).GetMethod("FromFixtureDirectory");
+
+        Assert.Null(method);
     }
 
     [Theory]
@@ -255,7 +234,7 @@ public class ApprovedModelManifestTests
     public void Synthetic_content_outside_the_plain_text_allowlist_is_refused(string body)
     {
         var ex = Assert.Throws<ModelGateException>(() =>
-            ModelCallGate.Authorize(Approved(), Synthetic(body), Registry(body)));
+            ModelCallGate.Authorize(Approved(), Synthetic(body), Registry()));
         Assert.Contains("allowlist", ex.Message);
     }
 
@@ -302,7 +281,7 @@ public class ApprovedModelManifestTests
     {
         var requests = new[] { Synthetic("Synthetic evidence A."), Synthetic("Synthetic evidence B.") };
 
-        var traces = ModelCallGate.AuthorizeScoredRun(Approved(), requests, Registry("Synthetic evidence A.", "Synthetic evidence B."));
+        var traces = ModelCallGate.AuthorizeScoredRun(Approved(), requests, Registry());
 
         Assert.Equal(2, traces.Count);
         Assert.All(traces, t => Assert.Equal("2026.10.1", t.ManifestVersion));
@@ -311,10 +290,10 @@ public class ApprovedModelManifestTests
     [Fact]
     public void Scored_run_is_refused_when_any_request_is_unregistered()
     {
-        var requests = new[] { Synthetic("Synthetic evidence A."), Synthetic("Synthetic evidence B.") };
+        var requests = new[] { Synthetic("Synthetic evidence A."), Synthetic("Synthetic evidence C.") };
 
         Assert.Throws<ModelGateException>(() =>
-            ModelCallGate.AuthorizeScoredRun(Approved(), requests, Registry("Synthetic evidence A.")));
+            ModelCallGate.AuthorizeScoredRun(Approved(), requests, Registry()));
     }
 
     [Fact]
