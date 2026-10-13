@@ -124,11 +124,15 @@ public static class TechnicalReviewEndpoints
         CommitResult result;
         try
         {
-            result = cases.Commit(scope, body.ExpectedRevision, new CaseCommit(null, null, session.User.Id, DecisionAction, detail));
+            result = cases.Commit(scope, body.ExpectedRevision, new CaseCommit(null, null, session.User.Id, DecisionAction, detail, body.BasisVersion));
         }
         catch (RevisionConflictException)
         {
             return Results.Json(new { error = "Case revision is stale." }, statusCode: StatusCodes.Status409Conflict);
+        }
+        catch (StaleBasisException)
+        {
+            return Results.Json(new { error = "Decision basis is stale." }, statusCode: StatusCodes.Status409Conflict);
         }
         catch (CaseAccessDeniedException)
         {

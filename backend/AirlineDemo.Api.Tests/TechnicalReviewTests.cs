@@ -431,6 +431,49 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.False(TechnicalReviewEndpoints.AuthorizesAcceptance(after));
     }
 
+    // Covers M-08: a current accept decision permits acceptance and changes the case state.
+    [Fact]
+    public async Task Acceptance_with_current_decision_is_recorded()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+        using (var decided = await PostDecisionAsync(CaseId, reviewer, withCsrf: true, Decide(revision)))
+        {
+            Assert.Equal(HttpStatusCode.OK, decided.StatusCode);
+        }
+
+        var client = _factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{CaseId}/reviews")
+        {
+            Content = JsonContent.Create(new { expectedRevision = 1, decision = "accept" }),
+        };
+        request.Headers.Add("Cookie", reviewer.Cookie);
+        request.Headers.Add("X-CSRF-Token", reviewer.Csrf);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var record = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("accepted", record.GetProperty("status").GetString());
+    }
+
+    // Covers M-02/M-08: the basis check is atomic with the commit, so a basis added after the request's check cannot be bypassed.
+    [Fact]
+    public void Decision_commit_is_rejected_atomically_when_basis_has_advanced()
+    {
+        var revision = SeedCaseWithBasis();
+        var scope = Store.AuthorizeCase(CaseId, "presenter");
+        var basis2 = CaseStateStore.CreateBasisVersion(2, "evidence-2", Store.GetBasisVersion(scope, 1).BasisDigest);
+        var latest = Store.Commit(scope, revision, new CaseCommit(basis2, null, "presenter", "submit-package", "basis 2")).State;
+
+        Assert.Throws<StaleBasisException>(() => Store.Commit(scope, latest.Revision,
+            new CaseCommit(null, null, "reviewer", TechnicalReviewEndpoints.DecisionAction, "{}", 1)));
+
+        var after = Store.Read(scope);
+        Assert.Equal(latest.Revision, after.Revision);
+        Assert.Equal(latest.Audit.Count, after.Audit.Count);
+    }
+
     // Covers M-10: a basis committed by another store instance (another process) must be seen by the acceptance check.
     [Fact]
     public void Acceptance_check_sees_basis_committed_by_another_store_instance()

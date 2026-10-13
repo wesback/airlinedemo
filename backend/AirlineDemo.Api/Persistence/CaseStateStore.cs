@@ -14,6 +14,9 @@ public sealed class RevisionConflictException()
 public sealed class ReceiptConflictException()
     : Exception("Receipt was already used for a different commit; no change was made.");
 
+public sealed class StaleBasisException()
+    : Exception("Basis version is no longer current; no change was made.");
+
 public sealed class BasisIntegrityException(string message) : Exception(message);
 
 /// <summary>Server-issued proof that a case id was authorized; only the store can create one.</summary>
@@ -53,7 +56,8 @@ public sealed record CaseCommit(
     string? ReceiptId,
     string Actor,
     string Action,
-    string Detail);
+    string Detail,
+    int? RequiredBasisVersion = null);
 
 public sealed record CommitResult(CaseState State, bool Replayed);
 
@@ -233,6 +237,11 @@ public sealed class CaseStateStore
             if (expectedRevision != current.Revision)
             {
                 throw new RevisionConflictException();
+            }
+
+            if (commit.RequiredBasisVersion is { } required && required != current.Basis.Count)
+            {
+                throw new StaleBasisException();
             }
 
             var basis = current.Basis.ToList();
