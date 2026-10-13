@@ -1,0 +1,279 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "15bea1b12c87c2ecb0380b32f1c85ca9a67c4bc0",
+  "round": 1,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake can accept a PDF with an image payload when valid whitespace separates the image subtype tokens. The tests also leave required criteria unmapped and omit exact-boundary acceptance checks for package bytes and page count.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 65,
+          "message": "Image payload detection misses valid PDF whitespace between /Subtype and /Image, allowing an image-bearing PDF to be accepted as evidence.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ValidateBytes searches for the literal marker \"/Subtype /Image\" after decoding hex escapes, then passes unflagged PDFs to PdfPig.",
+            "failureScenario": "A PDF containing extractable text and an image XObject written as \"/Subtype\\n/Image\" uses valid PDF whitespace but does not match either image marker. It can pass validation and be returned as Complete, although the acceptance criteria require image payloads to fail visibly and retryably. This is an insecure-design gap (A06:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 7,
+          "message": "The tests do not map behavior to M-10 or M-07, and do not verify acceptance at the exact package-byte and page limits, leaving acceptance criteria without required mapped coverage.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The tests for immutable versions and witness validation have no M-10 marker; the failed-intake append test has no M-07 marker. Only one test comment identifies M-09, and there is no test proving that a package exactly at the byte limit or a document exactly at the page limit is accepted.",
+            "failureScenario": "Under the required criterion-to-test map, these tests cannot count toward M-10 or M-07, and the exact package-byte and page-limit acceptance behavior has no test. A regression in those behaviors could pass the named test file without criterion-mapped coverage."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The suite exercises several intake and storage behaviors, but M-09 boundary acceptance is not established, and the M-10/M-07 tests are not mapped to their criteria as required.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 55,
+          "message": "M-09's at-limit acceptance is not tested: the exact-byte-limit fixture is structurally invalid and the test does not require successful processing. Add valid fixtures at the byte, package-byte, and page limits and assert they are accepted.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "DocumentAtByteLimitIsNotRejectedForSize checks only that the result kind is not LimitExceeded. PaddedPdf creates a byte array containing a PDF header, zero bytes, and an EOF marker, rather than a valid text PDF.",
+            "failureScenario": "If intake rejects every document at the byte limit, this test can still pass when the rejection is Corrupt. It therefore does not prove M-09's requirement that an input at the limit is accepted; the page-count and package-byte limits also lack at-limit acceptance tests."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 176,
+          "message": "The tests for M-10 and M-07 do not identify those criterion IDs in their names or comments, so they do not count under the review policy. Tag the versioning, witness, and failed-intake storage tests with the criteria they cover.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The versioning and witness checks are in StoredVersionsAreAppendOnlyAndWitnessMustMatch, and failed-intake storage is checked in TruncatedPdfFailsRetryablyAndCreatesNoBasis; neither test name nor comment identifies M-10 or M-07.",
+            "failureScenario": "Under the required criterion-to-test mapping, these tests cannot count toward M-10 or M-07. A regression in append-only storage, witness verification, or preventing failed intake from becoming a basis would therefore leave those criteria without mapped test coverage."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The active-content check only inspects raw PDF bytes and can miss markers hidden in compressed object streams. Such a PDF can pass intake as complete despite containing a JavaScript action.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 154,
+          "message": "The raw-byte marker scan can be bypassed with active content inside a compressed PDF object stream, so a script-bearing document may be accepted as evidence. This violates the active-content rejection requirement (A08:2025, Software or Data Integrity Failures).",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ValidateBytes scans raw PDF bytes for active-content markers before PdfPig parses the document. Active content inside a compressed PDF object stream is not visible to this scan.",
+            "failureScenario": "An attacker submits a text PDF whose compressed object stream contains a JavaScript action. The marker scan misses it, PdfPig extracts the text, and Process returns Complete, allowing a document with executable embedded content to be accepted as evidence."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 162,
+      "total": 183,
+      "percent": 88.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 162,
+          "total": 183,
+          "missed": [
+            88,
+            89,
+            144,
+            145,
+            146,
+            147,
+            148,
+            194,
+            195,
+            196,
+            197,
+            198,
+            208,
+            209,
+            210,
+            211,
+            212,
+            233,
+            234,
+            240,
+            241
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
