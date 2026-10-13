@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AirlineDemo.Api.Diagnostics;
 
 namespace AirlineDemo.Api.Auth;
 
@@ -35,14 +36,21 @@ public static class DemoAuthEndpoints
 
     internal static IResult AntiForgeryFailed() => Results.Json(new { error = "Anti-forgery validation failed." }, statusCode: StatusCodes.Status403Forbidden);
 
-    private static IResult SignIn(SignInRequest request, HttpContext http, IConfiguration config, DemoSessionStore sessions, PasscodeThrottle throttle)
+    private static void EmitAuthFailure(ILogger logger, IConfiguration config) =>
+        TelemetryRedaction.EmitSecurityEvent(logger, TelemetryRedaction.SecurityEvents.AuthScopeFailure,
+            TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+
+    private static IResult SignIn(SignInRequest request, HttpContext http, IConfiguration config, DemoSessionStore sessions, PasscodeThrottle throttle, ILogger<DemoSessionStore> logger)
     {
         if (CurrentSession(http, sessions) is not null)
             return Results.Conflict(new { error = "Sign out before switching users." });
 
         var source = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         if (throttle.IsLocked(source))
+        {
+            EmitAuthFailure(logger, config);
             return Results.Json(new { error = GenericFailure }, statusCode: StatusCodes.Status429TooManyRequests);
+        }
 
         var expected = config[PasscodeSetting];
         var user = DemoFixture.Find(request.UserId);
@@ -50,6 +58,7 @@ public static class DemoAuthEndpoints
         if (user is null || !passcodeOk)
         {
             throttle.RecordFailure(source);
+            EmitAuthFailure(logger, config);
             return Results.Json(new { error = GenericFailure }, statusCode: StatusCodes.Status401Unauthorized);
         }
 

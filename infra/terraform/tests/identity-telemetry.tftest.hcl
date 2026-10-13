@@ -93,6 +93,7 @@ run "M-14_app_identity_grants_are_exact" {
     error_message = "App identity telemetry grant must be publish-only."
   }
 
+
   assert {
     condition     = azurerm_storage_container.evidence.name == "evidence" && azurerm_storage_container.evidence.container_access_type == "private"
     error_message = "Evidence grant must stay scoped to the private evidence container."
@@ -215,6 +216,7 @@ run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
     condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action) == 1 && length(a.action[0].action_groups) == 1])
     error_message = "Every security alert must route through exactly one action group, the named owner group."
   }
+
 }
 
 run "M-15_rejects_missing_owner" {

@@ -67,11 +67,44 @@ public static partial class TelemetryRedaction
     [GeneratedRegex(@"[\p{Cc}\p{Cf}]")]
     private static partial Regex ControlPattern();
 
-    // Allowed values are short identifiers only; free text (prompts, documents, sentences) never matches.
-    [GeneratedRegex(@"^[A-Za-z0-9._#,:\-]{1,256}$")]
-    private static partial Regex IdentifierPattern();
+    private static readonly HashSet<string> AllowedEventNames = new(StringComparer.Ordinal)
+    {
+        "investigation.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+    };
 
-    // Keeps only allowlisted keys, drops denylisted keys and scrubs secret-like and personal values.
+    private static readonly HashSet<string> AllowedTools = new(StringComparer.Ordinal) { "reserve-calc", "citation-search" };
+
+    private static readonly HashSet<string> AllowedOutcomes = new(StringComparer.Ordinal) { "approved", "rejected", "escalated" };
+
+    private static readonly Regex TraceIdRule = new(@"^trace-[0-9a-f]{4,64}$", RegexOptions.CultureInvariant);
+    private static readonly Regex BasisRule = new(@"^basis-v[0-9]{1,4}$", RegexOptions.CultureInvariant);
+    private static readonly Regex DeploymentRule = new(@"^[a-z0-9][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
+    private static readonly Regex CitationRule = new(@"^doc-[0-9]{1,6}#p[0-9]{1,4}$", RegexOptions.CultureInvariant);
+    private static readonly Regex ActorRule = new(@"^actor-[0-9a-f]{16}$", RegexOptions.CultureInvariant);
+    private static readonly Regex VersionRule = new(@"^[0-9]+\.[0-9]+\.[0-9]+([\-+][0-9A-Za-z.\-]+)?$", RegexOptions.CultureInvariant);
+    private static readonly Regex EnvironmentRule = new(@"^[a-z][a-z0-9\-]{0,31}$", RegexOptions.CultureInvariant);
+    private static readonly Regex ErrorTypeRule = new(@"^[a-z][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
+
+    // Each allowlisted key has a rule that accepts only its enumerated or structured identifier form.
+    // Free text, and identifier-shaped content such as canaries, fail the rule and are replaced with Redacted.
+    private static readonly Dictionary<string, Func<string, bool>> ValueRules = new(StringComparer.Ordinal)
+    {
+        ["event.name"] = v => AllowedEventNames.Contains(v),
+        ["service.name"] = v => v == ServiceName,
+        ["service.version"] = v => VersionRule.IsMatch(v),
+        ["deployment.environment"] = v => EnvironmentRule.IsMatch(v),
+        ["trace.id"] = v => TraceIdRule.IsMatch(v),
+        ["investigation.basis_version"] = v => BasisRule.IsMatch(v),
+        ["gen_ai.request.model"] = v => DeploymentRule.IsMatch(v),
+        ["investigation.tools"] = v => v.Split(',').All(t => AllowedTools.Contains(t)),
+        ["investigation.citations"] = v => v.Split(',').All(c => CitationRule.IsMatch(c)),
+        ["investigation.decision"] = v => AllowedDecisions.Contains(v),
+        ["enduser.pseudo.id"] = v => ActorRule.IsMatch(v),
+        ["investigation.outcome"] = v => AllowedOutcomes.Contains(v),
+        ["error.type"] = v => ErrorTypeRule.IsMatch(v),
+    };
+
+    // Keeps only allowlisted keys, drops denylisted keys and replaces values that fail their key's rule.
     // Control characters are replaced so injected log content cannot forge new lines or fields.
     public static IReadOnlyDictionary<string, string> Redact(IEnumerable<KeyValuePair<string, object?>> attributes)
     {
@@ -84,7 +117,7 @@ public static partial class TelemetryRedaction
             }
 
             var text = value?.ToString() ?? string.Empty;
-            result[key] = IdentifierPattern().IsMatch(text) ? text : Redacted;
+            result[key] = ValueRules.TryGetValue(key, out var accepts) && accepts(text) ? text : Redacted;
         }
 
         return result;
@@ -163,6 +196,8 @@ public static partial class TelemetryRedaction
         logger.Log(level, new EventId(0, eventName), state, null,
             static (s, _) => string.Join(" ", s.Select(kv => $"{kv.Key}={kv.Value}")));
     }
+
+    public static string ServiceVersion => typeof(TelemetryRedaction).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
     public static IReadOnlyDictionary<string, string> ResourceAttributes(string serviceVersion, string environment) =>
         new Dictionary<string, string>(StringComparer.Ordinal)
