@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 
 namespace AirlineDemo.Api.Tests;
@@ -43,7 +44,7 @@ public sealed class SupplyChainWorkflowTests
     {
         var step = StepBody(ReadWorkflow(), "SBOM (.NET)");
 
-        Assert.Contains("CycloneDX AirlineDemo.sln", step);
+        Assert.Contains("dotnet-CycloneDX AirlineDemo.sln", step);
         Assert.DoesNotContain("dotnet CycloneDX", step);
         Assert.Contains("test -s artifacts/sbom/dotnet-sbom.cdx.json", step);
     }
@@ -135,6 +136,14 @@ public sealed class SupplyChainWorkflowTests
     }
 
     [Fact]
+    public void Exception_expiring_today_does_not_allow_matching_finding()
+    {
+        var (exitCode, _) = RunSeverityGate(Exception("pkg-a", TodayUtc), NpmAudit("high"), DotnetListing(null));
+
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
     public void Exception_for_other_package_does_not_allow_finding()
     {
         var (exitCode, _) = RunSeverityGate(Exception("other-pkg", FutureDate), NpmAudit("high"), DotnetListing(null));
@@ -171,6 +180,15 @@ public sealed class SupplyChainWorkflowTests
     public void Exception_validation_rejects_expired_exception()
     {
         var (exitCode, output) = RunExceptionValidation(Exception("pkg-a", PastDate));
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("expired on", output);
+    }
+
+    [Fact]
+    public void Exception_validation_rejects_exception_expiring_today()
+    {
+        var (exitCode, output) = RunExceptionValidation(Exception("pkg-a", TodayUtc));
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("expired on", output);
@@ -225,6 +243,46 @@ public sealed class SupplyChainWorkflowTests
     }
 
     [Fact]
+    public void Source_restriction_accepts_nuget_org_and_npmjs_org_only()
+    {
+        var (exitCode, output) = RunShellStep("Source restriction", repo => repo.Write(LockPath, NpmjsOnlyLock), NugetOrgListing);
+
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain("outside", output);
+    }
+
+    [Fact]
+    public void Source_restriction_rejects_unapproved_nuget_source()
+    {
+        var listing = NugetOrgListing + "  2.  internal [Enabled]\n      https://feeds.example.test/v3/index.json\n";
+
+        var (exitCode, output) = RunShellStep("Source restriction", repo => repo.Write(LockPath, NpmjsOnlyLock), listing);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("NuGet source outside nuget.org", output);
+    }
+
+    [Fact]
+    public void Source_restriction_rejects_npm_package_resolved_outside_npmjs()
+    {
+        var lockfile = "{\"packages\":{\"node_modules/react\":{\"resolved\": \"https://registry.npmjs.org/react/-/react-18.2.0.tgz\"},"
+            + "\"node_modules/evil\":{\"resolved\": \"https://feeds.example.test/evil-1.0.0.tgz\"}}}\n";
+
+        var (exitCode, output) = RunShellStep("Source restriction", repo => repo.Write(LockPath, lockfile), NugetOrgListing);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("npm package resolved outside npmjs.org", output);
+    }
+
+    [Fact]
+    public void Source_restriction_rejects_lockfile_without_npmjs_packages()
+    {
+        var (exitCode, _) = RunShellStep("Source restriction", repo => repo.Write(LockPath, "{\"packages\":{}}\n"), NugetOrgListing);
+
+        Assert.NotEqual(0, exitCode);
+    }
+
+    [Fact]
     public void Secret_scan_checks_tracked_content_and_fails_on_matches()
     {
         var step = StepBody(ReadWorkflow(), "Secret scan");
@@ -233,6 +291,32 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("AccountKey", step);
         Assert.Contains("Server=", step);
         Assert.Contains("exit 1", step);
+    }
+
+    // The scan must cover tracked lockfiles too, so credentials cannot hide in frontend/package-lock.json.
+    [Fact]
+    public void Secret_scan_passes_on_clean_tracked_content()
+    {
+        var (exitCode, _) = RunShellStep("Secret scan", repo =>
+        {
+            repo.Write(LockPath, NpmjsOnlyLock);
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public void Secret_scan_fails_on_credential_in_tracked_package_lock()
+    {
+        var (exitCode, output) = RunShellStep("Secret scan", repo =>
+        {
+            repo.Write(LockPath, "{\"resolved\": \"https://" + "deploy:tokenvalue@feeds.example.test/x.tgz\"}\n");
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Committed credential", output);
     }
 
     // M-14: committed credentials, including URI-form connection strings, fail the secret scan.
@@ -261,6 +345,14 @@ public sealed class SupplyChainWorkflowTests
     private static string FutureDate => "2999-12-31";
 
     private static string PastDate => "2000-01-01";
+
+    private static string TodayUtc => DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private const string LockPath = "frontend/package-lock.json";
+
+    private const string NpmjsOnlyLock = "{\"packages\":{\"node_modules/react\":{\"resolved\": \"https://registry.npmjs.org/react/-/react-18.2.0.tgz\"}}}\n";
+
+    private const string NugetOrgListing = "Registered Sources:\n\n  1.  nuget.org [Enabled]\n      https://api.nuget.org/v3/index.json\n";
 
     private static string Exception(string package, string expires) =>
         "{\"exceptions\":[{\"package\":\"" + package + "\",\"reason\":\"Tracked in ADR-7\",\"expires\":\"" + expires + "\"}]}";
@@ -292,6 +384,72 @@ public sealed class SupplyChainWorkflowTests
         using var repo = new TempRepo();
         arrange(repo);
         return RunNode(script, repo.Root);
+    }
+
+    // Runs a workflow shell step's run block in a temp repo. A fake `dotnet` on PATH prints the given NuGet source listing.
+    private static (int ExitCode, string Output) RunShellStep(string stepName, Action<TempRepo> arrange, string? nugetListing = null)
+    {
+        var script = RunBlock(StepBody(ReadWorkflow(), stepName));
+        using var repo = new TempRepo();
+        using var bin = new TempRepo();
+        arrange(repo);
+        if (nugetListing is not null)
+        {
+            var dotnet = Path.Combine(bin.Root, "dotnet");
+            bin.Write("dotnet", "#!/bin/sh\ncat <<'LIST'\n" + nugetListing + "LIST\n");
+            File.SetUnixFileMode(dotnet, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        var psi = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = repo.Root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add(script);
+        psi.Environment["PATH"] = bin.Root + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("bash could not be started.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode, stdout.Result + stderr);
+    }
+
+    private static string RunBlock(string step)
+    {
+        var lines = step.Split('\n');
+        var start = Array.FindIndex(lines, l => l.Trim() == "run: |");
+        Assert.True(start >= 0, "Step has no run block.");
+
+        // Workflow run blocks are indented by 10 spaces; strip that to get the script.
+        return string.Join('\n', lines[(start + 1)..].Select(l => l.Length >= 10 ? l[10..] : l.TrimStart()));
+    }
+
+    private static void GitTrackAll(string workDir)
+    {
+        RunGit(workDir, "init", "-q");
+        RunGit(workDir, "add", "-A");
+    }
+
+    private static void RunGit(string workDir, params string[] args)
+    {
+        var psi = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var arg in args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("git could not be started.");
+        process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
     }
 
     private static string ExtractHeredoc(string step)

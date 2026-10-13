@@ -49,7 +49,7 @@ jobs:
       - name: SBOM (.NET)
         run: |
           mkdir -p artifacts/sbom
-          CycloneDX AirlineDemo.sln -j -fn dotnet-sbom.cdx.json -o artifacts/sbom
+          dotnet-CycloneDX AirlineDemo.sln -j -fn dotnet-sbom.cdx.json -o artifacts/sbom
           test -s artifacts/sbom/dotnet-sbom.cdx.json
 
       - name: SBOM (npm)
@@ -81,7 +81,7 @@ jobs:
             echo "$bad_nuget"
             exit 1
           fi
-          bad_npm=$(grep -E '"resolved": "https?://' frontend/package-lock.json | grep -v -E '"resolved": "https://registry\.npmjs\.org/' || true)
+          bad_npm=$(grep -oE '"resolved": "https?://[^"]*"' frontend/package-lock.json | grep -v -E '"resolved": "https://registry\.npmjs\.org/' || true)
           if [ -n "$bad_npm" ]; then
             echo "::error::npm package resolved outside npmjs.org"
             exit 1
@@ -91,7 +91,7 @@ jobs:
       - name: Secret scan
         run: |
           pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@"]+:[^/[:space:]@"]+@'
-          if git grep -l -I -E "$pattern" -- . ':!frontend/package-lock.json'; then
+          if git grep -l -I -E "$pattern" -- .; then
             echo "::error::Committed credential or connection string found in the files listed above"
             exit 1
           fi
@@ -116,7 +116,7 @@ jobs:
             }
             if (!isRealDate(e.expires)) {
               errors.push(`exception ${e.package}: expires must be a real calendar date in YYYY-MM-DD form`);
-            } else if (e.expires < today) {
+            } else if (e.expires <= today) {
               errors.push(`exception ${e.package}: expired on ${e.expires}`);
             }
           });
@@ -145,7 +145,7 @@ jobs:
             const m = line.match(/^\s*>\s+(\S+)\s+\S+\s+\S+\s+(High|Critical)\b/i);
             if (m) findings.push({ source: 'dotnet', package: m[1], severity: m[2].toLowerCase() });
           }
-          const blocked = findings.filter(f => !exceptions.some(e => e.package === f.package && e.expires >= today));
+          const blocked = findings.filter(f => !exceptions.some(e => e.package === f.package && e.expires > today));
           if (blocked.length) {
             for (const f of blocked) console.error(`::error::${f.source} ${f.package} has a ${f.severity} finding with no valid exception`);
             process.exit(1);
