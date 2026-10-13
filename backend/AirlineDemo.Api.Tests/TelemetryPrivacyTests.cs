@@ -301,7 +301,7 @@ public sealed class TelemetryPrivacyTests
 
         var traces = logger.States
             .Select(ToProperties)
-            .Where(p => p.GetValueOrDefault("event.name") == "investigation.completed")
+            .Where(p => p.GetValueOrDefault("event.name") == "review.completed")
             .ToList();
         var properties = Assert.Single(traces);
         Assert.False(string.IsNullOrWhiteSpace(properties["trace.id"]));

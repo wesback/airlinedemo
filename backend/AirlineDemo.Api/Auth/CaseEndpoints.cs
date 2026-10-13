@@ -91,7 +91,7 @@ public static class CaseEndpoints
                 session.User.Id,
                 accepted ? "approved" : "rejected");
             TelemetryRedaction.EmitInvestigationTrace(logger, trace,
-                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo", ActorKey);
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo", ActorKey, "review.completed");
         }
 
         return outcome switch

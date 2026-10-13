@@ -69,7 +69,7 @@ public static partial class TelemetryRedaction
 
     private static readonly HashSet<string> AllowedEventNames = new(StringComparer.Ordinal)
     {
-        "investigation.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+        "investigation.completed", "review.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
     };
 
     private static readonly HashSet<string> AllowedTools = new(StringComparer.Ordinal) { "reserve-calc", "citation-search" };
@@ -141,7 +141,7 @@ public static partial class TelemetryRedaction
     // M-08: one investigation trace correlating basis, model, tools, citations, decision, actor and outcome.
     // Business content stays in the SQL audit tables; this carries only identifiers and opaque actors.
     public static IReadOnlyDictionary<string, string> InvestigationTrace(
-        InvestigationTraceRecord trace, string serviceVersion, string environment, byte[] actorKey)
+        InvestigationTraceRecord trace, string serviceVersion, string environment, byte[] actorKey, string eventName = "investigation.completed")
     {
         if (!AllowedDecisions.Contains(trace.Decision))
         {
@@ -150,7 +150,7 @@ public static partial class TelemetryRedaction
 
         var attributes = Redact(new KeyValuePair<string, object?>[]
         {
-            new("event.name", "investigation.completed"),
+            new("event.name", eventName),
             new("trace.id", trace.TraceId),
             new("investigation.basis_version", trace.BasisVersion),
             new("gen_ai.request.model", trace.ModelDeployment),
@@ -172,8 +172,8 @@ public static partial class TelemetryRedaction
 
     // Emission path: sanitized attributes become structured log properties (AppTraces Properties in Log Analytics).
     public static void EmitInvestigationTrace(
-        ILogger logger, InvestigationTraceRecord trace, string serviceVersion, string environment, byte[] actorKey) =>
-        Emit(logger, LogLevel.Information, InvestigationTrace(trace, serviceVersion, environment, actorKey));
+        ILogger logger, InvestigationTraceRecord trace, string serviceVersion, string environment, byte[] actorKey, string eventName = "investigation.completed") =>
+        Emit(logger, LogLevel.Information, InvestigationTrace(trace, serviceVersion, environment, actorKey, eventName));
 
     public static void EmitSecurityEvent(ILogger logger, string eventName, string serviceVersion, string environment)
     {

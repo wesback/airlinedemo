@@ -289,11 +289,30 @@ run "M-14_app_sql_contract_excludes_ddl_and_audit_mutation" {
 }
 
 run "M-14_migration_identity_has_only_sql_management_scope" {
-  command = plan
+  command = apply
 
   assert {
     condition     = azurerm_role_assignment.migration_sql.role_definition_name == "SQL DB Contributor" && azurerm_mssql_server.sql.name == "sql-demo-test"
     error_message = "Migration identity must be scoped to the SQL server management plane only."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.migration_sql.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Sql/servers/sql-demo-test" && azurerm_role_assignment.migration_sql.principal_type == "ServicePrincipal"
+    error_message = "Migration SQL grant scope must equal the SQL server resource id exactly; a widened or different scope must fail."
+  }
+}
+
+run "M-14_terraform_identity_scope_is_exact_resource_group" {
+  command = apply
+
+  assert {
+    condition     = azurerm_role_assignment.terraform_contributor.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test" && azurerm_role_assignment.terraform_contributor.role_definition_name == "Contributor"
+    error_message = "Terraform identity must hold Contributor on exactly the demo resource group; subscription or other scopes must fail."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.terraform_contributor.principal_id == "33333333-3333-3333-3333-333333333333"
+    error_message = "Terraform Contributor grant must be bound to the terraform_principal_object_id variable."
   }
 }
 
