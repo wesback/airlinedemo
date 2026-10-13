@@ -6,6 +6,8 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Investigation/SyntheticFixtures/*.txt" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.24.0" />
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.24.0" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
 </Project>
