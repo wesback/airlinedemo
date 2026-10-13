@@ -162,12 +162,17 @@ public static class EvidenceIntake
 
     }
 
+    private static readonly HashSet<string> AllowedCatalogKeys = new(StringComparer.Ordinal)
+    {
+        "Type", "Pages", "Version", "Metadata", "MarkInfo", "Lang", "PageLabels", "ViewerPreferences", "Outlines",
+    };
+
     // Decides active, embedded, form, and image content from parsed PDF entries, never from raw bytes,
-    // so ordinary text that contains marker words is accepted.
+    // so ordinary text that contains marker words is accepted. The catalog is an allowlist: any other key is rejected.
     private static void RejectActiveContent(string name, PdfDocument pdf)
     {
         var catalog = pdf.Structure.Catalog.CatalogDictionary.Data;
-        foreach (var key in new[] { "OpenAction", "AA", "AcroForm", "AF" })
+        foreach (var key in new[] { "OpenAction", "AA", "Names", "AcroForm", "AF", "EmbeddedFiles", "JavaScript", "Launch" })
         {
             if (catalog.ContainsKey(key))
             {
@@ -175,89 +180,37 @@ public static class EvidenceIntake
             }
         }
 
-        // Name tree entries for JavaScript and embedded files live under the catalog's /Names dictionary,
-        // which may itself be an indirect reference.
-        if (catalog.TryGetValue("Names", out var names)
-            && Resolve(pdf, names) is DictionaryToken nameTree)
+        foreach (var key in catalog.Keys)
         {
-            foreach (var key in new[] { "JavaScript", "EmbeddedFiles" })
+            if (!AllowedCatalogKeys.Contains(key))
             {
-                if (nameTree.Data.ContainsKey(key))
-                {
-                    throw ActiveContentFailure(name, $"/{key} name tree");
-                }
+                throw ActiveContentFailure(name, $"/{key} in the document catalog is not allowed");
             }
         }
     }
 
-    // Page annotations can carry scripts, form fields, or file attachments; decided from parsed dictionaries.
-    private static void RejectAnnotationContent(string name, PdfDocument pdf, Page page)
+    // Any page annotation, page-level additional action, or image/form XObject is rejected from parsed dictionaries.
+    private static void RejectPageContent(string name, PdfDocument pdf, Page page)
     {
-        if (!page.Dictionary.Data.TryGetValue("Annots", out var annots))
+        var dictionary = page.Dictionary.Data;
+        if (dictionary.ContainsKey("Annots"))
         {
-            return;
+            throw ActiveContentFailure(name, "/Annots on a page");
         }
 
-        if (Resolve(pdf, annots) is not ArrayToken annotationList)
+        if (dictionary.TryGetValue("Resources", out var resourcesToken)
+            && Resolve(pdf, resourcesToken) is DictionaryToken resources
+            && resources.Data.TryGetValue("XObject", out var xObjectsToken)
+            && Resolve(pdf, xObjectsToken) is DictionaryToken xObjects)
         {
-            return;
-        }
-
-        foreach (var entry in annotationList.Data)
-        {
-            if (Resolve(pdf, entry) is not DictionaryToken annotation)
+            foreach (var xObjectToken in xObjects.Data.Values)
             {
-                continue;
-            }
-
-            var dictionary = annotation.Data;
-            foreach (var key in new[] { "AA", "JS", "FS" })
-            {
-                if (dictionary.ContainsKey(key))
+                if (Resolve(pdf, xObjectToken) is StreamToken xObject
+                    && xObject.StreamDictionary.Data.TryGetValue("Subtype", out var subtype)
+                    && Resolve(pdf, subtype) is NameToken { Data: "Image" or "Form" } subtypeName)
                 {
-                    throw ActiveContentFailure(name, $"/{key} on a page annotation");
+                    throw ActiveContentFailure(name, $"/{subtypeName.Data} XObject on a page");
                 }
-            }
-
-            if (dictionary.TryGetValue("A", out var action))
-            {
-                RejectActionChain(name, pdf, action, 0);
-            }
-
-            if (dictionary.TryGetValue("Subtype", out var subtype)
-                && Resolve(pdf, subtype) is NameToken { Data: "Widget" or "FileAttachment" } subtypeName)
-            {
-                throw ActiveContentFailure(name, $"/{subtypeName.Data} page annotation");
-            }
-        }
-    }
-
-    // Follows an action and its /Next chain; any JavaScript or Launch action in the chain is active content.
-    private static void RejectActionChain(string name, PdfDocument pdf, IToken token, int depth)
-    {
-        if (depth > 16 || Resolve(pdf, token) is not DictionaryToken action)
-        {
-            return;
-        }
-
-        if (action.Data.TryGetValue("S", out var actionType)
-            && Resolve(pdf, actionType) is NameToken { Data: "JavaScript" or "Launch" } activeType)
-        {
-            throw ActiveContentFailure(name, $"/{activeType.Data} action on a page annotation");
-        }
-
-        if (action.Data.TryGetValue("Next", out var next))
-        {
-            if (Resolve(pdf, next) is ArrayToken nextActions)
-            {
-                foreach (var nextAction in nextActions.Data)
-                {
-                    RejectActionChain(name, pdf, nextAction, depth + 1);
-                }
-            }
-            else
-            {
-                RejectActionChain(name, pdf, next, depth + 1);
             }
         }
     }
@@ -299,12 +252,27 @@ public static class EvidenceIntake
         }
     }
 
-    // FlateDecode streams are inflated only up to the per-stream limit, so a compression bomb is never fully materialized.
+    // Accepted: unfiltered streams, single FlateDecode streams (inflated only up to the limit), and hex/ASCII85 chains
+    // that cannot expand. Any other filter chain is rejected before it is decoded.
     private static long DecodedLength(string name, PdfDocument pdf, StreamToken stream)
     {
+        if (!stream.StreamDictionary.Data.ContainsKey("Filter"))
+        {
+            return stream.Data.Count;
+        }
+
+        if (IsNonExpandingFilterChain(pdf, stream.StreamDictionary))
+        {
+            // Hex and ASCII85 decoding never yield more bytes than their input, which is already bounded per document.
+            return stream.Decode(DefaultFilterProvider.Instance).Count;
+        }
+
         if (!IsFlateOnly(pdf, stream.StreamDictionary))
         {
-            return stream.Decode(DefaultFilterProvider.Instance).Count;
+            throw new EvidenceIntakeException(
+                $"Document '{name}' has a content stream with an unsupported filter chain; it is rejected.",
+                EvidenceFailureKind.UnsupportedFormat,
+                true);
         }
 
         var limit = EvidenceLimits.MaxDecodedBytesPerStream;
@@ -333,6 +301,22 @@ public static class EvidenceIntake
         }
 
         return total;
+    }
+
+    private static bool IsNonExpandingFilterChain(PdfDocument pdf, DictionaryToken dictionary)
+    {
+        if (!dictionary.Data.TryGetValue("Filter", out var filter))
+        {
+            return false;
+        }
+
+        var resolved = Resolve(pdf, filter);
+        var names = resolved is ArrayToken array
+            ? array.Data.Select(entry => Resolve(pdf, entry)).ToList()
+            : [resolved];
+
+        return names.Count > 0 && names.All(entry =>
+            entry is NameToken { Data: "ASCIIHexDecode" or "AHx" or "ASCII85Decode" or "A85" });
     }
 
     private static bool IsFlateOnly(PdfDocument pdf, DictionaryToken dictionary)
@@ -398,7 +382,7 @@ public static class EvidenceIntake
                     }
                 }
 
-                RejectAnnotationContent(document.Name, pdf, pdfPage);
+                RejectPageContent(document.Name, pdf, pdfPage);
                 MeasureDecodedContent(document.Name, pdf, pdfPage, ref decodedTotal);
                 // Decoded content streams expose inline images even when compressed; reject them as image payloads.
                 if (pdfPage.GetImages().Any())
