@@ -108,14 +108,45 @@ public sealed record ApprovedModelManifest(
 public sealed record ModelRequest(string? EvidenceVersion, string? DataRegion, string Content);
 
 /// <summary>
-/// Registry of SHA-256 hashes of synthetic evidence items, filled from the committed synthetic fixtures. Only content
-/// whose exact hash is registered may be sent to a model.
+/// Registry of SHA-256 hashes of synthetic evidence items. The only way to fill it is <see cref="FromFixtureDirectory"/>,
+/// so registered content always comes from committed synthetic fixtures. Only content whose exact hash is registered
+/// may be sent to a model.
 /// </summary>
 public sealed class SyntheticContentRegistry
 {
     private readonly HashSet<string> _hashes = new(StringComparer.Ordinal);
 
-    public string Register(string content)
+    /// <summary>Builds the registry from every file in a committed synthetic fixture directory.</summary>
+    public static SyntheticContentRegistry FromFixtureDirectory(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            throw new ModelGateException("synthetic fixture directory not found");
+        }
+
+        var files = Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray();
+        if (files.Length == 0)
+        {
+            throw new ModelGateException("synthetic fixture directory is empty");
+        }
+
+        var registry = new SyntheticContentRegistry();
+        foreach (var file in files)
+        {
+            // Trailing newlines from the file are not part of the evidence item sent to the model.
+            var content = File.ReadAllText(file).TrimEnd('\r', '\n');
+            if (!ModelCallGate.IsMarkedSynthetic(content))
+            {
+                throw new ModelGateException($"synthetic fixture '{Path.GetFileName(file)}' is not marked as synthetic evidence");
+            }
+
+            registry.Register(content);
+        }
+
+        return registry;
+    }
+
+    private string Register(string content)
     {
         var hash = Sha256Hex(content);
         _hashes.Add(hash);
@@ -147,6 +178,9 @@ public static class ModelCallGate
     // Positive character allowlist on the request shape. It is not a personal-data scan and does not decide authorization.
     private static readonly Regex SyntheticBodyPattern =
         new(@"^SYNTHETIC EVIDENCE: [A-Za-z0-9 .,:;'()\-]*\z", RegexOptions.Compiled);
+
+    /// <summary>True when content carries the synthetic marker. Used to vet fixtures; not an authorization decision.</summary>
+    internal static bool IsMarkedSynthetic(string content) => content.StartsWith(SyntheticMarker, StringComparison.Ordinal);
 
     /// <summary>Throws unless the manifest is usable and the request is allowed; returns the trace to record.</summary>
     public static ModelCallTrace Authorize(

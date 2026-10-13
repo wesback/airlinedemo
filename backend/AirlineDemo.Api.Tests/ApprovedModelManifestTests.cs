@@ -37,17 +37,25 @@ public class ApprovedModelManifestTests
     private static ModelRequest Synthetic(string body = DefaultBody, string region = ApprovedRegion) =>
         new("evidence-v1", region, Marked(body));
 
-    /// <summary>Registry holding the default synthetic evidence plus any extra bodies, as the committed fixtures would.</summary>
+    /// <summary>Registry built from a fixture directory holding the default synthetic evidence plus any extra bodies.</summary>
     private static SyntheticContentRegistry Registry(params string[] bodies)
     {
-        var registry = new SyntheticContentRegistry();
-        registry.Register(Marked(DefaultBody));
-        foreach (var body in bodies)
+        var dir = Path.Combine(Path.GetTempPath(), "synthetic-fixtures-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
         {
-            registry.Register(Marked(body));
-        }
+            File.WriteAllText(Path.Combine(dir, "default.txt"), Marked(DefaultBody));
+            for (var i = 0; i < bodies.Length; i++)
+            {
+                File.WriteAllText(Path.Combine(dir, $"extra-{i}.txt"), Marked(bodies[i]));
+            }
 
-        return registry;
+            return SyntheticContentRegistry.FromFixtureDirectory(dir);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     private static string ShippedManifestPath()
@@ -86,6 +94,7 @@ public class ApprovedModelManifestTests
     }
 
     [Theory]
+    [InlineData("manifestVersion")]
     [InlineData("deploymentName")]
     [InlineData("model")]
     [InlineData("apiVersion")]
@@ -209,11 +218,32 @@ public class ApprovedModelManifestTests
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
             SyntheticContentRegistry.Sha256Hex("abc"));
 
-        var registry = new SyntheticContentRegistry();
-        var hash = registry.Register("abc");
-        Assert.Equal(SyntheticContentRegistry.Sha256Hex("abc"), hash);
-        Assert.True(registry.IsRegistered("abc"));
-        Assert.False(registry.IsRegistered("abd"));
+        var registry = Registry("abc");
+        Assert.True(registry.IsRegistered(Marked("abc")));
+        Assert.False(registry.IsRegistered(Marked("abd")));
+        Assert.False(new SyntheticContentRegistry().IsRegistered(Marked("abc")));
+    }
+
+    [Fact]
+    public void Registry_only_accepts_marked_content_from_a_fixture_directory()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "synthetic-fixtures-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            Assert.Throws<ModelGateException>(() => SyntheticContentRegistry.FromFixtureDirectory(dir));
+
+            File.WriteAllText(Path.Combine(dir, "real.txt"), "passenger Jane Smith in seat 12A");
+            var ex = Assert.Throws<ModelGateException>(() => SyntheticContentRegistry.FromFixtureDirectory(dir));
+            Assert.Contains("not marked as synthetic", ex.Message);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+
+        Assert.Throws<ModelGateException>(() =>
+            SyntheticContentRegistry.FromFixtureDirectory(Path.Combine(dir, "missing")));
     }
 
     [Theory]
