@@ -1,0 +1,287 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 148,
+  "branch": "ai-sdlc/issue-148",
+  "commitSha": "8a3a15700137f2cf391cd4e7d468a6534731b3ed",
+  "round": 1,
+  "pipelineVersion": "bdb6534",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The backend authentication boundary remains overrideable, and the mock-plan test can pass with a misrouted model private endpoint. Both leave stated acceptance criteria unenforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 12,
+          "message": "The backend’s Entra-only requirement can be bypassed with an init-time backend configuration override.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The backend block sets use_azuread_auth = true, but Terraform accepts backend settings through -backend-config. The separately validated terraform_state_backend variable does not constrain backend initialization; the comment only asks CI not to override the setting.",
+            "failureScenario": "An operator initializes Terraform with -backend-config=use_azuread_auth=false and access-key credentials. The backend can then use non-Entra authentication while the variable validation still passes, contrary to the backend identity criterion (OWASP A07:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 133,
+          "message": "M-18's private-routing test does not verify the model endpoint's actual subnet attachment or target resource.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The private endpoint assertions check endpoint keys, resource subresources, and the configured subnet's CIDR, but do not check each endpoint's subnet_id or private_connection_resource_id.",
+            "failureScenario": "If the model endpoint is attached to the app subnet or targets a different resource, the current assertions still pass. The test therefore does not catch a broken model private route required by M-18."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The mock-plan tests cover many network boundaries, but they do not verify SQL at-rest encryption, actual backend state locking, or the model DNS association and VNet link targets. These gaps leave acceptance criteria unenforced by tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 195,
+          "message": "M-14: The encryption test does not assert SQL at-rest encryption. Add an assertion that fails when the SQL transparent data encryption resource is missing.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The encryption test checks Blob encryption, Key Vault purge protection, and SQL TLS and authentication, but never asserts the azurerm_mssql_server_transparent_data_encryption.sql resource.",
+            "failureScenario": "If SQL transparent data encryption is removed, the mock plan and all current assertions still pass, leaving the SQL at-rest encryption requirement in M-14 untested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 183,
+          "message": "The backend locking criterion has no test of actual state-lock behavior. The disconnected variable validation does not establish that backend operations require a lock.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The backend declaration test checks only for use_azuread_auth = true. The lock rejection test validates terraform_state_backend.locking_enabled, which is a separate input and does not exercise backend state locking.",
+            "failureScenario": "If the backend cannot acquire a state lock during a state operation, the mock-plan tests still pass because they do not exercise locking; the backend identity and locking criterion is not fully tested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 164,
+          "message": "M-18: The private DNS assertions do not verify that the model endpoint is associated with the model zone and that the zone is linked to the demo VNet.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The model DNS assertions check the zone name, VNet link name, and that the endpoint zone group contains one zone ID, but do not compare that ID with the model zone ID or the link's virtual_network_id with the demo VNet ID.",
+            "failureScenario": "If the model endpoint is associated with a different DNS zone, or the model zone is linked to another VNet, these assertions still pass while private model name resolution can fail, leaving M-18 routing unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The backend authentication boundary can be bypassed with an initialization override. The M-14 test also does not cover SQL transparent data encryption.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 12,
+          "message": "The backend’s Entra-only requirement can be overridden during initialization, so this configuration does not enforce the required identity boundary.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The azurerm backend declares use_azuread_auth = true, but Terraform accepts backend-config overrides. The separately validated terraform_state_backend variable does not constrain the actual backend configuration.",
+            "failureScenario": "An operator runs terraform init with use_azuread_auth=false and supplies access-key credentials. The backend can then use non-Entra authentication, contrary to the acceptance criterion requiring Entra identity (OWASP A07:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 261,
+          "message": "M-14’s test does not verify SQL at-rest encryption; removing the transparent data encryption resource would not make this test fail.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-14 encryption assertions check Blob infrastructure encryption and Key Vault purge protection, but do not inspect azurerm_mssql_server_transparent_data_encryption.sql.",
+            "failureScenario": "If the SQL transparent data encryption resource is removed, the mock-plan test still passes. M-14’s SQL encryption-at-rest requirement would then lack a test that fails on the broken implementation."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
