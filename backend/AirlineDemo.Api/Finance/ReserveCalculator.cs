@@ -122,6 +122,19 @@ public static class ReserveCalculator
             }
         }
 
+        if (usage is not null && rates is not null)
+        {
+            // Every contract line with a rate for the period is required; an omitted usage line must not read as zero.
+            var usageLines = usage.Entries.Select(e => e.ContractLine).ToHashSet(StringComparer.Ordinal);
+            foreach (var line in rates.Entries.Where(r => r.Period == period).Select(r => r.ContractLine).Distinct(StringComparer.Ordinal))
+            {
+                if (!usageLines.Contains(line))
+                {
+                    blockers.Add(new BlockReason("usage-line-missing", $"No usage reported for required contract line {line} in {period}."));
+                }
+            }
+        }
+
         if (usage is null || rates is null || blockers.Count > 0)
         {
             return new ReserveDraft(draftId, version, period, ReserveDraftStatus.Blocked,

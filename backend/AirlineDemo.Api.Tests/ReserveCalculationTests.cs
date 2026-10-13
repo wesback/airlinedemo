@@ -19,6 +19,8 @@ public class ReserveCalculationTests
     private static RateReport StandardRates() =>
         Rates(new RateEntry("FH-A", Period, 0.10m), new RateEntry("CYC-B", Period, 12.345m));
 
+    private static RateReport FhRates() => Rates(new RateEntry("FH-A", Period, 0.10m));
+
     private static ReserveDraft Calc(UsageReport? usage, RateReport? rates, int version = 1) =>
         ReserveCalculator.Calculate("DRAFT-1", version, Period, usage, rates);
 
@@ -47,7 +49,7 @@ public class ReserveCalculationTests
     [Fact]
     public void Mismatched_line_is_discrepancy_not_approved_and_usage_is_unchanged()
     {
-        var draft = Calc(Usage(new UsageEntry("FH-A", 2m, 0.10m)), StandardRates());
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m, 0.10m)), FhRates());
 
         Assert.Equal(ReserveDraftStatus.Discrepancy, draft.Status);
         Assert.Equal(2m, draft.Lines[0].Units);
@@ -62,7 +64,7 @@ public class ReserveCalculationTests
     public void Mismatched_total_is_discrepancy_not_approved()
     {
         var draft = Calc(new UsageReport("USE-2026-09", Period, [new UsageEntry("FH-A", 2m)], ReportedTotal: 99.99m),
-            StandardRates());
+            FhRates());
 
         Assert.Equal(ReserveDraftStatus.Discrepancy, draft.Status);
         Assert.Contains(draft.Discrepancies, d => d.StartsWith("Total:", StringComparison.Ordinal));
@@ -73,7 +75,7 @@ public class ReserveCalculationTests
     [Fact]
     public void Discrepancy_keeps_source_reports_period_rates_and_basis()
     {
-        var draft = Calc(Usage(new UsageEntry("FH-A", 2m, 0.10m)), StandardRates());
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m, 0.10m)), FhRates());
 
         Assert.Equal("USE-2026-09", draft.UsageReportId);
         Assert.Equal("RATE-2026-09", draft.RateReportId);
@@ -140,6 +142,19 @@ public class ReserveCalculationTests
         Assert.Contains(draft.Blockers, b => b.Code == "rate-coverage-overlap");
         Assert.Empty(draft.Lines);
         Assert.Null(draft.PayableTotal);
+    }
+
+    [Fact]
+    public void Omitted_required_usage_line_is_blocked_not_treated_as_zero()
+    {
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
+
+        Assert.Equal(ReserveDraftStatus.Blocked, draft.Status);
+        Assert.Contains(draft.Blockers, b => b.Code == "usage-line-missing" && b.Detail.Contains("CYC-B"));
+        Assert.Empty(draft.Lines);
+        Assert.Null(draft.PayableTotal);
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, "ok", At));
     }
 
     [Fact]
@@ -227,7 +242,7 @@ public class ReserveCalculationTests
     [Fact]
     public void Approve_records_simulated_decision_with_provenance_and_no_invoice()
     {
-        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), FhRates());
 
         var record = ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, " reviewed ", At);
 
@@ -261,16 +276,30 @@ public class ReserveCalculationTests
     [Fact]
     public void Correction_creates_new_version_without_inherited_approval()
     {
-        var first = Calc(Usage(new UsageEntry("FH-A", 2m, 0.10m)), StandardRates());
-        var corrected = Calc(Usage(new UsageEntry("FH-A", 2m, 0.20m)), StandardRates(), version: 2);
+        var first = Calc(Usage(new UsageEntry("FH-A", 2m, 0.20m)), FhRates());
+        var firstApproval = ReserveCalculator.Review(first, FinanceDecisionKind.Approve, Reviewer, "v1 ok", At);
+        Assert.Equal(1, firstApproval.DraftVersion);
+        Assert.Equal(0.20m, firstApproval.PayableTotal);
 
-        Assert.Equal(ReserveDraftStatus.Discrepancy, first.Status);
+        var corrected = Calc(Usage(new UsageEntry("FH-A", 3m, 0.30m)), FhRates(), version: 2);
         Assert.Equal(ReserveDraftStatus.ReadyForReview, corrected.Status);
         Assert.Equal(2, corrected.Version);
+        Assert.Equal(0.30m, corrected.PayableTotal);
 
-        var record = ReserveCalculator.Review(corrected, FinanceDecisionKind.Approve, Reviewer, "corrected", At);
-        Assert.Equal(2, record.DraftVersion);
+        var returned = ReserveCalculator.Review(corrected, FinanceDecisionKind.Return, Reviewer, "recheck", At);
+        Assert.Equal(2, returned.DraftVersion);
+        Assert.Equal(FinanceDecisionKind.Return, returned.Decision);
+        Assert.False(returned.InvoiceIssued);
+
+        var approval = ReserveCalculator.Review(corrected, FinanceDecisionKind.Approve, Reviewer, "corrected", At);
+        Assert.Equal(2, approval.DraftVersion);
+        Assert.Equal(0.30m, approval.PayableTotal);
+        Assert.Equal(1, firstApproval.DraftVersion);
+        Assert.Equal(0.20m, firstApproval.PayableTotal);
+
+        var blockedV3 = Calc(Usage(new UsageEntry("FH-A", 3m, 0.30m)), null, version: 3);
+        Assert.Equal(ReserveDraftStatus.Blocked, blockedV3.Status);
         Assert.Throws<InvalidOperationException>(() =>
-            ReserveCalculator.Review(first, FinanceDecisionKind.Approve, Reviewer, "stale", At));
+            ReserveCalculator.Review(blockedV3, FinanceDecisionKind.Approve, Reviewer, "no inherited approval", At));
     }
 }
