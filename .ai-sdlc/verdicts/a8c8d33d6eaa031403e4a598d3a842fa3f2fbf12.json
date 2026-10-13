@@ -1,0 +1,395 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "a8c8d33d6eaa031403e4a598d3a842fa3f2fbf12",
+  "round": 0,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake misses required closed-allowlist checks and can fully materialize oversized multi-filter streams before enforcing decoded-size limits.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 155,
+          "message": "The parsed-content checks do not enforce the required closed allowlist, so PDFs with unapproved catalog entries or page content can be accepted as evidence.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "RejectActiveContent checks a short list of forbidden catalog keys, but does not enforce the required catalog allowlist. The page checks also do not reject every /Annots entry or /Form XObjects.",
+            "failureScenario": "A text PDF with an otherwise clean catalog plus an unrecognized /Foo entry passes the catalog check; if text extraction succeeds, Process returns Complete. A PDF with a benign annotation can also pass, despite the requirement to reject any page /Annots entry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 306,
+          "message": "Decoded-size limits are checked after fully decoding non-Flate-only streams, allowing a compressed PDF to consume excessive resources before rejection.",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "DecodedLength calls stream.Decode(...).Count for streams that are not exactly a single FlateDecode filter, then checks the decoded length in MeasureDecodedContent.",
+            "failureScenario": "A PDF within the input byte limit has a multi-filter stream that expands beyond the decoded-stream limit. Decode materializes the expanded stream before the limit check, so the request can consume excessive memory before failing. This is an unbounded resource risk (A06:2025, Insecure Design)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation covers many intake and storage behaviors, but it does not enforce several explicit catalog and page allowlist rules. The non-Flate decoding path also materializes stream data before applying the required size bound.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 179,
+          "message": "Enforce the catalog-key allowlist; currently an unlisted catalog entry can pass intake.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "RejectActiveContent rejects four catalog keys and checks two resolved name-tree entries, but it does not enforce the issue's catalog-key allowlist.",
+            "failureScenario": "A parseable text PDF with an otherwise allowed catalog plus an unrecognized entry such as /CustomKey can pass validation and be returned as Complete. The acceptance criteria require rejection when the catalog contains any entry outside the specified allowlist."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 411,
+          "message": "The page checks do not enforce the stated rules for all annotations and Form XObjects.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The page loop calls RejectAnnotationContent, which permits annotations that lack the checked keys, and GetImages checks images without inspecting page /Resources /XObject entries for /Form subtypes.",
+            "failureScenario": "A parseable text PDF with a benign /Annots entry, or with a /Resources /XObject entry whose subtype is /Form, can pass these checks and be returned as Complete. The acceptance criteria require rejection for any page /Annots entry and for /Form XObjects."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 306,
+          "message": "The decoded-stream limit is checked after decoding for non-Flate streams, allowing oversized decoded data to be materialized first.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "DecodedLength uses stream.Decode(...).Count for streams that are not Flate-only, then checks the decoded length against the limit.",
+            "failureScenario": "A PDF under the input-byte limit contains a small stream with multiple filters that expands beyond 10 MB. Decode materializes the expanded stream before the size check, so a crafted input can consume excessive memory before intake rejects it. This is an OWASP A06:2025 Insecure Design risk."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A multi-filter PDF content stream can bypass the intended bounded decompression path and consume excessive memory before intake rejects it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 315,
+          "message": "Multi-filter content streams are fully decoded before their size is checked, allowing a small compressed PDF to exhaust service memory (A06:2025).",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "DecodedLength fully decodes any content stream that is not a single FlateDecode stream, then checks its length in MeasureDecodedContent. The size limit therefore runs after decoding has allocated the output.",
+            "failureScenario": "A caller submits a PDF under the input byte limit with a content stream using ASCII85Decode followed by FlateDecode that expands beyond the decoded-stream limit. PdfPig materializes the expanded stream before the limit check, potentially exhausting service memory and disrupting other intake requests. This is OWASP A06:2025, Insecure Design."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 272,
+      "total": 331,
+      "percent": 82.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 272,
+          "total": 331,
+          "missed": [
+            91,
+            92,
+            147,
+            148,
+            149,
+            150,
+            151,
+            190,
+            202,
+            203,
+            209,
+            210,
+            225,
+            232,
+            239,
+            240,
+            252,
+            253,
+            254,
+            255,
+            256,
+            257,
+            261,
+            262,
+            263,
+            269,
+            270,
+            276,
+            277,
+            293,
+            294,
+            295,
+            296,
+            297,
+            326,
+            327,
+            328,
+            329,
+            330,
+            331,
+            332,
+            335,
+            347,
+            348,
+            349,
+            381,
+            382,
+            383,
+            384,
+            385,
+            423,
+            424,
+            425,
+            426,
+            427,
+            448,
+            449,
+            455,
+            456
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
