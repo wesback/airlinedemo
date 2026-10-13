@@ -185,9 +185,9 @@ public sealed class EvidenceIntakeTests
 
         var result = EvidenceIntake.Process([new("objstm.pdf", pdf)]);
 
-        // Raw-token matching was removed: this stub does not parse, so it fails as Corrupt (retryable, no evidence).
+        // Object streams are rejected by their decoded /Type name before PdfPig inflates them (UnsupportedFormat, retryable).
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
-        Assert.Equal(EvidenceFailureKind.Corrupt, result.Failure!.Kind);
+        Assert.Equal(EvidenceFailureKind.UnsupportedFormat, result.Failure!.Kind);
         Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }
@@ -224,6 +224,36 @@ public sealed class EvidenceIntakeTests
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: a catalog key outside the allowlist is rejected on its own, even when it is not a known active-content key.
+    [Fact]
+    public void UnlistedCatalogKeyIsRejectedRetryably()
+    {
+        var result = EvidenceIntake.Process([new("catalog-key.pdf", PdfWithPages(1, catalogExtra: "/Custom 1 0 R "))]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: each prohibited active-content key on a page is rejected on its own, one PDF per rule.
+    [Theory]
+    [InlineData("/OpenAction << /S /JavaScript >> ")]
+    [InlineData("/Names << >> ")]
+    [InlineData("/AcroForm << >> ")]
+    [InlineData("/EmbeddedFiles << >> ")]
+    [InlineData("/JavaScript << >> ")]
+    [InlineData("/Launch << >> ")]
+    public void ProhibitedPageKeyIsRejectedRetryably(string pageExtra)
+    {
+        var result = EvidenceIntake.Process([new("page-key.pdf", PdfWithPages(1, pageExtra: pageExtra))]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
         Assert.True(result.Failure.Retryable);
         Assert.Null(result.Content);
     }

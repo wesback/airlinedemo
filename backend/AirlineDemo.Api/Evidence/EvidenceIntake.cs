@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Filters;
@@ -160,6 +161,28 @@ public static class EvidenceIntake
                 true);
         }
 
+        RejectCompressedStructure(document);
+    }
+
+    private static readonly Regex NameRegex = new(@"/([^\s/\[\]<>(){}%]+)", RegexOptions.Compiled);
+
+    // Object and xref streams are compressed structure that PdfPig inflates while opening the file, before any
+    // pre-parse limit can apply. They are rejected by their /Type name (with #xx escapes decoded), so the limits hold.
+    private static void RejectCompressedStructure(EvidenceDocument document)
+    {
+        var text = Encoding.Latin1.GetString(document.Bytes);
+        foreach (Match match in NameRegex.Matches(text))
+        {
+            var name = Regex.Replace(match.Groups[1].Value, "#([0-9A-Fa-f]{2})", m =>
+                ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+            if (name is "ObjStm" or "XRef")
+            {
+                throw new EvidenceIntakeException(
+                    $"Document '{document.Name}' uses compressed object or cross-reference streams, which are not supported.",
+                    EvidenceFailureKind.UnsupportedFormat,
+                    true);
+            }
+        }
     }
 
     private static readonly HashSet<string> AllowedCatalogKeys = new(StringComparer.Ordinal)
@@ -193,6 +216,14 @@ public static class EvidenceIntake
     private static void RejectPageContent(string name, PdfDocument pdf, Page page)
     {
         var dictionary = page.Dictionary.Data;
+        foreach (var key in new[] { "AF", "AA", "OpenAction", "Names", "AcroForm", "EmbeddedFiles", "JavaScript", "Launch" })
+        {
+            if (dictionary.ContainsKey(key))
+            {
+                throw ActiveContentFailure(name, $"/{key} on a page");
+            }
+        }
+
         if (dictionary.ContainsKey("Annots"))
         {
             throw ActiveContentFailure(name, "/Annots on a page");
@@ -374,14 +405,6 @@ public static class EvidenceIntake
             for (var page = 1; page <= pages; page++)
             {
                 var pdfPage = pdf.GetPage(page);
-                foreach (var key in new[] { "AF", "AA" })
-                {
-                    if (pdfPage.Dictionary.Data.ContainsKey(key))
-                    {
-                        throw ActiveContentFailure(document.Name, $"/{key} on page {page}");
-                    }
-                }
-
                 RejectPageContent(document.Name, pdf, pdfPage);
                 MeasureDecodedContent(document.Name, pdf, pdfPage, ref decodedTotal);
                 // Decoded content streams expose inline images even when compressed; reject them as image payloads.
