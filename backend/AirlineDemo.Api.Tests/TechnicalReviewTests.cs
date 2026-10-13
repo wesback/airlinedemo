@@ -97,6 +97,7 @@ public sealed class TechnicalReviewTests : IDisposable
     private static object Command(long revision, BasisVersion basis, string decision = "accept", string? reason = "Evidence supports release.") =>
         new { expectedRevision = revision, decision, reason, basisVersion = basis.Version, basisDigest = basis.BasisDigest };
 
+    // AC: M-08
     [Fact]
     public async Task Authorized_reviewer_rejection_is_recorded_and_does_not_authorize_acceptance()
     {
@@ -124,6 +125,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.DoesNotContain(EvidenceText, decision.Detail);
     }
 
+    // AC: M-08
     [Fact]
     public async Task Authorized_reviewer_records_reasoned_decision_against_current_basis()
     {
@@ -157,6 +159,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.DoesNotContain(EvidenceText, decision.Detail);
     }
 
+    // AC: M-02
     [Fact]
     public async Task Forged_role_actor_and_case_fields_from_non_reviewer_are_denied_without_mutation()
     {
@@ -183,6 +186,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-002"));
     }
 
+    // AC: M-02
     [Fact]
     public async Task Forged_actor_and_case_fields_from_reviewer_are_ignored()
     {
@@ -212,6 +216,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-002"));
     }
 
+    // AC: M-02
     [Fact]
     public async Task Non_reviewer_role_is_denied_without_decision()
     {
@@ -226,6 +231,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-001"));
     }
 
+    // AC: M-08
     [Fact]
     public async Task Decision_without_reason_is_denied_without_decision()
     {
@@ -242,6 +248,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-001"));
     }
 
+    // AC: M-10
     [Fact]
     public async Task Decision_against_stale_basis_is_denied_without_decision()
     {
@@ -257,6 +264,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-001"));
     }
 
+    // AC: M-02
     [Fact]
     public async Task Decision_without_anti_forgery_token_is_denied_without_decision()
     {
@@ -272,6 +280,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-001"));
     }
 
+    // AC: M-02
     [Fact]
     public async Task Stale_revision_is_denied_without_decision()
     {
@@ -286,6 +295,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-001"));
     }
 
+    // AC: M-02
     [Fact]
     public async Task Cross_case_access_reveals_nothing_and_changes_nothing()
     {
@@ -302,6 +312,7 @@ public sealed class TechnicalReviewTests : IDisposable
         Assert.Equal(0, DecisionCount("case-002"));
     }
 
+    // AC: M-10
     [Fact]
     public async Task Later_basis_marks_prior_decision_non_current_and_keeps_history()
     {
