@@ -304,6 +304,36 @@ public sealed class EvidenceIntakeTests
             store.VerifyWitness("case-1", 1, second.ContentDigest!));
     }
 
+    // AC: inline images (BI ... ID ... EI) carry no /Subtype /Image key and must still be rejected.
+    [Fact]
+    public void InlineImagePayloadIsRejectedRetryably()
+    {
+        var pdf = Encoding.ASCII.GetBytes(
+            "%PDF-1.4\n4 0 obj << /Length 40 >> stream\nBT (Text) Tj ET\nBI /W 1 /H 1 /BPC 8 /CS /G ID \u0000 EI\nendstream endobj\n%%EOF\n");
+
+        var result = EvidenceIntake.Process([new("inline.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: a witness/basis digest must match its content; a fabricated completed result must not be stored.
+    [Fact]
+    public void BasisWithDigestMismatchingContentIsRejectedAndNotStored()
+    {
+        var store = new EvidenceBasisStore();
+        var forged = new EvidenceIntakeResult(
+            EvidenceProcessingState.Complete,
+            "forged content",
+            EvidenceIntake_Sha("different content"),
+            null);
+
+        Assert.Throws<InvalidOperationException>(() => store.Append("case-1", forged));
+        Assert.Empty(store.Versions("case-1"));
+    }
+
     private static string EvidenceIntake_Sha(string content) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(content)))
             .ToLowerInvariant();

@@ -71,6 +71,9 @@ public static class EvidenceIntake
         @"/Subtype(?:[\x00\t\n\f\r ]|%[^\r\n]*[\r\n])*/Image\b",
         RegexOptions.Compiled);
 
+    // Inline images appear as a BI operator in content streams (no /Subtype /Image key).
+    private static readonly Regex InlineImageOperator = new(@"\bBI\b", RegexOptions.Compiled);
+
     public static EvidenceIntakeResult Process(IReadOnlyList<EvidenceDocument> documents)
     {
         try
@@ -178,10 +181,10 @@ public static class EvidenceIntake
             }
         }
 
-        if (ImageSubtype.IsMatch(text))
+        if (ImageSubtype.IsMatch(text) || InlineImageOperator.IsMatch(text))
         {
             throw new EvidenceIntakeException(
-                $"Document '{document.Name}' contains an image payload (/Subtype /Image); it is rejected.",
+                $"Document '{document.Name}' contains an image payload (image XObject or inline image); it is rejected.",
                 EvidenceFailureKind.ActiveContent,
                 true);
         }
@@ -275,6 +278,11 @@ public sealed class EvidenceBasisStore
         if (result.State != EvidenceProcessingState.Complete || result.Content is null || result.ContentDigest is null)
         {
             throw new InvalidOperationException("A failed or partial intake cannot become an evidence basis.");
+        }
+
+        if (!string.Equals(EvidenceIntake.Sha256Hex(result.Content), result.ContentDigest, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Basis digest does not match its content.");
         }
 
         lock (_gate)
