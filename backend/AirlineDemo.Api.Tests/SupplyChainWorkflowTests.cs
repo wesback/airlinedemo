@@ -100,6 +100,8 @@ public sealed class SupplyChainWorkflowTests
     [InlineData("SBOM (npm)")]
     [InlineData("Audit (.NET)")]
     [InlineData("Audit (npm)")]
+    [InlineData("Exception validation")]
+    [InlineData("Severity gate")]
     public void Supply_chain_step_script_has_valid_shell_syntax(string stepName)
     {
         var script = RunBlock(StepBody(ReadWorkflow(), stepName));
@@ -121,6 +123,17 @@ public sealed class SupplyChainWorkflowTests
         {
             File.Delete(path);
         }
+    }
+
+    // AC: the evidence upload runs on every outcome and uploads the artifacts directory the audit steps write.
+    [Fact]
+    public void Upload_step_publishes_artifacts_even_on_failure()
+    {
+        var step = StepBody(ReadWorkflow(), "Upload supply-chain evidence");
+
+        Assert.Contains("if: always()", step);
+        Assert.Contains("uses: actions/upload-artifact@v4", step);
+        Assert.Contains("path: artifacts/", step);
     }
 
     [Fact]
