@@ -75,15 +75,16 @@ jobs:
       - name: Source restriction
         run: |
           set -euo pipefail
-          bad_nuget=$(dotnet nuget list source | grep -E 'https?://' | grep -v -E '^ *https://api\.nuget\.org/v3/index\.json$' || true)
+          bad_nuget=$(dotnet nuget list source | awk '/\[Enabled\]/ { getline; print }' | grep -v -E '^ *https://api\.nuget\.org/v3/index\.json$' || true)
           if [ -n "$bad_nuget" ]; then
             echo "::error::NuGet source outside nuget.org:"
             echo "$bad_nuget"
             exit 1
           fi
-          bad_npm=$(grep -oE '"resolved": "https?://[^"]*"' frontend/package-lock.json | grep -v -E '"resolved": "https://registry\.npmjs\.org/' || true)
+          bad_npm=$(grep -oE '"resolved": *"[^"]*"' frontend/package-lock.json | grep -v -E '"resolved": *"https://registry\.npmjs\.org/' || true)
           if [ -n "$bad_npm" ]; then
-            echo "::error::npm package resolved outside npmjs.org"
+            echo "::error::npm package resolved outside npmjs.org:"
+            echo "$bad_npm"
             exit 1
           fi
           grep -q '"resolved": "https://registry.npmjs.org/' frontend/package-lock.json

@@ -27,6 +27,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains($"- name: {stepName}", workflow);
     }
 
+    // M-12: build and test both applications.
     [Fact]
     public void Workflow_builds_and_tests_both_applications()
     {
@@ -39,6 +40,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("npm test", react);
     }
 
+    // M-12: CycloneDX SBOM for each dependency set.
     [Fact]
     public void SBOM_step_generates_dotnet_cyclonedx_output()
     {
@@ -231,6 +233,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.Equal(JsonValueKind.Array, exceptions.ValueKind);
     }
 
+    // M-14: package sources restricted to nuget.org and npmjs.org.
     [Fact]
     public void Source_restriction_allows_only_nuget_org_and_npmjs_org()
     {
@@ -263,6 +266,41 @@ public sealed class SupplyChainWorkflowTests
     }
 
     [Fact]
+    public void Source_restriction_rejects_enabled_local_folder_nuget_source()
+    {
+        var listing = NugetOrgListing + "  2.  local [Enabled]\n      /opt/feeds/local-packages\n";
+
+        var (exitCode, output) = RunShellStep("Source restriction", repo => repo.Write(LockPath, NpmjsOnlyLock), listing);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("NuGet source outside nuget.org", output);
+    }
+
+    [Fact]
+    public void Source_restriction_ignores_disabled_nuget_source()
+    {
+        var listing = NugetOrgListing + "  2.  local [Disabled]\n      /opt/feeds/local-packages\n";
+
+        var (exitCode, _) = RunShellStep("Source restriction", repo => repo.Write(LockPath, NpmjsOnlyLock), listing);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Theory]
+    [InlineData("git+ssh://git@github.com/example/evil.git#abc123")]
+    [InlineData("file:../local-package")]
+    [InlineData("http://feeds.example.test/evil-1.0.0.tgz")]
+    public void Source_restriction_rejects_non_npmjs_npm_sources(string resolved)
+    {
+        var lockfile = "{\"packages\":{\"node_modules/evil\":{\"resolved\": \"" + resolved + "\"}}}\n";
+
+        var (exitCode, output) = RunShellStep("Source restriction", repo => repo.Write(LockPath, lockfile), NugetOrgListing);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("npm package resolved outside npmjs.org", output);
+    }
+
+    [Fact]
     public void Source_restriction_rejects_npm_package_resolved_outside_npmjs()
     {
         var lockfile = "{\"packages\":{\"node_modules/react\":{\"resolved\": \"https://registry.npmjs.org/react/-/react-18.2.0.tgz\"},"
@@ -282,6 +320,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.NotEqual(0, exitCode);
     }
 
+    // M-14: tracked repository content is scanned for committed credentials.
     [Fact]
     public void Secret_scan_checks_tracked_content_and_fails_on_matches()
     {
