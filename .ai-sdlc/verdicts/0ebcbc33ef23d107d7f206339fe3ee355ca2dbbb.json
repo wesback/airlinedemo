@@ -1,0 +1,273 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "0ebcbc33ef23d107d7f206339fe3ee355ca2dbbb",
+  "round": 0,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake does not meet the required retryability behavior for several rejected inputs. Its active-content check also misses valid PDF-escaped names, so script-bearing documents can be accepted.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 136,
+          "message": "Several rejected input cases are marked non-retryable, despite the acceptance criterion requiring unsupported, nested archive, active-content, and oversized PDF failures to be retryable.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ValidateBytes throws EvidenceIntakeException with Retryable=false for unsupported formats, nested archives, active content, and missing EOF markers; ExtractDocument also marks page-limit failures non-retryable.",
+            "failureScenario": "When a package contains a nested archive or oversized PDF, Process returns Failed with Failure.Retryable=false, contrary to the acceptance criterion requiring these failures to be retryable."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 154,
+          "message": "The raw-byte marker scan can be bypassed with valid PDF name escaping, allowing a script-bearing PDF to be accepted as evidence.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ValidateBytes searches the raw PDF bytes for literal active-content marker strings before PdfPig parses the document.",
+            "failureScenario": "A PDF can encode the JavaScript name using PDF name escaping, such as /Java#53cript. The raw marker scan misses it, so a document containing an OpenAction script and extractable text can pass validation and be returned as Complete."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation returns non-retryable failures for input categories the acceptance criteria require to be retryable. The behavioral tests also lack the criterion IDs required by the review policy.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 146,
+          "message": "Unsupported, active-content, and oversized inputs are marked non-retryable, contrary to the acceptance criterion.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ValidateBytes returns UnsupportedFormat or ActiveContent failures with Retryable=false; ExtractPackage also returns LimitExceeded with Retryable=false, while Process preserves that value in the result.",
+            "failureScenario": "A caller submits a ZIP, a PDF with active content, or an oversized PDF. Processing fails visibly, but the returned failure is non-retryable, contrary to the acceptance criterion requiring these failures to be retryable."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 7,
+          "message": "The tests do not identify which acceptance criteria they cover; add criterion IDs to the relevant test names or comments.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test class contains behavioral tests, but its test names and comments do not identify any acceptance criterion IDs.",
+            "failureScenario": "A reviewer cannot count these tests toward M-09, M-10, or M-07 under the stated criterion-to-test rule; a regression in one of those criteria could therefore go without criterion-mapped coverage."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake rejects these inputs, but marks several required retryable failures as non-retryable. The ZIP and active JavaScript tests currently lock in that mismatch.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 117,
+          "message": "The rejection paths for unsupported formats, nested archives, active content, and oversized PDFs are non-retryable, contrary to the acceptance criterion requiring these failures to be retryable. Update the failure behavior and its tests.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "ValidateBytes returns failures with Retryable=false for unsupported formats, nested archives, and active content; ExtractPackage also marks size-limit failures non-retryable.",
+            "failureScenario": "A package containing a ZIP, a PDF with an active-content marker, or an oversized PDF is rejected with Retryable=false, despite the acceptance criterion requiring these failures to be retryable. The tests for ZIP and active JavaScript explicitly assert the opposite behavior."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 159,
+      "total": 180,
+      "percent": 88.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 159,
+          "total": 180,
+          "missed": [
+            87,
+            88,
+            143,
+            144,
+            145,
+            146,
+            147,
+            188,
+            189,
+            190,
+            191,
+            192,
+            202,
+            203,
+            204,
+            205,
+            206,
+            227,
+            228,
+            234,
+            235
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
