@@ -162,8 +162,17 @@ public class ApprovedModelManifestTests
         Assert.Equal("2025-01-01", trace.ApiVersion);
         Assert.Equal("eastus2", trace.Region);
         Assert.Equal("enabled", trace.ContentFilter);
-        Assert.Equal("evidence-v1", trace.EvidenceVersion);
+        Assert.Equal(SyntheticContentRegistry.Sha256Hex(Marked(body)), trace.EvidenceSha256);
         Assert.DoesNotContain("reserve figures", JsonSerializer.Serialize(trace));
+    }
+
+    [Fact]
+    public void Caller_supplied_evidence_version_is_not_recorded_in_the_trace()
+    {
+        var request = Synthetic() with { EvidenceVersion = "api-key-9f8e7d" };
+        var trace = ModelCallGate.Authorize(Approved(), request, Registry());
+
+        Assert.DoesNotContain("api-key-9f8e7d", JsonSerializer.Serialize(trace));
     }
 
     [Fact]
@@ -179,7 +188,7 @@ public class ApprovedModelManifestTests
     {
         var trace = ModelCallGate.Authorize(Approved(), Synthetic(), Registry());
 
-        Assert.Equal("evidence-v1", trace.EvidenceVersion);
+        Assert.Matches("^[0-9a-f]{64}$", trace.EvidenceSha256);
     }
 
     [Theory]
@@ -294,7 +303,7 @@ public class ApprovedModelManifestTests
     {
         var trace = ModelCallGate.Authorize(Approved(), Synthetic(region: "EASTUS2"), Registry());
 
-        Assert.Equal("evidence-v1", trace.EvidenceVersion);
+        Assert.Matches("^[0-9a-f]{64}$", trace.EvidenceSha256);
     }
 
     [Fact]

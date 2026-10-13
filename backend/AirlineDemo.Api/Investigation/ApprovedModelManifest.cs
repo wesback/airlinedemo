@@ -177,7 +177,7 @@ public sealed record ModelCallTrace(
     string ApiVersion,
     string Region,
     string ContentFilter,
-    string EvidenceVersion);
+    string EvidenceSha256);
 
 public static class ModelCallGate
 {
@@ -188,7 +188,7 @@ public static class ModelCallGate
     private static readonly Regex SyntheticBodyPattern =
         new(@"^SYNTHETIC EVIDENCE: [A-Za-z0-9 .,:;'()\-]*\z", RegexOptions.Compiled);
 
-    // The evidence version is recorded in the trace, so it must be a short plain identifier, never free text.
+    // The evidence version is a short plain label. It is not recorded in the trace; the content SHA-256 is.
     private static readonly Regex EvidenceVersionPattern =
         new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}\z", RegexOptions.Compiled);
 
@@ -244,7 +244,7 @@ public static class ModelCallGate
             manifest.ApiVersion!,
             manifest.Region!,
             manifest.ContentFilter!,
-            request.EvidenceVersion);
+            SyntheticContentRegistry.Sha256Hex(request.Content));
     }
 
     /// <summary>
