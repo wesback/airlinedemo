@@ -166,13 +166,16 @@ public static class EvidenceIntake
 
     private static readonly Regex NameRegex = new(@"/([^\s/\[\]<>(){}%]+)", RegexOptions.Compiled);
 
+    private static readonly Regex StreamBodyRegex = new(@"(?<!end)stream\r?\n.*?endstream", RegexOptions.Compiled | RegexOptions.Singleline);
+
     // Object and xref streams are compressed structure that PdfPig inflates while opening the file, before any
     // pre-parse limit can apply. A dictionary is recognised by a /Type key whose value is /ObjStm or /XRef (names are
-    // #xx-decoded). The whole file is scanned without stripping stream bodies, so a body cannot hide such a dictionary.
+    // #xx-decoded). Stream bodies are removed first, so ordinary text inside a content stream cannot look like one.
     private static void RejectCompressedStructure(EvidenceDocument document)
     {
         string? previous = null;
-        foreach (Match match in NameRegex.Matches(Encoding.Latin1.GetString(document.Bytes)))
+        var structure = StreamBodyRegex.Replace(Encoding.Latin1.GetString(document.Bytes), "stream endstream");
+        foreach (Match match in NameRegex.Matches(structure))
         {
             var name = Regex.Replace(match.Groups[1].Value, "#([0-9A-Fa-f]{2})", m =>
                 ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
@@ -265,6 +268,35 @@ public static class EvidenceIntake
         }
     }
 
+    // A page without its own /Resources inherits them from the nearest ancestor in the page tree.
+    private static DictionaryToken? InheritedResources(string name, PdfDocument pdf, DictionaryToken pageDictionary)
+    {
+        var node = pageDictionary;
+        for (var depth = 0; depth < 64; depth++)
+        {
+            if (node.Data.TryGetValue("Resources", out var resourcesToken))
+            {
+                return Resolve(pdf, resourcesToken) as DictionaryToken;
+            }
+
+            if (!node.Data.TryGetValue("Parent", out var parentToken))
+            {
+                return null;
+            }
+
+            node = Resolve(pdf, parentToken) as DictionaryToken
+                ?? throw new EvidenceIntakeException(
+                    $"Document '{name}' has an invalid page tree; it is rejected.",
+                    EvidenceFailureKind.Corrupt,
+                    true);
+        }
+
+        throw new EvidenceIntakeException(
+            $"Document '{name}' has a page tree deeper than 64 levels; it is rejected.",
+            EvidenceFailureKind.Corrupt,
+            true);
+    }
+
     // Any page annotation, page-level additional action, or image/form XObject is rejected from parsed dictionaries.
     private static void RejectPageContent(string name, PdfDocument pdf, Page page)
     {
@@ -282,8 +314,7 @@ public static class EvidenceIntake
             throw ActiveContentFailure(name, "/Annots on a page");
         }
 
-        if (dictionary.TryGetValue("Resources", out var resourcesToken)
-            && Resolve(pdf, resourcesToken) is DictionaryToken resources
+        if (InheritedResources(name, pdf, page.Dictionary) is { } resources
             && resources.Data.TryGetValue("XObject", out var xObjectsToken)
             && Resolve(pdf, xObjectsToken) is DictionaryToken xObjects)
         {
@@ -316,23 +347,38 @@ public static class EvidenceIntake
 
         foreach (var stream in streams)
         {
-            var decodedLength = DecodedLength(name, pdf, stream);
-            if (decodedLength > EvidenceLimits.MaxDecodedBytesPerStream)
-            {
-                throw new EvidenceIntakeException(
-                    $"Document '{name}' has a content stream that decodes to more than {EvidenceLimits.MaxDecodedBytesPerStream} bytes; it is rejected.",
-                    EvidenceFailureKind.LimitExceeded,
-                    true);
-            }
+            AddDecodedLength(name, pdf, stream, ref decodedTotal);
+        }
+    }
 
-            decodedTotal += decodedLength;
-            if (decodedTotal > EvidenceLimits.MaxDecodedBytesPerDocument)
-            {
-                throw new EvidenceIntakeException(
-                    $"Document '{name}' decodes to more than {EvidenceLimits.MaxDecodedBytesPerDocument} bytes of content; it is rejected.",
-                    EvidenceFailureKind.LimitExceeded,
-                    true);
-            }
+    // The catalog /Metadata stream is decoded too, so it counts toward the same per-stream and per-document bounds.
+    private static void MeasureCatalogMetadata(string name, PdfDocument pdf, ref long decodedTotal)
+    {
+        if (pdf.Structure.Catalog.CatalogDictionary.Data.TryGetValue("Metadata", out var metadataToken)
+            && Resolve(pdf, metadataToken) is StreamToken metadata)
+        {
+            AddDecodedLength(name, pdf, metadata, ref decodedTotal);
+        }
+    }
+
+    private static void AddDecodedLength(string name, PdfDocument pdf, StreamToken stream, ref long decodedTotal)
+    {
+        var decodedLength = DecodedLength(name, pdf, stream);
+        if (decodedLength > EvidenceLimits.MaxDecodedBytesPerStream)
+        {
+            throw new EvidenceIntakeException(
+                $"Document '{name}' has a stream that decodes to more than {EvidenceLimits.MaxDecodedBytesPerStream} bytes; it is rejected.",
+                EvidenceFailureKind.LimitExceeded,
+                true);
+        }
+
+        decodedTotal += decodedLength;
+        if (decodedTotal > EvidenceLimits.MaxDecodedBytesPerDocument)
+        {
+            throw new EvidenceIntakeException(
+                $"Document '{name}' decodes to more than {EvidenceLimits.MaxDecodedBytesPerDocument} bytes of content; it is rejected.",
+                EvidenceFailureKind.LimitExceeded,
+                true);
         }
     }
 
@@ -455,6 +501,7 @@ public static class EvidenceIntake
 
             var text = new StringBuilder();
             long decodedTotal = 0;
+            MeasureCatalogMetadata(document.Name, pdf, ref decodedTotal);
             for (var page = 1; page <= pages; page++)
             {
                 var pdfPage = pdf.GetPage(page);

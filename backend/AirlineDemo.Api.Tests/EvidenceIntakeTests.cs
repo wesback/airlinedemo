@@ -548,6 +548,86 @@ public sealed class EvidenceIntakeTests
         Assert.Null(result.Content);
     }
 
+    // AC: each prohibited catalog key is rejected on its own, one PDF per rule.
+    [Theory]
+    [InlineData("/OpenAction << /S /JavaScript >> ")]
+    [InlineData("/AA << /O << /S /JavaScript >> >> ")]
+    [InlineData("/Names << >> ")]
+    [InlineData("/AcroForm << >> ")]
+    [InlineData("/EmbeddedFiles << >> ")]
+    [InlineData("/JavaScript << >> ")]
+    [InlineData("/Launch << >> ")]
+    public void ProhibitedCatalogKeyIsRejectedRetryably(string catalogExtra)
+    {
+        var result = EvidenceIntake.Process([new("catalog-key.pdf", PdfWithPages(1, 0, catalogExtra: catalogExtra))]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: a catalog /Metadata stream that inflates past the per-stream limit is rejected before extraction.
+    [Fact]
+    public void OversizedCatalogMetadataStreamIsRejectedBeforeExtraction()
+    {
+        var inflated = new byte[EvidenceLimits.MaxDecodedBytesPerStream + 1];
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            zlib.Write(inflated);
+        }
+
+        var metadata = $"<< /Type /Metadata /Subtype /XML /Filter /FlateDecode /Length {compressed.Length} >>\nstream\n{Encoding.Latin1.GetString(compressed.ToArray())}\nendstream";
+        var pdf = PdfWithPages(1, 0, catalogExtra: "/Metadata 6 0 R ", extraObject: metadata);
+
+        var result = EvidenceIntake.Process([new("metadata-bomb.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: a /Form XObject that a page inherits from its /Pages node is rejected retryably, with no evidence.
+    [Fact]
+    public void FormXObjectInheritedFromPagesNodeIsRejectedRetryably()
+    {
+        // The page has no /Resources of its own, so its Form XObject comes only from the /Pages node.
+        string[] objects =
+        [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /Resources << /XObject << /X1 5 0 R >> >> >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>",
+            "<< /Length 0 >>\nstream\n\nendstream",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Length 0 >>\nstream\n\nendstream",
+        ];
+        var sb = new StringBuilder("%PDF-1.4\n");
+        var offsets = new List<int>();
+        for (var i = 0; i < objects.Length; i++)
+        {
+            offsets.Add(sb.Length);
+            sb.Append($"{i + 1} 0 obj {objects[i]} endobj\n");
+        }
+
+        var xrefAt = sb.Length;
+        sb.Append($"xref\n0 {objects.Length + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            sb.Append($"{offset:D10} 00000 n \n");
+        }
+
+        sb.Append($"trailer\n<< /Size {objects.Length + 1} /Root 1 0 R >>\nstartxref\n{xrefAt}\n%%EOF\n");
+        var pdf = Encoding.ASCII.GetBytes(sb.ToString());
+
+        var result = EvidenceIntake.Process([new("inherited-form.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
     [Fact]
     public void WidgetFormAnnotationIsRejectedRetryably()
     {
