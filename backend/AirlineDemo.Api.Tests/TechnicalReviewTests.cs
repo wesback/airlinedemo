@@ -357,4 +357,63 @@ public sealed class TechnicalReviewTests : IDisposable
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Forged_role_and_case_fields_are_ignored_and_create_no_mutation()
+    {
+        var revision = SeedCaseWithBasis();
+        Store.CreateCase("case-002", "presenter");
+        var presenter = await SignInAsync("presenter");
+        var before = Store.Read(Store.AuthorizeCase(CaseId, "presenter"));
+
+        using var response = await PostDecisionAsync(CaseId, presenter, withCsrf: true, new
+        {
+            expectedRevision = revision,
+            basisVersion = 1,
+            decision = "accept",
+            reason = "Checked against basis.",
+            role = "reviewer",
+            actor = "reviewer",
+            caseId = "case-002",
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.DoesNotContain("basisVersion", await response.Content.ReadAsStringAsync());
+        var after = Store.Read(Store.AuthorizeCase(CaseId, "presenter"));
+        Assert.Equal(before.Revision, after.Revision);
+        Assert.Equal(before.Audit.Count, after.Audit.Count);
+        Assert.Null(TechnicalReviewEndpoints.CurrentDecision(after));
+    }
+
+    [Fact]
+    public async Task Acceptance_after_later_basis_is_denied_by_stale_prior_decision()
+    {
+        var revision = SeedCaseWithBasis();
+        var reviewer = await SignInAsync("reviewer");
+        using (var decided = await PostDecisionAsync(CaseId, reviewer, withCsrf: true, Decide(revision)))
+        {
+            Assert.Equal(HttpStatusCode.OK, decided.StatusCode);
+        }
+
+        var scope = Store.AuthorizeCase(CaseId, "presenter");
+        var basis2 = CaseStateStore.CreateBasisVersion(2, "evidence-2", Store.GetBasisVersion(scope, 1).BasisDigest);
+        Store.Commit(scope, Store.Read(scope).Revision, new CaseCommit(basis2, null, "presenter", "submit-package", "basis 2"));
+        var before = Store.Read(scope);
+
+        var client = _factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{CaseId}/reviews")
+        {
+            Content = JsonContent.Create(new { expectedRevision = before.Revision, decision = "accept" }),
+        };
+        request.Headers.Add("Cookie", reviewer.Cookie);
+        request.Headers.Add("X-CSRF-Token", reviewer.Csrf);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var after = Store.Read(scope);
+        Assert.Equal(before.Revision, after.Revision);
+        Assert.Equal(before.Audit.Count, after.Audit.Count);
+        Assert.False(TechnicalReviewEndpoints.AuthorizesAcceptance(after));
+    }
 }
