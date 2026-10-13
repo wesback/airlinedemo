@@ -76,6 +76,20 @@ public class ApprovedModelManifestTests
     }
 
     [Theory]
+    [InlineData("deploymentName", "sk-live-abc123def456")]
+    [InlineData("model", "https://user:secret@example.test/model")]
+    [InlineData("region", "east us 2;token=abc")]
+    [InlineData("manifestVersion", "2026.10.1 Bearer xyz")]
+    [InlineData("apiVersion", "myApiKeyValue")]
+    public void Credential_or_non_identifier_values_are_refused(string field, string value)
+    {
+        var manifest = Approved(field, value);
+
+        Assert.Contains($"{field} is not a plain identifier", manifest.Validate());
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
+    }
+
+    [Theory]
     [InlineData("manifestVersion")]
     [InlineData("deploymentName")]
     [InlineData("model")]

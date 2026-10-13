@@ -27,6 +27,15 @@ public sealed record ApprovedModelManifest(
 
     private static readonly string[] SupportedArms = [LiveArm];
 
+    private static readonly Regex PlainIdentifierPattern =
+        new(@"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}\z", RegexOptions.Compiled);
+
+    private static readonly Regex CredentialHintPattern =
+        new(@"(?i)(secret|token|passw|pwd|bearer|apikey|api[_-]?key|accountkey|sk-)", RegexOptions.Compiled);
+
+    private static bool IsPlainIdentifier(string value) =>
+        PlainIdentifierPattern.IsMatch(value) && !CredentialHintPattern.IsMatch(value);
+
     public static ApprovedModelManifest Parse(string json)
     {
         try
@@ -54,6 +63,10 @@ public sealed record ApprovedModelManifest(
         {
             errors.Add("manifestVersion is still a stub value");
         }
+        else if (!IsPlainIdentifier(ManifestVersion))
+        {
+            errors.Add("manifestVersion is not a plain identifier");
+        }
 
         if (!Approved)
         {
@@ -69,6 +82,11 @@ public sealed record ApprovedModelManifest(
             else if (value.Contains(StubMarker, StringComparison.OrdinalIgnoreCase))
             {
                 errors.Add($"{name} is still a stub value");
+            }
+            else if (!IsPlainIdentifier(value))
+            {
+                // Values are copied into every trace, so only plain identifiers are accepted (no secrets, URLs, or spaces).
+                errors.Add($"{name} is not a plain identifier");
             }
         }
 
