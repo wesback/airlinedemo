@@ -52,6 +52,15 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("test -s artifacts/sbom/dotnet-sbom.cdx.json", step);
     }
 
+    // M-12: the CycloneDX tool used by the .NET SBOM step is pinned, so a change of version fails this test.
+    [Fact]
+    public void SBOM_step_installs_pinned_cyclonedx_tool()
+    {
+        var step = StepBody(ReadWorkflow(), "Install CycloneDX tool");
+
+        Assert.Contains("dotnet tool install --global CycloneDX --version 6.3.1", step);
+    }
+
     [Fact]
     public void SBOM_step_generates_npm_cyclonedx_output()
     {
@@ -393,6 +402,26 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("sha256sum -c -", step);
     }
 
+    // AC: M-14. The real secret scan step exits 0 on every tracked file of this repository.
+    [Fact]
+    public void Secret_scan_passes_on_repository_tracked_files()
+    {
+        var root = FindRepoRoot();
+        var (exitCode, output) = RunShellStep("Secret scan", repo =>
+        {
+            foreach (var path in TrackedFiles(root))
+            {
+                var target = Path.Combine(repo.Root, path);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(Path.Combine(root, path), target);
+            }
+
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.True(exitCode == 0, output);
+    }
+
     // Clean baseline: the lockfile is tracked and holds no credential, so the scan passes.
     [Fact]
     public void Secret_scan_passes_on_clean_tracked_content()
@@ -604,6 +633,26 @@ public sealed class SupplyChainWorkflowTests
 
         // Workflow run blocks are indented by 10 spaces; strip that to get the script.
         return string.Join('\n', lines[(start + 1)..].Select(l => l.Length >= 10 ? l[10..] : l.TrimStart()));
+    }
+
+    private static IEnumerable<string> TrackedFiles(string workDir)
+    {
+        var psi = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("ls-files");
+        psi.ArgumentList.Add("-z");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("git could not be started.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
+        return stdout.Result.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Where(path => File.Exists(Path.Combine(workDir, path)))
+            .ToList();
     }
 
     private static void GitTrackAll(string workDir)
