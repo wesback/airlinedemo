@@ -71,9 +71,6 @@ public static class EvidenceIntake
         @"/Subtype(?:[\x00\t\n\f\r ]|%[^\r\n]*[\r\n])*/Image\b",
         RegexOptions.Compiled);
 
-    // Inline images appear as a BI operator in content streams (no /Subtype /Image key).
-    private static readonly Regex InlineImageOperator = new(@"\bBI\b", RegexOptions.Compiled);
-
     public static EvidenceIntakeResult Process(IReadOnlyList<EvidenceDocument> documents)
     {
         try
@@ -181,7 +178,8 @@ public static class EvidenceIntake
             }
         }
 
-        if (ImageSubtype.IsMatch(text) || InlineImageOperator.IsMatch(text))
+        // Inline images (BI ... EI) are detected from decoded page content in ExtractDocument, not raw bytes.
+        if (ImageSubtype.IsMatch(text))
         {
             throw new EvidenceIntakeException(
                 $"Document '{document.Name}' contains an image payload (image XObject or inline image); it is rejected.",
@@ -218,7 +216,17 @@ public static class EvidenceIntake
             var text = new StringBuilder();
             for (var page = 1; page <= pages; page++)
             {
-                text.AppendLine(pdf.GetPage(page).Text);
+                var pdfPage = pdf.GetPage(page);
+                // Decoded content streams expose inline images even when compressed; reject them as image payloads.
+                if (pdfPage.GetImages().Any())
+                {
+                    throw new EvidenceIntakeException(
+                        $"Document '{document.Name}' contains an image payload (image XObject or inline image); it is rejected.",
+                        EvidenceFailureKind.ActiveContent,
+                        true);
+                }
+
+                text.AppendLine(pdfPage.Text);
             }
 
             if (string.IsNullOrWhiteSpace(text.ToString()))

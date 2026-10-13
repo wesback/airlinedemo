@@ -13,12 +13,15 @@ public sealed class EvidenceIntakeTests
 
     // Synthetic text PDF with one text-bearing content stream per page. Leading whitespace pads the
     // file to padToBytes; offsets are computed after padding, so the cross-reference table stays valid.
-    private static byte[] PdfWithPages(int pages, long padToBytes = 0)
+    private const string SyntheticContent = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
+
+    // asciiHex encodes each content stream with ASCIIHexDecode so raw bytes hide its operators.
+    private static byte[] PdfWithPages(int pages, long padToBytes = 0, string content = SyntheticContent, bool asciiHex = false)
     {
         var pad = 0;
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            var bytes = BuildPdf(pages, pad);
+            var bytes = BuildPdf(pages, pad, content, asciiHex);
             if (padToBytes == 0 || bytes.LongLength == padToBytes)
             {
                 return bytes;
@@ -30,9 +33,8 @@ public sealed class EvidenceIntakeTests
         throw new InvalidOperationException("Could not pad the synthetic PDF to the requested size.");
     }
 
-    private static byte[] BuildPdf(int pages, int pad)
+    private static byte[] BuildPdf(int pages, int pad, string content, bool asciiHex)
     {
-        const string content = "BT /F1 12 Tf 72 720 Td (Synthetic page text) Tj ET";
         var kids = string.Join(' ', Enumerable.Range(0, pages).Select(i => $"{4 + (2 * i)} 0 R"));
         var objects = new List<string>
         {
@@ -43,7 +45,9 @@ public sealed class EvidenceIntakeTests
         for (var i = 0; i < pages; i++)
         {
             objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {5 + (2 * i)} 0 R /Resources << /Font << /F1 3 0 R >> >> >>");
-            objects.Add($"<< /Length {content.Length} >>\nstream\n{content}\nendstream");
+            var body = asciiHex ? Convert.ToHexString(Encoding.ASCII.GetBytes(content)) + ">" : content;
+            var filter = asciiHex ? " /Filter /ASCIIHexDecode" : string.Empty;
+            objects.Add($"<< /Length {body.Length}{filter} >>\nstream\n{body}\nendstream");
         }
 
         var sb = new StringBuilder("%PDF-1.4\n");
@@ -308,10 +312,35 @@ public sealed class EvidenceIntakeTests
     [Fact]
     public void InlineImagePayloadIsRejectedRetryably()
     {
-        var pdf = Encoding.ASCII.GetBytes(
-            "%PDF-1.4\n4 0 obj << /Length 40 >> stream\nBT (Text) Tj ET\nBI /W 1 /H 1 /BPC 8 /CS /G ID \u0000 EI\nendstream endobj\n%%EOF\n");
+        var pdf = PdfWithPages(1, 0, "BT /F1 12 Tf 72 720 Td (Text) Tj ET BI /W 1 /H 1 /BPC 8 /CS /G ID \u0000 EI");
 
         var result = EvidenceIntake.Process([new("inline.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // Ordinary text that contains the token BI is not an inline image and must be accepted.
+    [Fact]
+    public void TextContainingBiTokenIsAccepted()
+    {
+        var pdf = PdfWithPages(1, 0, "BT /F1 12 Tf 72 720 Td (BI report, see EI notes) Tj ET");
+
+        var result = EvidenceIntake.Process([new("text-bi.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Complete, result.State);
+        Assert.NotNull(result.ContentDigest);
+    }
+
+    // The inline image sits in an encoded stream, so the raw bytes carry no BI token; decoded content must still reject it.
+    [Fact]
+    public void EncodedInlineImagePayloadIsRejectedRetryably()
+    {
+        var pdf = PdfWithPages(1, 0, "BT /F1 12 Tf 72 720 Td (Text) Tj ET BI /W 1 /H 1 /BPC 8 /CS /G ID \u0000 EI", asciiHex: true);
+
+        var result = EvidenceIntake.Process([new("encoded-inline.pdf", pdf)]);
 
         Assert.Equal(EvidenceProcessingState.Failed, result.State);
         Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
