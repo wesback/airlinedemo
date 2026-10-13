@@ -1,0 +1,242 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 150,
+  "branch": "ai-sdlc/issue-150",
+  "commitSha": "cec91a165bde5dda6447a649d453083bc59371d5",
+  "round": 0,
+  "pipelineVersion": "2a8c9d6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The expiry check accepts impossible calendar dates, allowing an invalid exception to suppress a high or critical dependency finding. The tests check workflow text rather than gate behavior and are not mapped to the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 104,
+          "message": "Validate that exception expiry is a real calendar date before accepting it; malformed dates can bypass the dependency severity gate (OWASP A06:2025).",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Exception validation checks the expiry string's YYYY-MM-DD shape, then compares it lexically with today's date. The severity gate uses the same comparison to decide whether an exception is valid.",
+            "failureScenario": "An exception with expires set to a value such as 2027-99-99 passes the format check and compares later than today, so a high or critical finding for that package is accepted despite the exception having no valid future expiry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs",
+          "line": 10,
+          "message": "Add criterion-linked behavior tests for M-12 and M-14. The current text-presence assertions can pass when the gate behaves incorrectly, and the tests do not identify which criterion they cover.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The tests assert that workflow text contains step names and command fragments, but none identifies M-12 or M-14, and the severity and exception tests do not execute their gate logic.",
+            "failureScenario": "If the severity gate keeps the expected strings but is changed to always accept findings, Severity_gate_blocks_unexcepted_high_and_critical_findings still passes. No test is explicitly tied to M-12 or M-14 as required by the review policy."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow covers the requested build, audit, and supply-chain steps, but the .NET SBOM command cannot invoke the installed tool. Its test asserts the incorrect invocation, so it does not catch the M-12 failure.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 53,
+          "message": "Invoke the installed CycloneDX tool using its executable name; the current command prevents the workflow from generating the .NET SBOM. [CycloneDX usage](https://github.com/CycloneDX/cyclonedx-dotnet/blob/master/README.md)",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The workflow installs the CycloneDX global .NET tool, then invokes `dotnet CycloneDX`. The tool's documented executable is `dotnet-CycloneDX`.",
+            "failureScenario": "On a CI run, the installed tool is not invoked by this command, so the .NET SBOM step fails before producing `artifacts/sbom/dotnet-sbom.cdx.json`; M-12's requirement to generate both SBOMs is unmet. The test at `SupplyChainWorkflowTests.cs` only asserts this incorrect command text, so it passes despite the failure."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow has a bypass for exceptions with impossible expiry dates and its secret scan misses URI-form connection strings with embedded credentials.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 104,
+          "message": "A08:2025 — Validate expiry as a real calendar date before accepting an exception; impossible dates can keep a vulnerability exception valid indefinitely.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Exception validation checks the expiry string against a YYYY-MM-DD shape and compares it lexically with today's date; it never verifies that the date exists.",
+            "failureScenario": "An exception with expires set to 9999-99-99 passes validation and remains later than today in the severity gate. A matching high or critical dependency finding is therefore suppressed despite the exception having no valid expiry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/build.yml",
+          "line": 84,
+          "message": "A02:2025 — The secret scan misses URI-form connection strings with embedded credentials, allowing committed credentials to pass the workflow.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The tracked-content scan only searches for the listed assignment patterns, private-key headers, AWS access-key prefixes, and GitHub token prefixes.",
+            "failureScenario": "A contributor commits a connection string such as postgres://app:secret@db.example/app. It matches none of the patterns, so git grep finds no match and the workflow passes with the credential in tracked content."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 2,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/build.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SupplyChainWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 5,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
