@@ -1,0 +1,224 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "faa84bf60d681008ba46b05f21e79e3b4ddbb613",
+  "round": 0,
+  "pipelineVersion": "d1406c0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The bounded intake and immutable versioning behavior is implemented. The page-count rejection state conflicts with the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 146,
+          "message": "More than 200 pages is rejected permanently instead of retryably as required.",
+          "confidence": 0.86,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ExtractText checks PdfPig's page count and returns RejectedPermanent when it exceeds MaxPagesPerDocument.",
+            "failureScenario": "A valid 201-page PDF is submitted. The intake returns RejectedPermanent, but the acceptance criteria require an over-200-page PDF rejection to be retryable."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several rejection paths and versioning behavior, but they miss the total-package-size limit and the 13-document test's partial-commit assertion is vacuous.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 111,
+          "message": "M-09 has no test for the 50 MB package limit or its boundary. Add at-limit and over-limit package cases.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests check document count, per-document bytes, and page count, but no test builds a package whose total size exceeds MaxPackageBytes while each document remains under MaxDocumentBytes.",
+            "failureScenario": "If the package-size check is removed, a package totaling more than 50 MB with each document under 10 MB is accepted, and the current tests still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 118,
+          "message": "The 13-document rejection test does not verify that the rejected package leaves its store empty. Keep the store passed to Process and assert against that same store.",
+          "confidence": 1,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The 13-document case passes an inline new EvidenceBasisStore() to Process, then checks History on a different, newly created store.",
+            "failureScenario": "If processing 13 documents incorrectly commits evidence before returning RejectedPermanent, the assertion still passes because it inspects an untouched store. The test therefore does not verify M-09's no-partial-basis requirement."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed code checks the package byte limit, but the tests do not prove that behavior. The remaining reviewed paths show no concrete security vulnerability.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+          "line": 123,
+          "message": "M-09's 50 MB package limit lacks a behavior test. Add cases at the limit and one byte over, and identify the test as covering M-09.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-09 tests check document count and individual document size, but do not exercise the package byte limit.",
+            "failureScenario": "If the 50 MB package-size check is removed, all current tests can still pass because the 12-document test uses small documents and the per-document test submits only one document."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/acroform.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/annotated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/corrupt.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/embedded-files.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/image.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/nested-archive.zip",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
