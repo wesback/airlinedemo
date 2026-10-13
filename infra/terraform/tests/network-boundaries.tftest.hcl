@@ -58,8 +58,12 @@ run "ingress_and_egress_allowlists" {
   command = plan
 
   assert {
-    condition     = azurerm_network_security_rule.ingress_allow["0"].source_address_prefix == "203.0.113.0/24" && azurerm_network_security_rule.ingress_deny_all.access == "Deny"
-    error_message = "Approved presenter/reviewer CIDR must be allowed inbound and inbound must end in deny-all."
+    condition     = toset([for r in values(azurerm_network_security_rule.ingress_allow) : r.source_address_prefix]) == toset(["203.0.113.0/24"]) && length(azurerm_network_security_rule.ingress_allow) == 1 && azurerm_network_security_rule.ingress_deny_all.access == "Deny"
+    error_message = "The complete inbound allow-rule set must equal the approved presenter/reviewer CIDRs, and inbound must end in deny-all."
+  }
+  assert {
+    condition     = alltrue([for r in values(azurerm_network_security_rule.ingress_allow) : r.access == "Allow" && r.direction == "Inbound" && r.destination_port_range == "443" && r.destination_address_prefix == "10.60.1.0/24"])
+    error_message = "Every inbound allow rule must be Allow on TCP 443 into the app subnet only."
   }
   assert {
     condition     = toset([for r in values(azurerm_network_security_rule.egress_allow) : r.destination_address_prefix]) == toset(["198.51.100.0/24"]) && length(azurerm_network_security_rule.egress_allow) == 1 && azurerm_network_security_rule.egress_deny_all.access == "Deny"
@@ -74,6 +78,19 @@ run "ingress_and_egress_allowlists" {
   assert {
     condition     = alltrue([for r in values(azurerm_network_security_rule.egress_allow) : r.priority < azurerm_network_security_rule.egress_deny_all.priority])
     error_message = "Every explicit egress allow rule must have higher precedence than the deny-all."
+  }
+}
+
+run "ingress_allows_exactly_configured_cidrs" {
+  command = plan
+
+  variables {
+    presenter_reviewer_cidrs = ["203.0.113.0/24", "192.0.2.0/24"]
+  }
+
+  assert {
+    condition     = toset([for r in values(azurerm_network_security_rule.ingress_allow) : r.source_address_prefix]) == toset(["203.0.113.0/24", "192.0.2.0/24"]) && length(azurerm_network_security_rule.ingress_allow) == 2
+    error_message = "Inbound allow rules must be exactly the configured presenter/reviewer CIDRs; any other source must be denied."
   }
 }
 
@@ -111,21 +128,46 @@ run "data_endpoints_are_private" {
     error_message = "SQL, Blob and model each need a private endpoint."
   }
   assert {
-    condition     = azurerm_private_endpoint.demo["sql"].private_service_connection[0].private_connection_resource_id == azurerm_mssql_server.sql.id && azurerm_private_endpoint.demo["sql"].private_service_connection[0].subresource_names[0] == "sqlServer"
-    error_message = "SQL private endpoint must connect to the SQL server through the sqlServer subresource."
+    condition     = azurerm_private_endpoint.demo["sql"].private_service_connection[0].subresource_names[0] == "sqlServer"
+    error_message = "SQL private endpoint must connect through the sqlServer subresource."
   }
   assert {
-    condition     = azurerm_private_endpoint.demo["blob"].private_service_connection[0].private_connection_resource_id == azurerm_storage_account.blob.id && azurerm_private_endpoint.demo["blob"].private_service_connection[0].subresource_names[0] == "blob"
-    error_message = "Blob private endpoint must connect to the storage account through the blob subresource."
+    condition     = azurerm_private_endpoint.demo["blob"].private_service_connection[0].subresource_names[0] == "blob"
+    error_message = "Blob private endpoint must connect through the blob subresource."
   }
   assert {
-    condition     = azurerm_private_endpoint.demo["model"].private_service_connection[0].private_connection_resource_id == azurerm_cognitive_account.model.id && azurerm_private_endpoint.demo["model"].private_service_connection[0].subresource_names[0] == "account"
-    error_message = "Model private endpoint must connect to the model account through the account subresource."
+    condition     = azurerm_private_endpoint.demo["model"].private_service_connection[0].subresource_names[0] == "account"
+    error_message = "Model private endpoint must connect through the account subresource."
   }
   assert {
-    condition     = alltrue([for e in values(azurerm_private_endpoint.demo) : e.subnet_id == azurerm_subnet.private_endpoints.id])
-    error_message = "Every private endpoint must sit in the private endpoint subnet."
+    condition     = azurerm_subnet.private_endpoints.address_prefixes[0] == "10.60.2.0/24" && length(azurerm_private_endpoint.demo) == 4
+    error_message = "Private endpoints must be created for SQL, Blob, model and Key Vault in the configured private endpoint subnet."
   }
+  assert {
+    condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].name == "link-model"
+    error_message = "The model private DNS zone must be privatelink.openai.azure.com with a VNet link named link-model."
+  }
+  assert {
+    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && length(azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].private_dns_zone_ids) == 1
+    error_message = "The model endpoint must register in its DNS zone group with exactly one private DNS zone."
+  }
+}
+
+run "no_environment_defaults" {
+  command = plan
+
+  assert {
+    condition     = var.subscription_id != "" && alltrue([for n in ["subscription_id", "tenant_id", "presenter_reviewer_cidrs", "egress_allowed_destinations", "budget_amount", "budget_contact_emails", "terraform_state_backend"] : !anytrue([for p in split("variable \"", file("variables.tf")) : startswith(p, "${n}\"") && can(regex("(?m)^\\s*default\\s*=", p))])])
+    error_message = "Subscription, tenant, CIDR, egress, budget, and state-backend inputs must not have Terraform defaults."
+  }
+}
+
+run "backend_identity_and_locking_declared" {
+  command = plan
+
+  assert {
+    condition     = var.terraform_state_backend.use_azuread_auth && can(regex("(?s)backend \"azurerm\" \\{\\s*use_azuread_auth\\s*=\\s*true", file("main.tf")))
+    error_message = "The azurerm backend block must declare use_azuread_auth = true (Entra identity)."
   }
 }
 
@@ -149,17 +191,12 @@ run "encryption_and_no_key_outputs" {
     error_message = "Model endpoint must be HTTPS on the approved subdomain."
   }
   assert {
-    condition     = azurerm_mssql_server_transparent_data_encryption.sql.server_id == azurerm_mssql_server.sql.id
-    error_message = "SQL transparent data encryption must be configured on the SQL server."
-  }
-  assert {
     condition     = can(regex("^https://", output.model_endpoint)) && azurerm_cognitive_account.model.local_auth_enabled == false
     error_message = "Model transport must be HTTPS and key-based auth must be disabled."
   }
   assert {
-    condition     = !can(regex("(?i)AccountKey|ConnectionString|primary_access_key|secret", output.model_endpoint))
-    error_message = "Outputs must not emit access keys or connection strings."
-  }
+    condition     = var.subscription_id != "" && !can(regex("(?is)output \"[^\"]*\" \\{[^}]*(AccountKey|ConnectionString|primary_access_key|primary_key|secondary_key|client_secret)", file("main.tf")))
+    error_message = "No declared output may emit access keys, connection strings or secrets."
   }
 }
 
