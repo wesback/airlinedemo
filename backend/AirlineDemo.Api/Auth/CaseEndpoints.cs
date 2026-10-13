@@ -83,7 +83,8 @@ public static class CaseEndpoints
             var trace = new TelemetryRedaction.InvestigationTraceRecord(
                 "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant(),
                 "basis-v" + updated.Revision,
-                config["Telemetry:ModelDeployment"] ?? "not-invoked",
+                // The review endpoint runs no model call, so no deployment is reported.
+                "not-invoked",
                 Array.Empty<string>(),
                 Array.Empty<string>(),
                 accepted ? "return-ready" : "return-not-ready",
