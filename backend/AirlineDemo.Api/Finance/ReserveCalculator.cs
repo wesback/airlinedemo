@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
-using System.Security.Claims;
 using System.Text.RegularExpressions;
+using AirlineDemo.Api.Auth;
+using Microsoft.AspNetCore.Http;
 
 namespace AirlineDemo.Api.Finance;
 
@@ -167,19 +168,22 @@ public static class ReserveCalculator
     }
 
     /// <summary>
-    /// Records a simulated finance decision. Authority comes only from the server-held
-    /// roster, matched against the NameIdentifier of an authenticated principal supplied by the host.
+    /// Records a simulated finance decision. The actor is the user of the demo session identified by the
+    /// request cookie, resolved through the <see cref="DemoSessionStore"/> in the request services; no caller-supplied
+    /// identity is read. Authority is then checked against the server-held roster.
     /// </summary>
-    public static FinanceReviewRecord Review(ReserveDraft draft, FinanceDecisionKind decision, ClaimsPrincipal actor,
+    public static FinanceReviewRecord Review(ReserveDraft draft, FinanceDecisionKind decision, HttpContext http,
         string reason, DateTimeOffset decidedAt)
     {
         ArgumentNullException.ThrowIfNull(draft);
-        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(http);
         if (!Enum.IsDefined(decision))
         {
             throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown finance decision.");
         }
-        var actorId = actor.Identity?.IsAuthenticated == true ? actor.FindFirst(ClaimTypes.NameIdentifier)?.Value : null;
+        var sessions = http.RequestServices?.GetService(typeof(DemoSessionStore)) as DemoSessionStore;
+        var session = sessions is null ? null : DemoAuthEndpoints.CurrentSession(http, sessions);
+        var actorId = session?.User.Id;
         if (string.IsNullOrWhiteSpace(actorId) || !AuthorizedReviewerIds.Contains(actorId))
         {
             throw new UnauthorizedAccessException("Only an authenticated finance reviewer may record a finance decision.");

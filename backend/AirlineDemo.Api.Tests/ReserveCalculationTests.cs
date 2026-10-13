@@ -1,15 +1,33 @@
-using System.Security.Claims;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Finance;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AirlineDemo.Api.Tests;
 
 public class ReserveCalculationTests
 {
     private const string Period = "2026-09";
-    private static readonly ClaimsPrincipal Reviewer = Actor("fin-1");
+    private static HttpContext Reviewer => Actor("fin-1");
 
-    private static ClaimsPrincipal Actor(string id) =>
-        new(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, id) }, "test"));
+    /// <summary>A request carrying a real demo session cookie issued by DemoSessionStore for the user.</summary>
+    private static HttpContext Actor(string userId)
+    {
+        var store = new DemoSessionStore(TimeProvider.System);
+        var session = store.Create(new DemoUser(userId, userId, "finance", []));
+        return RequestWith(store, session.Id);
+    }
+
+    private static HttpContext RequestWith(DemoSessionStore store, string? sessionId)
+    {
+        var services = new ServiceCollection().AddSingleton(store).BuildServiceProvider();
+        var http = new DefaultHttpContext { RequestServices = services };
+        if (sessionId is not null)
+        {
+            http.Request.Headers.Cookie = $"{DemoAuthEndpoints.CookieName}={sessionId}";
+        }
+        return http;
+    }
     private static readonly DateTimeOffset At = new(2026, 10, 13, 1, 0, 0, TimeSpan.Zero);
 
     private static UsageReport Usage(params UsageEntry[] entries) => new("USE-2026-09", Period, entries);
@@ -221,13 +239,35 @@ public class ReserveCalculationTests
     }
 
     [Fact]
-    public void Unauthenticated_principal_claiming_reviewer_id_is_refused()
+    public void Request_without_session_cannot_name_itself_reviewer()
     {
         var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
-        var unauthenticated = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, "fin-1") }));
+        var http = RequestWith(new DemoSessionStore(TimeProvider.System), null);
+        http.Request.Headers["X-User-Id"] = "fin-1";
 
         Assert.Throws<UnauthorizedAccessException>(() =>
-            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, unauthenticated, "ok", At));
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, http, "ok", At));
+    }
+
+    [Fact]
+    public void Forged_session_cookie_naming_reviewer_is_refused()
+    {
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
+        var http = RequestWith(new DemoSessionStore(TimeProvider.System), "FORGED-fin-1");
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, http, "ok", At));
+    }
+
+    [Fact]
+    public void Caller_supplied_identity_cannot_elevate_a_non_reviewer_session()
+    {
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
+        var presenter = Actor("pres-1");
+        presenter.Request.Headers["X-User-Id"] = "fin-1";
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, presenter, "ok", At));
     }
 
     [Fact]
