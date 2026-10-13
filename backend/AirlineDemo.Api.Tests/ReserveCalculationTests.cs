@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using AirlineDemo.Api.Finance;
 
 namespace AirlineDemo.Api.Tests;
@@ -5,7 +6,10 @@ namespace AirlineDemo.Api.Tests;
 public class ReserveCalculationTests
 {
     private const string Period = "2026-09";
-    private static readonly FinanceActor Reviewer = new("fin-1");
+    private static readonly ClaimsPrincipal Reviewer = Actor("fin-1");
+
+    private static ClaimsPrincipal Actor(string id) =>
+        new(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, id) }, "test"));
     private static readonly DateTimeOffset At = new(2026, 10, 13, 1, 0, 0, TimeSpan.Zero);
 
     private static UsageReport Usage(params UsageEntry[] entries) => new("USE-2026-09", Period, entries);
@@ -139,6 +143,35 @@ public class ReserveCalculationTests
     }
 
     [Fact]
+    public void Missing_rate_report_is_blocked_with_no_charge_lines_or_total_and_refuses_approval()
+    {
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), null);
+
+        Assert.Equal(ReserveDraftStatus.Blocked, draft.Status);
+        Assert.Contains(draft.Blockers, b => b.Code == "rate-report-missing");
+        Assert.Null(draft.RateReportId);
+        Assert.Empty(draft.Lines);
+        Assert.Null(draft.PayableTotal);
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, "ok", At));
+    }
+
+    [Fact]
+    public void Wrong_period_rate_report_is_blocked_with_no_charge_lines_or_total_and_refuses_approval()
+    {
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)),
+            new RateReport("RATE-2026-08", "2026-08", [new RateEntry("FH-A", "2026-08", 0.10m)]));
+
+        Assert.Equal(ReserveDraftStatus.Blocked, draft.Status);
+        Assert.Contains(draft.Blockers, b => b.Code == "rate-report-wrong-period");
+        Assert.Equal("RATE-2026-08", draft.RateReportId);
+        Assert.Empty(draft.Lines);
+        Assert.Null(draft.PayableTotal);
+        Assert.Throws<InvalidOperationException>(() =>
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, Reviewer, "ok", At));
+    }
+
+    [Fact]
     public void Malformed_inputs_fail_validation()
     {
         Assert.Throws<ArgumentException>(() =>
@@ -154,7 +187,7 @@ public class ReserveCalculationTests
     public void Unauthorized_actor_cannot_record_decision()
     {
         var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
-        var presenter = new FinanceActor("pres-1");
+        var presenter = Actor("pres-1");
 
         Assert.Throws<UnauthorizedAccessException>(() =>
             ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, presenter, "ok", At));
@@ -166,10 +199,20 @@ public class ReserveCalculationTests
     public void Actor_not_on_server_roster_is_refused_even_when_claiming_reviewer_identity()
     {
         var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
-        var claimant = new FinanceActor("fin-2");
+        var claimant = Actor("fin-2");
 
         Assert.Throws<UnauthorizedAccessException>(() =>
             ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, claimant, "ok", At));
+    }
+
+    [Fact]
+    public void Unauthenticated_principal_claiming_reviewer_id_is_refused()
+    {
+        var draft = Calc(Usage(new UsageEntry("FH-A", 2m)), StandardRates());
+        var unauthenticated = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, "fin-1") }));
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            ReserveCalculator.Review(draft, FinanceDecisionKind.Approve, unauthenticated, "ok", At));
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 
 namespace AirlineDemo.Api.Finance;
@@ -39,8 +41,6 @@ public sealed record ReserveDraft(
     IReadOnlyList<BlockReason> Blockers,
     IReadOnlyList<string> Discrepancies,
     string CalculationBasis);
-
-public sealed record FinanceActor(string Id);
 
 public sealed record FinanceReviewRecord(
     string DraftId,
@@ -155,9 +155,9 @@ public static class ReserveCalculator
 
     /// <summary>
     /// Records a simulated finance decision. Authority comes only from the server-held
-    /// <see cref="AuthorizedReviewerIds"/> roster; the caller cannot supply or assert a role.
+    /// roster, matched against the NameIdentifier of an authenticated principal supplied by the host.
     /// </summary>
-    public static FinanceReviewRecord Review(ReserveDraft draft, FinanceDecisionKind decision, FinanceActor actor,
+    public static FinanceReviewRecord Review(ReserveDraft draft, FinanceDecisionKind decision, ClaimsPrincipal actor,
         string reason, DateTimeOffset decidedAt)
     {
         ArgumentNullException.ThrowIfNull(draft);
@@ -166,10 +166,10 @@ public static class ReserveCalculator
         {
             throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown finance decision.");
         }
-        ValidateNonBlank(actor.Id, nameof(actor));
-        if (!AuthorizedReviewerIds.Contains(actor.Id))
+        var actorId = actor.Identity?.IsAuthenticated == true ? actor.FindFirst(ClaimTypes.NameIdentifier)?.Value : null;
+        if (string.IsNullOrWhiteSpace(actorId) || !AuthorizedReviewerIds.Contains(actorId))
         {
-            throw new UnauthorizedAccessException("Only a finance reviewer may record a finance decision.");
+            throw new UnauthorizedAccessException("Only an authenticated finance reviewer may record a finance decision.");
         }
         ValidateNonBlank(reason, nameof(reason));
         if (decision == FinanceDecisionKind.Approve && draft.Status != ReserveDraftStatus.ReadyForReview)
@@ -177,13 +177,12 @@ public static class ReserveCalculator
             throw new InvalidOperationException($"Approval refused: draft {draft.DraftId} v{draft.Version} is {draft.Status}.");
         }
 
-        return new FinanceReviewRecord(draft.DraftId, draft.Version, decision, actor.Id, reason.Trim(),
+        return new FinanceReviewRecord(draft.DraftId, draft.Version, decision, actorId, reason.Trim(),
             decidedAt, draft.CalculationBasis, draft.PayableTotal, Simulated: true, InvoiceIssued: false);
     }
 
-    /// <summary>Server-held finance reviewer roster. Simulated decisions are only accepted from these actors.</summary>
-    public static IReadOnlySet<string> AuthorizedReviewerIds { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "fin-1" };
+    /// <summary>Server-held finance reviewer roster; immutable, so callers cannot add reviewers at runtime.</summary>
+    private static readonly FrozenSet<string> AuthorizedReviewerIds = new[] { "fin-1" }.ToFrozenSet(StringComparer.Ordinal);
 
     private static decimal Cents(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
