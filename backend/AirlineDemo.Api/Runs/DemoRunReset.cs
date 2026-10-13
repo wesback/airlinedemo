@@ -6,13 +6,13 @@ public sealed class DemoRunResetException(string message) : Exception(message);
 
 public sealed record DemoRunFallback(string FixtureId, string ApplicationVersion);
 
-public sealed record DemoRunResetResult(string NewRunId, CaseState NewRun);
+public sealed record DemoRunResetResult(string NewRunId, CaseState NewRun, DemoRunFallback Fallback);
 
 // Starts a clean run for the authorized owner. The selected run is only authorized, never written,
 // so its audit, receipts and revision stay as they were. Reset accepts no evaluator input.
 public sealed class DemoRunReset(CaseStateStore store)
 {
-    public DemoRunResetResult Reset(string runId, string owner, string newRunId)
+    public DemoRunResetResult Reset(string runId, string owner, string newRunId, string? fixtureId, string? applicationVersion)
     {
         // Throws CaseAccessDeniedException for unknown runs or runs owned by someone else, before any write.
         store.AuthorizeCase(runId, owner);
@@ -22,8 +22,9 @@ public sealed class DemoRunReset(CaseStateStore store)
             throw new DemoRunResetException("A reset must start a new run id.");
         }
 
+        var fallback = ResolveFallback(fixtureId, applicationVersion);
         var scope = store.CreateCase(newRunId, owner);
-        return new DemoRunResetResult(newRunId, store.Read(scope));
+        return new DemoRunResetResult(newRunId, store.Read(scope), fallback);
     }
 
     // Fallback results must be traceable to a fixture and an application version; missing metadata blocks selection.

@@ -1,5 +1,10 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -45,9 +50,10 @@ public sealed class DemoRunResetTests : IDisposable
         var runBBefore = store.Read(store.AuthorizeCase("run-b", Owner));
         var runABefore = store.Read(store.AuthorizeCase("run-a", Owner));
 
-        var result = new DemoRunReset(store).Reset("run-a", Owner, "run-c");
+        var result = new DemoRunReset(store).Reset("run-a", Owner, "run-c", "aircraft-return-fixture-v1", "1.4.2");
 
         Assert.Equal("run-c", result.NewRunId);
+        Assert.Equal("1.4.2", result.Fallback.ApplicationVersion);
         var runBAfter = store.Read(store.AuthorizeCase("run-b", Owner));
         Assert.Equal(runBBefore.Revision, runBAfter.Revision);
         Assert.Equal(runBBefore.ReceiptIds, runBAfter.ReceiptIds);
@@ -69,7 +75,7 @@ public sealed class DemoRunResetTests : IDisposable
         var store = new CaseStateStore(PathFor());
         Seed(store, "run-a", Owner, "receipt-a");
 
-        var result = new DemoRunReset(store).Reset("run-a", Owner, "run-c");
+        var result = new DemoRunReset(store).Reset("run-a", Owner, "run-c", "aircraft-return-fixture-v1", "1.4.2");
 
         Assert.Empty(result.NewRun.ReceiptIds);
         Assert.Empty(result.NewRun.Audit);
@@ -83,7 +89,7 @@ public sealed class DemoRunResetTests : IDisposable
         Seed(store, "run-a", Owner, "receipt-a");
         var before = File.ReadAllBytes(PathFor());
 
-        Assert.Throws<CaseAccessDeniedException>(() => new DemoRunReset(store).Reset("run-a", "reviewer", "run-c"));
+        Assert.Throws<CaseAccessDeniedException>(() => new DemoRunReset(store).Reset("run-a", "reviewer", "run-c", "aircraft-return-fixture-v1", "1.4.2"));
 
         Assert.Equal(before, File.ReadAllBytes(PathFor()));
         Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("run-c", Owner));
@@ -96,7 +102,7 @@ public sealed class DemoRunResetTests : IDisposable
         Seed(store, "run-a", Owner, "receipt-a");
         var before = File.ReadAllBytes(PathFor());
 
-        Assert.Throws<CaseAccessDeniedException>(() => new DemoRunReset(store).Reset("missing", Owner, "run-c"));
+        Assert.Throws<CaseAccessDeniedException>(() => new DemoRunReset(store).Reset("missing", Owner, "run-c", "aircraft-return-fixture-v1", "1.4.2"));
 
         Assert.Equal(before, File.ReadAllBytes(PathFor()));
     }
@@ -109,8 +115,8 @@ public sealed class DemoRunResetTests : IDisposable
         Seed(store, "run-b", Owner, "receipt-b");
         var before = File.ReadAllBytes(PathFor());
 
-        Assert.Throws<InvalidOperationException>(() => new DemoRunReset(store).Reset("run-a", Owner, "run-b"));
-        Assert.Throws<DemoRunResetException>(() => new DemoRunReset(store).Reset("run-a", Owner, "run-a"));
+        Assert.Throws<InvalidOperationException>(() => new DemoRunReset(store).Reset("run-a", Owner, "run-b", "aircraft-return-fixture-v1", "1.4.2"));
+        Assert.Throws<DemoRunResetException>(() => new DemoRunReset(store).Reset("run-a", Owner, "run-a", "aircraft-return-fixture-v1", "1.4.2"));
 
         Assert.Equal(before, File.ReadAllBytes(PathFor()));
     }
@@ -121,7 +127,7 @@ public sealed class DemoRunResetTests : IDisposable
         var store = new CaseStateStore(PathFor());
         Seed(store, "run-a", Owner, "receipt-a");
 
-        var result = new DemoRunReset(store).Reset("run-a", Owner, "run-c");
+        var result = new DemoRunReset(store).Reset("run-a", Owner, "run-c", "aircraft-return-fixture-v1", "1.4.2");
 
         Assert.DoesNotContain(result.NewRun.Audit, e => e.Actor.Contains("evaluator", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(result.NewRun.ReceiptIds);
@@ -150,5 +156,147 @@ public sealed class DemoRunResetTests : IDisposable
     public void Fallback_is_blocked_when_fixture_id_is_missing()
     {
         Assert.Throws<DemoRunResetException>(() => DemoRunReset.ResolveFallback(null, "1.4.2"));
+    }
+}
+
+public sealed class DemoRunResetEndpointTests : IDisposable
+{
+    private const string Passcode = "test-passcode";
+    private const string Fixture = "aircraft-return-fixture-v1";
+
+    private sealed record Session(string Cookie, string Csrf);
+
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "demo-run-reset-http-" + Guid.NewGuid().ToString("N"));
+
+    private string PathFor => Path.Combine(_dir, "runs.json");
+
+    public DemoRunResetEndpointTests()
+    {
+        Directory.CreateDirectory(_dir);
+        var store = new CaseStateStore(PathFor);
+        foreach (var caseId in new[] { "case-001", "case-002" })
+        {
+            var scope = store.CreateCase(caseId, "presenter");
+            store.Commit(scope, 0, new CaseCommit(null, "receipt-" + caseId, "presenter", "open", "opened " + caseId));
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_dir))
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+    }
+
+    private WebApplicationFactory<Program> CreateFactory() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = Passcode,
+                    ["CaseState:Path"] = PathFor,
+                })));
+
+    private static async Task<Session> SignInAsync(HttpClient client, string userId)
+    {
+        using var response = await client.PostAsJsonAsync("/api/auth/sign-in", new { userId, passcode = Passcode }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var cookie = response.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        return new Session(cookie, body.GetProperty("csrfToken").GetString()!);
+    }
+
+    private Task<HttpResponseMessage> ResetAsync(HttpClient client, string runId, Session? session, bool withCsrf, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/{runId}/reset") { Content = JsonContent.Create(body) };
+        if (session is not null) request.Headers.Add("Cookie", session.Cookie);
+        if (session is not null && withCsrf) request.Headers.Add("X-CSRF-Token", session.Csrf);
+        return client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Authorized_reset_creates_new_run_and_returns_fixture_and_version()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var session = await SignInAsync(client, "presenter");
+
+        using var response = await ResetAsync(client, "case-001", session, true, new { newRunId = "run-new", fixtureId = Fixture, applicationVersion = "1.4.2" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal("run-new", body.GetProperty("newRunId").GetString());
+        Assert.Equal(Fixture, body.GetProperty("fallback").GetProperty("fixtureId").GetString());
+        Assert.Equal("1.4.2", body.GetProperty("fallback").GetProperty("applicationVersion").GetString());
+        Assert.Equal("receipt-case-001", new CaseStateStore(PathFor).Read(new CaseStateStore(PathFor).AuthorizeCase("case-001", "presenter")).ReceiptIds.Single());
+    }
+
+    [Fact]
+    public async Task Reset_without_application_version_is_rejected_and_creates_no_run()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var session = await SignInAsync(client, "presenter");
+
+        using var response = await ResetAsync(client, "case-001", session, true, new { newRunId = "run-new", fixtureId = Fixture, applicationVersion = (string?)null });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Throws<CaseAccessDeniedException>(() => new CaseStateStore(PathFor).AuthorizeCase("run-new", "presenter"));
+    }
+
+    [Fact]
+    public async Task Reset_onto_existing_run_id_returns_conflict_without_mutating_store()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var session = await SignInAsync(client, "presenter");
+        var before = File.ReadAllBytes(PathFor);
+
+        using var response = await ResetAsync(client, "case-001", session, true, new { newRunId = "case-002", fixtureId = Fixture, applicationVersion = "1.4.2" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(before, File.ReadAllBytes(PathFor));
+    }
+
+    [Fact]
+    public async Task Reset_of_another_users_run_is_not_found_and_mutates_nothing()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var reviewer = await SignInAsync(client, "reviewer");
+        var before = File.ReadAllBytes(PathFor);
+
+        using var response = await ResetAsync(client, "case-002", reviewer, true, new { newRunId = "run-new", fixtureId = Fixture, applicationVersion = "1.4.2" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(before, File.ReadAllBytes(PathFor));
+    }
+
+    [Fact]
+    public async Task Reset_without_session_is_rejected_and_mutates_nothing()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var before = File.ReadAllBytes(PathFor);
+
+        using var response = await ResetAsync(client, "case-001", null, false, new { newRunId = "run-new", fixtureId = Fixture, applicationVersion = "1.4.2" });
+
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(before, File.ReadAllBytes(PathFor));
+    }
+
+    [Fact]
+    public async Task Reset_without_csrf_token_is_rejected_and_mutates_nothing()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var session = await SignInAsync(client, "presenter");
+        var before = File.ReadAllBytes(PathFor);
+
+        using var response = await ResetAsync(client, "case-001", session, false, new { newRunId = "run-new", fixtureId = Fixture, applicationVersion = "1.4.2" });
+
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(before, File.ReadAllBytes(PathFor));
     }
 }

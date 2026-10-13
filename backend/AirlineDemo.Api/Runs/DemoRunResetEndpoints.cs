@@ -3,7 +3,7 @@ using AirlineDemo.Api.Persistence;
 
 namespace AirlineDemo.Api.Runs;
 
-public sealed record DemoRunResetRequest(string NewRunId);
+public sealed record DemoRunResetRequest(string NewRunId, string? FixtureId, string? ApplicationVersion);
 
 public static class DemoRunResetEndpoints
 {
@@ -22,7 +22,7 @@ public static class DemoRunResetEndpoints
 
         try
         {
-            return Results.Ok(reset.Reset(runId, session.User.Id, body.NewRunId));
+            return Results.Ok(reset.Reset(runId, session.User.Id, body.NewRunId, body.FixtureId, body.ApplicationVersion));
         }
         catch (CaseAccessDeniedException)
         {
@@ -31,6 +31,10 @@ public static class DemoRunResetEndpoints
         catch (DemoRunResetException ex)
         {
             return Results.BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.Conflict(new { error = "A run with that id already exists." });
         }
     }
 }
