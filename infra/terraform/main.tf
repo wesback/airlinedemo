@@ -19,6 +19,8 @@ terraform {
 provider "azurerm" {
   subscription_id = var.subscription_id
   tenant_id       = var.tenant_id
+  # Storage has shared keys disabled, so container management must use Entra auth.
+  storage_use_azuread = true
   features {}
 }
 
