@@ -111,6 +111,10 @@ public class ClaimValidationPolicyTests
     [InlineData("Return readiness is up-to-date, with pending reserve approval noted.")]
     [InlineData("Return readiness is compliant with pending reserve approval.")]
     [InlineData("Return readiness is done; pending reserve approval is in place.")]
+    [InlineData("Return readiness meets all requirements, including pending reserve approval.")]
+    [InlineData("Return readiness meeting the threshold: pending reserve approval.")]
+    [InlineData("Return readiness is current: pending reserve approval.")]
+    [InlineData("Return readiness is currently recorded with pending reserve approval.")]
     public void Resolved_or_historical_quote_cannot_establish_missing_requirement(string resolved)
     {
         var basis = new Dictionary<string, BasisDocument>
@@ -298,6 +302,15 @@ public class ClaimValidationPolicyTests
         Assert.Equal(baseline.Outcome, withEncoded.Outcome);
         Assert.Equal(baseline.RequestCount, withEncoded.RequestCount);
         Assert.False(withEncoded.AutoAccepted);
+        AssertSameDecision(baseline, withEncoded);
+    }
+
+    private static void AssertSameDecision<T>(T expected, T actual)
+    {
+        foreach (var property in typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+        {
+            Assert.Equal(property.GetValue(expected), property.GetValue(actual));
+        }
     }
 
     [Fact]
@@ -318,5 +331,7 @@ public class ClaimValidationPolicyTests
         Assert.Equal(baseline.RequestCount, withInjection.RequestCount);
         Assert.Equal(FindingOutcome.CompleteBaseline, withSplit.Outcome);
         Assert.Equal(0, withSplit.RequestCount);
+        AssertSameDecision(baseline, withInjection);
+        AssertSameDecision(baseline, withSplit);
     }
 }

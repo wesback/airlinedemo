@@ -156,6 +156,6 @@ public static class ClaimValidator
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly Regex Resolution = new(
-        @"\b(?:satisfied|satisfies|satisfy|satisfying|completed|completes|complete|completion|resolved|resolves|resolving|fulfilled|fulfils|fulfills|cleared|closed|met|historical|historically|previously|formerly|already|done|ready|approved|accepted|passed|passes|compliant|valid|effective|addressed|remedied|corrected)\b|up[- ]to[- ]date|in place",
+        @"\b(?:satisfied|satisfies|satisfy|satisfying|completed|completes|complete|completion|resolved|resolves|resolving|fulfilled|fulfils|fulfills|cleared|closed|met|historical|historically|previously|formerly|already|done|ready|approved|accepted|passed|passes|compliant|valid|effective|addressed|remedied|corrected|meets|meet|meeting|current|currently)\b|up[- ]to[- ]date|in place",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }
