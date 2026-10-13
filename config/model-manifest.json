@@ -1,0 +1,16 @@
+{
+  "manifestVersion": "STUB-0",
+  "arm": "STUB",
+  "deploymentName": "STUB",
+  "model": "STUB",
+  "apiVersion": "STUB",
+  "region": "STUB",
+  "contentFilter": "STUB",
+  "approval": {
+    "status": "unapproved",
+    "approvedBy": "",
+    "approvedAt": ""
+  },
+  "nonSyntheticContentApproved": false,
+  "realWorldActionsEnabled": false
+}
