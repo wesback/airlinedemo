@@ -1,0 +1,320 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 145,
+  "branch": "ai-sdlc/issue-145",
+  "commitSha": "92d4120ea66a8f783963060cf1268b9efe4ea97a",
+  "round": 0,
+  "pipelineVersion": "9266dd9",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint implements the main authorization and current-basis paths, but the named tests leave required acceptance behavior unverified: stale revision conflicts, complete audit provenance, and safe correlated trace metadata.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 133,
+          "message": "Add an M-02 test for a stale expected revision; the stale-basis test does not cover revision conflicts.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The stale-basis test submits basisVersion 0; it does not submit an outdated expectedRevision.",
+            "failureScenario": "If the expected-revision check is removed, a reviewer can submit a decision with a stale revision and the named test suite has no test that fails. M-02 requires stale revisions to be denied without mutation."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 77,
+          "message": "Add M-08 assertions for the decision timestamp and audit sequence.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The successful-decision test checks actor, action, outcome, reason, and basis version, but does not assert the audit timestamp or sequence.",
+            "failureScenario": "If decision audit provenance stops recording or exposing its time or sequence, this test still passes. M-08 requires both in the append-only business audit."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 77,
+          "message": "Add an M-10 test for correlated trace metadata and verify it excludes raw document and prompt content.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The tests verify decision state and audit entries, but none checks the emitted correlated trace metadata or its content.",
+            "failureScenario": "If the review trace stops being emitted or includes raw document or prompt content, the named test suite still passes. M-10 requires reconstructable correlated trace metadata without that content."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several authorization, reason, audit, and basis-invalidation paths. They miss the cross-case GET read case and do not verify required audit time, sequence, or decision-to-trace correlation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 135,
+          "message": "M-02 lacks a cross-case read test for the GET endpoint. Add a test that verifies an out-of-scope case returns no protected data.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The only out-of-scope test posts a decision. The GET review endpoint also uses TryScope, but no test calls it.",
+            "failureScenario": "If GET stops checking the session's case scope, a reviewer scoped to case-001 could read case-002's revision, basis version, and decision; the current tests would not catch the leak."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 67,
+          "message": "M-08 lacks assertions that the decision's audit time and sequence are recorded.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The successful-decision test checks outcome, reason, basis version, actor, action, and current status, but does not assert audit time or sequence.",
+            "failureScenario": "If decision audit entries stop recording their time or sequence, the test can still pass, leaving business history without the provenance M-08 requires."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 147,
+          "message": "M-10 lacks a test that verifies the business decision can be correlated with trace metadata without exposing raw document or prompt content.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The later-basis test checks that the prior decision remains non-current and no longer authorizes acceptance, but it does not verify correlated trace metadata.",
+            "failureScenario": "If successful decisions stop emitting a trace correlated by trace ID, the later-basis test still passes and reviewers cannot reconstruct the decision alongside its trace as M-10 requires."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A reviewer can still accept a case without a current technical decision because the new authorization helper is not wired into the existing acceptance path. The named tests also leave M-02's read and forged-ID protections unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "line": 63,
+          "message": "The technical-review decision does not gate acceptance. A reviewer can bypass it through the existing review endpoint, contrary to M-10. OWASP A01:2025 Broken Access Control.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "`AuthorizesAcceptance` is defined here, but nothing in the API calls it. The existing `/api/cases/{caseId}/reviews` handler can still accept a case directly.",
+            "failureScenario": "A signed-in technical reviewer with a valid anti-forgery token posts `accept` to the existing review endpoint without recording a current technical decision. The case is accepted despite the M-10 gate."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 80,
+          "message": "M-02 is not adequately tested: the change has no criterion-linked test for cross-case reads or the other specified forged-ID and stale-revision cases. Add tests tied to M-02; the current suite can pass if those protections regress.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The tests cover decision writes, but none identify the acceptance criteria they cover, and there is no test for the decision GET route's case-scope check.",
+            "failureScenario": "If the GET route stops checking the session's case scope, a reviewer scoped to case-001 could read case-002's decision and the named test file would still pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 94,
+      "total": 118,
+      "percent": 79.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 3,
+          "total": 3,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "covered": 81,
+          "total": 105,
+          "missed": [
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            75,
+            76,
+            77,
+            78,
+            79,
+            82,
+            83,
+            84,
+            90,
+            91,
+            92,
+            111,
+            129,
+            130,
+            131,
+            133,
+            134,
+            135
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
