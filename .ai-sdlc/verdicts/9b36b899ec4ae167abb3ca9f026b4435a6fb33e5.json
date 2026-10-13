@@ -1,0 +1,316 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 149,
+  "branch": "ai-sdlc/issue-149",
+  "commitSha": "9b36b899ec4ae167abb3ca9f026b4435a6fb33e5",
+  "round": 1,
+  "pipelineVersion": "f9929ba",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation adds identity, telemetry, and alert behavior, but the Terraform tests do not enforce all required grant scopes or alert routing. The M-08 tests exercise only a helper with synthetic data, so they do not verify that the application emits the trace.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 120,
+          "message": "M-14's tests do not catch widened scopes on all app grants or grants bound to the wrong principal.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-14 tests check the evidence assignment's exact scope and check that app assignments use the ServicePrincipal type, but do not verify the app principal IDs or the scopes of the OpenAI and telemetry assignments.",
+            "failureScenario": "If the OpenAI assignment is widened to resource-group scope, the current assertions still pass. M-14 requires the app identity's grants to remain limited, and the scope notes specifically require the test to reject subscription or resource-group scope."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 280,
+          "message": "M-15's test does not verify that each alert routes to the configured owner's action group.",
+          "confidence": 0.93,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-15 assertions verify that each alert has one action group and that the configured owner group has the expected receiver, but do not compare each alert's action group ID with that group's ID.",
+            "failureScenario": "If an alert references a different action group, the current assertions still pass while the configured owner receives no alert. M-15 requires alerts to reach that owner."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+          "line": 183,
+          "message": "M-08 has no test for trace emission through a real application path; the helper-only tests cannot detect a disconnected trace.",
+          "confidence": 0.89,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The trace tests construct synthetic records and call TelemetryRedaction directly; none exercises the application request path in CaseEndpoints that creates and emits the trace.",
+            "failureScenario": "If the application path stops calling EmitInvestigationTrace, or omits it for a successful review, these tests still pass. The M-08 acceptance criterion requires a real investigation trace and the issue requires tests to detect missing trace fields."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform tests cover many identity and alert properties, but they do not catch widened scopes on every app grant or alerts routed away from the configured owner.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 120,
+          "message": "M-14's tests do not detect widened scopes for every app grant.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-14 tests check role names and principal types, and assert the evidence assignment's exact scope. They do not assert the scopes of the OpenAI and telemetry assignments or that app assignments avoid subscription and resource-group scopes.",
+            "failureScenario": "If an app role assignment is widened to a subscription or resource-group scope while keeping its current role name and principal type, the tests still pass. This misses M-14's requirement to detect widened grants and the scope note's requirement to reject parent-scope assignments."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 280,
+          "message": "M-15's test does not verify that each alert routes to the configured owner's action group.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-15 test checks that each alert has one action group and that the configured owner group has the expected receiver, but does not compare each alert's action group ID with the owner group's ID.",
+            "failureScenario": "If an alert references a different action group, the owner group and receiver assertions still pass, so the test passes while the configured owner receives no alert."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable through the changed code. Telemetry attributes are allowlisted and value-validated, actor IDs are pseudonymized, and the SQL grant script uses a fixed identity name.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 5,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+      "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 166,
+      "total": 175,
+      "percent": 94.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 31,
+          "total": 36,
+          "missed": [
+            65,
+            66,
+            67,
+            68,
+            69
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "covered": 7,
+          "total": 7,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 128,
+          "total": 132,
+          "missed": [
+            93,
+            94,
+            95,
+            104
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

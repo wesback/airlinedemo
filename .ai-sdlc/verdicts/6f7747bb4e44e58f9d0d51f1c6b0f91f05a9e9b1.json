@@ -1,0 +1,266 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 151,
+  "branch": "ai-sdlc/issue-151",
+  "commitSha": "6f7747bb4e44e58f9d0d51f1c6b0f91f05a9e9b1",
+  "round": 0,
+  "pipelineVersion": "5401b35",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow does not bind the supplied image digest to the supplied CI run, and its signing step lacks the CLI and plugin setup needed on a fresh runner. The approval requirement also depends on an environment protection rule that this change neither establishes nor verifies.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 98,
+          "message": "Bind the requested digest to verifiable output from the specified CI run before signing or deploying it. Checking that unrelated evidence files exist does not establish image provenance.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The workflow takes image_digest and build_run_id as independent inputs, downloads evidence for the supplied run ID, then signs the supplied digest without checking that CI produced that digest or that the evidence belongs to it.",
+            "failureScenario": "A dispatch supplies the digest of a different image already in ACR and a run ID whose artifact contains the expected filenames. The workflow signs and deploys that image with unrelated evidence, although it was not the exact image produced by that CI run. This is an OWASP A03:2025 software supply chain failure."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 98,
+          "message": "Install and configure Notation and the Azure Key Vault plugin before invoking them; the release job currently cannot reach its signing or deployment steps on a fresh runner.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The job runs on ubuntu-latest and invokes notation sign with the azure-kv plugin, but the workflow has no step that installs the Notation CLI or its Azure Key Vault plugin.",
+            "failureScenario": "On a fresh GitHub-hosted runner without those tools, the sign step fails with a command-not-found or missing-plugin error, so the release cannot sign or deploy the image."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 28,
+          "message": "The workflow does not establish the required product-owner approval gate. Ensure the environment has a required-reviewer protection rule and verify that configuration; referencing its name alone does not enforce approval.",
+          "confidence": 0.94,
+          "category": "design",
+          "evidence": {
+            "codePathTraced": "The workflow assigns the job to the production-release environment, but does not configure required reviewers; merely naming a GitHub environment does not require approval.",
+            "failureScenario": "If production-release has no required-reviewer protection rule configured, a manual dispatch proceeds without product-owner approval and can deploy when OIDC credentials are valid. The workflow test only checks the environment name, so it would still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow does not guarantee the required approval gate, lacks setup for the signing tools, and does not retain the signature itself as a workflow artifact. The current tests check YAML text but do not catch these failures.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 31,
+          "message": "The workflow does not ensure that the referenced environment requires product-owner approval. Configure that protection for this environment or otherwise make the approval requirement verifiable.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The job references the production-release environment, while the workflow test only checks that this environment name appears in the YAML.",
+            "failureScenario": "If production-release has no required reviewers configured in GitHub, a manually dispatched run can proceed without product-owner approval and reach the deployment step; the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 88,
+          "message": "Install Notation and its Azure Key Vault plugin before invoking the signing command.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The release job runs on ubuntu-latest and invokes `notation sign` with the Azure Key Vault plugin, but the workflow has no step to install Notation or that plugin.",
+            "failureScenario": "On a fresh hosted runner without those tools installed, the signing step fails with a command or plugin-not-found error, so no release can proceed."
+          }
+        },
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 124,
+          "message": "The retention step uploads signature inspection output, not the signature. Export or retrieve the signature into the artifact directory and test that the actual signature is retained.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The signing command writes the signature to the registry; the only file written under artifacts/signature is notation-inspect.txt, which is what the upload step retains.",
+            "failureScenario": "After a successful release, downloading the 90-day workflow artifact provides signature inspection text but not the signature itself, so the signature is not retained as a workflow artifact as required."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workflow’s approval gate and digest syntax check do not establish that the image was produced by CI. The release key can sign an unrelated image digest, which is then eligible for deployment.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": ".github/workflows/release.yml",
+          "line": 87,
+          "message": "The release job signs an arbitrary supplied digest without verifying its provenance or binding it to the selected CI run. This lets an untrusted image become release-signed and deployable; verify CI provenance for this exact digest before signing. OWASP A08:2025 — Software or Data Integrity Failures.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The workflow accepts any syntactically valid image digest, then signs it with the release Key Vault key. It checks that build evidence files exist, but does not verify that the digest was produced by the specified CI run or that the evidence belongs to that digest.",
+            "failureScenario": "A user who can dispatch the workflow supplies the digest of an untrusted image already in ACR and an unrelated build run ID with the expected evidence files. If the required reviewer approves the run, this step signs that image and the later verification accepts the newly created signature before deployment."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "team-lead",
+    "complexityScore": 1,
+    "needsHuman": true,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": true,
+    "infraPaths": [
+      ".github/workflows/release.yml"
+    ]
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SignedReleaseWorkflowTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

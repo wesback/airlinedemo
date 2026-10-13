@@ -1,4 +1,5 @@
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 
@@ -11,6 +12,8 @@ builder.Services.AddSingleton(_ => new CaseStateStore(
     builder.Configuration["CaseState:Path"] ?? Path.Combine(AppContext.BaseDirectory, "case-state.json")));
 builder.Services.AddSingleton<DemoRunReset>();
 var app = builder.Build();
+TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
+app.UseTransportSecurityHeaders();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();

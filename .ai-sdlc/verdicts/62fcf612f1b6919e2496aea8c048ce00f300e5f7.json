@@ -1,0 +1,316 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 149,
+  "branch": "ai-sdlc/issue-149",
+  "commitSha": "62fcf612f1b6919e2496aea8c048ce00f300e5f7",
+  "round": 3,
+  "pipelineVersion": "f9929ba",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation covers the requested identity, telemetry, and alert behavior, but the Terraform tests miss two explicit regression checks: widened app grant scopes and alerts routed away from the configured owner.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 60,
+          "message": "M-14's tests do not detect widened scopes on the OpenAI or telemetry grants.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-14 tests assert the evidence assignment's exact scope, but check only role names and principal types for the OpenAI and telemetry assignments. They do not reject app assignments at subscription or resource-group scope.",
+            "failureScenario": "If the OpenAI or telemetry assignment is widened to resource-group scope, the current assertions still pass. The issue's M-14 criterion and scope notes require widened grants to be detected."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 270,
+          "message": "M-15's test does not verify that every alert routes to the configured owner's action group.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-15 test checks that every alert has one action group and separately checks the configured owner's receiver, but never compares each alert's action group ID with the owner's action group ID.",
+            "failureScenario": "If an alert is changed to route to a different action group, the assertions still pass while the configured owner receives no alert."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change includes criterion-linked tests for identity grants and security alert configuration, but they do not catch widened OpenAI or telemetry grant scopes or alerts routed away from the configured owner.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 162,
+          "message": "M-14's tests do not detect widened scopes on every app grant.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-14 tests assert the evidence assignment's exact container scope, but do not assert the scopes of the OpenAI and telemetry assignments or reject app grants at subscription or resource-group scope.",
+            "failureScenario": "If an OpenAI or telemetry grant is widened to resource-group scope, the current assertions still pass. This misses M-14's grant-widening requirement and the scope note's requirement to reject parent-scope app grants."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/identity-telemetry.tftest.hcl",
+          "line": 300,
+          "message": "M-15's test does not verify that every alert routes to the configured owner's action group.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-15 test checks that each alert has one action group and separately checks the configured owner's receiver, but does not compare each alert's action group ID with the owner's action group ID.",
+            "failureScenario": "If an alert references a different action group, the current assertions still pass while the configured owner receives no alert."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable through the changed code. Telemetry trace fields are constrained to structured values, actor identifiers are pseudonymized, and security event names are fixed.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 5,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+      "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 166,
+      "total": 175,
+      "percent": 94.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 31,
+          "total": 36,
+          "missed": [
+            65,
+            66,
+            67,
+            68,
+            69
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "covered": 7,
+          "total": 7,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 128,
+          "total": 132,
+          "missed": [
+            93,
+            94,
+            95,
+            104
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
