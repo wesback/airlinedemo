@@ -7,6 +7,10 @@ using Microsoft.Extensions.Hosting;
 
 namespace AirlineDemo.Api.Tests;
 
+/// <summary>
+/// Covers acceptance criterion [M-02] (NFR-001, AC-020, DD-028): CSP and HSTS headers on every response,
+/// no CORS, and the local identity bypass refused in deployed mode.
+/// </summary>
 public sealed class TransportSecurityTests
 {
     private static WebApplicationFactory<Program> CreateFactory(string environment, string? bypass = null) =>
@@ -42,6 +46,12 @@ public sealed class TransportSecurityTests
         Assert.Equal(
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             TransportSecurity.ContentSecurityPolicy);
+    }
+
+    [Fact]
+    public void Hsts_matches_m02_pinned_value()
+    {
+        Assert.Equal("max-age=31536000; includeSubDomains", TransportSecurity.StrictTransportSecurity);
     }
 
     [Fact]
