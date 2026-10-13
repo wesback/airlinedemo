@@ -1,0 +1,303 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 144,
+  "branch": "ai-sdlc/issue-144",
+  "commitSha": "8e2e8da3a24cbbac1fecb31ad7d22e556e21d2db",
+  "round": 2,
+  "pipelineVersion": "d734a57",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The catalog check can miss embedded-file name trees when /Names is an indirect reference. Such a PDF can be accepted as complete evidence despite the requirement to reject or ignore embedded files.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 181,
+          "message": "Resolve the catalog /Names value before checking its entries; an indirect /Names dictionary lets embedded files bypass rejection (A06:2025, Insecure Design).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RejectActiveContent checks the catalog's /Names value only when it is already a DictionaryToken. It does not resolve an IndirectReferenceToken, although the existing Resolve helper handles indirect references elsewhere in this file.",
+            "failureScenario": "A PDF stores its catalog /Names dictionary as an indirect object, with an /EmbeddedFiles name tree in that object and no attachment annotation. This check skips the name tree, so text extraction can succeed and Process can return Complete for a PDF containing an embedded file, contrary to the acceptance criteria (A06:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The intake covers the tested catalog, annotation, and image cases, but misses the catalog /AF route for embedded files. That leaves a reachable path for a PDF with an associated file to be accepted as complete evidence.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 177,
+          "message": "Catalog-associated embedded files can bypass intake rejection. Check the parsed /AF entry and reject PDFs that reference associated files.",
+          "confidence": 0.88,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RejectActiveContent checks selected catalog keys and the JavaScript and EmbeddedFiles name trees, but does not inspect the catalog's /AF associated-files entry.",
+            "failureScenario": "A text PDF with an embedded file referenced through the catalog's /AF array, but no /EmbeddedFiles name tree or file-attachment annotation, can pass these checks. PdfPig extracts its text and Process returns Complete, so the embedded file is accepted as evidence despite the acceptance criterion. OWASP A06:2025, Insecure Design."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A compressed PDF can pass the input-size checks while consuming excessive resources during page extraction. This is an A06:2025 unbounded resource risk.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 278,
+          "message": "The byte and page limits do not bound resources used to decode PDF streams, so a small compressed PDF can exhaust service resources during extraction.",
+          "confidence": 0.78,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The input byte limits run before parsing, but ExtractDocument then opens the PDF and processes each page without a bound on decoded stream size or processing resources.",
+            "failureScenario": "A caller submits a PDF under the 10 MB limit with a highly compressed page content stream that expands to a very large amount of data. PdfPig processes the decoded stream during page extraction, potentially exhausting service memory or CPU and disrupting other intake requests. This is an unbounded resource risk (A06:2025, Insecure Design)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AirlineDemo.Api.Tests.csproj",
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/active-javascript.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/malformed.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/truncated.pdf",
+      "backend/AirlineDemo.Api.Tests/Fixtures/PdfCorpus/valid-text.pdf"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 204,
+      "total": 231,
+      "percent": 88.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 204,
+          "total": 231,
+          "missed": [
+            82,
+            83,
+            138,
+            139,
+            140,
+            141,
+            142,
+            179,
+            191,
+            192,
+            198,
+            199,
+            224,
+            254,
+            255,
+            256,
+            257,
+            258,
+            279,
+            280,
+            281,
+            282,
+            283,
+            304,
+            305,
+            311,
+            312
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 0,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
