@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Persistence;
 
 namespace AirlineDemo.Api.Auth;
 
@@ -7,6 +9,9 @@ public sealed record ReviewRequest(int ExpectedRevision, string? Decision);
 public static class CaseEndpoints
 {
     public const string ReviewerRole = "technical-reviewer";
+
+    // Per-process key: actor pseudonyms correlate within a run and are not reversible from traces.
+    private static readonly byte[] ActorKey = RandomNumberGenerator.GetBytes(32);
 
     public static IEndpointRouteBuilder MapCaseEndpoints(this IEndpointRouteBuilder app)
     {
@@ -40,7 +45,35 @@ public static class CaseEndpoints
         if (body.Decision is not ("accept" or "reject"))
             return Results.BadRequest(new { error = "Decision must be accept or reject." });
 
-        var outcome = cases.RecordReview(caseId, body.ExpectedRevision, body.Decision, out var updated);
+        CaseRecord? updated;
+        ReviewOutcome outcome;
+        try
+        {
+            outcome = cases.RecordReview(caseId, body.ExpectedRevision, body.Decision, out updated);
+        }
+        catch (BasisIntegrityException)
+        {
+            TelemetryRedaction.EmitSecurityEvent(logger, TelemetryRedaction.SecurityEvents.IntegritySignatureFailure,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return Results.Json(new { error = "Case integrity check failed." }, statusCode: StatusCodes.Status409Conflict);
+        }
+
+        if (outcome == ReviewOutcome.Recorded && updated is not null)
+        {
+            var accepted = body.Decision == "accept";
+            var trace = new TelemetryRedaction.InvestigationTraceRecord(
+                "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant(),
+                "basis-v" + updated.Revision,
+                config["Telemetry:ModelDeployment"] ?? "not-invoked",
+                Array.Empty<string>(),
+                Array.Empty<string>(),
+                accepted ? "return-ready" : "return-not-ready",
+                session.User.Id,
+                accepted ? "approved" : "rejected");
+            TelemetryRedaction.EmitInvestigationTrace(logger, trace,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo", ActorKey);
+        }
+
         return outcome switch
         {
             ReviewOutcome.Recorded => Results.Ok(updated),

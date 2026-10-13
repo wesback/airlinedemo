@@ -46,6 +46,11 @@ variable "egress_allowed_destinations" {
   }
 }
 
+variable "sql_database_name" {
+  type    = string
+  default = "airlinedemo"
+}
+
 variable "sql_server_name" {
   type = string
 }

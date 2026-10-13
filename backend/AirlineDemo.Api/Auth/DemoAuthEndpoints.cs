@@ -48,6 +48,8 @@ public static class DemoAuthEndpoints
         var source = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         if (throttle.IsLocked(source))
         {
+            TelemetryRedaction.EmitSecurityEvent(logger, TelemetryRedaction.SecurityEvents.BudgetExhausted,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
             EmitAuthFailure(logger, config);
             return Results.Json(new { error = GenericFailure }, statusCode: StatusCodes.Status429TooManyRequests);
         }

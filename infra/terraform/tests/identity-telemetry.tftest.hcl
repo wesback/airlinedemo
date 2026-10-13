@@ -93,6 +93,21 @@ run "M-14_app_identity_grants_are_exact" {
     error_message = "App identity telemetry grant must be publish-only."
   }
 
+  assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::audit") && !(strcontains(s, "SELECT") || strcontains(s, "INSERT"))]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::audit")]) == 2
+    error_message = "Audit schema may only be granted SELECT and INSERT to the app identity."
+  }
+
+  assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && (strcontains(s, "ALTER") || strcontains(s, "CONTROL"))]) == 0
+    error_message = "App identity must never be granted ALTER or CONTROL."
+  }
+
+  assert {
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "DENY") && strcontains(s, "SCHEMA::audit")]) == 4
+    error_message = "Audit UPDATE, DELETE, ALTER and CONTROL must stay explicitly denied to the app identity."
+  }
+
 
   assert {
     condition     = azurerm_storage_container.evidence.name == "evidence" && azurerm_storage_container.evidence.container_access_type == "private"
@@ -215,6 +230,11 @@ run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
   assert {
     condition     = alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : length(a.action) == 1 && length(a.action[0].action_groups) == 1])
     error_message = "Every security alert must route through exactly one action group, the named owner group."
+  }
+
+  assert {
+    condition     = sort(keys(azurerm_monitor_scheduled_query_rules_alert_v2.security)) == sort(["auth_scope_failures", "integrity_signature_failures", "budget_exhausted"])
+    error_message = "Security alerts must cover auth/scope failures, integrity failures and exhausted budgets, and nothing else is required."
   }
 
 }

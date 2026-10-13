@@ -217,6 +217,24 @@ public sealed class TelemetryPrivacyTests
             TelemetryRedaction.EmitSecurityEvent(new CapturingLogger(), "security.made_up", "1.2.3", "demo"));
     }
 
+    [Fact]
+    public void Empty_tool_and_citation_lists_are_kept_and_injected_tool_values_are_redacted()
+    {
+        var redacted = TelemetryRedaction.Redact(new[]
+        {
+            new KeyValuePair<string, object?>("investigation.tools", string.Empty),
+            new KeyValuePair<string, object?>("investigation.citations", string.Empty),
+        });
+        Assert.Equal(string.Empty, redacted["investigation.tools"]);
+        Assert.Equal(string.Empty, redacted["investigation.citations"]);
+
+        var injected = TelemetryRedaction.Redact(new[]
+        {
+            new KeyValuePair<string, object?>("investigation.tools", $"reserve-calc,{Canaries[0]}"),
+        });
+        Assert.Equal(TelemetryRedaction.Redacted, injected["investigation.tools"]);
+    }
+
     private sealed class CapturingLogger : ILogger
     {
         public List<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = new();

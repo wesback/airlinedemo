@@ -59,6 +59,21 @@ locals {
   )
 }
 
+# Applies the exact app SQL contract. Re-runs whenever the contract changes. Requires sqlcmd on the runner and
+# Entra ID rights on the SQL server; the app identity itself never runs these statements.
+resource "terraform_data" "app_sql_grants" {
+  triggers_replace = local.app_sql_grant_statements
+
+  provisioner "local-exec" {
+    environment = {
+      SQL_SERVER   = azurerm_mssql_server.sql.fully_qualified_domain_name
+      SQL_DATABASE = var.sql_database_name
+      SQL_GRANTS   = join(" ", local.app_sql_grant_statements)
+    }
+    command = "sqlcmd -S \"$SQL_SERVER\" -d \"$SQL_DATABASE\" -G -b -Q \"$SQL_GRANTS\""
+  }
+}
+
 output "app_sql_grant_statements" {
   description = "T-SQL the migration identity runs to grant the app identity its exact SQL data-plane rights."
   value       = local.app_sql_grant_statements
