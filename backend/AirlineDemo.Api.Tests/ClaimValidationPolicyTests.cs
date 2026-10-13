@@ -107,6 +107,10 @@ public class ClaimValidationPolicyTests
     [InlineData("Return readiness: pending reserve approval was completed at the last inspection.")]
     [InlineData("Return readiness: pending reserve approval was resolved and is historical.")]
     [InlineData("Return readiness: pending reserve approval, previously recorded and now fulfilled.")]
+    [InlineData("Return readiness is up to date: pending reserve approval.")]
+    [InlineData("Return readiness is up-to-date, with pending reserve approval noted.")]
+    [InlineData("Return readiness is compliant with pending reserve approval.")]
+    [InlineData("Return readiness is done; pending reserve approval is in place.")]
     public void Resolved_or_historical_quote_cannot_establish_missing_requirement(string resolved)
     {
         var basis = new Dictionary<string, BasisDocument>
@@ -272,6 +276,28 @@ public class ClaimValidationPolicyTests
         Assert.Equal(ClaimStatus.Downgraded, result.Status);
         Assert.Equal(FindingOutcome.Review, decision.Outcome);
         Assert.Equal(0, decision.RequestCount);
+    }
+
+    [Fact]
+    public void Base64_encoded_instruction_in_document_does_not_change_policy()
+    {
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Injection));
+        var basis = new Dictionary<string, BasisDocument>
+        {
+            ["history"] = BasisDocument.Create("history", [encoded, "Maintenance history page."]),
+        };
+
+        var encodedClaim = ClaimValidator.Validate(
+            new InvestigationClaim(encoded, [new DocumentWitness("history", 1, encoded)]),
+            ClaimKind.Baseline,
+            basis,
+            encoded);
+        var baseline = FindingRouter.Route(Complete, [Supported()], identityAmbiguous: false);
+        var withEncoded = FindingRouter.Route(Complete, [encodedClaim], identityAmbiguous: false);
+
+        Assert.Equal(baseline.Outcome, withEncoded.Outcome);
+        Assert.Equal(baseline.RequestCount, withEncoded.RequestCount);
+        Assert.False(withEncoded.AutoAccepted);
     }
 
     [Fact]
