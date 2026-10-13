@@ -47,13 +47,15 @@ public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvest
     private async Task<string> GetRequirementsAsync(CancellationToken cancellationToken)
     {
         await limits.BeforeToolCallAsync(cancellationToken);
-        return source.GetApprovedRequirements(caseId) ?? "no approved requirements";
+        var requirements = source.GetApprovedRequirements(caseId);
+        return requirements is null ? "no approved requirements" : Untrusted(requirements);
     }
 
     private async Task<string> GetSourcePageAsync(string documentId, int page, CancellationToken cancellationToken)
     {
         await limits.BeforeToolCallAsync(cancellationToken);
-        return source.GetSourcePage(caseId, documentId, page) ?? "denied: document page is not part of this case";
+        var text = source.GetSourcePage(caseId, documentId, page);
+        return text is null ? "denied: document page is not part of this case" : Untrusted(text);
     }
 
     private async Task<string> SearchAsync(string query, CancellationToken cancellationToken)
@@ -65,8 +67,12 @@ public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvest
         }
 
         var hits = source.SearchWithinBasis(caseId, query);
-        return hits.Count == 0 ? "no matches" : string.Join('\n', hits);
+        return hits.Count == 0 ? "no matches" : Untrusted(string.Join('\n', hits));
     }
+
+    // Document-derived tool output reaches the model only inside the untrusted-data delimiter (M-05).
+    private static string Untrusted(string text) =>
+        $"{BoundedInvestigator.UntrustedBegin}\n{text}\n{BoundedInvestigator.UntrustedEnd}";
 
     private async Task<string> GetStatusAsync(CancellationToken cancellationToken)
     {
