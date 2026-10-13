@@ -1,0 +1,258 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 157,
+  "branch": "ai-sdlc/issue-157",
+  "commitSha": "cf89f2f03ee3f2550347a2318d4e8e6c0476f4c5",
+  "round": 3,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A current citation with a numeric zero can pass validation as a missing requirement and produce a request, even though it states that no requirements are outstanding.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 144,
+          "message": "The negation check misses numeric zero, so evidence stating there are no outstanding requirements can establish a MissingRequirement request. Recognize numeric zero as a denial and cover this case with a test.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "For MissingRequirement claims, WitnessProblem rejects quotes matching Negation or Resolution. The negation pattern recognizes the word “zero” but not the numeric value “0”; a quote containing the typed value and the full claim text can therefore be marked Supported. FindingRouter routes a supported MissingRequirement claim as a request.",
+            "failureScenario": "With complete coverage and a current, digest-valid page containing “Maintenance requirements: 0 outstanding.”, an investigator submits that sentence as the claim and witness, with typedValue “Maintenance requirements” and kind MissingRequirement. Neither pattern matches the numeric zero, so validation marks it Supported and routing creates a request despite the evidence showing no outstanding requirements. OWASP A08:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover witness validation, coverage and uncertainty routing, and routing behavior for embedded instructions. They do not verify the acceptance criterion's permissions and tool availability behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ClaimValidationPolicyTests.cs",
+          "line": 307,
+          "message": "The instruction-inert tests do not cover the acceptance criterion that split or encoded instructions cannot change permissions or tool availability. Add assertions for those behaviors, or test that those controls are outside this policy's influence.",
+          "confidence": 0.87,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The instruction tests validate claims, route them, and compare FindingDecision fields. They do not inspect permissions or tool availability.",
+            "failureScenario": "If an embedded instruction changed permissions or tool availability while leaving the routing decision unchanged, these tests would still pass, so the permissions and tool availability behavior in the third acceptance criterion is unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A current, digest-valid witness can still be classified as a missing requirement when its wording indicates the requirement is satisfied but avoids the validator’s fixed negation and resolution terms.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 151,
+          "message": "The fixed wording checks miss clear satisfied statuses such as “green,” allowing evidence that does not establish a current gap to produce a MissingRequirement request. Validate that evidence supports the claim kind before marking it Supported.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "For MissingRequirement claims, the validator rejects witness quotes only when they match the fixed Resolution or Negation patterns. A quote containing the typed value and the entire claim text can otherwise be marked Supported; FindingRouter then creates a request for any supported MissingRequirement claim.",
+            "failureScenario": "An investigator submits the current, digest-valid quote “Maintenance requirement status: green.” as the claim text, labels it MissingRequirement, and uses “Maintenance requirement” as the typed value. Neither pattern recognizes “green,” so validation marks the claim Supported and routing creates a request despite the evidence indicating the requirement is satisfied. OWASP A08:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ClaimValidationPolicyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
