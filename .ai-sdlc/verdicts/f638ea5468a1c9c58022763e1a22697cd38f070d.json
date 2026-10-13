@@ -1,0 +1,250 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 155,
+  "branch": "ai-sdlc/issue-155",
+  "commitSha": "f638ea5468a1c9c58022763e1a22697cd38f070d",
+  "round": 0,
+  "pipelineVersion": "6b098a7",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new gate is only exercised by its tests, so the diff does not ensure production calls or scored runs are blocked by an unapproved manifest. Its content scan also misses common personal identifiers, allowing them in requests marked synthetic.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 103,
+          "message": "The manifest gate is not connected to production model-call or scored-run paths, so an unapproved manifest does not reliably block data transmission.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff defines ModelCallGate.Authorize, but adds no production call site that loads the manifest or invokes the gate; the only Authorize calls shown are in tests.",
+            "failureScenario": "A model call or scored run follows the existing production path with the shipped unapproved manifest and sends data without invoking Authorize, so the manifest does not cause the call or run to fail before transmission."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 119,
+          "message": "The identifier scan misses common personal identifiers such as phone numbers, allowing them through in a request marked synthetic.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Authorize accepts requests marked IsSynthetic and checks content only against the listed credential and identifier regexes.",
+            "failureScenario": "A request marked synthetic contains a real passenger phone number, such as \"+1 415 555 0134\"; none of the patterns match, so Authorize returns a trace and permits the content. This exposes personal information to the model (LLM02:2025 Sensitive Information Disclosure)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The manifest validation helper has useful unit coverage, but the diff does not connect it to scored runs, and its identifier checks allow aircraft registrations through.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 119,
+          "message": "The scored-run rejection criterion is not implemented or tested: the gate is a standalone helper, so M-18 does not establish that scored runs fail before sending data.",
+          "confidence": 0.86,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The new tests call ModelCallGate.Authorize directly; the diff adds no production call site that loads the manifest or invokes the gate for model calls or scored runs.",
+            "failureScenario": "With the shipped stub manifest, a scored run that follows the existing scoring path without calling Authorize can proceed instead of failing explicitly. No test exercises a scored run with an invalid manifest."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs",
+          "line": 158,
+          "message": "The identifier guard misses aircraft registration numbers, and the test treats one as safe. Add rejection coverage and block this identifier form before authorizing the request.",
+          "confidence": 0.93,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Authorize checks the content against credential and identifier regexes, but none recognizes aircraft registration numbers; this test authorizes in-region non-synthetic content containing \"Aircraft N123 record.\"",
+            "failureScenario": "An in-region request containing an aircraft registration such as N123 passes authorization and its content can be sent to the model, despite the criterion prohibiting real identifiers. This is sensitive information disclosure (OWASP LLM02:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The manifest checks are present, but the request gate does not verify that content marked synthetic is actually synthetic. Real identifiers outside the narrow regex patterns can pass authorization.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 139,
+          "message": "The gate can authorize real passenger data as synthetic based on a caller-controlled flag, exposing sensitive information to the model. This is sensitive information disclosure (LLM02:2025).",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Authorize trusts the caller-controlled IsSynthetic flag to skip the approved-region check. Its content scan only recognizes a few credential formats and email addresses; it does not establish that content is synthetic or detect identifiers such as phone or passport numbers.",
+            "failureScenario": "With an approved manifest, a caller passes real passenger records in Content, sets IsSynthetic=true, and supplies a non-empty EvidenceVersion. If the records contain an identifier the regexes do not match, Authorize returns a trace and permits the request to proceed with that real data."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 103,
+      "total": 106,
+      "percent": 97.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "covered": 103,
+          "total": 106,
+          "missed": [
+            48,
+            49,
+            50
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
