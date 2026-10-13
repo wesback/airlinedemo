@@ -17,42 +17,54 @@ public class EvidenceIntakeTests
         return File.ReadAllBytes(Path.Combine(dir!, "Fixtures", "PdfCorpus", name));
     }
 
-    /// <summary>Builds a synthetic text PDF with the given page count, optionally padded with trailing comment bytes to an exact size.</summary>
+    /// <summary>
+    /// Builds a synthetic text PDF with the given page count and a valid cross-reference table. When padToBytes is
+    /// larger than the document, comment bytes are inserted after the header so the file is exactly padToBytes long.
+    /// </summary>
     private static byte[] TextPdf(int pages, int padToBytes = 0)
     {
+        var unpadded = BuildTextPdf(pages, 0);
+        return padToBytes > unpadded.Length ? BuildTextPdf(pages, padToBytes - unpadded.Length) : unpadded;
+    }
+
+    private static byte[] BuildTextPdf(int pages, int padBytes)
+    {
         var sb = new StringBuilder("%PDF-1.4\n");
+        if (padBytes > 0)
+        {
+            sb.Append('%', padBytes - 1).Append('\n');
+        }
+
+        var offsets = new List<int>();
+        void Add(string body)
+        {
+            offsets.Add(sb.Length);
+            sb.Append(offsets.Count).Append(" 0 obj ").Append(body).Append('\n');
+        }
+
         int fontId = 3 + 2 * pages;
-        sb.Append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
-        sb.Append("2 0 obj << /Type /Pages /Count ").Append(pages).Append(" /Kids [");
+        var kids = string.Join(" ", Enumerable.Range(0, pages).Select(i => $"{3 + 2 * i} 0 R"));
+        Add("<< /Type /Catalog /Pages 2 0 R >> endobj");
+        Add($"<< /Type /Pages /Count {pages} /Kids [{kids}] >> endobj");
         for (int i = 0; i < pages; i++)
         {
-            sb.Append(3 + 2 * i).Append(" 0 R ");
-        }
-
-        sb.Append("] >> endobj\n");
-        for (int i = 0; i < pages; i++)
-        {
-            int pageId = 3 + 2 * i;
-            int contentId = pageId + 1;
-            sb.Append(pageId).Append(" 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ")
-                .Append(contentId).Append(" 0 R /Resources << /Font << /F1 ").Append(fontId).Append(" 0 R >> >> >> endobj\n");
+            int contentId = 4 + 2 * i;
+            Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentId} 0 R /Resources << /Font << /F1 {fontId} 0 R >> >> >> endobj");
             var content = $"BT /F1 12 Tf 72 720 Td (synthetic page {i + 1}) Tj ET";
-            sb.Append(contentId).Append(" 0 obj << /Length ").Append(content.Length).Append(" >> stream\n")
-                .Append(content).Append("\nendstream endobj\n");
+            Add($"<< /Length {content.Length} >> stream\n{content}\nendstream endobj");
         }
 
-        sb.Append(fontId).Append(" 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n");
-        sb.Append("trailer << /Root 1 0 R >>\n%%EOF\n");
-        var bytes = Encoding.ASCII.GetBytes(sb.ToString());
-        if (bytes.Length >= padToBytes)
+        Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj");
+        int xrefPosition = sb.Length;
+        sb.Append("xref\n0 ").Append(offsets.Count + 1).Append("\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
         {
-            return bytes;
+            sb.Append(offset.ToString("D10")).Append(" 00000 n \n");
         }
 
-        var padded = new byte[padToBytes];
-        Array.Fill(padded, (byte)'%');
-        Array.Copy(bytes, padded, bytes.Length);
-        return padded;
+        sb.Append("trailer << /Size ").Append(offsets.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n")
+            .Append(xrefPosition.ToString("D10")).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(sb.ToString());
     }
 
     private static EvidenceDocument Doc(string name, byte[] content) => new(name, content);
@@ -117,13 +129,17 @@ public class EvidenceIntakeTests
     [Fact]
     public void TwelveDocumentsAreAcceptedAndThirteenAreRejectedWithoutPartialBasis()
     {
-        var store = new EvidenceBasisStore();
         var twelve = Enumerable.Range(1, 12).Select(i => Doc($"doc-{i}.pdf", TextPdf(1))).ToList();
         var thirteen = Enumerable.Range(1, 13).Select(i => Doc($"doc-{i}.pdf", TextPdf(1))).ToList();
 
-        Assert.Equal(EvidenceProcessingState.Complete, EvidenceIntake.Process(twelve, store).State);
-        Assert.Equal(EvidenceProcessingState.RejectedPermanent, EvidenceIntake.Process(thirteen, new EvidenceBasisStore()).State);
-        Assert.Empty(new EvidenceBasisStore().History("doc-1.pdf"));
+        var acceptedStore = new EvidenceBasisStore();
+        Assert.Equal(EvidenceProcessingState.Complete, EvidenceIntake.Process(twelve, acceptedStore).State);
+        Assert.NotNull(acceptedStore.Latest("doc-1.pdf"));
+
+        var rejectedStore = new EvidenceBasisStore();
+        Assert.Equal(EvidenceProcessingState.RejectedPermanent, EvidenceIntake.Process(thirteen, rejectedStore).State);
+        Assert.Empty(rejectedStore.History("doc-1.pdf"));
+        Assert.Null(rejectedStore.Latest("doc-13.pdf"));
     }
 
     [Fact]
@@ -141,14 +157,32 @@ public class EvidenceIntakeTests
     }
 
     [Fact]
-    public void DocumentWithTwoHundredPagesIsAcceptedAndTwoHundredOneIsRejected()
+    public void M09PackageAtFiftyMegabytesIsAcceptedAndOneByteOverIsRejectedWithoutBasis()
+    {
+        var tenMb = (int)EvidenceIntake.MaxDocumentBytes;
+        var atLimit = Enumerable.Range(1, 5).Select(i => Doc($"big-{i}.pdf", TextPdf(1, tenMb))).ToList();
+        Assert.Equal(EvidenceIntake.MaxPackageBytes, atLimit.Sum(d => d.Content.LongLength));
+        Assert.Equal(EvidenceProcessingState.Complete, EvidenceIntake.Process(atLimit, new EvidenceBasisStore()).State);
+
+        var overLimit = new List<EvidenceDocument>(atLimit) { Doc("extra.pdf", new byte[1]) };
+        var store = new EvidenceBasisStore();
+        var result = EvidenceIntake.Process(overLimit, store);
+        Assert.Equal(EvidenceProcessingState.RejectedPermanent, result.State);
+        Assert.Empty(result.Versions);
+        Assert.Empty(store.History("big-1.pdf"));
+        Assert.Null(store.Latest("extra.pdf"));
+    }
+
+    [Fact]
+    public void DocumentWithTwoHundredPagesIsAcceptedAndTwoHundredOneIsRetryablyRejected()
     {
         Assert.Equal(EvidenceProcessingState.Complete,
             EvidenceIntake.Process([Doc("two-hundred.pdf", TextPdf(200))], new EvidenceBasisStore()).State);
 
         var store = new EvidenceBasisStore();
         var result = EvidenceIntake.Process([Doc("two-hundred-one.pdf", TextPdf(201))], store);
-        Assert.Equal(EvidenceProcessingState.RejectedPermanent, result.State);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, result.State);
+        Assert.Empty(result.Versions);
         Assert.Null(store.Latest("two-hundred-one.pdf"));
     }
 

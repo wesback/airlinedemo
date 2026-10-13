@@ -157,7 +157,7 @@ public static class EvidenceIntake
 
             if (pdf.NumberOfPages > MaxPagesPerDocument)
             {
-                return (EvidenceProcessingState.RejectedPermanent, $"{pdf.NumberOfPages} pages; limit is {MaxPagesPerDocument}", "");
+                return (EvidenceProcessingState.RejectedRetryable, $"{pdf.NumberOfPages} pages; limit is {MaxPagesPerDocument}", "");
             }
 
             if (HasEmbeddedFilesOrForms(pdf))
