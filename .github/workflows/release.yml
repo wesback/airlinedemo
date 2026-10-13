@@ -1,0 +1,132 @@
+name: release
+
+# Promotes and deploys one exact signed image digest. Tags are never accepted.
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "Image digest produced by CI, as sha256:<64 hex>. Mutable tags are rejected."
+        required: true
+        type: string
+      build_run_id:
+        description: "Build workflow run ID that produced the supply-chain-evidence artifact."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Required reviewers on this environment (product owner) gate every run before any step executes.
+    environment: production-release
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    env:
+      IMAGE_DIGEST: ${{ inputs.image_digest }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+      IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+      SIGNING_KEY_ID: ${{ vars.AZURE_KV_SIGNING_KEY_ID }}
+      APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+    steps:
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::image_digest must be sha256:<64 hex>; tags and other references are rejected"
+            exit 1
+          fi
+          if [[ ! "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::build_run_id must be numeric"
+            exit 1
+          fi
+
+      - name: Private registry connectivity
+        run: |
+          set -euo pipefail
+          ip="$(getent hosts "$ACR_LOGIN_SERVER" | awk 'NR==1{print $1}')"
+          if [[ -z "$ip" ]]; then
+            echo "::error::ACR login server does not resolve; private endpoint is required"
+            exit 1
+          fi
+          if [[ ! "$ip" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; then
+            echo "::error::ACR resolves to public address $ip; release requires the private endpoint"
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Registry login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Download build evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: evidence
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify build evidence present
+        run: |
+          set -euo pipefail
+          test -s evidence/sbom/dotnet-sbom.cdx.json
+          test -s evidence/sbom/npm-sbom.cdx.json
+          test -s evidence/audit/dotnet-vulnerable.txt
+          test -s evidence/audit/npm-audit.json
+
+      - name: Sign image digest
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/signature
+          notation sign "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" \
+            --id "$SIGNING_KEY_ID" --plugin azure-kv --signature-format cose \
+            --allow-referrers-api
+          notation inspect "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" > artifacts/signature/notation-inspect.txt
+          test -s artifacts/signature/notation-inspect.txt
+
+      - name: Verify signature and digest
+        run: |
+          set -euo pipefail
+          notation verify "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+          actual="$(az acr repository show --name "$ACR_NAME" --image "$IMAGE_REPOSITORY@$IMAGE_DIGEST" --query digest -o tsv)"
+          if [[ "$actual" != "$IMAGE_DIGEST" ]]; then
+            echo "::error::digest mismatch: expected $IMAGE_DIGEST, registry has $actual"
+            exit 1
+          fi
+
+      - name: Deploy signed digest
+        run: |
+          set -euo pipefail
+          az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --image "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+
+      - name: Retain release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.run_id }}
+          path: |
+            evidence/sbom/dotnet-sbom.cdx.json
+            evidence/sbom/npm-sbom.cdx.json
+            evidence/audit/dotnet-vulnerable.txt
+            evidence/audit/npm-audit.json
+            artifacts/signature/
+          retention-days: 90
+          if-no-files-found: error
