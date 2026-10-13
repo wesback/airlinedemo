@@ -142,10 +142,20 @@ public static class ClaimValidator
             return "witness quote negates claim";
         }
 
+        // A missing-requirement claim needs a current gap, so a quote saying the requirement is done or historical cannot support it.
+        if (kind == ClaimKind.MissingRequirement && Resolution.IsMatch(witness.Quote))
+        {
+            return "witness quote shows requirement resolved";
+        }
+
         return null;
     }
 
     private static readonly Regex Negation = new(
         @"\b(?:not|no|never|none|nil|zero|nothing|without|neither|nor|cannot|denied|denies|deny|denying|rejected|disproves?|absent|absence|lacks?|lacking)\b|n['’]t\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex Resolution = new(
+        @"\b(?:satisfied|satisfies|satisfy|satisfying|completed|completes|complete|completion|resolved|resolves|resolving|fulfilled|fulfils|fulfills|cleared|closed|met|historical|historically|previously|formerly|already)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }

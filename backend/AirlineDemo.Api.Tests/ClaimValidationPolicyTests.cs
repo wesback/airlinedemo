@@ -102,6 +102,27 @@ public class ClaimValidationPolicyTests
         Assert.Equal(0, decision.RequestCount);
     }
 
+    [Theory]
+    [InlineData("Return readiness is satisfied: pending reserve approval.")]
+    [InlineData("Return readiness: pending reserve approval was completed at the last inspection.")]
+    [InlineData("Return readiness: pending reserve approval was resolved and is historical.")]
+    [InlineData("Return readiness: pending reserve approval, previously recorded and now fulfilled.")]
+    public void Resolved_or_historical_quote_cannot_establish_missing_requirement(string resolved)
+    {
+        var basis = new Dictionary<string, BasisDocument>
+        {
+            ["return-status"] = BasisDocument.Create("return-status", [resolved]),
+        };
+
+        var result = ClaimValidator.Validate(Claim("return-status", 1, resolved, resolved), ClaimKind.MissingRequirement, basis, TypedValue);
+        var decision = FindingRouter.Route(Complete, [result], identityAmbiguous: false);
+
+        Assert.Equal(ClaimStatus.Downgraded, result.Status);
+        Assert.Equal("witness quote shows requirement resolved", result.Reason);
+        Assert.Equal(0, decision.RequestCount);
+        Assert.NotEqual(FindingOutcome.Request, decision.Outcome);
+    }
+
     [Fact]
     public void Page_text_containing_old_separator_cannot_shift_boundaries_past_digest()
     {
