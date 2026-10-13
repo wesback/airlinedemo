@@ -159,6 +159,18 @@ public class ApprovedModelManifestTests
         Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), Synthetic(content)));
     }
 
+    [Theory]
+    [InlineData("record Jane at Gate#12")]
+    [InlineData("route ABC/DEF cancelled")]
+    [InlineData("reference id_77 pending")]
+    [InlineData("status=open")]
+    [InlineData("name O'Brien\u00e9 on file")]
+    public void Synthetic_content_outside_the_plain_text_allowlist_is_refused(string content)
+    {
+        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), Synthetic(content)));
+        Assert.Contains("allowlist", ex.Message);
+    }
+
     [Fact]
     public void Synthetic_flag_without_synthetic_marker_is_refused()
     {

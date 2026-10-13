@@ -121,7 +121,11 @@ public static class ModelCallGate
     /// <summary>Prefix every synthetic evidence request must carry. The caller's IsSynthetic flag alone is not trusted.</summary>
     public const string SyntheticMarker = "SYNTHETIC EVIDENCE";
 
-    // Heuristic screen: it cannot prove content is synthetic, so the marker and the approved region are also required.
+    // Positive allowlist: synthetic evidence is plain text, so symbols common in real identifiers (@, +, /, #, =, _) are refused.
+    private static readonly Regex SyntheticBodyPattern =
+        new(@"^SYNTHETIC EVIDENCE: [A-Za-z0-9 .,:;'()\-]*\z", RegexOptions.Compiled);
+
+    // Heuristic screen: it cannot prove content is synthetic, so the marker, allowlist and approved region are also required.
     private static readonly Regex[] CredentialOrIdentifierPatterns =
     [
         new(@"(?i)\b(api[-_]?key|password|secret|token|authorization)\s*[:=]", RegexOptions.Compiled),
@@ -156,6 +160,11 @@ public static class ModelCallGate
         if (!request.Content.StartsWith(SyntheticMarker, StringComparison.Ordinal))
         {
             throw new ModelGateException("model request refused: content is not marked as synthetic evidence");
+        }
+
+        if (!SyntheticBodyPattern.IsMatch(request.Content))
+        {
+            throw new ModelGateException("model request refused: content has characters outside the synthetic evidence allowlist");
         }
 
         // Region applies to every request: the synthetic flag is caller-supplied and cannot waive it.
