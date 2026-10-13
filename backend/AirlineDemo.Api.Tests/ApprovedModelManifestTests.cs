@@ -181,7 +181,7 @@ public class ApprovedModelManifestTests
         Assert.Equal("2025-01-01", trace.ApiVersion);
         Assert.Equal("eastus2", trace.Region);
         Assert.Equal("enabled", trace.ContentFilter);
-        Assert.Equal(SyntheticContentRegistry.Sha256Hex(Marked(body)), trace.EvidenceSha256);
+        Assert.Equal(SyntheticContentRegistry.Sha256Hex(Marked(body)), Assert.Single(trace.EvidenceSha256));
         Assert.DoesNotContain("reserve figures", JsonSerializer.Serialize(trace));
     }
 
@@ -207,7 +207,7 @@ public class ApprovedModelManifestTests
     {
         var trace = ModelCallGate.Authorize(Approved(), Synthetic(), Registry());
 
-        Assert.Matches("^[0-9a-f]{64}$", trace.EvidenceSha256);
+        Assert.All(trace.EvidenceSha256, h => Assert.Matches("^[0-9a-f]{64}$", h));
     }
 
     [Theory]
@@ -322,7 +322,7 @@ public class ApprovedModelManifestTests
     {
         var trace = ModelCallGate.Authorize(Approved(), Synthetic(region: "EASTUS2"), Registry());
 
-        Assert.Matches("^[0-9a-f]{64}$", trace.EvidenceSha256);
+        Assert.All(trace.EvidenceSha256, h => Assert.Matches("^[0-9a-f]{64}$", h));
     }
 
     [Fact]
@@ -361,5 +361,47 @@ public class ApprovedModelManifestTests
             ModelCallGate.AuthorizeScoredRun(Approved("approved", (JsonNode?)false), [Synthetic()], Registry()));
         Assert.Throws<ModelGateException>(() =>
             ModelCallGate.AuthorizeScoredRun(Approved(), [], Registry()));
+    }
+
+    [Fact]
+    public void Multi_item_request_traces_each_registered_evidence_hash_in_order()
+    {
+        var first = Marked("Synthetic evidence A.");
+        var second = Marked("Synthetic evidence B.");
+        var request = new ModelRequest("evidence-v1", ApprovedRegion, [first, second]);
+
+        var trace = ModelCallGate.Authorize(Approved(), request, Registry());
+
+        Assert.Equal(
+            new[] { SyntheticContentRegistry.Sha256Hex(first), SyntheticContentRegistry.Sha256Hex(second) },
+            trace.EvidenceSha256.ToArray());
+    }
+
+    [Fact]
+    public void Multi_item_request_is_refused_when_any_single_item_is_unregistered()
+    {
+        var request = new ModelRequest("evidence-v1", ApprovedRegion,
+            [Marked("Synthetic evidence A."), Marked("Synthetic evidence C.")]);
+
+        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request, Registry()));
+        Assert.Contains("not registered", ex.Message);
+    }
+
+    [Fact]
+    public void Multi_item_request_is_refused_when_any_single_item_lacks_synthetic_marker()
+    {
+        var request = new ModelRequest("evidence-v1", ApprovedRegion,
+            [Marked(DefaultBody), "aircraft record v1."]);
+
+        var ex = Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request, Registry()));
+        Assert.Contains("not marked as synthetic", ex.Message);
+    }
+
+    [Fact]
+    public void Request_with_no_evidence_items_is_refused()
+    {
+        var request = new ModelRequest("evidence-v1", ApprovedRegion, []);
+
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(Approved(), request, Registry()));
     }
 }

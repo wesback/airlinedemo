@@ -145,8 +145,17 @@ public sealed record ApprovedModelManifest(
     ];
 }
 
-/// <summary>Model input. Only versioned evidence is allowed; no raw prompts are stored in traces.</summary>
-public sealed record ModelRequest(string? EvidenceVersion, string? DataRegion, string Content);
+/// <summary>
+/// Model input. Only versioned evidence is allowed; no raw prompts are stored in traces. Each evidence item is checked
+/// and traced by its own SHA-256; one unregistered item refuses the whole request.
+/// </summary>
+public sealed record ModelRequest(string? EvidenceVersion, string? DataRegion, IReadOnlyList<string> Evidence)
+{
+    public ModelRequest(string? EvidenceVersion, string? DataRegion, string Content)
+        : this(EvidenceVersion, DataRegion, [Content])
+    {
+    }
+}
 
 /// <summary>
 /// Registry of SHA-256 hashes of synthetic evidence items. The only way to fill it is <see cref="FromCommittedFixtures"/>,
@@ -214,7 +223,7 @@ public sealed record ModelCallTrace(
     string ApiVersion,
     string Region,
     string ContentFilter,
-    string EvidenceSha256);
+    IReadOnlyList<string> EvidenceSha256);
 
 public static class ModelCallGate
 {
@@ -257,20 +266,36 @@ public static class ModelCallGate
             throw new ModelGateException("model request refused: content region is not the approved region");
         }
 
-        if (!request.Content.StartsWith(SyntheticMarker, StringComparison.Ordinal))
+        if (request.Evidence is null || request.Evidence.Count == 0)
         {
-            throw new ModelGateException("model request refused: content is not marked as synthetic evidence");
+            throw new ModelGateException("model request refused: no evidence items");
         }
 
-        if (!SyntheticBodyPattern.IsMatch(request.Content))
+        var hashes = new List<string>(request.Evidence.Count);
+        foreach (var item in request.Evidence)
         {
-            throw new ModelGateException("model request refused: content has characters outside the synthetic evidence allowlist");
-        }
+            if (item is null)
+            {
+                throw new ModelGateException("model request refused: evidence item is missing");
+            }
 
-        // The registry is the only synthetic-data guard: unregistered content is refused whatever it looks like.
-        if (!registry.IsRegistered(request.Content))
-        {
-            throw new ModelGateException("model request refused: evidence SHA-256 is not registered as synthetic content");
+            if (!item.StartsWith(SyntheticMarker, StringComparison.Ordinal))
+            {
+                throw new ModelGateException("model request refused: content is not marked as synthetic evidence");
+            }
+
+            if (!SyntheticBodyPattern.IsMatch(item))
+            {
+                throw new ModelGateException("model request refused: content has characters outside the synthetic evidence allowlist");
+            }
+
+            // The registry is the only synthetic-data guard: each unregistered item refuses the whole request.
+            if (!registry.IsRegistered(item))
+            {
+                throw new ModelGateException("model request refused: evidence SHA-256 is not registered as synthetic content");
+            }
+
+            hashes.Add(SyntheticContentRegistry.Sha256Hex(item));
         }
 
         return new ModelCallTrace(
@@ -281,7 +306,7 @@ public static class ModelCallGate
             manifest.ApiVersion!,
             manifest.Region!,
             manifest.ContentFilter!,
-            SyntheticContentRegistry.Sha256Hex(request.Content));
+            hashes.AsReadOnly());
     }
 
     /// <summary>
