@@ -212,8 +212,8 @@ run "M-14_app_role_scopes_are_exact_literals" {
   }
 
   assert {
-    condition     = contains(output.app_sql_grant_statements, "GRANT SELECT ON SCHEMA::dbo TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT INSERT ON SCHEMA::dbo TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON SCHEMA::dbo TO [id-airline-app];") && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 3
-    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE."
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 9 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
+    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE on the three case tables, never the whole schema."
   }
 }
 

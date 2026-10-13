@@ -50,10 +50,12 @@ locals {
     operational = ["SELECT", "INSERT", "UPDATE"]
     audit       = ["SELECT", "INSERT"]
   }
-  app_sql_user = azurerm_user_assigned_identity.app.name
+  # Case tables the app may read and write. The SQL adapter story (#179) owns the schema and keeps this list in step.
+  app_case_tables = ["cases", "case_documents", "case_decisions"]
+  app_sql_user    = azurerm_user_assigned_identity.app.name
   app_sql_grant_statements = concat(
     ["IF DATABASE_PRINCIPAL_ID('${local.app_sql_user}') IS NULL CREATE USER [${local.app_sql_user}] FROM EXTERNAL PROVIDER;"],
-    [for p in local.app_sql_grants.operational : "GRANT ${p} ON SCHEMA::dbo TO [${local.app_sql_user}];"],
+    flatten([for t in local.app_case_tables : [for p in local.app_sql_grants.operational : "GRANT ${p} ON OBJECT::dbo.${t} TO [${local.app_sql_user}];"]]),
     [for p in local.app_sql_grants.audit : "GRANT ${p} ON SCHEMA::audit TO [${local.app_sql_user}];"],
     [for p in ["UPDATE", "DELETE", "ALTER", "CONTROL"] : "DENY ${p} ON SCHEMA::audit TO [${local.app_sql_user}];"],
     ["DENY ALTER ON SCHEMA::dbo TO [${local.app_sql_user}];"],

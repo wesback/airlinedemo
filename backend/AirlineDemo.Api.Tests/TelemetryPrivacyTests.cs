@@ -156,6 +156,15 @@ public sealed class TelemetryPrivacyTests
     }
 
     [Fact]
+    public void Resource_attributes_redact_malformed_environment_and_version()
+    {
+        var resource = TelemetryRedaction.ResourceAttributes("1.2.3\nevent.name=x", "prod\"; drop table");
+
+        Assert.Equal("[redacted]", resource["service.version"]);
+        Assert.Equal("[redacted]", resource["deployment.environment"]);
+    }
+
+    [Fact]
     public void Free_text_decision_is_rejected_before_emission()
     {
         var trace = new TelemetryRedaction.InvestigationTraceRecord(

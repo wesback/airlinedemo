@@ -203,7 +203,7 @@ public static partial class TelemetryRedaction
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["service.name"] = ServiceName,
-            ["service.version"] = serviceVersion,
-            ["deployment.environment"] = environment,
+            ["service.version"] = VersionRule.IsMatch(serviceVersion) ? serviceVersion : Redacted,
+            ["deployment.environment"] = EnvironmentRule.IsMatch(environment) ? environment : Redacted,
         };
 }
