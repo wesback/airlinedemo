@@ -1,5 +1,11 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using AirlineDemo.Api.Diagnostics;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Tests;
@@ -7,6 +13,7 @@ namespace AirlineDemo.Api.Tests;
 public sealed class TelemetryPrivacyTests
 {
     private static readonly byte[] TestKey = Encoding.UTF8.GetBytes("synthetic-test-key-not-a-secret");
+    private const string AppPasscode = "test-passcode";
 
     private static readonly string[] Canaries =
     [
@@ -235,6 +242,58 @@ public sealed class TelemetryPrivacyTests
         Assert.Equal(TelemetryRedaction.Redacted, injected["investigation.tools"]);
     }
 
+    [Fact]
+    public async Task Review_decision_emits_correlated_trace_through_the_app()
+    {
+        var logger = new CapturingLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+            builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
+        });
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        using var signIn = await client.PostAsJsonAsync("/api/auth/sign-in", new { userId = "reviewer", passcode = AppPasscode }, ct);
+        signIn.EnsureSuccessStatusCode();
+        var cookie = signIn.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var csrf = (await signIn.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("csrfToken").GetString()!;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/cases/case-001/reviews")
+        {
+            Content = JsonContent.Create(new { expectedRevision = 1, decision = "accept" }),
+        };
+        request.Headers.Add("Cookie", cookie);
+        request.Headers.Add("X-CSRF-Token", csrf);
+        using var response = await client.SendAsync(request, ct);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var traces = logger.States
+            .Select(ToProperties)
+            .Where(p => p.GetValueOrDefault("event.name") == "investigation.completed")
+            .ToList();
+        var properties = Assert.Single(traces);
+        Assert.False(string.IsNullOrWhiteSpace(properties["trace.id"]));
+        Assert.Equal("return-ready", properties["investigation.decision"]);
+        Assert.Equal(TelemetryRedaction.ServiceName, properties["service.name"]);
+        Assert.Equal(TelemetryRedaction.ServiceVersion, properties["service.version"]);
+        Assert.Equal("demo", properties["deployment.environment"]);
+        Assert.DoesNotContain("reviewer", string.Join("|", properties.Values));
+    }
+
+    private static Dictionary<string, string?> ToProperties(IReadOnlyList<KeyValuePair<string, object?>> state) =>
+        state.GroupBy(kv => kv.Key).ToDictionary(g => g.Key, g => g.Last().Value?.ToString());
+
+    private sealed class CapturingLoggerProvider(CapturingLogger logger) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => logger;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class CapturingLogger : ILogger
     {
         public List<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = new();
@@ -248,7 +307,8 @@ public sealed class TelemetryPrivacyTests
         {
             if (state is IReadOnlyList<KeyValuePair<string, object?>> list)
             {
-                States.Add(list);
+                // Snapshot now: framework state can be backed by request features disposed after the response.
+                States.Add(list.ToList());
             }
         }
     }
