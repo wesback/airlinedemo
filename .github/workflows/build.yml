@@ -48,11 +48,24 @@ jobs:
       - name: Secret scan
         run: |
           set -euo pipefail
-          # Only tracked files are scanned, copied to a scratch directory with gitleaks' default rules.
-          scan_dir=$(mktemp -d)
-          git ls-files -z | xargs -0 -r cp --parents -t "$scan_dir"
+          # Only tracked files are scanned. Each is copied to a neutral name (f<n>) so gitleaks' default
+          # path allowlist (which skips files such as package-lock.json) cannot hide its content.
+          # `cp --` stops a tracked name beginning with "-" being read as an option.
+          work=$(mktemp -d)
+          scan_dir="$work/scan"
+          mkdir "$scan_dir"
+          map="$work/map.tsv"
+          : > "$map"
+          git ls-files -z > "$work/files.z"
+          n=0
+          while IFS= read -r -d '' f; do
+            n=$((n + 1))
+            cp -- "$f" "$scan_dir/f$n"
+            printf 'f%s\t%s\n' "$n" "$f" >> "$map"
+          done < "$work/files.z"
           if ! gitleaks detect --no-git --source "$scan_dir" --redact --exit-code 1; then
-            echo "::error::Committed credential found by gitleaks"
+            echo "::error::Committed credential found by gitleaks; scanned copies mapped to tracked paths:"
+            cat "$map"
             exit 1
           fi
 

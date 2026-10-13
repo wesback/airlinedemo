@@ -33,7 +33,7 @@ const visit = (node) => {
         problems.push(`npm package resolved to an invalid URL: ${value}`);
         continue;
       }
-      if (parsed.protocol !== 'https:' || parsed.hostname !== NPM_ALLOWED_HOST || parsed.username || parsed.password) {
+      if (parsed.protocol !== 'https:' || parsed.hostname !== NPM_ALLOWED_HOST || parsed.username || parsed.password || parsed.search || parsed.hash) {
         problems.push(`npm package resolved outside npmjs.org: ${value}`);
       }
     } else {

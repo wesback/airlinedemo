@@ -308,6 +308,9 @@ public sealed class SupplyChainWorkflowTests
     [InlineData("git+ssh://git@github.com/example/evil.git#abc123")]
     [InlineData("file:../local-package")]
     [InlineData("http://feeds.example.test/evil-1.0.0.tgz")]
+    // AC: M-14. Query strings and fragments on an npmjs.org URL are rejected, since they can carry credentials.
+    [InlineData("https://registry.npmjs.org/react/-/react-18.2.0.tgz?token=abc")]
+    [InlineData("https://registry.npmjs.org/react/-/react-18.2.0.tgz#frag")]
     public void Source_restriction_rejects_non_npmjs_npm_sources(string resolved)
     {
         var lockfile = "{\"packages\":{\"node_modules/evil\":{\"resolved\": \"" + resolved + "\"}}}\n";
@@ -374,8 +377,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("sha256sum -c -", step);
     }
 
-    // gitleaks' default allowlist skips package-lock.json, so the clean-content check uses the lockfile
-    // path only for a no-finding baseline; a credential in a non-lockfile tracked file is what must fail.
+    // Clean baseline: the lockfile is tracked and holds no credential, so the scan passes.
     [Fact]
     public void Secret_scan_passes_on_clean_tracked_content()
     {
@@ -434,6 +436,34 @@ public sealed class SupplyChainWorkflowTests
         });
 
         Assert.Equal(0, exitCode);
+    }
+
+    // AC: M-14. Tracked files are scanned under neutral names, so a lockfile name cannot hide a credential.
+    [Fact]
+    public void M14_secret_scan_fails_on_credential_in_package_lock()
+    {
+        var (exitCode, output) = RunShellStep("Secret scan", repo =>
+        {
+            repo.Write(LockPath, "{\"resolved\": \"https://registry.npmjs.org/x/-/x-1.tgz?token=" + "gh" + "p_" + new string('a', 36) + "\"}\n");
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Committed credential", output);
+    }
+
+    // AC: M-14. A tracked filename beginning with "-" is copied as a path, not read as a cp option.
+    [Fact]
+    public void M14_secret_scan_fails_on_credential_in_option_like_filename()
+    {
+        var (exitCode, output) = RunShellStep("Secret scan", repo =>
+        {
+            repo.Write("--help", "token = " + "gh" + "p_" + new string('a', 36) + "\n");
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Committed credential", output);
     }
 
     private static string NoExceptions => "{\"exceptions\":[]}";
