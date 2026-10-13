@@ -41,6 +41,15 @@ public sealed class DemoSessionStore(TimeProvider time)
         }
     }
 
+    public void GrantScope(string id, string scope)
+    {
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(id, out var session) || session.User.CaseScopes.Contains(scope)) return;
+            _sessions[id] = session with { User = session.User with { CaseScopes = [.. session.User.CaseScopes, scope] } };
+        }
+    }
+
     public void Remove(string id)
     {
         lock (_gate) _sessions.Remove(id);
