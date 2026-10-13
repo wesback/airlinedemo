@@ -1,0 +1,255 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 155,
+  "branch": "ai-sdlc/issue-155",
+  "commitSha": "cdf21bff89b20eda86e9e01a17720ce041ee1a05",
+  "round": 3,
+  "pipelineVersion": "6b098a7",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The helper validates manifests and returns traces, but production calls and scored runs are not shown invoking it. Its caller-controlled synthetic flag and limited identifier scan also leave a path for real personal information to be authorized.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 117,
+          "message": "The manifest gate is not connected to production model calls or scored runs, so the required refusal is not enforced.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff defines Authorize and AuthorizeScoredRun, but adds no production model-call or scored-run path that loads the manifest and invokes either method.",
+            "failureScenario": "A model call or scored run follows an existing application path without invoking this gate. Even with the shipped stub, unapproved manifest, it can proceed instead of failing before data is sent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 139,
+          "message": "The gate cannot establish that content marked synthetic is synthetic; real personal information outside its pattern list can pass authorization.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Authorize trusts the caller-provided IsSynthetic flag and relies on a limited set of regular expressions to detect identifiers.",
+            "failureScenario": "With an approved manifest, a caller marks real content such as \"Jane Doe's booking record for flight 42\" as synthetic. It matches none of the listed patterns, so Authorize permits it, contrary to M-07's synthetic-only, no-real-identifiers requirement. This risks sensitive information disclosure (OWASP LLM02:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests exercise manifest refusal, scored-run authorization, trace fields, and synthetic request checks. I found no test defect with a concrete failure scenario reachable through this diff.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added helper does not enforce the manifest on production call paths, and even when called it can authorize real personal information marked as synthetic.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 131,
+          "message": "The manifest gate is not connected to production model calls or scored runs, so those paths can bypass the required refusal for an unusable manifest.",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The diff defines ModelCallGate.Authorize and AuthorizeScoredRun, but adds no production model-call or scored-run call site that loads the manifest and invokes either method.",
+            "failureScenario": "A production model call or scored evaluation follows its existing path without invoking this gate. With the shipped stub or another unapproved manifest, it can proceed without the required refusal before data is sent, risking sensitive information disclosure (LLM02:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "line": 140,
+          "message": "The gate trusts a caller-supplied synthetic flag and can authorize real personal information that its limited pattern scan does not recognize.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Authorize trusts ModelRequest.IsSynthetic and only rejects content matched by CredentialOrIdentifierPatterns; the patterns do not detect unlabelled names and dates of birth.",
+            "failureScenario": "With an approved manifest, a caller submits content such as \"Jane Doe, 1980-01-01, booking 42\" with IsSynthetic=true and the approved region. No pattern matches, so Authorize returns a trace and permits the real personal information to proceed to the model (LLM02:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 118,
+      "total": 121,
+      "percent": 97.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "covered": 118,
+          "total": 121,
+          "missed": [
+            48,
+            49,
+            50
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 1,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
