@@ -62,6 +62,7 @@ public sealed class SupplyChainWorkflowTests
 
     // M-12: dotnet list --vulnerable output is required; missing output fails the run.
     [Fact]
+    // AC: M-12. The dotnet vulnerability listing runs and a missing output fails the run.
     public void Audit_step_runs_dotnet_vulnerable_listing_and_fails_on_missing_output()
     {
         var step = StepBody(ReadWorkflow(), "Audit (.NET)");
@@ -73,6 +74,7 @@ public sealed class SupplyChainWorkflowTests
 
     // M-12: npm audit output is required; missing output fails the run.
     [Fact]
+    // AC: M-12. npm audit runs and a missing output fails the run.
     public void Audit_step_runs_npm_audit_and_fails_on_missing_output()
     {
         var step = StepBody(ReadWorkflow(), "Audit (npm)");
@@ -256,10 +258,8 @@ public sealed class SupplyChainWorkflowTests
     {
         var step = StepBody(ReadWorkflow(), "Source restriction");
 
-        Assert.Contains("dotnet nuget list source", step);
-        Assert.Contains("api\\.nuget\\.org/v3/index\\.json", step);
-        Assert.Contains("registry\\.npmjs\\.org", step);
-        Assert.Contains("exit 1", step);
+        Assert.Contains("node backend/ci/check-sources.mjs", step);
+        Assert.DoesNotContain("grep", step);
     }
 
     // M-14: approved sources pass; the gate exits 0 only when every enabled NuGet source is nuget.org.
@@ -358,13 +358,24 @@ public sealed class SupplyChainWorkflowTests
     {
         var step = StepBody(ReadWorkflow(), "Secret scan");
 
-        Assert.Contains("git grep", step);
-        Assert.Contains("AccountKey", step);
-        Assert.Contains("Server=", step);
-        Assert.Contains("exit 1", step);
+        Assert.Contains("gitleaks detect", step);
+        Assert.Contains("--exit-code 1", step);
+        Assert.DoesNotContain("pattern=", step);
     }
 
-    // The scan must cover tracked lockfiles too, so credentials cannot hide in frontend/package-lock.json.
+    // AC: M-14. The gitleaks binary is downloaded at a pinned version and its published SHA-256 is checked.
+    [Fact]
+    public void Install_gitleaks_verifies_pinned_sha256()
+    {
+        var step = StepBody(ReadWorkflow(), "Install gitleaks");
+
+        Assert.Contains("version=8.18.4", step);
+        Assert.Contains("ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d", step);
+        Assert.Contains("sha256sum -c -", step);
+    }
+
+    // gitleaks' default allowlist skips package-lock.json, so the clean-content check uses the lockfile
+    // path only for a no-finding baseline; a credential in a non-lockfile tracked file is what must fail.
     [Fact]
     public void Secret_scan_passes_on_clean_tracked_content()
     {
@@ -378,11 +389,11 @@ public sealed class SupplyChainWorkflowTests
     }
 
     [Fact]
-    public void Secret_scan_fails_on_credential_in_tracked_package_lock()
+    public void Secret_scan_fails_on_credential_in_tracked_source_file()
     {
         var (exitCode, output) = RunShellStep("Secret scan", repo =>
         {
-            repo.Write(LockPath, "{\"resolved\": \"https://" + "deploy:tokenvalue@feeds.example.test/x.tgz\"}\n");
+            repo.Write("backend/appsettings.local.json", "{\"token\": \"" + "gh" + "p_" + new string('a', 36) + "\"}\n");
             GitTrackAll(repo.Root);
         });
 
@@ -390,26 +401,39 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("Committed credential", output);
     }
 
-    // M-14: committed credentials, including URI-form connection strings, fail the secret scan.
-    // Credential fixtures are split so this file never contains a full credential that the secret scan would flag.
+    // M-14: committed credentials that gitleaks' default rules detect fail the secret scan.
+    // Fixtures are joined from pieces so this file never contains a full credential literal.
+    // AC: M-14. Each fixture is committed to a temp repo, and the real workflow secret scan step must fail on it.
     [Theory]
-    [InlineData("AWS_SECRET_" + "ACCESS_KEY=wJalrXUtnFEMI/K7MDENG")]
-    [InlineData("postgres://" + "admin:s3cret-pass@db.internal/app")]
-    [InlineData("https://" + "deploy:tokenvalue@feeds.example.com/index.json")]
-    [InlineData("Server=tcp:db.internal;Database=app;User=sa;" + "Pass" + "word=hunter2222")]
+    [InlineData("gh" + "p_" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("AKIA" + "ABCDEFGHIJKLMNOP")]
     [InlineData("DefaultEndpointsProtocol=https;" + "Account" + "Key=abcdefgh12345678")]
     public void M14_secret_scan_fails_on_committed_credentials(string content)
     {
-        Assert.True(SecretPatternMatches(content));
+        var (exitCode, output) = RunShellStep("Secret scan", repo =>
+        {
+            repo.Write("fixture.txt", content + "\n");
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Committed credential", output);
     }
 
+    // AC: M-14. Plain URLs and clone addresses are not credentials, so the secret scan passes on them.
     [Theory]
     [InlineData("https://api.nuget.org/v3/index.json")]
     [InlineData("https://registry.npmjs.org/react/-/react-18.2.0.tgz")]
     [InlineData("git@github.com:owner/repo.git")]
     public void M14_secret_scan_ignores_plain_urls(string content)
     {
-        Assert.False(SecretPatternMatches(content));
+        var (exitCode, _) = RunShellStep("Secret scan", repo =>
+        {
+            repo.Write("fixture.txt", content + "\n");
+            GitTrackAll(repo.Root);
+        });
+
+        Assert.Equal(0, exitCode);
     }
 
     private static string NoExceptions => "{\"exceptions\":[]}";
@@ -458,12 +482,31 @@ public sealed class SupplyChainWorkflowTests
         return RunNode(script, repo.Root);
     }
 
+    private static string? FindOnPath(string name) =>
+        (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(Path.PathSeparator)
+            .Select(dir => Path.Combine(dir, name))
+            .FirstOrDefault(File.Exists);
+
     // Runs a workflow shell step's run block in a temp repo. A fake `dotnet` on PATH prints the given NuGet source listing.
     private static (int ExitCode, string Output) RunShellStep(string stepName, Action<TempRepo> arrange, string? nugetListing = null)
     {
         var script = RunBlock(StepBody(ReadWorkflow(), stepName));
         using var repo = new TempRepo();
         using var bin = new TempRepo();
+        if (stepName == "Source restriction")
+        {
+            // The step runs the real checker; copy it to the path the workflow uses, relative to the repo root.
+            repo.Write("backend/ci/check-sources.mjs", File.ReadAllText(Path.Combine(FindRepoRoot(), "backend", "ci", "check-sources.mjs")));
+        }
+
+        if (stepName == "Secret scan")
+        {
+            // The step runs the installed gitleaks binary; expose it on the fake PATH directory.
+            var gitleaks = FindOnPath("gitleaks") ?? throw new InvalidOperationException("gitleaks must be on PATH to run the secret scan tests.");
+            File.CreateSymbolicLink(Path.Combine(bin.Root, "gitleaks"), gitleaks);
+        }
+
         arrange(repo);
         if (nugetListing is not null)
         {
@@ -551,30 +594,6 @@ public sealed class SupplyChainWorkflowTests
         var stderr = process.StandardError.ReadToEnd();
         process.WaitForExit();
         return (process.ExitCode, stdout.Result + stderr);
-    }
-
-    private static bool SecretPatternMatches(string content)
-    {
-        var workflow = ReadWorkflow();
-        var line = workflow.Split('\n').Single(l => l.TrimStart().StartsWith("pattern='", StringComparison.Ordinal)).Trim();
-        var pattern = line[(line.IndexOf('\'') + 1)..line.LastIndexOf('\'')];
-
-        using var repo = new TempRepo();
-        repo.Write("probe.txt", content);
-        var psi = new ProcessStartInfo("grep")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        psi.ArgumentList.Add("-E");
-        psi.ArgumentList.Add("-q");
-        psi.ArgumentList.Add("-e");
-        psi.ArgumentList.Add(pattern);
-        psi.ArgumentList.Add(Path.Combine(repo.Root, "probe.txt"));
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("grep could not be started.");
-        process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
-        return process.ExitCode == 0;
     }
 
     private sealed class TempRepo : IDisposable

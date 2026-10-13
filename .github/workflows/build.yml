@@ -32,25 +32,27 @@ jobs:
       - name: Source restriction
         run: |
           set -euo pipefail
-          bad_nuget=$(dotnet nuget list source | awk '/\[Enabled\]/ { getline; print }' | grep -v -E '^ *https://api\.nuget\.org/v3/index\.json$' || true)
-          if [ -n "$bad_nuget" ]; then
-            echo "::error::NuGet source outside nuget.org:"
-            echo "$bad_nuget"
-            exit 1
-          fi
-          bad_npm=$(grep -oE '"resolved": *"[^"]*"' frontend/package-lock.json | grep -v -E '"resolved": *"https://registry\.npmjs\.org/' || true)
-          if [ -n "$bad_npm" ]; then
-            echo "::error::npm package resolved outside npmjs.org:"
-            echo "$bad_npm"
-            exit 1
-          fi
-          grep -q '"resolved": "https://registry.npmjs.org/' frontend/package-lock.json
+          node backend/ci/check-sources.mjs
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          version=8.18.4
+          sha256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
+          dir=$(mktemp -d)
+          curl -sSfL -o "$dir/gitleaks.tar.gz" "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          echo "${sha256}  $dir/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
 
       - name: Secret scan
         run: |
-          pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey|AWS_SECRET_ACCESS_KEY)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@"]+:[^/[:space:]@"]+@'
-          if git grep -l -I -E "$pattern" -- .; then
-            echo "::error::Committed credential or connection string found in the files listed above"
+          set -euo pipefail
+          # Only tracked files are scanned, copied to a scratch directory with gitleaks' default rules.
+          scan_dir=$(mktemp -d)
+          git ls-files -z | xargs -0 -r cp --parents -t "$scan_dir"
+          if ! gitleaks detect --no-git --source "$scan_dir" --redact --exit-code 1; then
+            echo "::error::Committed credential found by gitleaks"
             exit 1
           fi
 
