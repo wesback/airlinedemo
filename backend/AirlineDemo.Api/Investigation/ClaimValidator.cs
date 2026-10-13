@@ -24,19 +24,47 @@ public sealed record BasisDocument(string DocumentId, string ContentDigest, IRea
         SyntheticContentRegistry.Sha256Hex(string.Join('\u001F', pages));
 }
 
-public sealed record ValidatedClaim(InvestigationClaim Claim, ClaimKind Kind, ClaimStatus Status, string? Reason);
+/// <summary>
+/// A claim after validation. Only <see cref="ClaimValidator"/> can construct one, so policy code cannot be handed a
+/// Supported claim that was never checked against the basis.
+/// </summary>
+public sealed record ValidatedClaim
+{
+    internal ValidatedClaim(InvestigationClaim claim, ClaimKind kind, ClaimStatus status, string? reason)
+    {
+        Claim = claim;
+        Kind = kind;
+        Status = status;
+        Reason = reason;
+    }
+
+    public InvestigationClaim Claim { get; }
+    public ClaimKind Kind { get; }
+    public ClaimStatus Status { get; }
+    public string? Reason { get; }
+}
 
 /// <summary>
-/// Checks each investigator claim against the current basis. A claim is supported only when every witness names a
-/// document in the inventory whose current content still matches its recorded digest, on an existing page, with a
-/// quote that appears verbatim there. Anything else is downgraded. Claim text is never interpreted.
+/// Checks each investigator claim against the current basis. A claim is supported only when its typed value appears
+/// in every witness quote, and every witness names a document in the inventory whose current content still matches
+/// its recorded digest, on an existing page, with a quote that appears verbatim there. Anything else is downgraded.
+/// Claim text is never interpreted.
 /// </summary>
 public static class ClaimValidator
 {
-    public static ValidatedClaim Validate(InvestigationClaim claim, ClaimKind kind, IReadOnlyDictionary<string, BasisDocument> basis)
+    public static ValidatedClaim Validate(
+        InvestigationClaim claim,
+        ClaimKind kind,
+        IReadOnlyDictionary<string, BasisDocument> basis,
+        string typedValue)
     {
         ArgumentNullException.ThrowIfNull(claim);
         ArgumentNullException.ThrowIfNull(basis);
+
+        if (string.IsNullOrWhiteSpace(typedValue))
+        {
+            return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim has no typed value");
+        }
 
         if (claim.Witnesses is null || claim.Witnesses.Count == 0)
         {
@@ -45,7 +73,7 @@ public static class ClaimValidator
 
         foreach (var witness in claim.Witnesses)
         {
-            var problem = WitnessProblem(witness, basis);
+            var problem = WitnessProblem(witness, basis, typedValue);
             if (problem is not null)
             {
                 return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, problem);
@@ -55,7 +83,7 @@ public static class ClaimValidator
         return new ValidatedClaim(claim, kind, ClaimStatus.Supported, null);
     }
 
-    private static string? WitnessProblem(DocumentWitness? witness, IReadOnlyDictionary<string, BasisDocument> basis)
+    private static string? WitnessProblem(DocumentWitness? witness, IReadOnlyDictionary<string, BasisDocument> basis, string typedValue)
     {
         if (witness is null || string.IsNullOrEmpty(witness.DocumentId))
         {
@@ -81,6 +109,11 @@ public static class ClaimValidator
             !document.Pages[witness.Page - 1].Contains(witness.Quote, StringComparison.Ordinal))
         {
             return "quote not on witness page";
+        }
+
+        if (!witness.Quote.Contains(typedValue, StringComparison.Ordinal))
+        {
+            return "claim value not in witness quote";
         }
 
         return null;
