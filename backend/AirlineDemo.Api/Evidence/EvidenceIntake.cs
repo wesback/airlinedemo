@@ -166,20 +166,19 @@ public static class EvidenceIntake
 
     private static readonly Regex NameRegex = new(@"/([^\s/\[\]<>(){}%]+)", RegexOptions.Compiled);
 
-    // A stream body starts right after a dictionary end (">> stream"). Bodies are page content or other data, so they
-    // are removed before the scan: ordinary text containing "/ObjStm" is then accepted, while stream dictionaries are kept.
-    private static readonly Regex StreamBodyRegex = new(@">>\s*stream\r?\n.*?endstream", RegexOptions.Compiled | RegexOptions.Singleline);
-
     // Object and xref streams are compressed structure that PdfPig inflates while opening the file, before any
-    // pre-parse limit can apply. They are rejected by their /Type name (with #xx escapes decoded), so the limits hold.
+    // pre-parse limit can apply. A dictionary is recognised by a /Type key whose value is /ObjStm or /XRef (names are
+    // #xx-decoded). The whole file is scanned without stripping stream bodies, so a body cannot hide such a dictionary.
     private static void RejectCompressedStructure(EvidenceDocument document)
     {
-        var text = StreamBodyRegex.Replace(Encoding.Latin1.GetString(document.Bytes), ">> ");
-        foreach (Match match in NameRegex.Matches(text))
+        string? previous = null;
+        foreach (Match match in NameRegex.Matches(Encoding.Latin1.GetString(document.Bytes)))
         {
             var name = Regex.Replace(match.Groups[1].Value, "#([0-9A-Fa-f]{2})", m =>
                 ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
-            if (name is "ObjStm" or "XRef")
+            var follows = previous;
+            previous = name;
+            if (follows == "Type" && name is ("ObjStm" or "XRef"))
             {
                 throw new EvidenceIntakeException(
                     $"Document '{document.Name}' uses compressed object or cross-reference streams, which are not supported.",
@@ -212,6 +211,56 @@ public static class EvidenceIntake
             if (!AllowedCatalogKeys.Contains(key))
             {
                 throw ActiveContentFailure(name, $"/{key} in the document catalog is not allowed");
+            }
+        }
+
+        if (catalog.TryGetValue("Outlines", out var outlines))
+        {
+            RejectOutlineActions(name, pdf, outlines);
+        }
+    }
+
+    private static readonly HashSet<string> AllowedOutlineKeys = new(StringComparer.Ordinal)
+    {
+        "Type", "Title", "Parent", "First", "Last", "Next", "Prev", "Count", "Dest", "F", "C",
+    };
+
+    private static readonly string[] OutlineLinkKeys = ["First", "Last", "Next", "Prev", "Parent"];
+
+    // Outline items are walked from the catalog. Any key outside the item allowlist (such as /A, /AA or /SE) is an
+    // action or structure hook and rejects the document. Each indirect node is visited once, so cycles terminate.
+    private static void RejectOutlineActions(string name, PdfDocument pdf, IToken outlines)
+    {
+        var pending = new Stack<IToken>();
+        pending.Push(outlines);
+        var seen = new HashSet<long>();
+        while (pending.Count > 0)
+        {
+            var token = pending.Pop();
+            if (token is IndirectReferenceToken reference && !seen.Add(reference.Data.ObjectNumber))
+            {
+                continue;
+            }
+
+            if (Resolve(pdf, token) is not DictionaryToken node)
+            {
+                continue;
+            }
+
+            foreach (var key in node.Data.Keys)
+            {
+                if (!AllowedOutlineKeys.Contains(key))
+                {
+                    throw ActiveContentFailure(name, $"/{key} in the outline tree");
+                }
+            }
+
+            foreach (var key in OutlineLinkKeys)
+            {
+                if (node.Data.TryGetValue(key, out var link))
+                {
+                    pending.Push(link);
+                }
             }
         }
     }

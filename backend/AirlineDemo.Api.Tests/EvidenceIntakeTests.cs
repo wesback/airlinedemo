@@ -453,6 +453,71 @@ public sealed class EvidenceIntakeTests
         Assert.Null(result.Content);
     }
 
+    // AC: a valid text PDF whose page references a parsed /Image XObject is rejected retryably, with no evidence.
+    [Fact]
+    public void ValidPdfWithImageXObjectIsRejectedRetryably()
+    {
+        var image = "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nA\nendstream";
+        var pdf = PdfWithPages(1, 0, resources: "/XObject << /Im1 6 0 R >>", extraObject: image);
+
+        var result = EvidenceIntake.Process([new("image-xobject.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: an outline item carrying an action is rejected, because outline trees are walked for executable actions.
+    [Fact]
+    public void OutlineItemWithJavaScriptActionIsRejectedRetryably()
+    {
+        var outlines = "<< /Type /Outlines /Count 1 /First << /Title (x) /A << /S /JavaScript /JS (app.alert(1)) >> >> /Last << /Title (x) >> >>";
+        var pdf = PdfWithPages(1, 0, catalogExtra: "/Outlines 6 0 R ", extraObject: outlines);
+
+        var result = EvidenceIntake.Process([new("outline-action.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.ActiveContent, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
+    // AC: a text PDF whose stream body contains "endstream" followed by structural marker words is accepted.
+    [Fact]
+    public void TextContainingEndstreamAndObjStmNamesIsAccepted()
+    {
+        var pdf = PdfWithPages(1, 0, content: "BT /F1 12 Tf 72 720 Td (endstream /ObjStm /XRef) Tj ET");
+
+        var result = EvidenceIntake.Process([new("text-endstream.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Complete, result.State);
+        Assert.Null(result.Failure);
+    }
+
+    // AC: content streams that together decode past the 50 MB per-document limit are rejected before text extraction,
+    // even though each stream stays within the 10 MB per-stream limit.
+    [Fact]
+    public void DocumentDecodingOverAggregateLimitIsRejectedBeforeExtraction()
+    {
+        var inflated = new byte[9L * 1024 * 1024];
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            zlib.Write(inflated);
+        }
+
+        // Six pages of 9 MB each decode to 54 MB, which is over the 50 MB document total.
+        var pdf = PdfWithPages(6, 0, content: Encoding.Latin1.GetString(compressed.ToArray()), flate: true);
+
+        var result = EvidenceIntake.Process([new("aggregate-bomb.pdf", pdf)]);
+
+        Assert.Equal(EvidenceProcessingState.Failed, result.State);
+        Assert.Equal(EvidenceFailureKind.LimitExceeded, result.Failure!.Kind);
+        Assert.True(result.Failure.Retryable);
+        Assert.Null(result.Content);
+    }
+
     // Ordinary text that contains structural marker words is accepted; only real object streams are rejected.
     [Fact]
     public void TextContainingObjStmAndXRefNamesIsAccepted()
