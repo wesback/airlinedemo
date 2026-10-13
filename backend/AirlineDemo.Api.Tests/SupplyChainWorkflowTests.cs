@@ -60,6 +60,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("test -s ../artifacts/sbom/npm-sbom.cdx.json", step);
     }
 
+    // M-12: dotnet list --vulnerable output is required; missing output fails the run.
     [Fact]
     public void Audit_step_runs_dotnet_vulnerable_listing_and_fails_on_missing_output()
     {
@@ -70,6 +71,7 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("test -s artifacts/audit/dotnet-vulnerable.txt", step);
     }
 
+    // M-12: npm audit output is required; missing output fails the run.
     [Fact]
     public void Audit_step_runs_npm_audit_and_fails_on_missing_output()
     {
@@ -77,6 +79,21 @@ public sealed class SupplyChainWorkflowTests
 
         Assert.Contains("npm audit --json", step);
         Assert.Contains("test -s ../artifacts/audit/npm-audit.json", step);
+    }
+
+    // M-14: source and secret guards run before any dependency is restored or installed.
+    [Fact]
+    public void Source_and_secret_guards_run_before_dependency_install()
+    {
+        var workflow = ReadWorkflow();
+        var sourceGuard = workflow.IndexOf("- name: Source restriction", StringComparison.Ordinal);
+        var secretGuard = workflow.IndexOf("- name: Secret scan", StringComparison.Ordinal);
+        var dotnetRestore = workflow.IndexOf("dotnet restore", StringComparison.Ordinal);
+        var npmCi = workflow.IndexOf("npm ci", StringComparison.Ordinal);
+
+        Assert.True(sourceGuard >= 0 && secretGuard >= 0, "Source and secret guards must exist.");
+        Assert.True(sourceGuard < dotnetRestore && sourceGuard < npmCi, "Source restriction must run before install.");
+        Assert.True(secretGuard < dotnetRestore && secretGuard < npmCi, "Secret scan must run before install.");
     }
 
     // M-12: an unexcepted high/critical finding blocks the release candidate.

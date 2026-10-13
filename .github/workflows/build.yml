@@ -28,6 +28,32 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # M-14: source and secret guards run before any dependency is restored or installed.
+      - name: Source restriction
+        run: |
+          set -euo pipefail
+          bad_nuget=$(dotnet nuget list source | awk '/\[Enabled\]/ { getline; print }' | grep -v -E '^ *https://api\.nuget\.org/v3/index\.json$' || true)
+          if [ -n "$bad_nuget" ]; then
+            echo "::error::NuGet source outside nuget.org:"
+            echo "$bad_nuget"
+            exit 1
+          fi
+          bad_npm=$(grep -oE '"resolved": *"[^"]*"' frontend/package-lock.json | grep -v -E '"resolved": *"https://registry\.npmjs\.org/' || true)
+          if [ -n "$bad_npm" ]; then
+            echo "::error::npm package resolved outside npmjs.org:"
+            echo "$bad_npm"
+            exit 1
+          fi
+          grep -q '"resolved": "https://registry.npmjs.org/' frontend/package-lock.json
+
+      - name: Secret scan
+        run: |
+          pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@"]+:[^/[:space:]@"]+@'
+          if git grep -l -I -E "$pattern" -- .; then
+            echo "::error::Committed credential or connection string found in the files listed above"
+            exit 1
+          fi
+
       - name: Restore and build .NET
         run: |
           dotnet restore AirlineDemo.sln
@@ -71,31 +97,6 @@ jobs:
           mkdir -p ../artifacts/audit
           npm audit --json > ../artifacts/audit/npm-audit.json || true
           test -s ../artifacts/audit/npm-audit.json
-
-      - name: Source restriction
-        run: |
-          set -euo pipefail
-          bad_nuget=$(dotnet nuget list source | awk '/\[Enabled\]/ { getline; print }' | grep -v -E '^ *https://api\.nuget\.org/v3/index\.json$' || true)
-          if [ -n "$bad_nuget" ]; then
-            echo "::error::NuGet source outside nuget.org:"
-            echo "$bad_nuget"
-            exit 1
-          fi
-          bad_npm=$(grep -oE '"resolved": *"[^"]*"' frontend/package-lock.json | grep -v -E '"resolved": *"https://registry\.npmjs\.org/' || true)
-          if [ -n "$bad_npm" ]; then
-            echo "::error::npm package resolved outside npmjs.org:"
-            echo "$bad_npm"
-            exit 1
-          fi
-          grep -q '"resolved": "https://registry.npmjs.org/' frontend/package-lock.json
-
-      - name: Secret scan
-        run: |
-          pattern='(AccountKey|SharedAccessSignature|Password|Pwd|Secret|Token|ApiKey)=[^;[:space:]"]{8,}|Server=[^;]*;[^"]*(Password|Pwd)=|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@"]+:[^/[:space:]@"]+@'
-          if git grep -l -I -E "$pattern" -- .; then
-            echo "::error::Committed credential or connection string found in the files listed above"
-            exit 1
-          fi
 
       - name: Exception validation
         run: |
