@@ -74,7 +74,8 @@ public static class IsolatedPdfParser
     internal static ProcessStartInfo CreateStartInfo(IsolatedPdfParserOptions options, string workingDirectory)
     {
         var fileName = options.WorkerFileName ?? ResolveHost();
-        var startInfo = new ProcessStartInfo(fileName)
+        var inNetworkNamespace = options.WorkerFileName is null && NetworkNamespaceAvailable.Value;
+        var startInfo = new ProcessStartInfo(inNetworkNamespace ? UnsharePath : fileName)
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -86,6 +87,14 @@ public static class IsolatedPdfParser
 
         if (options.WorkerFileName is null)
         {
+            if (inNetworkNamespace)
+            {
+                // A new user and network namespace with no interfaces: the child has no network access.
+                startInfo.ArgumentList.Add("-rn");
+                startInfo.ArgumentList.Add("--");
+                startInfo.ArgumentList.Add(fileName);
+            }
+
             if (string.Equals(Path.GetFileNameWithoutExtension(fileName), "dotnet", StringComparison.OrdinalIgnoreCase))
             {
                 startInfo.ArgumentList.Add(typeof(IsolatedPdfParser).Assembly.Location);
@@ -103,6 +112,43 @@ public static class IsolatedPdfParser
 
         startInfo.Environment.Clear();
         return startInfo;
+    }
+
+    private const string UnsharePath = "/usr/bin/unshare";
+
+    /// <summary>True when Linux allows an unprivileged network namespace; checked once per process.</summary>
+    private static readonly Lazy<bool> NetworkNamespaceAvailable = new(ProbeNetworkNamespace);
+
+    private static bool ProbeNetworkNamespace()
+    {
+        if (!OperatingSystem.IsLinux() || !File.Exists(UnsharePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var probe = Process.Start(new ProcessStartInfo(UnsharePath)
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                ArgumentList = { "-rn", "--", "true" },
+            });
+            if (probe is null)
+            {
+                return false;
+            }
+
+            _ = probe.StandardError.ReadToEndAsync();
+            _ = probe.StandardOutput.ReadToEndAsync();
+            return probe.WaitForExit(5000) && probe.ExitCode == 0;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>The dotnet host is used when the app runs under it; otherwise the app's own executable.</summary>

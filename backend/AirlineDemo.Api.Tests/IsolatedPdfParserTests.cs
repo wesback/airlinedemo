@@ -45,6 +45,7 @@ public class IsolatedPdfParserTests
         stream.Write(bytes);
     }
 
+    // AC-1: the parent hands the PDF to a child worker and reads JSON back. Covered by the valid, corrupt and hang tests.
     [Fact]
     public void ValidPdf_IsExtractedByChildProcess()
     {
@@ -63,6 +64,7 @@ public class IsolatedPdfParserTests
         Assert.Equal(string.Empty, outcome.Text);
     }
 
+    // AC-3: a flate bomb fails within the limits and the next valid PDF is still processed.
     [Fact]
     public void FlateBomb_FailsWithinLimits_AndServiceStillProcessesValidPdf()
     {
@@ -77,6 +79,7 @@ public class IsolatedPdfParserTests
         Assert.Equal(EvidenceProcessingState.Complete, valid.State);
     }
 
+    // AC-2: exceeding the 30 second wall-clock limit kills the child (tested here with a 2 second limit).
     [Fact]
     public void HungWorker_IsKilledByTimeLimit()
     {
@@ -96,6 +99,7 @@ public class IsolatedPdfParserTests
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"hang took {clock.Elapsed}");
     }
 
+    // AC-2: exceeding the memory limit kills the child and returns a retryable failure with no evidence.
     [Fact]
     public void MemoryLimit_KillsWorkerAndReturnsRetryable()
     {
@@ -108,6 +112,7 @@ public class IsolatedPdfParserTests
         Assert.Equal(string.Empty, outcome.Text);
     }
 
+    // AC-4: the child starts with an empty environment and a working directory of its own (no secrets, no store access).
     [Fact]
     public void Child_StartsWithEmptyEnvironmentAndReadOnlyWorkingDirectory()
     {
