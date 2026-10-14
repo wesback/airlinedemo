@@ -360,7 +360,7 @@ public class ClaimValidationPolicyTests
     }
 
     [Fact]
-    public void Matching_value_with_unsupported_extra_assertion_is_downgraded_and_cannot_establish_request()
+    public void Matching_value_with_extra_claim_text_is_structurally_supported_and_routes_to_review_not_request()
     {
         var mixed = ClaimValidator.Validate(
             Claim("return-status", 1, Quote, text: $"{Text} Fuel load is missing."),
@@ -370,9 +370,9 @@ public class ClaimValidationPolicyTests
 
         var decision = FindingRouter.Route(Complete, [mixed], identityAmbiguous: false);
 
-        Assert.Equal(ClaimStatus.Downgraded, mixed.Status);
-        Assert.Equal("claim text not stated by witness quote", mixed.Reason);
-        Assert.Equal(FindingOutcome.NoAction, decision.Outcome);
+        Assert.Equal(ClaimStatus.Supported, mixed.Status);
+        Assert.Null(mixed.Reason);
+        Assert.Equal(FindingOutcome.Review, decision.Outcome);
         Assert.Equal(0, decision.RequestCount);
     }
 

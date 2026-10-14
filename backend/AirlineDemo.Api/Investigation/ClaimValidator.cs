@@ -86,13 +86,6 @@ public static class ClaimValidator
             return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim text does not state typed value");
         }
 
-        // The claim may assert nothing beyond what its witnesses state, so a matching value cannot carry extra claims.
-        var assertion = claim.Text.Trim();
-        if (claim.Witnesses.Any(witness => !witness.Quote.Contains(assertion, StringComparison.Ordinal)))
-        {
-            return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim text not stated by witness quote");
-        }
-
         return new ValidatedClaim(claim, kind, ClaimStatus.Supported, null);
     }
 
