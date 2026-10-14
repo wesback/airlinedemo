@@ -177,12 +177,15 @@ public class MockRequestDeliveryTests
     {
         var inbox = new MockRequestInbox();
         inbox.Submit(Env(eventId: "evt-1", reportId: "rep-1"), Gap(), ScenarioTime);
+        var auditBefore = inbox.Audit.Count;
 
         var reused = inbox.Submit(Env(eventId: "evt-2", reportId: "rep-1"), Gap(), ScenarioTime);
 
         Assert.Equal(DeliveryOutcome.Conflict, reused.Outcome);
         Assert.Equal(409, reused.HttpStatus);
+        Assert.Null(reused.Receipt);
         Assert.Single(inbox.Requests);
+        Assert.Equal(auditBefore, inbox.Audit.Count);
     }
 
     [Fact]
@@ -205,8 +208,10 @@ public class MockRequestDeliveryTests
 
         var results = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() => inbox.Submit(Env(), Gap(), ScenarioTime))));
 
+        var delivered = results.Single(r => r.Outcome == DeliveryOutcome.Delivered);
         Assert.Equal(1, results.Count(r => r.Outcome == DeliveryOutcome.Delivered));
         Assert.Equal(31, results.Count(r => r.Outcome == DeliveryOutcome.Replayed));
+        Assert.All(results, r => Assert.Equal(delivered.Receipt, r.Receipt));
         Assert.Single(inbox.Requests);
         Assert.Single(inbox.Audit);
     }
