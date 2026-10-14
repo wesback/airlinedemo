@@ -21,7 +21,8 @@ public static partial class RedactionFilter
     [GeneratedRegex(@"(?i)\bbearer\s+[A-Za-z0-9\-._~+/]+=*")]
     private static partial Regex BearerToken();
 
-    [GeneratedRegex(@"\b[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")]
+    // A JWT header is a base64url JSON object, so it starts with "eyJ"; the payload and signature may be short or empty (unsecured JWTs).
+    [GeneratedRegex(@"\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")]
     private static partial Regex Jwt();
 
     [GeneratedRegex(@"(?:__Host-|\.AspNetCore\.)[A-Za-z0-9_.-]+=[^;\s]+")]

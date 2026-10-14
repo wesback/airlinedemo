@@ -52,6 +52,8 @@ public sealed class DiagnosticsTests
     [InlineData("Bearer eyJhbGci.abc.def", "eyJhbGci")]
     [InlineData("__Host-session=8f3c9a2b7d; Path=/", "8f3c9a2b7d")]
     [InlineData(".AspNetCore.Session=abc123", "abc123")]
+    [InlineData("jwt eyJhbGciOiJub25lIn0.e30.", "eyJhbGciOiJub25lIn0")]
+    [InlineData("jwt eyJhbGci.e30.c2ln", "eyJhbGci")]
     public void BearerTokensJwtsAndAuthCookiesInTextAreScrubbed(string text, string secret)
     {
         var scrubbed = RedactionFilter.ScrubText(text);
