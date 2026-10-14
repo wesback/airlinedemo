@@ -223,11 +223,10 @@ public sealed class MockRequestInbox
     }
 
     private static string RequestIdFor(DeliveryEnvelope envelope) =>
-        "REQ-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(envelope.CaseId + "\u001f" + envelope.ReportId)))[..16];
+        "REQ-" + Digest(envelope.CaseId, envelope.ReportId)[..16];
 
     private static string Fingerprint(DeliveryEnvelope e) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(
-            '\u001f',
+        Digest(
             e.EventId,
             e.CaseId,
             e.ReportId,
@@ -236,5 +235,16 @@ public sealed class MockRequestInbox
             e.ScenarioTime,
             e.Component,
             e.SerialNumber,
-            e.MissingRequirement))));
+            e.MissingRequirement);
+
+    // Each field is prefixed with its length so no field value can shift a boundary and collide with another envelope.
+    private static string Digest(params string[] fields)
+    {
+        var sb = new StringBuilder();
+        foreach (var field in fields)
+        {
+            sb.Append(field.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(field);
+        }
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
+    }
 }
