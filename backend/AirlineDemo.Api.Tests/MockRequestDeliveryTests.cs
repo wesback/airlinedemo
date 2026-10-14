@@ -268,6 +268,8 @@ public class MockRequestDeliveryTests
         var pending = new Queue<MethodBase>();
         foreach (var root in roots)
         {
+            Assert.False(IsNativeOrBodylessApiMethod(root, apiAssembly),
+                $"{root.DeclaringType?.FullName}.{root.Name} is native or has no IL body");
             if (seen.Add(root)) pending.Enqueue(root);
         }
 
@@ -282,6 +284,8 @@ public class MockRequestDeliveryTests
                 var ownerAssembly = owner?.Assembly.GetName().Name ?? string.Empty;
                 Assert.True(owner?.Assembly == apiAssembly || AllowedFrameworkAssemblies.Contains(ownerAssembly),
                     $"{method.DeclaringType?.FullName}.{method.Name} calls {owner?.FullName}.{callee.Name} in {ownerAssembly}");
+                Assert.False(IsNativeOrBodylessApiMethod(callee, apiAssembly),
+                    $"{method.DeclaringType?.FullName}.{method.Name} calls native or bodyless {owner?.FullName}.{callee.Name}");
                 if (owner?.Assembly == apiAssembly && seen.Add(callee)) pending.Enqueue(callee);
             }
         }
@@ -302,6 +306,15 @@ public class MockRequestDeliveryTests
         .GetFields(BindingFlags.Public | BindingFlags.Static)
         .Select(f => (OpCode)f.GetValue(null)!)
         .ToDictionary(op => (int)(ushort)op.Value);
+
+    /// <summary>True for P/Invoke methods anywhere, and for concrete API methods with no IL body (extern or runtime-implemented); such methods are opaque to the IL walk.</summary>
+    private static bool IsNativeOrBodylessApiMethod(MethodBase method, Assembly apiAssembly)
+    {
+        if (method.Attributes.HasFlag(MethodAttributes.PinvokeImpl)) return true;
+        return method.DeclaringType?.Assembly == apiAssembly
+            && !method.IsAbstract
+            && method.GetMethodBody() is null;
+    }
 
     /// <summary>Decodes the IL of <paramref name="method"/> and returns every method it references by token.</summary>
     private static IEnumerable<MethodBase> CalledMethods(MethodBase method)
