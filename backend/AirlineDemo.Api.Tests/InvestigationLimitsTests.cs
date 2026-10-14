@@ -323,6 +323,48 @@ public class InvestigationLimitsTests
         Assert.Equal(0, sent);
     }
 
+    [Fact]
+    public async Task The_input_guard_counts_function_call_and_result_content_in_later_tool_loop_requests()
+    {
+        var firstRequestBytes = 0;
+        var probe = new MessageClient((messages, _) =>
+        {
+            firstRequestBytes = messages.Sum(m => System.Text.Encoding.UTF8.GetByteCount(m.Text ?? string.Empty));
+            return Reply(GoodReply);
+        });
+        using (var probeLimits = Limits())
+        {
+            await Investigator(probe, probeLimits, new TraceLogger()).InvestigateAsync([Doc]);
+        }
+
+        var logger = new TraceLogger();
+        using var limits = Limits(new InvestigationLimitOptions { MaxInputTokensPerCall = SchemaBytes() + firstRequestBytes });
+        var calls = 0;
+        var model = new MessageClient((_, _) => ++calls == 1 ? Task.FromResult(SourcePageCall()) : Reply(GoodReply));
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
+
+        AssertBreach(ex, limits, logger, InvestigationBreach.InputTokens);
+        Assert.Equal(1, calls);
+    }
+
+    private sealed class MessageClient(Func<IEnumerable<ChatMessage>, CancellationToken, Task<ChatResponse>> respond) : IChatClient
+    {
+        public ChatClientMetadata Metadata { get; } = new("message");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            respond(messages, cancellationToken);
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class CaseSource : ICaseReadSource
     {
         public IReadOnlyList<string> GetInventory(string caseId) => ["doc-1"];

@@ -322,9 +322,24 @@ public sealed class BoundedInvestigator(
         private static bool IsTransient(Exception ex) => ex is HttpRequestException or TimeoutException;
 
         private static long EstimateInputBytes(IEnumerable<ChatMessage> request, ChatOptions? options) =>
-            request.Sum(message => (long)Encoding.UTF8.GetByteCount(message.Text ?? string.Empty))
+            request.Sum(message => message.Contents.Sum(content => content is TextContent text
+                ? (long)Encoding.UTF8.GetByteCount(text.Text ?? string.Empty)
+                : EstimateContentBytes(content)))
             + (options?.Tools ?? Array.Empty<AITool>()).Sum(tool => (long)Encoding.UTF8.GetByteCount(
                 tool.Name + tool.Description + (tool is AIFunctionDeclaration declaration ? declaration.JsonSchema.GetRawText() : string.Empty)));
+
+        // Function calls and results are sent to the model too, so their serialized form counts toward the input limit.
+        private static long EstimateContentBytes(AIContent content)
+        {
+            try
+            {
+                return JsonSerializer.SerializeToUtf8Bytes(content, content.GetType(), AIJsonUtilities.DefaultOptions).LongLength;
+            }
+            catch (Exception ex) when (ex is NotSupportedException or JsonException or InvalidOperationException)
+            {
+                return int.MaxValue;
+            }
+        }
 
         public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
