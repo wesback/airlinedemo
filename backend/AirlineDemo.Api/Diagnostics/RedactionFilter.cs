@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
@@ -21,8 +22,9 @@ public static partial class RedactionFilter
     [GeneratedRegex(@"(?i)\bbearer\s+[A-Za-z0-9\-._~+/]+=*")]
     private static partial Regex BearerToken();
 
-    // A JWT header is a base64url JSON object, so it starts with "eyJ"; the payload and signature may be short or empty (unsecured JWTs).
-    [GeneratedRegex(@"\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")]
+    // A JWT header is a base64url JSON object: "{" followed by a quote or whitespace encodes to "ey" or "ew" (eyJ, eyAi, ewog).
+    // The payload and signature may be short or empty (unsecured JWTs).
+    [GeneratedRegex(@"\be[wy][A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")]
     private static partial Regex Jwt();
 
     [GeneratedRegex(@"(?:__Host-|\.AspNetCore\.)[A-Za-z0-9_.-]+=[^;\s]+")]
@@ -39,16 +41,52 @@ public static partial class RedactionFilter
     private static string RenderMessage(string formatted, IEnumerable<KeyValuePair<string, object?>>? pairs)
     {
         var rendered = formatted;
-        foreach (var pair in pairs ?? [])
+        var list = pairs?.ToList() ?? [];
+        var template = list.FirstOrDefault(p => p.Key == "{OriginalFormat}").Value as string;
+        foreach (var pair in list)
         {
+            if (!IsSensitiveName(pair.Key))
+            {
+                continue;
+            }
+
             var raw = pair.Value?.ToString();
-            if (IsSensitiveName(pair.Key) && !string.IsNullOrEmpty(raw))
+            if (!string.IsNullOrEmpty(raw))
             {
                 rendered = rendered.Replace(raw, TelemetryRedaction.Redacted, StringComparison.Ordinal);
             }
+
+            rendered = ReplaceFormattedValue(rendered, template, pair);
         }
 
         return ScrubText(rendered);
+    }
+
+    // A placeholder such as {passcode:D6} or {password,10} renders the value through its format specifier or alignment, so ToString() alone does not match.
+    private static string ReplaceFormattedValue(string rendered, string? template, KeyValuePair<string, object?> pair)
+    {
+        if (template is null)
+        {
+            return rendered;
+        }
+
+        foreach (Match placeholder in Regex.Matches(template, @"\{" + Regex.Escape(pair.Key) + @"((?:,[^:}]*)?(?::[^}]*)?)\}"))
+        {
+            try
+            {
+                var text = string.Format(CultureInfo.InvariantCulture, "{0" + placeholder.Groups[1].Value + "}", pair.Value).Trim();
+                if (text.Length > 0)
+                {
+                    rendered = rendered.Replace(text, TelemetryRedaction.Redacted, StringComparison.Ordinal);
+                }
+            }
+            catch (FormatException)
+            {
+                // The logger itself could not format this placeholder, so there is no rendered value to remove.
+            }
+        }
+
+        return rendered;
     }
 
     public static IReadOnlyList<KeyValuePair<string, object?>> Redact(IEnumerable<KeyValuePair<string, object?>> pairs) =>

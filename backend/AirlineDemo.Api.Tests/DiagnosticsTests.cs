@@ -54,6 +54,8 @@ public sealed class DiagnosticsTests
     [InlineData(".AspNetCore.Session=abc123", "abc123")]
     [InlineData("jwt eyJhbGciOiJub25lIn0.e30.", "eyJhbGciOiJub25lIn0")]
     [InlineData("jwt eyJhbGci.e30.c2ln", "eyJhbGci")]
+    [InlineData("jwt ewogImFsZyI6ICJub25lIiB9.e30.c2ln", "ewogImFsZyI6ICJub25lIiB9")]
+    [InlineData("jwt eyAiYWxnIjogIm5vbmUiIH0.e30.c2ln", "eyAiYWxnIjogIm5vbmUiIH0")]
     public void BearerTokensJwtsAndAuthCookiesInTextAreScrubbed(string text, string secret)
     {
         var scrubbed = RedactionFilter.ScrubText(text);
@@ -121,6 +123,25 @@ public sealed class DiagnosticsTests
         Assert.Equal(12345, RedactionFilter.Sanitize("balance", 12345));
         Assert.Equal(true, RedactionFilter.Sanitize("flag", true));
         Assert.Equal(7, RedactionFilter.Sanitize("retry_count", 7));
+    }
+
+    [Fact]
+    public void FormattedSensitiveValuesAreRedactedFromMessages()
+    {
+        var capture = new CapturingProvider();
+        using var services = new ServiceCollection()
+            .AddLogging(builder => builder.AddProvider(capture))
+            .AddRedactingLogging()
+            .BuildServiceProvider();
+        var logger = services.GetRequiredService<ILogger<DiagnosticsTests>>();
+
+        logger.LogInformation("Passcode {passcode:D6} and {password,10} for {investigation_id}", 4815, "hunter2", "inv-1");
+
+        var message = capture.Records.Single().Message;
+        Assert.DoesNotContain("004815", message);
+        Assert.DoesNotContain("4815", message);
+        Assert.DoesNotContain("hunter2", message);
+        Assert.Contains("inv-1", message);
     }
 
     [Fact]
