@@ -1,0 +1,281 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 181,
+  "branch": "ai-sdlc/issue-181",
+  "commitSha": "91027e6ce25878c5dd2c032286861c4cc50a9c76",
+  "round": 0,
+  "pipelineVersion": "1692eaf-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The required case-state provider setting cannot select Sql, and the endpoint restart test omits the required out-of-scope check.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 53,
+          "message": "The case-state provider wiring does not implement the required Persistence:CaseStateProvider selection and rejects Sql.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "CaseStatePath reads Persistence:Provider and throws when its value is Sql; it never reads the required Persistence:CaseStateProvider setting or constructs SqlCaseStateStore.",
+            "failureScenario": "When an operator sets Persistence:CaseStateProvider=Sql, the application ignores that setting and defaults to File. Setting Persistence:Provider=Sql instead makes startup fail, so the configured SQL provider cannot be selected."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 65,
+          "message": "AC-3 is missing an out-of-scope request assertion in the endpoint restart test.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The endpoint restart test reads only case-001, the seeded case owned by the reviewer, and checks its revision and status. It never requests an out-of-scope case.",
+            "failureScenario": "If a case endpoint returns data for a reviewer who lacks scope, this test still passes, so it does not verify AC-3's requirement that the restart test check for no data on an out-of-scope request."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The configured case-state provider does not support the required setting or SQL selection. The restart test also omits the required out-of-scope access check.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 50,
+          "message": "The case-state provider setting does not meet the acceptance criterion: the composition root reads the wrong key and rejects Sql instead of selecting the SQL store.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "CaseStatePath reads Persistence:Provider, while the acceptance criterion requires Persistence:CaseStateProvider. Its Sql branch also throws instead of registering the SQL adapter.",
+            "failureScenario": "When an operator sets Persistence:CaseStateProvider=Sql, the application ignores that setting and uses the File default. Setting Persistence:Provider=Sql instead causes startup to fail, so neither required provider selection works."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 52,
+          "message": "The endpoint restart test does not verify the acceptance criterion that an out-of-scope case request returns no data.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The endpoint restart test reviews case-001 and verifies its restored state, then reads audit events from the store. It never requests a case outside the reviewer’s scope.",
+            "failureScenario": "If an endpoint returns case data to a reviewer who is out of scope, this test still passes; the acceptance criterion’s required denial check is untested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No direct security vulnerability is evident in the changed code. The configured Sql provider is rejected, and the required out-of-scope endpoint behavior is not covered by the new wiring test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 53,
+          "message": "The Sql provider is explicitly unavailable, so the configured case-state provider selection criterion is not met.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "When Persistence:CaseStateProvider is set to Sql, CaseStatePath takes the Sql branch.",
+            "failureScenario": "An operator configures Persistence:CaseStateProvider=Sql, and resolving ICaseStateStore throws InvalidOperationException instead of registering the SQL store. The required provider cannot be selected."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 61,
+          "message": "The endpoint-level restart test does not verify the out-of-scope denial and no-data behavior required by the acceptance criteria.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The endpoint-level restart test reviews and reads case-001, but never sends a request for a case outside the reviewer's scope.",
+            "failureScenario": "If an endpoint begins returning data for an out-of-scope case, this test still passes; it does not verify the acceptance criterion that the request returns the existing denial response and exposes no data."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 3,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 62,
+      "total": 66,
+      "percent": 93.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseStore.cs",
+          "covered": 33,
+          "total": 34,
+          "missed": [
+            70
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 29,
+          "total": 32,
+          "missed": [
+            56,
+            67,
+            68
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
