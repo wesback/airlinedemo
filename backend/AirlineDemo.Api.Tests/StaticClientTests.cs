@@ -90,7 +90,7 @@ public sealed class StaticClientTests : IDisposable
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        foreach (var path in new[] { "/", "/cases/42/review", "/assets/app-3f9c1a.js", "/api/does-not-exist" })
+        foreach (var path in new[] { "/", "/index.html", "/cases/42/review", "/assets/app-3f9c1a.js", "/api/does-not-exist" })
         {
             using var response = await client.GetAsync(path);
 
@@ -114,6 +114,8 @@ public sealed class StaticClientTests : IDisposable
         Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
         // DD-028: no CORS, so no cross-origin allow header is ever emitted on the page or assets.
         Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Headers"));
     }
 
     [Fact]
