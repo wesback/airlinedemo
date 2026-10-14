@@ -13,6 +13,8 @@ label `ai-eligible`, passes AI-SDLC's Definition-of-Ready gate, and every issue 
 - **`## Acceptance criteria`**: checkboxes, each one testable, each naming the behaviour and at least one negative case.
 - **Size**: the pipeline refuses a change over 500 changed lines (added plus removed) or one with no test file. Aim for a story that changes
   well under 500 lines; split anything bigger, and give a deletion-only cleanup its own test.
+- **One test per criterion, named by it**: each acceptance criterion gets at least one test, and the test says which
+  criterion it covers (in its name or a comment such as `AC: M-01`). Reviewers check this criterion by criterion.
 - **A behaviour test**: name the test file. The test must fail on a broken version; the pipeline requires the new tests
   to fail on `main` and pass on the branch, and the whole test suite to pass. One exception: a story that changes
   **only test files** (tests, specs, e2e, fixtures; no production file) cannot fail on `main`, so the pipeline waives
@@ -26,6 +28,35 @@ label `ai-eligible`, passes AI-SDLC's Definition-of-Ready gate, and every issue 
   `frontend/package.json` (with its lockfile) when it needs one; name the package and why.
 - **GitHub Actions workflows** (`.github/workflows/`) may be written by a story. Such a pull request always waits for a
   person to merge it (AI-SDLC never merges `.github/`), so keep workflow changes in their own stories.
+
+### Rules that keep a story from getting stuck
+
+Each rule comes from a story that stopped for a person because it was missing (D109).
+
+- **Every criterion names how it is verified.** By default it is a unit test in the story's test file. A criterion that no
+  unit test can prove (a build or publish succeeds, how a page looks in a browser, what an external tool, cloud service or
+  the platform does, a deployment) ends with `Verified by CI: <job>` (an existing job in `.github/workflows/`) or with
+  `Verified by review.`, and no test is asked for it.
+- **Lists are written out in full.** Never "the other headers", "and so on", "all required fields": name every item and,
+  where it matters, the exact value (a header and its value, a field and its type).
+- **What the story relies on exists.** Every endpoint, class, method, setting or file the story calls or extends is on the
+  default branch, or is created by this story or by one it depends on (`Depends on #N`). A page that must not show data
+  before a check needs a server endpoint that enforces the check.
+- **Platform controls go in infrastructure stories.** A grant, a network rule, a read-only mount, an identity's write
+  access or a role assignment is enforced and tested by the infrastructure (Terraform) story, not by application code.
+- **Code outside the test process gets a testable seam.** Logic that runs in a child process, a worker or a script is put in
+  a plain method the unit tests call directly (`Main` stays a one-line call), because coverage only sees the test
+  process. One test may still start the real process to prove the wiring.
+- **Unit tests use only what CI installs.** No unit test runs `npm`, `dotnet publish`, a browser, Docker or a cloud
+  service; such a check is `Verified by CI` or `Verified by review`.
+- **Security filters work on names and exact shapes.** A redaction or validation rule lists the property names and the
+  exact patterns it acts on (for example `Bearer <token>`, three base64url segments of 8+ characters separated by dots).
+  It never judges free text by keywords or wording; what a filter cannot decide structurally goes to a person (an
+  internal review task), and the story says so.
+- **Tests are designed, not hoped for.** Where a test needs a particular setup (a temporary `wwwroot`, a fake clock, a
+  mock provider, a fixture), the story says which.
+- **Small enough.** Well under 500 changed lines including tests; a story that needs more is two stories, the second
+  depending on the first.
 
 ### Story template
 
