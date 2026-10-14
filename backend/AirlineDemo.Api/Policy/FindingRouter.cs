@@ -12,7 +12,6 @@ public enum FindingOutcome
 {
     Blocked,
     Review,
-    Request,
     CompleteBaseline,
 }
 
@@ -58,9 +57,10 @@ public static class FindingRouter
             return new FindingDecision(FindingOutcome.Review, 0, "zero eligible examples");
         }
 
+        // A structurally valid gap claim is only a candidate: a person must confirm it before any request exists.
         if (claims.Any(c => c.Kind == ClaimKind.MissingRequirement))
         {
-            return new FindingDecision(FindingOutcome.Request, 1, "supported missing requirement");
+            return new FindingDecision(FindingOutcome.Review, 0, "supported missing requirement needs internal review");
         }
 
         return new FindingDecision(FindingOutcome.CompleteBaseline, 0, "evidence-linked baseline");
