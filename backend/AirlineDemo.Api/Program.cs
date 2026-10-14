@@ -1,3 +1,4 @@
+using AirlineDemo.Api;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
@@ -19,6 +20,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();
 app.MapCaseEndpoints();
 app.MapDemoRunReset();
+app.MapStaticClient();
 
 app.Run();
 

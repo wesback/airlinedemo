@@ -12,4 +12,14 @@
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.24.0" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
+  <!-- Publish builds the React client and stages frontend/dist into the published wwwroot (DD-013). -->
+  <Target Name="BuildAndStageClient" AfterTargets="ComputeResolvedFilesToPublishList">
+    <Exec Command="npm --prefix &quot;$(MSBuildProjectDirectory)/../../frontend&quot; run build" />
+    <ItemGroup>
+      <ClientBuildFile Include="$(MSBuildProjectDirectory)/../../frontend/dist/**/*" />
+    </ItemGroup>
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(ClientBuildFile)" RelativePath="wwwroot/%(ClientBuildFile.RecursiveDir)%(ClientBuildFile.Filename)%(ClientBuildFile.Extension)" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 </Project>
