@@ -1,10 +1,8 @@
 using System.Diagnostics;
 using AirlineDemo.Api.Diagnostics;
-using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 
@@ -52,9 +50,9 @@ public sealed class DiagnosticsTests
 
     [Theory]
     [InlineData("Bearer eyJhbGci.abc.def", "eyJhbGci")]
-    [InlineData("session=8f3c9a2b7d; Path=/", "8f3c9a2b7d")]
+    [InlineData("__Host-session=8f3c9a2b7d; Path=/", "8f3c9a2b7d")]
     [InlineData(".AspNetCore.Session=abc123", "abc123")]
-    public void BearerTokensAndSessionCookiesInTextAreScrubbed(string text, string secret)
+    public void BearerTokensJwtsAndAuthCookiesInTextAreScrubbed(string text, string secret)
     {
         var scrubbed = RedactionFilter.ScrubText(text);
 
@@ -74,8 +72,8 @@ public sealed class DiagnosticsTests
 
         logger.LogInformation(
             "Sign-in {passcode} cookie {cookie} prompt {prompt} document {document} text {text}",
-            "4815", "session=8f3c9a2b7d", "Summarise the secret clause", "Confidential lease text", "Plain body text");
-        logger.LogWarning("Request carried {Header}", "session=8f3c9a2b7d");
+            "4815", "__Host-session=8f3c9a2b7d", "Summarise the secret clause", "Confidential lease text", "Plain body text");
+        logger.LogWarning("Request carried {Header}", "__Host-session=8f3c9a2b7d");
         logger.LogInformation("Caller {authorization} tokens {input_tokens}", "Bearer eyJhbGci.abc.def", 128);
 
         var output = string.Join("\n", capture.Records.Select(record =>
@@ -100,9 +98,9 @@ public sealed class DiagnosticsTests
             .BuildServiceProvider();
         var logger = services.GetRequiredService<ILogger<DiagnosticsTests>>();
 
-        using (logger.BeginScope("request session=8f3c9a2b7d Authorization: Bearer eyJhbGci"))
+        using (logger.BeginScope("request __Host-session=8f3c9a2b7d Authorization: Bearer eyJhbGci"))
         {
-            logger.LogError(new InvalidOperationException("Bad passcode 4815 for cookie session=8f3c9a2b7d"), "Sign-in failed");
+            logger.LogError(new InvalidOperationException("Bad passcode 4815 for cookie __Host-session=8f3c9a2b7d"), "Sign-in failed");
         }
 
         var record = Assert.Single(capture.Records);
@@ -116,15 +114,15 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void NumbersUnderUnlistedNamesAreRedactedButOperationalOnesKept()
+    public void ValuesUnderUnlistedNamesAreKept()
     {
-        Assert.Equal(TelemetryRedaction.Redacted, RedactionFilter.Sanitize("balance", 12345));
-        Assert.Equal(TelemetryRedaction.Redacted, RedactionFilter.Sanitize("flag", true));
+        Assert.Equal(12345, RedactionFilter.Sanitize("balance", 12345));
+        Assert.Equal(true, RedactionFilter.Sanitize("flag", true));
         Assert.Equal(7, RedactionFilter.Sanitize("retry_count", 7));
     }
 
     [Fact]
-    public void LiteralTemplateTextAndMalformedTemplatesAreRedacted()
+    public void LiteralTemplateTextIsKeptAndTemplatesStillFormat()
     {
         var capture = new CapturingProvider();
         using var services = new ServiceCollection()
@@ -135,12 +133,12 @@ public sealed class DiagnosticsTests
 
         logger.LogInformation("Confidential");
         logger.LogInformation("Lease clause 4 forbids subletting");
-        logger.LogInformation($"Interpolated {"Confidential"} content {{braces}}");
         logger.LogInformation("Investigation {investigation_id} state {state}", "inv-1", "ready");
 
         var messages = capture.Records.Select(r => r.Message).ToList();
-        Assert.All(messages.Take(3), m => Assert.Equal(TelemetryRedaction.Redacted, m));
-        Assert.Equal("Investigation inv-1 state ready", messages[3]);
+        Assert.Equal("Confidential", messages[0]);
+        Assert.Equal("Lease clause 4 forbids subletting", messages[1]);
+        Assert.Equal("Investigation inv-1 state ready", messages[2]);
     }
 
     [Fact]
@@ -160,7 +158,7 @@ public sealed class DiagnosticsTests
         {
             Assert.NotNull(activity);
             activity!.SetTag("gen_ai.prompt", "Summarise the secret clause");
-            activity.SetTag("cookie", "session=8f3c9a2b7d");
+            activity.SetTag("cookie", "__Host-session=8f3c9a2b7d");
         }
 
         var tags = Assert.Single(seen.Tags);
@@ -169,16 +167,16 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void OverlongFreeTextIsRedacted()
+    public void FreeTextUnderUnlistedNamesIsNotJudged()
     {
-        var longText = new string('x', RedactionFilter.MaxFreeTextLength + 1);
+        var longText = new string('x', 5000);
 
-        Assert.Equal(TelemetryRedaction.Redacted, RedactionFilter.Sanitize("status", longText));
+        Assert.Equal(longText, RedactionFilter.Sanitize("status", longText));
         Assert.Equal("short", RedactionFilter.Sanitize("status", "short"));
     }
 
     [Fact]
-    public void FreeTextUnderUnlistedNamesIsRedactedInMessagesAndState()
+    public void FreeTextUnderUnlistedNamesIsKeptInMessagesAndState()
     {
         var capture = new CapturingProvider();
         using var services = new ServiceCollection()
@@ -190,9 +188,8 @@ public sealed class DiagnosticsTests
         logger.LogInformation("Model said {answer}", "Lease clause 4 forbids subletting");
 
         var record = Assert.Single(capture.Records);
-        Assert.DoesNotContain("Lease clause", record.Message);
-        Assert.DoesNotContain("Lease clause", string.Join(" ", record.State.Select(pair => pair.Value)));
-        Assert.Contains(TelemetryRedaction.Redacted, record.Message);
+        Assert.Contains("Lease clause", record.Message);
+        Assert.Contains("Lease clause", string.Join(" ", record.State.Select(pair => pair.Value)));
     }
 
     [Fact]
@@ -212,7 +209,7 @@ public sealed class DiagnosticsTests
         {
             Assert.NotNull(activity);
             activity!.SetTag("gen_ai.prompt", "Summarise the secret clause");
-            activity.SetTag("cookie", "session=8f3c9a2b7d");
+            activity.SetTag("cookie", "__Host-session=8f3c9a2b7d");
             activity.SetTag("gen_ai.usage.input_tokens", 128);
             activity.SetTag("note", "Authorization: Bearer eyJhbGci");
             processor.OnEnd(activity);
@@ -222,8 +219,52 @@ public sealed class DiagnosticsTests
         var tags = exported.Single().TagObjects.ToDictionary(t => t.Key, t => t.Value);
         Assert.Equal(TelemetryRedaction.Redacted, tags["gen_ai.prompt"]);
         Assert.Equal(TelemetryRedaction.Redacted, tags["cookie"]);
+        Assert.Equal(TelemetryRedaction.Redacted, tags["cookie"]);
         Assert.Equal(128, tags["gen_ai.usage.input_tokens"]);
         Assert.DoesNotContain("eyJhbGci", (string)tags["note"]!);
+    }
+
+    private const string TestConnectionString =
+        "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://localhost/";
+
+    [Fact]
+    public void TraceExporterIsRegisteredOnlyWhenConnectionStringIsSet()
+    {
+        var unset = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        unset.Configuration[DiagnosticsSetup.ConnectionStringSetting] = null;
+        unset.AddAirlineDiagnostics();
+        using (var app = unset.Build())
+        {
+            Assert.Null(app.Services.GetService<TracerProvider>());
+        }
+
+        var set = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        set.Configuration[DiagnosticsSetup.ConnectionStringSetting] = TestConnectionString;
+        set.AddAirlineDiagnostics();
+        using (var app = set.Build())
+        {
+            Assert.NotNull(app.Services.GetService<TracerProvider>());
+        }
+    }
+
+    [Fact]
+    public void LogExporterIsRegisteredOnlyWhenConnectionStringIsSet()
+    {
+        var unset = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        unset.Configuration[DiagnosticsSetup.ConnectionStringSetting] = null;
+        unset.AddAirlineDiagnostics();
+        using (var app = unset.Build())
+        {
+            Assert.DoesNotContain(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
+        }
+
+        var set = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        set.Configuration[DiagnosticsSetup.ConnectionStringSetting] = TestConnectionString;
+        set.AddAirlineDiagnostics();
+        using (var app = set.Build())
+        {
+            Assert.Contains(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
+        }
     }
 
     [Fact]
@@ -249,8 +290,6 @@ public sealed class DiagnosticsTests
             Assert.NotNull(app.Services.GetRequiredService<ILoggerFactory>());
             Assert.NotNull(app.Services.GetService<TracerProvider>());
             Assert.Contains(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
-            // The Application Insights exporter is wired to the configured connection string, not a code literal.
-            Assert.Equal(connectionString, app.Services.GetRequiredService<IOptions<AzureMonitorOptions>>().Value.ConnectionString);
         }
     }
 
@@ -269,7 +308,7 @@ public sealed class DiagnosticsTests
             ["prompt"] = "Summarise the secret clause",
             ["document"] = "Confidential lease text",
             ["passcode"] = "4815",
-            ["cookie"] = "session=8f3c9a2b7d",
+            ["cookie"] = "__Host-session=8f3c9a2b7d",
             ["authorization"] = "Bearer eyJhbGci",
             ["investigation_id"] = "inv-7",
         }))

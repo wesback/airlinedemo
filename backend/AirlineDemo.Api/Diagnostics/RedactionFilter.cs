@@ -15,111 +15,35 @@ public static partial class RedactionFilter
         "prompt", "document", "text", "passcode", "password", "cookie", "authorization", "token", "secret",
     };
 
-    // Only these names may carry a string value: identifiers, states, counts, durations and token usage.
-    private static readonly HashSet<string> OperationalSegments = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "id", "ids", "state", "status", "count", "counts", "citations", "duration", "ms", "usage", "tokens", "total",
-        "decision", "revision", "kind", "code", "outcome", "event", "type", "model", "trace", "span", "route", "level",
-        "operation", "attempts", "latency", "version", "service", "name", "environment", "deployment", "span",
-    };
-
     public static bool IsSensitiveName(string name) =>
         name.Split(new[] { '.', '_', '-' }).Any(SensitiveSegments.Contains);
-
-    public static bool IsOperationalName(string name) =>
-        name.Split(new[] { '.', '_', '-' }).Any(OperationalSegments.Contains);
 
     [GeneratedRegex(@"(?i)\bbearer\s+[A-Za-z0-9\-._~+/]+=*")]
     private static partial Regex BearerToken();
 
-    [GeneratedRegex(@"(?i)(?:\b__session|\bsession|\bsid|\.AspNetCore\.[A-Za-z]+)=[^;\s]+")]
-    private static partial Regex SessionCookie();
+    [GeneratedRegex(@"\b[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")]
+    private static partial Regex Jwt();
+
+    [GeneratedRegex(@"(?:__Host-|\.AspNetCore\.)[A-Za-z0-9_.-]+=[^;\s]+")]
+    private static partial Regex AuthCookie();
 
     public static string ScrubText(string text) =>
-        SessionCookie().Replace(BearerToken().Replace(text, TelemetryRedaction.Redacted), TelemetryRedaction.Redacted);
+        AuthCookie().Replace(Jwt().Replace(BearerToken().Replace(text, TelemetryRedaction.Redacted), TelemetryRedaction.Redacted), TelemetryRedaction.Redacted);
 
-    // Free-form content (prompts, document text) is long or contains spaces; identifiers, states and counts are single tokens.
-    public const int MaxFreeTextLength = 256;
+    // Only the name decides whether a value is dropped; other values are kept except for the listed value shapes.
+    public static object? Sanitize(string name, object? value) =>
+        IsSensitiveName(name) ? TelemetryRedaction.Redacted : value is string text ? ScrubText(text) : value;
 
-    // Strings, numbers and flags survive only under operational names; strings must also be single short tokens.
-    public static object? Sanitize(string name, object? value)
+    // The message keeps its text; the values bound to sensitive placeholders are replaced by the redaction marker.
+    private static string RenderMessage(string formatted, IEnumerable<KeyValuePair<string, object?>>? pairs)
     {
-        if (IsSensitiveName(name))
-        {
-            return TelemetryRedaction.Redacted;
-        }
-
-        return value switch
-        {
-            null => null,
-            ValueType when IsOperationalName(name) => value,
-            string text when IsOperationalName(name) => FreeText(text),
-            _ => TelemetryRedaction.Redacted,
-        };
-    }
-
-    private static string FreeText(string text) =>
-        text.Length > MaxFreeTextLength || text.Any(char.IsWhiteSpace) ? TelemetryRedaction.Redacted : ScrubText(text);
-
-    // Literal text without placeholders is kept only as a single token made of operational words.
-    private static string LiteralText(string text) =>
-        text.Length is > 0 and <= MaxFreeTextLength && !text.Any(char.IsWhiteSpace)
-            && text.Split(new[] { '.', '_', '-' }).All(OperationalSegments.Contains)
-            ? ScrubText(text)
-            : TelemetryRedaction.Redacted;
-
-    [GeneratedRegex(@"\{[^{}]*\}")]
-    private static partial Regex Placeholder();
-
-    [GeneratedRegex(@"^\{[@$]?[A-Za-z_][A-Za-z0-9_]*(?:[,:][^{}]*)?\}$")]
-    private static partial Regex ValidPlaceholder();
-
-    // A template is trusted only when it is short and every brace is part of a well-formed placeholder;
-    // an interpolated string that carries content fails this.
-    private static bool IsTrustedTemplate(string template, IEnumerable<KeyValuePair<string, object?>>? pairs) =>
-        template.Length <= MaxFreeTextLength
-        && Placeholder().Matches(template).All(match => ValidPlaceholder().IsMatch(match.Value))
-        && Placeholder().Matches(template).All(match => HasValue(match.Value, pairs))
-        && !Placeholder().Replace(template, string.Empty).Any(c => c is '{' or '}');
-
-    // A placeholder without a bound value means the content was interpolated into the template text.
-    private static bool HasValue(string placeholder, IEnumerable<KeyValuePair<string, object?>>? pairs)
-    {
-        var name = placeholder.Trim('{', '}').Split(',', ':')[0].TrimStart('@', '$');
-        return pairs?.Any(pair => pair.Key == name) == true;
-    }
-
-    // Messages are only trusted as message templates: placeholder values are redacted and literal text is never free-form.
-    private static string RenderMessage(string formatted, string? template, IEnumerable<KeyValuePair<string, object?>>? pairs)
-    {
-        if (template is null)
-        {
-            return TelemetryRedaction.Redacted;
-        }
-
-        if (!template.Contains('{'))
-        {
-            return LiteralText(template);
-        }
-
-        if (!IsTrustedTemplate(template, pairs))
-        {
-            return TelemetryRedaction.Redacted;
-        }
-
         var rendered = formatted;
         foreach (var pair in pairs ?? [])
         {
-            if (pair.Key == "{OriginalFormat}")
-            {
-                continue;
-            }
-
             var raw = pair.Value?.ToString();
-            var sanitized = Sanitize(pair.Key, pair.Value)?.ToString() ?? string.Empty;
-            if (!string.IsNullOrEmpty(raw) && raw != sanitized)
+            if (IsSensitiveName(pair.Key) && !string.IsNullOrEmpty(raw))
             {
-                rendered = rendered.Replace(raw, sanitized, StringComparison.Ordinal);
+                rendered = rendered.Replace(raw, TelemetryRedaction.Redacted, StringComparison.Ordinal);
             }
         }
 
@@ -178,7 +102,7 @@ public static partial class RedactionFilter
             object scope = state switch
             {
                 IEnumerable<KeyValuePair<string, object?>> pairs => new RedactedState(Redact(pairs), TelemetryRedaction.Redacted),
-                string text => LiteralText(text),
+                string text => ScrubText(text),
                 _ => TelemetryRedaction.Redacted,
             };
             return inner.BeginScope(scope);
@@ -195,8 +119,7 @@ public static partial class RedactionFilter
 
             var source = state as IEnumerable<KeyValuePair<string, object?>>;
             var formatted = formatter(state, exception);
-            var template = source?.FirstOrDefault(pair => pair.Key == "{OriginalFormat}").Value as string;
-            var message = RenderMessage(formatted, template, source);
+            var message = RenderMessage(formatted, source);
             var pairs = source is null ? null : Redact(source);
             inner.Log(logLevel, eventId, new RedactedState(pairs, message), SanitizeException(exception), static (s, _) => s.Message);
         }

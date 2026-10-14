@@ -1,4 +1,4 @@
-using Azure.Monitor.OpenTelemetry.AspNetCore;
+using Azure.Monitor.OpenTelemetry.Exporter;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,9 +21,12 @@ public static class DiagnosticsSetup
             return builder;
         }
 
+        builder.Logging.AddOpenTelemetry(logging =>
+            logging.AddAzureMonitorLogExporter(options => options.ConnectionString = connectionString));
         builder.Services.AddOpenTelemetry()
-            .WithTracing(tracing => tracing.AddProcessor(new RedactionFilter.RedactingActivityProcessor()))
-            .UseAzureMonitor(options => options.ConnectionString = connectionString);
+            .WithTracing(tracing => tracing
+                .AddProcessor(new RedactionFilter.RedactingActivityProcessor())
+                .AddAzureMonitorTraceExporter(options => options.ConnectionString = connectionString));
         return builder;
     }
 
