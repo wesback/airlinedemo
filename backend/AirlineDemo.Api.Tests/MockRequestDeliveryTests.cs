@@ -257,39 +257,80 @@ public class MockRequestDeliveryTests
         var roots = new[] { typeof(MockRequestInbox), typeof(MockDeliveryPolicy), typeof(MockRequestTemplate) }
             .SelectMany(t => t.GetMembers(All).OfType<MethodBase>());
 
-        var seen = new HashSet<MethodBase>();
-        var pending = new Queue<MethodBase>();
-        foreach (var root in roots)
-        {
-            Assert.False(IsNativeOrBodylessApiMethod(root, apiAssembly),
-                $"{root.DeclaringType?.FullName}.{root.Name} is native or has no IL body");
-            if (seen.Add(root)) pending.Enqueue(root);
-        }
+        var (violations, visited) = WalkDispatchGraph(roots, apiAssembly);
 
-        Assert.Contains(seen, m => m.Name == nameof(MockRequestInbox.Submit));
-
-        while (pending.Count > 0)
-        {
-            var method = pending.Dequeue();
-            foreach (var callee in CalledMethods(method))
-            {
-                var owner = callee.DeclaringType;
-                var ownerAssembly = owner?.Assembly.GetName().Name ?? string.Empty;
-                Assert.True(owner?.Assembly == apiAssembly || AllowedFrameworkAssemblies.Contains(ownerAssembly),
-                    $"{method.DeclaringType?.FullName}.{method.Name} calls {owner?.FullName}.{callee.Name} in {ownerAssembly}");
-                Assert.False(IsNativeOrBodylessApiMethod(callee, apiAssembly),
-                    $"{method.DeclaringType?.FullName}.{method.Name} calls native or bodyless {owner?.FullName}.{callee.Name}");
-                Assert.False(IsReflectiveOrDynamicInvocation(callee),
-                    $"{method.DeclaringType?.FullName}.{method.Name} uses reflective or dynamic invocation via {owner?.FullName}.{callee.Name}");
-                Assert.False(IsUnresolvedApiDispatch(callee, apiAssembly),
-                    $"{method.DeclaringType?.FullName}.{method.Name} dispatches to API interface/abstract {owner?.FullName}.{callee.Name}; its implementations are not visible to the IL walk");
-                if (owner?.Assembly == apiAssembly && seen.Add(callee)) pending.Enqueue(callee);
-            }
-        }
+        Assert.Empty(violations);
+        Assert.Contains(visited, m => m.Name == nameof(MockRequestInbox.Submit));
 
         var result = new MockRequestInbox().Submit(Env(), Gap(), ScenarioTime);
         Assert.Equal(DeliveryOutcome.Delivered, result.Outcome);
     }
+
+    [Fact]
+    public void No_dispatch_walk_reports_each_forbidden_construct_it_reaches()
+    {
+        var testAssembly = typeof(MockRequestDeliveryTests).Assembly;
+
+        Assert.Empty(WalkDispatchGraph(new[] { ((Action)PlainHelperCaller).Method }, testAssembly).Violations);
+        Assert.NotEmpty(WalkDispatchGraph(new[] { ((Action<IFakeSender>)InterfaceCaller).Method }, testAssembly).Violations);
+        Assert.NotEmpty(WalkDispatchGraph(new[] { ((Action)AsyncCaller).Method }, testAssembly).Violations);
+        Assert.NotEmpty(WalkDispatchGraph(new[] { ((Action)ReflectionCaller).Method }, testAssembly).Violations);
+        Assert.NotEmpty(WalkDispatchGraph(new[] { ((Action)ProcessCaller).Method }, testAssembly).Violations);
+    }
+
+    private static void PlainHelperCaller() => _ = string.Empty.Trim();
+    private static void InterfaceCaller(IFakeSender sender) => sender.Send("x");
+    private static void AsyncCaller() => _ = AsyncHelper();
+    private static async System.Threading.Tasks.Task AsyncHelper() => await System.Threading.Tasks.Task.Yield();
+    private static void ReflectionCaller() => _ = Activator.CreateInstance(typeof(object));
+    private static void ProcessCaller() => System.Diagnostics.Process.Start("x");
+
+    /// <summary>Walks the IL call graph from <paramref name="roots"/> and collects every forbidden construct it reaches, plus the methods visited.</summary>
+    private static (List<string> Violations, HashSet<MethodBase> Visited) WalkDispatchGraph(IEnumerable<MethodBase> roots, Assembly apiAssembly)
+    {
+        var violations = new List<string>();
+        var visited = new HashSet<MethodBase>();
+        var pending = new Queue<MethodBase>();
+        foreach (var root in roots)
+        {
+            if (visited.Add(root)) pending.Enqueue(root);
+        }
+
+        while (pending.Count > 0)
+        {
+            var method = pending.Dequeue();
+            var where = $"{method.DeclaringType?.FullName}.{method.Name}";
+            if (IsNativeOrBodylessApiMethod(method, apiAssembly)) violations.Add($"{where} is native or has no IL body");
+            if (IsStateMachineMethod(method)) violations.Add($"{where} is async or an iterator; its generated state machine is not walked");
+
+            foreach (var callee in CalledMethods(method))
+            {
+                if (callee is null)
+                {
+                    violations.Add($"{where} uses calli (indirect call through a function pointer)");
+                    continue;
+                }
+                var owner = callee.DeclaringType;
+                var ownerAssembly = owner?.Assembly.GetName().Name ?? string.Empty;
+                if (owner?.Assembly != apiAssembly && !AllowedFrameworkAssemblies.Contains(ownerAssembly))
+                    violations.Add($"{where} calls {owner?.FullName}.{callee.Name} in {ownerAssembly}");
+                if (IsNativeOrBodylessApiMethod(callee, apiAssembly))
+                    violations.Add($"{where} calls native or bodyless {owner?.FullName}.{callee.Name}");
+                if (IsReflectiveOrDynamicInvocation(callee))
+                    violations.Add($"{where} uses reflective or dynamic invocation via {owner?.FullName}.{callee.Name}");
+                if (IsUnresolvedApiDispatch(callee, apiAssembly))
+                    violations.Add($"{where} dispatches to API interface/abstract/virtual {owner?.FullName}.{callee.Name}; its implementations are not visible to the IL walk");
+                if (owner?.Assembly == apiAssembly && visited.Add(callee)) pending.Enqueue(callee);
+            }
+        }
+
+        return (violations, visited);
+    }
+
+    /// <summary>True for async and iterator methods, whose bodies live in compiler-generated state machines the IL walk does not follow.</summary>
+    private static bool IsStateMachineMethod(MethodBase method) =>
+        method.IsDefined(typeof(System.Runtime.CompilerServices.AsyncStateMachineAttribute), false)
+        || method.IsDefined(typeof(System.Runtime.CompilerServices.IteratorStateMachineAttribute), false);
 
     /// <summary>Framework assemblies a delivery path may use for pure computation. Anything else (Process, sockets, HTTP, third-party SDKs) fails the test.</summary>
     private static readonly HashSet<string> AllowedFrameworkAssemblies = new(StringComparer.Ordinal)
@@ -369,7 +410,7 @@ public class MockRequestDeliveryTests
     }
 
     /// <summary>Decodes the IL of <paramref name="method"/> and returns every method it references by token.</summary>
-    private static IEnumerable<MethodBase> CalledMethods(MethodBase method)
+    private static IEnumerable<MethodBase?> CalledMethods(MethodBase method)
     {
         var il = method.GetMethodBody()?.GetILAsByteArray();
         if (il is null) yield break;
@@ -381,8 +422,7 @@ public class MockRequestDeliveryTests
             if (code == 0xFE) code = 0xFE00 | il[i++];
             var op = OpCodeByValue[code];
             // calli takes its target from the stack, so no method token is visible to the walk.
-            if (op == OpCodes.Calli)
-                Assert.Fail($"{method.DeclaringType?.FullName}.{method.Name} uses calli (indirect call through a function pointer)");
+            if (op == OpCodes.Calli) yield return null;
             switch (op.OperandType)
             {
                 case OperandType.InlineMethod:
