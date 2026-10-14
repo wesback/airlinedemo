@@ -1,0 +1,235 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 161,
+  "branch": "ai-sdlc/issue-161",
+  "commitSha": "33ba0a43b951de388de669b4aed587ce66402a3a",
+  "round": 0,
+  "pipelineVersion": "53a15c1",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The dashboard renders accepted trace and evidence URLs as links, but safeHref does not reject browser-equivalent protocol-relative paths.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/CapabilityDashboard.tsx",
+          "line": 22,
+          "message": "The same-origin URL check can be bypassed with a backslash after the leading slash, allowing a purported trace or evidence link to navigate off-site (OWASP A01:2025).",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "safeHref accepts any string beginning with one slash; evidence and activity trace URLs that pass this check are rendered as anchor hrefs.",
+            "failureScenario": "If backend data contains `/\\\\evil.example/x`, safeHref accepts it, but browsers treat the backslash as a slash when resolving the URL, so the link can navigate to evil.example instead of staying same-origin."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The component covers capability and activity labels, design-only cards, supplied decision actions, and inert text rendering. Queue-item labels and M-02 forged-command rejection are not covered by this change.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/CapabilityDashboard.tsx",
+          "line": 24,
+          "message": "Acceptance criterion 1 requires labels for queue items as well as capabilities and activity. Queue items are absent from the dashboard data and rendering, and no test covers their labels.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "DashboardData contains only capabilities and activity, and CapabilityDashboard renders only those collections.",
+            "failureScenario": "When the dashboard has queue items to display, this component has no queue-item data or rendering path, so those items cannot display their backend-supplied labels."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/CapabilityDashboard.test.tsx",
+          "line": 113,
+          "message": "M-02 requires a test showing forged client permissions do not authorize an API command. The named tests cover displayed actions only; add a test that submits a forged command and verifies the API rejects it.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The role-permitted decisions tests verify that supplied actions render and invoke the callback, but do not exercise an API command with forged client permissions.",
+            "failureScenario": "If a client adds a disallowed action and submits its command, the tests would still pass even if the API accepted it; the M-02 authorization behavior is therefore unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The UI renders supplied action data and dispatches the chosen action. The change does not verify the acceptance criterion that forged client permissions cannot authorize an API command.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/CapabilityDashboard.tsx",
+          "line": 79,
+          "message": "M-02's forged-permission condition has no test proving that an unauthorized API command is rejected; the added tests cover displayed actions and callback dispatch only.",
+          "confidence": 0.88,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The dashboard renders buttons from client-held capability.actions and passes the selected action ID to onDecision; the added tests verify role-based projection and callback dispatch but do not exercise an API command with forged client permissions.",
+            "failureScenario": "A signed-in user alters the client-held action list to add a decision their role is not permitted to make. This change's tests do not establish that the resulting API command is rejected, so the M-02 authorization requirement is unverified."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CapabilityProjectionTests.cs",
+      "frontend/tests/CapabilityDashboard.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 67,
+      "total": 67,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Dashboard/CapabilityProjection.cs",
+          "covered": 67,
+          "total": 67,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
