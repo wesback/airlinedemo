@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import SignIn from './components/SignIn';
 
 type ApiState = 'checking' | 'ready' | 'unavailable';
 
@@ -28,6 +29,7 @@ export default function App() {
       <h1>Airline asset review</h1>
       <p>Reviewer workspace</p>
       <p role="status" aria-live="polite">{message}</p>
+      <SignIn />
     </main>
   );
 }
