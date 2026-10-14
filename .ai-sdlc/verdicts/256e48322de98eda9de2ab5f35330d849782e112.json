@@ -1,0 +1,222 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 158,
+  "branch": "ai-sdlc/issue-158",
+  "commitSha": "256e48322de98eda9de2ab5f35330d849782e112",
+  "round": 0,
+  "pipelineVersion": "53a15c1",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The delivery policy and tests cover the stated eligibility, replay, conflict, and atomicity cases. The fingerprint encoding can treat distinct envelopes as identical, violating the changed-envelope rejection criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Requests/MockRequestDelivery.cs",
+          "line": 225,
+          "message": "The delimiter-based fingerprint is ambiguous when field values contain U+001F, so changed envelopes can bypass the required same-ID conflict check.",
+          "confidence": 0.85,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Fingerprint joins envelope fields with U+001F, and Submit returns Replayed when an existing event ID has the same fingerprint.",
+            "failureScenario": "After submitting an envelope with Component=\"Engine\" and SerialNumber=\"ENG-123\\u001fX\", resubmit the same EventId with Component=\"Engine\\u001fENG-123\" and SerialNumber=\"X\". The joined fingerprint is unchanged, but the rendered body differs; Submit returns the original receipt as Replayed instead of rejecting the changed envelope with 409."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the listed delivery outcomes, replay, concurrency, and injected commit failure. However, the fingerprint can collide for distinct envelopes, violating the required changed-envelope conflict behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Requests/MockRequestDelivery.cs",
+          "line": 232,
+          "message": "The delimiter-based fingerprint is ambiguous when envelope fields contain U+001F. Use an unambiguous encoding so changed envelopes under the same event ID are rejected.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Submit fingerprints the envelope with string.Join using U+001F, then treats a matching fingerprint for an existing EventId as an exact replay.",
+            "failureScenario": "After delivering an envelope with CaseId \"case-1\" and ReportId \"rep-1\", submit the same EventId with CaseId \"case-1\\u001frep-1\" and an empty ReportId. The joined fields produce the same fingerprint, so Submit returns the original receipt with status 200 instead of rejecting the changed envelope with 409."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The delimiter-based envelope fingerprint allows distinct envelopes to collide, violating M-04's requirement to reject changed envelopes under a reused event ID. No external-message path is present in this diff.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Requests/MockRequestDelivery.cs",
+          "line": 234,
+          "message": "The delimiter-based fingerprint is ambiguous when field values contain U+001F. Encode fields unambiguously before hashing so changed envelopes cannot be accepted as exact replays.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Submit fingerprints the envelope by joining its fields with U+001F, then treats a matching fingerprint for an existing event ID as an exact replay.",
+            "failureScenario": "Submit an envelope with Component \"Engine\" and SerialNumber \"ENG-123\\u001ffoo\", then reuse its EventId with Component \"Engine\\u001fENG-123\" and SerialNumber \"foo\". Both envelopes produce the same joined fingerprint, but render different bodies; the second submission returns the original receipt as Replayed instead of rejecting the changed envelope with 409."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/MockRequestDeliveryTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 133,
+      "total": 133,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Requests/MockRequestDelivery.cs",
+          "covered": 133,
+          "total": 133,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
