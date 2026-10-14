@@ -232,6 +232,18 @@ public class IsolatedPdfParserTests
         Assert.Equal(string.Empty, response.Text);
     }
 
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool DeniesWrite(string directory)
+    {
+        var rules = new DirectoryInfo(directory).GetAccessControl()
+            .GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier))
+            .Cast<System.Security.AccessControl.FileSystemAccessRule>();
+        var write = System.Security.AccessControl.FileSystemRights.WriteData
+            | System.Security.AccessControl.FileSystemRights.CreateFiles;
+        return rules.Any(r => r.AccessControlType == System.Security.AccessControl.AccessControlType.Deny
+            && (r.FileSystemRights & write) == write);
+    }
+
     // AC-4: the child starts with an empty environment and a working directory of its own (no secrets, no store access).
     [Fact]
     public void Child_StartsWithEmptyEnvironmentAndReadOnlyWorkingDirectory()
@@ -245,6 +257,11 @@ public class IsolatedPdfParserTests
             {
                 var mode = File.GetUnixFileMode(workingDirectory);
                 Assert.Equal(0, (int)(mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite | UnixFileMode.UserWrite)));
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.True(DeniesWrite(workingDirectory));
             }
 
             var startInfo = IsolatedPdfParser.CreateStartInfo(new IsolatedPdfParserOptions(), workingDirectory);

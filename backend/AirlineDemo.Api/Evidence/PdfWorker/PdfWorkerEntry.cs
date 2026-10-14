@@ -14,6 +14,9 @@ public static class PdfWorkerEntry
 
     public static int Run()
     {
+        var limit = IsolatedPdfParserOptions.Default.MemoryLimitBytes;
+        LimitOwnDataSegment(limit);
+        StartMemoryWatchdog(limit);
         using var stdin = Console.OpenStandardInput();
         var response = Execute(stdin, WithinMemoryLimit);
         using var stdout = Console.OpenStandardOutput();
@@ -71,6 +74,61 @@ public static class PdfWorkerEntry
             AppDomain.CurrentDomain.FirstChanceException -= OnFirstChance;
         }
     }
+
+    /// <summary>
+    /// Linux: the worker caps its own private memory with RLIMIT_DATA before it reads any input, so the kernel
+    /// refuses allocations over the limit even when no cgroup or prlimit wrapper is available.
+    /// </summary>
+    private static void LimitOwnDataSegment(long limitBytes)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        try
+        {
+            var limit = new RLimit { Current = (ulong)limitBytes, Maximum = (ulong)limitBytes };
+            SetRLimit(RLimitData, ref limit);
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+        }
+    }
+
+    /// <summary>Other platforms and a last resort on Linux: a thread that exits the worker as soon as its working set passes the limit.</summary>
+    private static void StartMemoryWatchdog(long limitBytes)
+    {
+        var watchdog = new Thread(() =>
+        {
+            while (true)
+            {
+                if (Environment.WorkingSet > limitBytes)
+                {
+                    Environment.FailFast("worker exceeded the memory limit");
+                }
+
+                Thread.Sleep(5);
+            }
+        })
+        {
+            IsBackground = true,
+            Priority = ThreadPriority.Highest,
+        };
+        watchdog.Start();
+    }
+
+    private const int RLimitData = 2;
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RLimit
+    {
+        public ulong Current;
+        public ulong Maximum;
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "setrlimit")]
+    private static extern int SetRLimit(int resource, ref RLimit limit);
 
     private static bool WithinMemoryLimit() =>
         Environment.WorkingSet <= IsolatedPdfParserOptions.Default.MemoryLimitBytes;
