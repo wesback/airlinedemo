@@ -88,6 +88,17 @@ public class DockerfileTests
         Assert.Equal(new List<string> { "EXPOSE 8080" }, exposes);
     }
 
+    private static void AssertExactVersionTag(string image)
+    {
+        var lastSegment = image[(image.LastIndexOf('/') + 1)..];
+        var colon = lastSegment.IndexOf(':');
+        Assert.True(colon > 0, $"Base image '{image}' has no tag.");
+        var tag = lastSegment[(colon + 1)..];
+        Assert.NotEqual("latest", tag, StringComparer.OrdinalIgnoreCase);
+        // Full major.minor.patch version required; floating tags such as "22" or "22.12" are rejected.
+        Assert.Matches(@"^\d+\.\d+\.\d+(-[A-Za-z0-9.]+)*$", tag);
+    }
+
     [Fact]
     public void EveryFromUsesAnExactVersionTagNotLatest()
     {
@@ -99,13 +110,28 @@ public class DockerfileTests
         Assert.NotEmpty(images);
         foreach (var image in images)
         {
-            var lastSegment = image[(image.LastIndexOf('/') + 1)..];
-            var colon = lastSegment.IndexOf(':');
-            Assert.True(colon > 0, $"Base image '{image}' has no tag.");
-            var tag = lastSegment[(colon + 1)..];
-            Assert.NotEqual("latest", tag, StringComparer.OrdinalIgnoreCase);
-            Assert.Matches(@"^\d", tag);
+            AssertExactVersionTag(image);
         }
+    }
+
+    [Theory]
+    [InlineData("node:latest")]
+    [InlineData("node")]
+    [InlineData("node:22")]
+    [InlineData("node:22.12")]
+    [InlineData("mcr.microsoft.com/dotnet/sdk:10")]
+    [InlineData("mcr.microsoft.com/dotnet/aspnet:10.0")]
+    public void ExactVersionTagCheckRejectsFloatingOrMissingTags(string image)
+    {
+        Assert.ThrowsAny<Exception>(() => AssertExactVersionTag(image));
+    }
+
+    [Theory]
+    [InlineData("node:22.12.0-bookworm-slim")]
+    [InlineData("mcr.microsoft.com/dotnet/sdk:10.0.100")]
+    public void ExactVersionTagCheckAcceptsPinnedTags(string image)
+    {
+        AssertExactVersionTag(image);
     }
 
     [Fact]
