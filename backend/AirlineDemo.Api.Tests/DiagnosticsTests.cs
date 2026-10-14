@@ -27,6 +27,18 @@ public sealed class DiagnosticsTests
         Assert.Equal(TelemetryRedaction.Redacted, RedactionFilter.Sanitize(name, "anything"));
 
     [Theory]
+    [InlineData("prompt")]
+    [InlineData("document")]
+    [InlineData("text")]
+    [InlineData("passcode")]
+    [InlineData("password")]
+    [InlineData("cookie")]
+    [InlineData("authorization")]
+    [InlineData("token")]
+    public void ListedSensitiveNamesAreMatchedByName(string name) =>
+        Assert.True(RedactionFilter.IsSensitiveName(name), $"'{name}' must stay on the sensitive-name list.");
+
+    [Theory]
     [InlineData("gen_ai.usage.input_tokens")]
     [InlineData("gen_ai.usage.output_tokens")]
     [InlineData("duration_ms")]
