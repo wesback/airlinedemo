@@ -1,0 +1,307 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 191,
+  "branch": "ai-sdlc/issue-191",
+  "commitSha": "13059fd27c538716cc467f12c47319024fd908a1",
+  "round": 0,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The limits have direct unit coverage, but the investigator-level tests do not cover each breach path, and trace coverage omits successful investigations. The trace record also lacks the model name required by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 143,
+          "message": "Include the manifest model in the emitted trace; the current record only includes the deployment.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "EmitTrace constructs the trace record from the manifest deployment name, but does not pass the manifest model name.",
+            "failureScenario": "When an investigation emits a trace, the record cannot identify which model from the manifest was used, contrary to the trace acceptance criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 109,
+          "message": "The test for the investigator wiring does not run an investigation that exceeds each limit and assert an explicit breach with no partial result, as required by the second acceptance criterion.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The only investigation-level breach test sets MaxModelCalls to zero. The remaining limit tests call InvestigationLimits directly.",
+            "failureScenario": "A regression that lets an investigation continue after exceeding its tool, time, input-token, output-token, or retry limit could pass this test file because those cases are not exercised through the investigator."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 109,
+          "message": "Add a finished-investigation trace test that asserts the required fields and absence of raw content, as required by the third acceptance criterion.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The trace assertion covers only an investigation stopped by a model-call breach; there is no completed-investigation trace assertion.",
+            "failureScenario": "If a completed investigation stops emitting its trace or omits required fields, the tests can still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The limit primitives have direct boundary tests, but the required investigator-level coverage for each breach and both trace outcomes is missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 100,
+          "message": "M-09's investigator-level acceptance criterion is not covered: add a test that runs an investigation through each limit and asserts an explicit recorded breach and no partial authoritative result.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The direct limit tests exercise limits in isolation; the only investigation-level test sets MaxModelCalls to zero.",
+            "failureScenario": "If the investigator fails to stop and return no result when a tool-call, time, input-token, output-token, or retry limit is breached, the tests can still pass because none of those breaches is exercised through an investigation."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 100,
+          "message": "The trace acceptance criterion lacks the required coverage: add assertions for the required fields on both a finished-investigation trace and a limit-breach trace.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The sole trace assertion runs an investigation stopped by a model-call breach; there is no test for a finished investigation's trace.",
+            "failureScenario": "If finished investigations stop emitting traces, the current tests still pass. The breach trace test also does not assert the required basis/version, tools, citations, and opaque identifiers."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability in the changed code. The required investigator-level limit and trace behavior is not adequately covered by the tests in this diff.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 101,
+          "message": "The second acceptance criterion requires investigation-level coverage for each limit breach. Add tests that run an investigation through each breach and assert an explicit recorded breach with no partial authoritative result.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The limit tests call InvestigationLimits directly; the only test that runs BoundedInvestigator covers a model-call breach.",
+            "failureScenario": "If a tool-call, timeout, input-token, output-token, or retry breach is swallowed or produces a partial result in the investigator loop, these tests can still pass because they do not run an investigation through those breach paths or assert its recorded breach and lack of a result."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 101,
+          "message": "The third acceptance criterion requires trace assertions for both a finished investigation and a limit breach, including the listed fields. Add tests covering both outcomes and verifying those fields and the absence of raw content.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The trace assertion covers only a model-call breach and checks for the deployment name and escalation outcome; no test asserts a finished investigation trace or the required basis/version, tools, citations, model, and opaque identifiers.",
+            "failureScenario": "If successful investigations emit no trace, or traces omit required fields, the current tests still pass because they exercise only the breach path and do not assert those fields."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 153,
+      "total": 182,
+      "percent": 84.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 72,
+          "total": 88,
+          "missed": [
+            22,
+            109,
+            110,
+            118,
+            119,
+            144,
+            145,
+            292,
+            293,
+            294,
+            295,
+            296,
+            297,
+            298,
+            299,
+            302
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationLimits.cs",
+          "covered": 81,
+          "total": 94,
+          "missed": [
+            59,
+            61,
+            73,
+            87,
+            92,
+            101,
+            102,
+            103,
+            108,
+            120,
+            143,
+            144,
+            145
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
