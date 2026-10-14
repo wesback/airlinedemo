@@ -112,27 +112,36 @@ public sealed class StaticClientTests : IDisposable
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             response.Headers.GetValues("Content-Security-Policy").Single());
         Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
+        // DD-028: no CORS, so no cross-origin allow header is ever emitted on the page or assets.
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
     }
 
     [Fact]
-    public void Publish_builds_frontend_and_stages_dist_into_wwwroot()
+    public void Publish_builds_frontend_and_copies_dist_into_published_wwwroot()
     {
         var repoRoot = FindRepoRoot();
         var project = Path.Combine(repoRoot, "backend", "AirlineDemo.Api", "AirlineDemo.Api.csproj");
+        var outputDir = Path.Combine(Path.GetTempPath(), "static-client-publish-" + Guid.NewGuid().ToString("N"));
 
-        var json = RunMsBuild(project, "-t:ComputeResolvedFilesToPublishList", "-getItem:ResolvedFileToPublish");
+        try
+        {
+            RunDotnet("publish", project, "-c", "Release", "--no-restore", "-o", outputDir);
 
-        Assert.True(File.Exists(Path.Combine(repoRoot, "frontend", "dist", "index.html")), "npm build did not produce frontend/dist/index.html.");
-        using var document = JsonDocument.Parse(json);
-        var staged = document.RootElement.GetProperty("Items").GetProperty("ResolvedFileToPublish")
-            .EnumerateArray()
-            .Select(item => item.GetProperty("RelativePath").GetString())
-            .ToList();
-        Assert.Contains("wwwroot/index.html", staged);
-        Assert.Contains(staged, path => path is not null && path.StartsWith("wwwroot/assets/", StringComparison.Ordinal) && path.EndsWith(".js", StringComparison.Ordinal));
+            Assert.True(File.Exists(Path.Combine(repoRoot, "frontend", "dist", "index.html")), "npm build did not produce frontend/dist/index.html.");
+            var wwwroot = Path.Combine(outputDir, "wwwroot");
+            Assert.True(File.Exists(Path.Combine(wwwroot, "index.html")), "Published wwwroot is missing index.html.");
+            Assert.NotEmpty(Directory.GetFiles(Path.Combine(wwwroot, "assets"), "*.js"));
+        }
+        finally
+        {
+            if (Directory.Exists(outputDir))
+            {
+                Directory.Delete(outputDir, recursive: true);
+            }
+        }
     }
 
-    private static string RunMsBuild(string project, params string[] args)
+    private static void RunDotnet(params string[] args)
     {
         var startInfo = new ProcessStartInfo("dotnet")
         {
@@ -140,25 +149,21 @@ public sealed class StaticClientTests : IDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
         };
-        startInfo.ArgumentList.Add("msbuild");
-        startInfo.ArgumentList.Add(project);
-        startInfo.ArgumentList.Add("-nologo");
         foreach (var arg in args)
         {
             startInfo.ArgumentList.Add(arg);
         }
+        startInfo.ArgumentList.Add("-nologo");
 
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start dotnet msbuild.");
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start dotnet.");
         var stderrTask = process.StandardError.ReadToEndAsync();
         var stdout = process.StandardOutput.ReadToEnd();
         process.WaitForExit();
         var stderr = stderrTask.Result;
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException($"dotnet msbuild failed ({process.ExitCode}): {stderr}{stdout}");
+            throw new InvalidOperationException($"dotnet {string.Join(' ', args)} failed ({process.ExitCode}): {stderr}{stdout}");
         }
-
-        return stdout;
     }
 
     private static string FindRepoRoot()
