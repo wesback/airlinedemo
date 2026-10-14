@@ -65,7 +65,7 @@ internal sealed record CaseStoreDocument(int SchemaVersion, List<CaseState> Case
 /// persists atomically: on any failure neither memory nor the file changes.
 /// The audit log is exposed read-only; there is no update or delete operation.
 /// </summary>
-public sealed class CaseStateStore
+public sealed class CaseStateStore : ICaseStateStore
 {
     private const int SchemaVersion = 1;
     private const int LockAttempts = 500;
@@ -350,7 +350,7 @@ public sealed class CaseStateStore
     private static ReadOnlyCollection<T> Wrap<T>(IEnumerable<T> items) => new(items.ToList());
 
     /// <summary>Digest of the commit payload, used to tell a true replay from a reused receipt ID.</summary>
-    private static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
+    internal static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
     {
         basisVersion = commit.NewBasis?.Version,
         content = commit.NewBasis?.Content,
@@ -403,6 +403,6 @@ public sealed class CaseStateStore
         }
     }
 
-    private static string Digest(string value) =>
+    internal static string Digest(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

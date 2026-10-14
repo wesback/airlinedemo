@@ -10,13 +10,18 @@ if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEn
     Environment.Exit(AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Run());
 }
 
+if (args.Length > 0 && args[0] == CaseStateServices.MigrateSwitch)
+{
+    CaseStateServices.Migrate(Environment.GetEnvironmentVariable("ConnectionStrings__CaseStateMigration"));
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<DemoSessionStore>();
 builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddSingleton<CaseStore>();
-builder.Services.AddSingleton(_ => new CaseStateStore(
-    builder.Configuration["CaseState:Path"] ?? Path.Combine(AppContext.BaseDirectory, "case-state.json")));
+builder.Services.AddSqlCaseState(builder.Configuration);
 builder.Services.AddSingleton<DemoRunReset>();
 var app = builder.Build();
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
