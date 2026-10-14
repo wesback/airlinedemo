@@ -194,7 +194,7 @@ public sealed class SqlCaseStateStoreTests
         var basis2 = CaseStateStore.CreateBasisVersion(1, "basis for case two", string.Empty);
         store.Commit(scope1, 0, new CaseCommit(basis1, null, "owner-a", "open", "case one"));
         store.Commit(scope2, 0, new CaseCommit(basis2, null, "owner-b", "open", "case two"));
-        store.Commit(scope2, 1, new CaseCommit(null, null, "owner-b", "review", "case two again"));
+        store.Commit(scope2, 1, new CaseCommit(null, "receipt-2", "owner-b", "review", "case two again"));
 
         Assert.Equal("case-1", store.AuthorizeCase("case-1", "owner-a").CaseId);
         Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-1", "OWNER-A"));
@@ -205,7 +205,20 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<InvalidOperationException>(() => store.CreateCase("case-1", "owner-c"));
         Assert.Equal("owner-a", store.OwnerOf("case-1"));
 
-        Assert.Equal(new[] { "case one" }, store.Read(scope1).Audit.Select(a => a.Detail));
+        var state1 = store.Read(scope1);
+        Assert.Equal("case-1", state1.CaseId);
+        Assert.Equal("owner-a", state1.Owner);
+        Assert.Equal(1L, state1.Revision);
+        Assert.Empty(state1.ReceiptIds);
+        Assert.Empty(state1.ReceiptFingerprints);
+        Assert.Equal(new[] { "case one" }, state1.Audit.Select(a => a.Detail));
+
+        var state2 = store.Read(scope2);
+        Assert.Equal("case-2", state2.CaseId);
+        Assert.Equal("owner-b", state2.Owner);
+        Assert.Equal(2L, state2.Revision);
+        Assert.Equal(new[] { "receipt-2" }, state2.ReceiptIds);
+        Assert.Equal(new[] { "case two", "case two again" }, state2.Audit.Select(a => a.Detail));
         Assert.Equal(new[] { "case two", "case two again" }, store.ReadAudit(scope2).Select(a => a.Detail));
         Assert.Equal(new[] { "case one" }, store.ReadAudit(scope1).Select(a => a.Detail));
 
