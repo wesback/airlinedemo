@@ -118,4 +118,59 @@ describe('sign-in page', () => {
     const alert = await screen.findByRole('alert');
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
+
+  it('labels every control on both steps', async () => {
+    stubApi({ 'GET /api/auth/users': () => json(users) });
+    render(<SignIn />);
+
+    expect(screen.getByLabelText('Demo passcode').tagName).toBe('INPUT');
+    expect(screen.getByRole('button', { name: 'Continue' }).tagName).toBe('BUTTON');
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(await screen.findByRole('group', { name: 'Choose a user' })).toBeTruthy();
+    for (const radio of screen.getAllByRole('radio')) {
+      expect(radio.tagName).toBe('INPUT');
+      expect(radio.getAttribute('type')).toBe('radio');
+      expect(radio.getAttribute('name')).toBe('seeded-user');
+      expect(radio.getAttribute('id')).toBeTruthy();
+      expect(radio.getAttribute('aria-label')).toBeNull();
+    }
+    expect(screen.getByRole('button', { name: 'Sign in' }).getAttribute('type')).toBe('submit');
+  });
+
+  it('uses native controls so keyboard submission reaches the same handlers as a click', async () => {
+    const fetchMock = stubApi({
+      'GET /api/auth/users': () => json(users),
+      'POST /api/auth/sign-in': () => json({ id: 'agent-2', displayName: 'Ben Approver', role: 'Approver', csrfToken: 'csrf-456' }),
+    });
+    render(<SignIn />);
+
+    const passcodeForm = screen.getByLabelText('Demo passcode').closest('form');
+    expect(passcodeForm).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.submit(passcodeForm!);
+
+    const radio = await screen.findByRole('radio', { name: 'Ben Approver (Approver)' });
+    fireEvent.click(radio);
+    expect((radio as HTMLInputElement).checked).toBe(true);
+    const pickerForm = radio.closest('form');
+    expect(pickerForm).toBeTruthy();
+    fireEvent.submit(pickerForm!);
+
+    expect(await screen.findByText('Signed in as Ben Approver.')).toBeTruthy();
+    const signInCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/sign-in');
+    expect(JSON.parse(String(signInCall?.[1]?.body))).toEqual({ userId: 'agent-2', passcode: 'demo-pass' });
+  });
+
+  it('keeps errors as text, not colour alone, and announces them in an alert region', async () => {
+    stubApi({ 'GET /api/auth/users': () => json(users) });
+    render(<SignIn />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Enter the demo passcode.');
+    expect(alert.getAttribute('role')).toBe('alert');
+  });
 });
