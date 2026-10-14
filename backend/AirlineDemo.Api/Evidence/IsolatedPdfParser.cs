@@ -10,6 +10,9 @@ public sealed class IsolatedPdfParserOptions
 
     public TimeSpan WallClockLimit { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>Largest JSON response the parent accepts from the child before it kills the child.</summary>
+    public long OutputLimitBytes { get; init; } = 8L * 1024 * 1024;
+
     /// <summary>Null runs the application's own worker entry point; tests may substitute another program.</summary>
     public string? WorkerFileName { get; init; }
 
@@ -32,9 +35,10 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
-        if (options.WorkerFileName is null && !NetworkNamespaceAvailable.Value)
+        if (options.WorkerFileName is null && OperatingSystem.IsLinux() && !NetworkNamespaceAvailable.Value)
         {
-            // Fail closed: without a network namespace the child could reach the network.
+            // Fail closed on Linux: without a network namespace the child could reach the network.
+            // Other platforms do not use unshare, so this check does not apply there.
             return Retryable("network isolation is unavailable on this host; the document was not accepted, retry is possible");
         }
 
@@ -80,8 +84,8 @@ public static class IsolatedPdfParser
     internal static ProcessStartInfo CreateStartInfo(IsolatedPdfParserOptions options, string workingDirectory)
     {
         var fileName = options.WorkerFileName ?? ResolveHost();
-        var inNetworkNamespace = options.WorkerFileName is null;
-        var startInfo = new ProcessStartInfo(inNetworkNamespace ? UnsharePath : fileName)
+        var useUnshare = options.WorkerFileName is null && OperatingSystem.IsLinux();
+        var startInfo = new ProcessStartInfo(useUnshare ? UnsharePath : fileName)
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -91,11 +95,15 @@ public static class IsolatedPdfParser
             WorkingDirectory = workingDirectory,
         };
 
-        if (options.WorkerFileName is null)
+        if (useUnshare)
         {
             // A new user and network namespace with no interfaces: the child has no network access.
             startInfo.ArgumentList.Add("-rn");
             startInfo.ArgumentList.Add("--");
+        }
+
+        if (options.WorkerFileName is null)
+        {
             startInfo.ArgumentList.Add(fileName);
 
             if (string.Equals(Path.GetFileNameWithoutExtension(fileName), "dotnet", StringComparison.OrdinalIgnoreCase))
@@ -121,8 +129,6 @@ public static class IsolatedPdfParser
 
     /// <summary>True when Linux allows an unprivileged network namespace; checked once per process.</summary>
     private static readonly Lazy<bool> NetworkNamespaceAvailable = new(ProbeNetworkNamespace);
-
-    internal static bool NetworkIsolationAvailable => NetworkNamespaceAvailable.Value;
 
     private static bool ProbeNetworkNamespace()
     {
@@ -173,7 +179,7 @@ public static class IsolatedPdfParser
         byte[] content,
         IsolatedPdfParserOptions options)
     {
-        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stdout = ReadBoundedAsync(process.StandardOutput.BaseStream, options.OutputLimitBytes);
         _ = process.StandardError.ReadToEndAsync();
         _ = WriteInputAsync(process.StandardInput, content);
 
@@ -189,11 +195,21 @@ public static class IsolatedPdfParser
             {
                 return Terminate(process, "exceeded the memory limit");
             }
+
+            if (stdout.IsCompleted && stdout.Result.Overflow)
+            {
+                return Terminate(process, "exceeded the output size limit");
+            }
         }
 
         if (!stdout.Wait(TimeSpan.FromSeconds(5)))
         {
             return Retryable("worker output did not close; retry is possible");
+        }
+
+        if (stdout.Result.Overflow)
+        {
+            return Retryable("worker output exceeded the output size limit; retry is possible");
         }
 
         if (process.ExitCode != 0)
@@ -204,7 +220,7 @@ public static class IsolatedPdfParser
         PdfWorkerResponse? response;
         try
         {
-            response = JsonSerializer.Deserialize<PdfWorkerResponse>(stdout.Result);
+            response = JsonSerializer.Deserialize<PdfWorkerResponse>(stdout.Result.Data);
         }
         catch (JsonException)
         {
@@ -247,6 +263,32 @@ public static class IsolatedPdfParser
         {
             return 0;
         }
+    }
+
+    /// <summary>Reads the child's stdout up to <paramref name="limit"/> bytes; reports overflow instead of buffering more.</summary>
+    private static async Task<(byte[] Data, bool Overflow)> ReadBoundedAsync(Stream stream, long limit)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        try
+        {
+            int read;
+            while ((read = await stream.ReadAsync(chunk)) > 0)
+            {
+                if (buffer.Length + read > limit)
+                {
+                    return (Array.Empty<byte>(), true);
+                }
+
+                buffer.Write(chunk, 0, read);
+            }
+        }
+        catch (IOException)
+        {
+            return (Array.Empty<byte>(), false);
+        }
+
+        return (buffer.ToArray(), false);
     }
 
     private static async Task WriteInputAsync(StreamWriter stdin, byte[] content)

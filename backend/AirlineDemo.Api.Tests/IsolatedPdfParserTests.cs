@@ -49,12 +49,22 @@ public class IsolatedPdfParserTests
         stream.Write(bytes);
     }
 
+    /// <summary>
+    /// Runs the application's own worker entry point through the dotnet host, without the network namespace wrapper,
+    /// so these tests never skip. The parent still applies the memory, time and output limits and the empty environment.
+    /// </summary>
+    private static IsolatedPdfParserOptions RealWorker(long? memoryLimitBytes = null) => new()
+    {
+        WorkerFileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
+        WorkerArguments = new[] { typeof(IsolatedPdfParser).Assembly.Location, PdfWorkerEntry.Switch },
+        MemoryLimitBytes = memoryLimitBytes ?? 512L * 1024 * 1024,
+    };
+
     // AC-1: the parent hands the PDF to a child worker and reads JSON back. Covered by the valid, corrupt and hang tests.
     [Fact]
     public void ValidPdf_IsExtractedByChildProcess()
     {
-        RequireNetworkIsolation();
-        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"));
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
 
         Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
         Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
@@ -63,8 +73,7 @@ public class IsolatedPdfParserTests
     [Fact]
     public void CorruptPdf_IsRejectedAsRetryable()
     {
-        RequireNetworkIsolation();
-        var outcome = IsolatedPdfParser.Parse(Fixture("corrupt.pdf"));
+        var outcome = IsolatedPdfParser.Parse(Fixture("corrupt.pdf"), RealWorker());
 
         Assert.NotEqual(EvidenceProcessingState.Complete, outcome.State);
         Assert.Equal(string.Empty, outcome.Text);
@@ -74,9 +83,8 @@ public class IsolatedPdfParserTests
     [Fact]
     public void FlateBomb_FailsWithinLimits_AndServiceStillProcessesValidPdf()
     {
-        RequireNetworkIsolation();
         var clock = Stopwatch.StartNew();
-        var bomb = IsolatedPdfParser.Parse(FlateBomb());
+        var bomb = IsolatedPdfParser.Parse(FlateBomb(), RealWorker());
         clock.Stop();
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, bomb.State);
@@ -85,7 +93,7 @@ public class IsolatedPdfParserTests
             $"bomb was not stopped by a limit: {bomb.Reason}");
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"bomb took {clock.Elapsed}");
 
-        var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"));
+        var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
         Assert.Equal(EvidenceProcessingState.Complete, valid.State);
     }
 
@@ -113,23 +121,29 @@ public class IsolatedPdfParserTests
     [Fact]
     public void MemoryLimit_KillsWorkerAndReturnsRetryable()
     {
-        RequireNetworkIsolation();
-        var options = new IsolatedPdfParserOptions { MemoryLimitBytes = 1 };
-
-        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker(memoryLimitBytes: 1));
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
         Assert.Contains("memory limit", outcome.Reason);
         Assert.Equal(string.Empty, outcome.Text);
     }
 
-    /// <summary>Tests that run the real child need the network namespace; skip them where the host denies it (fail-closed).</summary>
-    private static void RequireNetworkIsolation()
+    // AC-2 (output bound): a child that writes more than OutputLimitBytes is killed and nothing is buffered without limit.
+    [Fact]
+    public void OversizedWorkerOutput_IsKilledAndReturnsRetryable()
     {
-        if (!IsolatedPdfParser.NetworkIsolationAvailable)
+        var options = new IsolatedPdfParserOptions
         {
-            Assert.Skip("unprivileged network namespaces are unavailable on this host");
-        }
+            WorkerFileName = "/bin/sh",
+            WorkerArguments = new[] { "-c", "head -c 1000000 /dev/zero" },
+            OutputLimitBytes = 1024,
+        };
+
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Contains("output size limit", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
     }
 
     // AC-1: intake routes every PDF through IsolatedPdfParser; a hung worker stops intake before anything is stored.
