@@ -404,17 +404,15 @@ public sealed class TelemetryPrivacyTests
 
     private sealed class CapturingLogger : ILogger
     {
-        private readonly object gate = new();
-        private readonly List<IReadOnlyList<KeyValuePair<string, object?>>> states = new();
+        private readonly object _gate = new();
+        private readonly List<IReadOnlyList<KeyValuePair<string, object?>>> _states = new();
 
+        // Logging can happen on request threads while the test enumerates; return a locked snapshot.
         public IReadOnlyList<IReadOnlyList<KeyValuePair<string, object?>>> States
         {
             get
             {
-                lock (gate)
-                {
-                    return states.ToList();
-                }
+                lock (_gate) return _states.ToList();
             }
         }
 
@@ -429,10 +427,7 @@ public sealed class TelemetryPrivacyTests
             {
                 // Snapshot now: framework state can be backed by request features disposed after the response.
                 var snapshot = list.ToList();
-                lock (gate)
-                {
-                    states.Add(snapshot);
-                }
+                lock (_gate) _states.Add(snapshot);
             }
         }
     }
