@@ -105,6 +105,8 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<InvalidOperationException>(() =>
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString(connectionString + "Access Token=token;"));
         Assert.Throws<InvalidOperationException>(() =>
+            CaseStateStoreRegistration.ValidateManagedIdentityConnectionString(connectionString + "PWD=secret;"));
+        Assert.Throws<InvalidOperationException>(() =>
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString("Server=x;Database=y;Encrypt=True;"));
 
         var forbidden = new ConfigurationBuilder()
@@ -194,7 +196,7 @@ public sealed class SqlCaseStateStoreTests
         var basis2 = CaseStateStore.CreateBasisVersion(1, "basis for case two", string.Empty);
         store.Commit(scope1, 0, new CaseCommit(basis1, null, "owner-a", "open", "case one"));
         store.Commit(scope2, 0, new CaseCommit(basis2, null, "owner-b", "open", "case two"));
-        store.Commit(scope2, 1, new CaseCommit(null, "receipt-2", "owner-b", "review", "case two again"));
+        var receiptCommit = store.Commit(scope2, 1, new CaseCommit(null, "receipt-2", "owner-b", "review", "case two again"));
 
         Assert.Equal("case-1", store.AuthorizeCase("case-1", "owner-a").CaseId);
         Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-1", "OWNER-A"));
@@ -218,6 +220,8 @@ public sealed class SqlCaseStateStoreTests
         Assert.Equal("owner-b", state2.Owner);
         Assert.Equal(2L, state2.Revision);
         Assert.Equal(new[] { "receipt-2" }, state2.ReceiptIds);
+        Assert.Equal(new[] { "receipt-2" }, state2.ReceiptFingerprints.Keys.ToArray());
+        Assert.Equal(receiptCommit.State.ReceiptFingerprints["receipt-2"], state2.ReceiptFingerprints["receipt-2"]);
         Assert.Equal(new[] { "case two", "case two again" }, state2.Audit.Select(a => a.Detail));
         Assert.Equal(new[] { "case two", "case two again" }, store.ReadAudit(scope2).Select(a => a.Detail));
         Assert.Equal(new[] { "case one" }, store.ReadAudit(scope1).Select(a => a.Detail));
