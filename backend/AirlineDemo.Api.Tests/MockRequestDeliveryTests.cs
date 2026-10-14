@@ -143,6 +143,7 @@ public class MockRequestDeliveryTests
     {
         var inbox = new MockRequestInbox();
         inbox.Submit(Env(), Gap(), ScenarioTime);
+        var auditBefore = inbox.Audit.Count;
 
         var changed = inbox.Submit(Env(missing: "a different record"), Gap(), ScenarioTime);
 
@@ -150,6 +151,7 @@ public class MockRequestDeliveryTests
         Assert.Equal(409, changed.HttpStatus);
         Assert.Null(changed.Receipt);
         Assert.Single(inbox.Requests);
+        Assert.Equal(auditBefore, inbox.Audit.Count);
     }
 
     [Fact]
