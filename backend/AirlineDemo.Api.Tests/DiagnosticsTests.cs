@@ -153,7 +153,7 @@ public sealed class DiagnosticsTests
             activity.SetTag(".AspNetCore.Cookies", CookieValue);
             activity.SetTag("__Host-session", CookieValue);
             activity.SetTag("case.id", "case-42");
-            activity.AddEvent(new ActivityEvent("review.event", tags: new ActivityTagsCollection
+            RedactionFilter.AddRedactedEvent(activity, "review.event", new Dictionary<string, object?>
             {
                 ["prompt"] = PromptText,
                 ["document.text"] = DocumentText,
@@ -163,7 +163,7 @@ public sealed class DiagnosticsTests
                 ["note"] = $"Bearer {BearerValue}",
                 ["jwt"] = Jwt,
                 ["case.id"] = "case-42",
-            }));
+            });
         }
 
         var activityRecord = captured.Single();
@@ -175,7 +175,28 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain(BearerValue, tags);
         Assert.Contains("case.id=case-42", tags);
 
+        var eventTags = string.Join("\n", activityRecord.Events.Single().Tags!.Select(t => $"{t.Key}={t.Value}"));
+        Assert.DoesNotContain(PromptText, eventTags);
+        Assert.DoesNotContain(DocumentText, eventTags);
+        Assert.DoesNotContain(Passcode, eventTags);
+        Assert.DoesNotContain(CookieValue, eventTags);
+        Assert.DoesNotContain(BearerValue, eventTags);
+        Assert.DoesNotContain(Jwt, eventTags);
+        Assert.Contains("case.id=case-42", eventTags);
     }
+
+    [Fact]
+    public void Non_string_property_values_are_scrubbed_for_bearer_and_jwt()
+    {
+        var holder = new Holder($"Bearer {BearerValue}", Jwt);
+        var attributes = RedactionFilter.RedactAttributes(new[] { new KeyValuePair<string, object?>("holder", holder) });
+        var text = string.Join("\n", attributes.Select(a => $"{a.Key}={a.Value}"));
+
+        Assert.DoesNotContain(BearerValue, text);
+        Assert.DoesNotContain("xyzabc12", text);
+    }
+
+    private sealed record Holder(string Auth, string Token);
 
     // LogRecord instances are pooled by the SDK, so snapshot the attributes, scopes and rendered message during OnEnd.
     private sealed record CapturedLog(

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -69,6 +70,18 @@ public static partial class RedactionFilter
                 : match.Value);
     }
 
+    // Redacts event tags before the event is recorded, because recorded event tags cannot be rewritten.
+    public static void AddRedactedEvent(Activity activity, string name, IEnumerable<KeyValuePair<string, object?>> tags)
+    {
+        var redacted = new ActivityTagsCollection();
+        foreach (var (key, value) in tags)
+        {
+            redacted[key] = RedactObject(key, value);
+        }
+
+        activity.AddEvent(new ActivityEvent(name, tags: redacted));
+    }
+
     public static IReadOnlyList<KeyValuePair<string, object?>> RedactAttributes(
         IReadOnlyList<KeyValuePair<string, object?>>? attributes)
     {
@@ -80,9 +93,26 @@ public static partial class RedactionFilter
         var result = new List<KeyValuePair<string, object?>>(attributes.Count);
         foreach (var (key, value) in attributes)
         {
-            result.Add(new KeyValuePair<string, object?>(key, value is string text ? RedactValue(key, text) : IsSensitiveKey(key) ? Redacted : value));
+            result.Add(new KeyValuePair<string, object?>(key, RedactObject(key, value)));
         }
 
         return result;
+    }
+
+    // Non-string values are rendered to text and scrubbed too, so a token hidden in an object's ToString() cannot leak.
+    private static object? RedactObject(string key, object? value)
+    {
+        if (IsSensitiveKey(key))
+        {
+            return Redacted;
+        }
+
+        return value switch
+        {
+            null => null,
+            string text => RedactValue(key, text),
+            bool or byte or short or int or long or float or double or decimal => value,
+            _ => RedactValue(key, Convert.ToString(value, CultureInfo.InvariantCulture)),
+        };
     }
 }

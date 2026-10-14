@@ -112,24 +112,8 @@ public static class DiagnosticsSetup
                 }
             }
 
-            // ActivityEvent exposes its tags read-only, but the SDK stores them in a mutable ActivityTagsCollection.
-            foreach (var activityEvent in data.Events)
-            {
-                if (activityEvent.Tags is not ActivityTagsCollection tags)
-                {
-                    continue;
-                }
-
-                foreach (var tag in tags.ToList())
-                {
-                    var text = tag.Value?.ToString() ?? string.Empty;
-                    var redacted = RedactionFilter.RedactValue(tag.Key, text) ?? string.Empty;
-                    if (redacted != text)
-                    {
-                        tags[tag.Key] = redacted;
-                    }
-                }
-            }
+            // Event tags are read-only once recorded (the SDK stores them as a linked list), so events are redacted
+            // when added, through RedactionFilter.AddRedactedEvent.
         }
     }
 }
