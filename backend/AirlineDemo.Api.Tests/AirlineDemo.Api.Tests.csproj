@@ -13,6 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../AirlineDemo.Api/AirlineDemo.Api.csproj" />
+    <ProjectReference Include="../DemoCaseGenerator/DemoCaseGenerator.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

@@ -1,0 +1,230 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 147,
+  "branch": "ai-sdlc/issue-147",
+  "commitSha": "0b3d8489a07e002217cc678c78577470735fc884",
+  "round": 1,
+  "pipelineVersion": "4387444",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The evaluator covers the stated state, UTC-window, and draft-history cases. The no-send acceptance criterion lacks a test that would fail if recording a legal decision triggered delivery.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ObligationEvaluationTests.cs",
+          "line": 216,
+          "message": "The no-send acceptance criterion is not verified by this test; it only checks the simulated record and unchanged draft history.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Legal_decision_sends_nothing_and_leaves_draft_history_unchanged calls RecordLegalDecision and checks its returned record and draft history, but it does not observe any sending boundary.",
+            "failureScenario": "If RecordLegalDecision were changed to send a notice and still return a simulated record, these assertions could pass. The test therefore would not fail if the required no-send behavior were removed."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover state precedence, UTC window boundaries, draft creation and supersession, and simulated legal decisions. The required no-send behavior is not observable in the legal-decision test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ObligationEvaluationTests.cs",
+          "line": 214,
+          "message": "The test does not verify that recording a legal decision sends no notice, so it can pass if the required no-send behavior is removed.",
+          "confidence": 0.84,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Legal_decision_sends_nothing_and_leaves_draft_history_unchanged calls RecordLegalDecision and checks the returned record and draft history, but observes no notice-sending boundary.",
+            "failureScenario": "If RecordLegalDecision gained a side effect that sent a notice while still returning the same simulated record and leaving draft history unchanged, this test would pass. The acceptance criterion explicitly requires this test file to fail if no-send behavior is removed."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed evaluator exposes no reachable security vulnerability. The no-send acceptance criterion is not protected by a test that would fail if recording a decision triggered delivery.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ObligationEvaluationTests.cs",
+          "line": 224,
+          "message": "The test does not verify the acceptance criterion that legal decisions send no notice.",
+          "confidence": 0.83,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The legal-decision test calls RecordLegalDecision and checks the returned record and draft history, but does not observe a notification or sending boundary.",
+            "failureScenario": "If recording a signed-off or rejected decision also sent a notice while returning the same record, the assertions would still pass, despite the acceptance criterion requiring that no notice be sent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ObligationEvaluationTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 97,
+      "total": 98,
+      "percent": 99,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Obligations/ObligationEvaluator.cs",
+          "covered": 97,
+          "total": 98,
+          "missed": [
+            103
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

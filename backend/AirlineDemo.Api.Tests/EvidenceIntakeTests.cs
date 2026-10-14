@@ -3,6 +3,7 @@ using AirlineDemo.Api.Evidence;
 
 namespace AirlineDemo.Api.Tests;
 
+[Collection("IsolatedPdfParser")]
 public class EvidenceIntakeTests
 {
     private static byte[] Fixture(string name)

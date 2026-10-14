@@ -1,7 +1,14 @@
+using AirlineDemo.Api;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
+using AirlineDemo.Api.Reviews;
+
+if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Switch)
+{
+    Environment.Exit(AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Run());
+}
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -18,7 +25,9 @@ app.UseTransportSecurityHeaders();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();
 app.MapCaseEndpoints();
+app.MapTechnicalReviewEndpoints();
 app.MapDemoRunReset();
+app.MapStaticClient();
 
 app.Run();
 

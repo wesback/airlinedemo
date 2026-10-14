@@ -1,0 +1,359 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 145,
+  "branch": "ai-sdlc/issue-145",
+  "commitSha": "c01ae56246ea426df985043026b9ae1b6c220eac",
+  "round": 0,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The decision path enforces role, scope, basis, reason, and anti-forgery checks in the shown implementation. A concurrent audit append can corrupt the provenance returned for a successful decision, and the tests do not cover several required endpoint and audit behaviors.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "line": 70,
+          "message": "Select the audit event created by this decision instead of assuming it remains the last event; concurrent case activity can return incorrect decision provenance.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After Commit succeeds, Decide reads the case state and passes latest.Audit[^1] to ToDecision while supplying the detail from its own command.",
+            "failureScenario": "If another case operation appends an audit event between this decision's Commit and the subsequent Read, the last event belongs to that operation. The response then reports its sequence, revision, actor, and timestamp as the review decision's provenance."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 47,
+          "message": "M-02 lacks endpoint behavior tests for anti-forgery enforcement and cross-case reads; add tests that fail if either endpoint check is removed.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named tests call TechnicalReviewPolicy.Decide directly; none calls RecordDecision through the endpoint, where HasValidAntiForgery and session-derived identity and scope are enforced.",
+            "failureScenario": "Removing the endpoint's anti-forgery check would leave these tests passing, so a review POST without a valid token could still record a decision without this suite detecting it. M-02 also requires cross-case reads to be denied, which is not exercised through the list endpoint."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 33,
+          "message": "M-08 needs an assertion that the recorded audit includes the decision timestamp and sequence.",
+          "confidence": 0.87,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The successful-decision test checks actor, reason, basis version, outcome, and audit revision, but does not assert the audit timestamp or sequence.",
+            "failureScenario": "If the business audit stops recording a decision timestamp or sequence, the named test still passes, despite M-08 requiring both fields in append-only audit."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 100,
+          "message": "M-10 needs a test that reconstructs a decision from business audit and verifies its trace correlation.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The later-basis test checks that a prior acceptance becomes non-current and no longer authorizes a request, but does not verify reconstruction of its trace correlation.",
+            "failureScenario": "If TraceId is omitted from the stored business audit detail, the later-basis test still passes, although M-10 requires reconstructing the decision with correlated trace metadata."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The policy tests cover core authorization, reason capture, stale-basis handling, and invalidation. They do not cover several explicitly required endpoint security and audit-trace behaviors in M-02, M-08, and M-10.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 1,
+          "message": "M-02 lacks endpoint tests for anti-forgery enforcement and cross-case reads. Add tests showing those requests reveal no protected data and create no mutation.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Every test calls TechnicalReviewPolicy.Decide directly; none exercises TechnicalReviewEndpoints.RecordDecision or ListDecisions.",
+            "failureScenario": "If the POST endpoint stops checking anti-forgery tokens or the GET endpoint stops enforcing case scope, these tests still pass. A request without a valid token could record a decision, or a cross-case request could read decisions, contrary to M-02."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 31,
+          "message": "M-08's sequence and time provenance are not asserted by the named test file; add assertions that the recorded decision exposes the audit sequence and time.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The successful-decision test checks actor, reason, basis version, outcome, current status, and audit revision, but does not assert the decision's sequence or timestamp.",
+            "failureScenario": "If the returned decision loses its audit sequence or timestamp, the successful-decision test still passes, although M-08 requires both in the business history."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 1,
+          "message": "M-10 lacks a test that correlates the business audit decision with redacted trace metadata; add coverage for that reconstruction path.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests exercise the policy directly and never call the endpoint's EmitTrace path or assert the trace ID stored in the audit detail.",
+            "failureScenario": "If decision recording stops emitting correlated trace metadata, or the business audit no longer retains the correlation ID, all current tests still pass despite M-10."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed endpoint code checks the session role, anti-forgery token, and case scope. However, the named tests exercise only the policy class, so they do not protect M-02's HTTP boundary behaviors against regression.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs",
+          "line": 1,
+          "message": "Acceptance criterion M-02 lacks tests for endpoint anti-forgery enforcement and cross-case reads; add endpoint tests that fail if either check is removed.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The tests call TechnicalReviewPolicy.Decide directly and do not exercise either mapped HTTP endpoint.",
+            "failureScenario": "If RecordDecision stopped checking the session anti-forgery token or ListDecisions stopped enforcing the session's case scope, the named test suite could still pass. A request without a valid token could then record a decision, or a case-scoped user could read another case's decisions."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 3,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TechnicalReviewTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 67,
+      "total": 121,
+      "percent": 55.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "covered": 60,
+          "total": 114,
+          "missed": [
+            49,
+            114,
+            115,
+            116,
+            118,
+            119,
+            120,
+            121,
+            122,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            136,
+            137,
+            138,
+            139,
+            140,
+            141,
+            143,
+            145,
+            146,
+            148,
+            151,
+            152,
+            154,
+            155,
+            157,
+            158,
+            160,
+            162,
+            164,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177,
+            178,
+            179,
+            180,
+            181,
+            184,
+            185
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
