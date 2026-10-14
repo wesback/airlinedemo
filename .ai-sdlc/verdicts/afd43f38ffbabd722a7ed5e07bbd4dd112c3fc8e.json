@@ -1,0 +1,227 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 194,
+  "branch": "ai-sdlc/issue-194",
+  "commitSha": "afd43f38ffbabd722a7ed5e07bbd4dd112c3fc8e",
+  "round": 0,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests exercise fixture registration, delimiter wrapping, the advertised tool set, and one cross-case read attempt. They do not detect changes to the investigator's task, identity, scope, or policy, which M-05 requires.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs",
+          "line": 121,
+          "message": "M-05's requirement that injected text cannot change the task, identity, scope, or policy is not tested. Add assertions or a fixture-sensitive model stub that would fail if those constraints were altered.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The hostile client returns the same hard-coded tool calls regardless of the fixture or prompt. The test checks the advertised tools and whether other-case text appears, but does not verify that the investigator's task, identity, scope, or policy remain unchanged.",
+            "failureScenario": "If an investigator change lets injected document text alter its task or identity while keeping the five advertised tools and blocking the tested cross-case read, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fixture battery covers delimiter presence, the offered tool set, and cross-case data leakage. It does not prove that a model-supplied call to a forbidden tool is never executed, as M-05 requires.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs",
+          "line": 111,
+          "message": "M-05 requires proving that no call outside the five read tools occurs. Checking the offered tool list does not verify that model-supplied calls are rejected; add an assertion that detects execution of the forbidden call.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test checks which tools are offered to the model and whether cross-case text appears in results, but does not observe whether the investigator executes a model-supplied call to an unregistered tool.",
+            "failureScenario": "If the investigator executes a model-supplied send_to_recipient call despite not offering that tool, the stub emits that call, but the test has no assertion that detects its execution; the forbidden action can occur while the test passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fixture battery checks delimiter placement and the exposed tool set, but it does not prove all M-05 protections. In particular, its model stub ignores fixture content, and its source double independently blocks cross-case reads.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs",
+          "line": 53,
+          "message": "The M-05 tests do not exercise or assert that injected text cannot change the investigator's task, identity, or policy.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HostileChatClient returns the same forbidden-tool call on its first response and the same fixed claims after any function result; it never checks the fixture text or models a changed task, identity, or policy.",
+            "failureScenario": "If the investigator stops preserving its task, identity, or policy when it receives injected text, this stub still returns the fixed claims and the tests can pass. The M-05 criterion's task, identity, and policy protections are therefore not shown to fail when broken."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs",
+          "line": 97,
+          "message": "The cross-case test is masked by the test source's own ownership check, so it does not fail if the investigator's scope check is removed as required.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test source itself checks document ownership and returns null for a cross-case page before the investigator's scope check can be distinguished.",
+            "failureScenario": "If the investigator's scope check is removed, a request for other-case-doc still yields null from InjectionSource.GetSourcePage; the test then sees no other-case text and passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
