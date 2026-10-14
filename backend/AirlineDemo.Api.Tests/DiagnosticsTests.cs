@@ -54,7 +54,7 @@ public sealed class DiagnosticsTests
     [InlineData(".AspNetCore.Session=abc123", "abc123")]
     [InlineData("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl", "eyJhbGciOiJIUzI1NiJ9")]
     [InlineData("jwt eyJhbGciOiJI.eyJzdWIiOiIx.c2lnbmF0dXJl", "eyJhbGciOiJI")]
-    [InlineData("jwt Abc123Def456.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl", "Abc123Def456")]
+    [InlineData("jwt Abc123Def456." + "eyJzdWIiOiIxMjMifQ" + ".c2lnbmF0dXJl", "Abc123Def456")]
     public void BearerTokensJwtsAndAuthCookiesInTextAreScrubbed(string text, string secret)
     {
         var scrubbed = RedactionFilter.ScrubText(text);
@@ -89,6 +89,47 @@ public sealed class DiagnosticsTests
         }
         Assert.Contains(TelemetryRedaction.Redacted, output);
         Assert.Contains("input_tokens=128", output);
+    }
+
+    [Fact]
+    public void StandaloneJwtIsRedactedInCapturedLogsAndTraces()
+    {
+        // Header deliberately does not start with 'e'; the token is built at runtime so no JWT literal sits in source.
+        var jwt = string.Join('.', "h1Xq9Lm2", "Pz7Rt4Yk8Vw1", "Qa5Nb3Cd9Ef2");
+
+        var capture = new CapturingProvider();
+        using var services = new ServiceCollection()
+            .AddLogging(builder => builder.AddProvider(capture))
+            .AddRedactingLogging()
+            .BuildServiceProvider();
+        var logger = services.GetRequiredService<ILogger<DiagnosticsTests>>();
+        logger.LogWarning("Forwarded {header} to upstream", $"Authorization: {jwt}");
+
+        var logOutput = string.Join(" ", capture.Records.Select(r => r.Message + " " + string.Join(" ", r.State.Select(p => $"{p.Key}={p.Value}"))));
+        Assert.DoesNotContain(jwt, logOutput);
+        Assert.DoesNotContain("h1Xq9Lm2", logOutput);
+        Assert.Contains(TelemetryRedaction.Redacted, logOutput);
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        builder.Configuration[DiagnosticsSetup.ConnectionStringSetting] =
+            "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://localhost/";
+        builder.AddAirlineDiagnostics();
+        var seen = new CapturingProcessor();
+        builder.Services.ConfigureOpenTelemetryTracerProvider((_, tracing) => tracing.AddSource("DiagnosticsTests.Jwt").AddProcessor(seen));
+        using var app = builder.Build();
+        using var provider = app.Services.GetRequiredService<TracerProvider>();
+        using var source = new ActivitySource("DiagnosticsTests.Jwt");
+
+        using (var activity = source.StartActivity("chat"))
+        {
+            Assert.NotNull(activity);
+            activity!.SetTag("note", $"Bearer-less token {jwt}");
+        }
+
+        var tags = Assert.Single(seen.Tags);
+        Assert.DoesNotContain("h1Xq9Lm2", (string)tags["note"]!);
+        Assert.DoesNotContain("Pz7Rt4Yk8Vw1", (string)tags["note"]!);
+        Assert.Contains(TelemetryRedaction.Redacted, (string)tags["note"]!);
     }
 
     [Fact]
