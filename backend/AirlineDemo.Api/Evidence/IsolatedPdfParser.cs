@@ -109,6 +109,12 @@ public static class IsolatedPdfParser
                 chain.AddRange(new[] { PrlimitPath, $"--data={options.MemoryLimitBytes}", "--" });
             }
 
+            // Root bypasses directory mode bits, so a root worker could write the read-only directory: drop to nobody.
+            if (options.WorkerFileName is null && Environment.UserName == "root" && File.Exists(SetprivPath))
+            {
+                chain.AddRange(new[] { SetprivPath, $"--reuid={NobodyUid}", $"--regid={NobodyUid}", "--clear-groups", "--" });
+            }
+
             if (chain.Count > 0)
             {
                 program = chain[0];
@@ -153,7 +159,10 @@ public static class IsolatedPdfParser
         return startInfo;
     }
 
-    /// <summary>Makes the child's working directory read-only: a Windows deny ACE, or no write bits on Unix.</summary>
+    /// <summary>
+    /// Makes the child's working directory read-only: a Windows deny ACE, or mode 0555 on Unix. On Unix the child runs
+    /// as <see cref="NobodyUid"/> (see <see cref="CreateStartInfo"/>) so the mode bits apply to it even when the API is root.
+    /// </summary>
     internal static void RestrictWorkingDirectory(string directory)
     {
         if (OperatingSystem.IsWindows())
@@ -162,7 +171,10 @@ public static class IsolatedPdfParser
         }
         else
         {
-            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(directory,
+                UnixFileMode.UserRead | UnixFileMode.UserExecute
+                | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+                | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
         }
     }
 
@@ -187,6 +199,11 @@ public static class IsolatedPdfParser
     private const string UnsharePath = "/usr/bin/unshare";
 
     private const string PrlimitPath = "/usr/bin/prlimit";
+
+    private const string SetprivPath = "/usr/bin/setpriv";
+
+    /// <summary>Conventional uid/gid of the unprivileged "nobody" account the worker switches to when the API is root.</summary>
+    private const int NobodyUid = 65534;
 
     /// <summary>True when Linux allows an unprivileged network namespace; checked once per process.</summary>
     private static readonly Lazy<bool> NetworkNamespaceAvailable = new(ProbeNetworkNamespace);
