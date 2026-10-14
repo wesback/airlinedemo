@@ -30,8 +30,9 @@ public class InitialCaseStateSchema : Migration
             schema: "dbo",
             columns: table => new
             {
-                Id = table.Column<long>(type: "bigint", nullable: false)
-                    .Annotation("SqlServer:Identity", "1, 1"),
+                Id = table.Column<long>(type: migrationBuilder.ActiveProvider == "Microsoft.EntityFrameworkCore.Sqlite" ? "INTEGER" : "bigint", nullable: false)
+                    .Annotation("SqlServer:Identity", "1, 1")
+                    .Annotation("Sqlite:Autoincrement", true),
                 CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 Version = table.Column<int>(type: "int", nullable: false),
                 Content = table.Column<string>(nullable: false),
@@ -46,8 +47,9 @@ public class InitialCaseStateSchema : Migration
             schema: "dbo",
             columns: table => new
             {
-                Id = table.Column<long>(type: "bigint", nullable: false)
-                    .Annotation("SqlServer:Identity", "1, 1"),
+                Id = table.Column<long>(type: migrationBuilder.ActiveProvider == "Microsoft.EntityFrameworkCore.Sqlite" ? "INTEGER" : "bigint", nullable: false)
+                    .Annotation("SqlServer:Identity", "1, 1")
+                    .Annotation("Sqlite:Autoincrement", true),
                 CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 ReceiptId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 Fingerprint = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
@@ -59,8 +61,9 @@ public class InitialCaseStateSchema : Migration
             schema: "audit",
             columns: table => new
             {
-                Sequence = table.Column<long>(type: "bigint", nullable: false)
-                    .Annotation("SqlServer:Identity", "1, 1"),
+                Sequence = table.Column<long>(type: migrationBuilder.ActiveProvider == "Microsoft.EntityFrameworkCore.Sqlite" ? "INTEGER" : "bigint", nullable: false)
+                    .Annotation("SqlServer:Identity", "1, 1")
+                    .Annotation("Sqlite:Autoincrement", true),
                 CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 Revision = table.Column<long>(type: "bigint", nullable: false),
                 Actor = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
