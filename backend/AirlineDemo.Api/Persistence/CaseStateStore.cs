@@ -108,6 +108,15 @@ public sealed class CaseStateStore
         }
     }
 
+    /// <summary>Returns the server-recorded owner of a case, or null when the case does not exist.</summary>
+    public string? OwnerOf(string caseId)
+    {
+        lock (_gate)
+        {
+            return _cases.TryGetValue(caseId, out var state) ? state.Owner : null;
+        }
+    }
+
     public CaseScope CreateCase(string caseId, string owner)
     {
         if (string.IsNullOrWhiteSpace(caseId))
