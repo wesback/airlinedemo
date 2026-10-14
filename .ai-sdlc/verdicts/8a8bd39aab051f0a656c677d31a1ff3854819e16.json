@@ -1,0 +1,234 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "8a8bd39aab051f0a656c677d31a1ff3854819e16",
+  "round": 1,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The logger can still emit raw prompt or document content through formatted messages when callers use ordinary property names. The connection-string test does not verify either required export behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 131,
+          "message": "Formatted log messages can bypass redaction for free-form content under ordinary property names.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "RedactingLogger.Log sanitizes structured state with Redact, but builds the emitted message from the original formatter output and only scrubs bearer tokens and session cookies in that message.",
+            "failureScenario": "A caller logs a short prompt as an ordinary property, for example `logger.LogInformation(\"Request: {details}\", \"Summarise the confidential clause\")`. Because `details` is not a sensitive name and the value contains no token or cookie pattern, the provider receives the raw prompt in the formatted message. This violates the log-content restriction and is OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 148,
+          "message": "Acceptance criterion 1 lacks a test that verifies Application Insights export with a connection string and console-only behavior without one.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "ConnectionStringIsReadFromConfigurationOnly configures builders with and without a connection string, but only asserts that each built app has an ILoggerFactory.",
+            "failureScenario": "If Application Insights registration or export is removed while the logger factory remains available, the test still passes. It also does not establish the required console-only behavior when the connection string is absent, leaving acceptance criterion 1 unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The redaction path allows short free-form content through when it uses an unlisted property name. The connection-string test does not verify either export behavior required by acceptance criterion 1.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 41,
+          "message": "Short free-form values under unlisted property names pass through, so logs are not restricted to identifiers, states, counts, durations, and token usage.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "For a property with a nonsensitive name, Sanitize passes strings of 256 characters or fewer to ScrubText, which only replaces bearer tokens and session cookies.",
+            "failureScenario": "A caller logs a short prompt or document excerpt under a name such as query. It contains no bearer token or session cookie, so it reaches the provider unchanged, contrary to the criterion that logs carry only operational fields. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 133,
+          "message": "Acceptance criterion 1 lacks a test that verifies Application Insights export when configured and console-only behavior without a connection string.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "ConnectionStringIsReadFromConfigurationOnly builds the app with and without a connection string but only asserts that ILoggerFactory resolves.",
+            "failureScenario": "If Application Insights registration is removed or the connection-string branch stops registering its exporter, both assertions can still pass, leaving acceptance criterion 1 unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The logger redacts the listed property names and token or cookie patterns, but short ordinary text under unlisted names or in plain messages passes through to log providers.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 44,
+          "message": "Short free-form text under an unlisted property name bypasses redaction and can expose prompts or document text in exported logs (OWASP A09:2025).",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Sanitize passes strings of 256 characters or fewer to ScrubText; ScrubText only removes bearer tokens and session cookies. The logger emits the resulting state to configured providers.",
+            "failureScenario": "A caller logs a short prompt as a plain message or under an unlisted property such as input. If it contains no bearer token or session cookie, the prompt reaches the log provider unchanged, contrary to the requirement to keep raw prompts out of logs. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
