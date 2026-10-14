@@ -71,8 +71,8 @@ public sealed class BoundedInvestigator(
 
     private static readonly JsonSerializerOptions ClaimJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    // Without supplied limits each investigation gets its own default limits, so none runs unbounded.
-    private readonly IInvestigationLimits? _suppliedLimits = limits;
+    // Without supplied limits, or with the no-op limits, each investigation gets its own default limits, so none runs unbounded.
+    private readonly IInvestigationLimits? _suppliedLimits = limits is NoInvestigationLimits ? null : limits;
     // Without telemetry the trace still goes to standard output, so no investigation's trace is dropped silently.
     private readonly InvestigationTelemetry _telemetry = telemetry
         ?? new InvestigationTelemetry(new ConsoleTraceLogger(), "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");

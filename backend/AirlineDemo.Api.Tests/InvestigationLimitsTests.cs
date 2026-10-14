@@ -306,6 +306,22 @@ public class InvestigationLimitsTests
     }
 
     [Fact]
+    public async Task An_explicit_no_op_limits_argument_still_enforces_the_default_limits()
+    {
+        var logger = new TraceLogger();
+        var model = new ScriptedClient(_ => Reply(GoodReply, outputTokens: 5_000));
+
+        var investigator = new BoundedInvestigator(
+            "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "basis-v1",
+            model, NoInvestigationLimits.Instance, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => investigator.InvestigateAsync([Doc]));
+
+        Assert.Equal(InvestigationBreach.OutputTokens, ex.Breach);
+        AssertBreachTraceFields(logger);
+    }
+
+    [Fact]
     public async Task The_input_guard_counts_tool_schemas_so_an_over_limit_request_is_never_sent()
     {
         var logger = new TraceLogger();
