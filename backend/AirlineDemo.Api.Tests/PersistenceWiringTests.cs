@@ -119,6 +119,55 @@ public sealed class PersistenceWiringTests
     }
 
     [Fact]
+    public void Blob_evidence_provider_selects_the_azure_blob_store_independently_of_case_state()
+    {
+        using var factory = CreateFactory(NewCaseStatePath(),
+            ("Persistence:EvidenceProvider", "Blob"),
+            ("Persistence:BlobContainerUri", "https://example.blob.core.windows.net/evidence"));
+
+        Assert.IsType<AzureEvidenceBlobStore>(factory.Services.GetRequiredService<IEvidenceBlobStore>());
+        Assert.IsType<CaseStateStore>(factory.Services.GetRequiredService<ICaseStateStore>());
+    }
+
+    [Fact]
+    public async Task Seeded_case_without_a_review_reports_awaiting_review()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var factory = CreateFactory(NewCaseStatePath(), ("Demo:Passcode", Passcode));
+        using var client = factory.CreateClient();
+        var session = await SignInAsync(client, "reviewer", ct);
+
+        using var read = await SendAsync(client, HttpMethod.Get, "/api/cases/case-001", session, null, ct);
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        var body = await read.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal("awaiting-review", body.GetProperty("status").GetString());
+        Assert.Equal(1, body.GetProperty("revision").GetInt32());
+    }
+
+    [Fact]
+    public async Task Technical_review_rejection_is_reported_as_rejected_after_restart()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var path = NewCaseStatePath();
+        using (var first = CreateFactory(path, ("Demo:Passcode", Passcode)))
+        using (var client = first.CreateClient())
+        {
+            var session = await SignInAsync(client, "reviewer", ct);
+            using var review = await SendAsync(client, HttpMethod.Post, "/api/cases/case-001/reviews",
+                session, new { expectedRevision = 1, decision = "reject" }, ct);
+            Assert.Equal(HttpStatusCode.OK, review.StatusCode);
+        }
+
+        using var second = CreateFactory(path, ("Demo:Passcode", Passcode));
+        using var secondClient = second.CreateClient();
+        var restored = await SignInAsync(secondClient, "reviewer", ct);
+        using var read = await SendAsync(secondClient, HttpMethod.Get, "/api/cases/case-001", restored, null, ct);
+        var body = await read.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal("rejected", body.GetProperty("status").GetString());
+        Assert.Equal(2, body.GetProperty("revision").GetInt32());
+    }
+
+    [Fact]
     public void Defaults_are_file_for_case_state_and_memory_for_evidence()
     {
         using var factory = CreateFactory(NewCaseStatePath());

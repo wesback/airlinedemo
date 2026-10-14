@@ -1,4 +1,7 @@
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Persistence.Migrations;
 using AirlineDemo.Api.Reviews;
@@ -76,6 +79,143 @@ public sealed class SqlCaseStateStoreTests
         var eventsIndex = operations.FindIndex(o => o is CreateTableOperation c && c.Name == "case_events");
         Assert.True(auditIndex >= 0 && auditIndex < eventsIndex, "audit schema must be created before audit.case_events");
     }
+
+    // AC3: the SQL adapter, run against the migrated schema on an in-memory SQLite connection (no Azure SQL).
+    [Fact]
+    public void AC3_case_creation_and_ownership_checks_use_sql()
+    {
+        using var connection = OpenMigratedConnection(out var options);
+        var store = new SqlCaseStateStore(options);
+
+        var created = store.CreateCase("case-1", "alice");
+        Assert.Equal("case-1", created.CaseId);
+        Assert.Equal("alice", store.OwnerOf("case-1"));
+        Assert.Null(store.OwnerOf("missing"));
+        Assert.Equal("case-1", store.AuthorizeCase("case-1", "alice").CaseId);
+
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-1", "bob"));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("missing", "alice"));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("CASE-1", "alice"));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("", "alice"));
+        Assert.Throws<InvalidOperationException>(() => store.CreateCase("case-1", "bob"));
+        Assert.Throws<ArgumentException>(() => store.CreateCase(" ", "alice"));
+        Assert.Throws<ArgumentException>(() => store.CreateCase("case-2", " "));
+
+        var state = store.Read(created);
+        Assert.Equal("alice", state.Owner);
+        Assert.Equal(0L, state.Revision);
+        Assert.Empty(state.Basis);
+        Assert.Empty(state.Audit);
+    }
+
+    // AC3: basis versions, commits, and audit reads round-trip through the SQL adapter.
+    [Fact]
+    public void AC3_basis_reads_commits_and_audit_reads_round_trip_through_sql()
+    {
+        using var connection = OpenMigratedConnection(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "alice");
+
+        var v1 = Basis(1, "page one", "");
+        var first = store.Commit(scope, 0, new CaseCommit(v1, "receipt-1", "reviewer", "basis.add", "first basis"));
+        Assert.False(first.Replayed);
+        Assert.Equal(1L, first.State.Revision);
+        Assert.Equal(["receipt-1"], first.State.ReceiptIds);
+        Assert.Equal("first basis", first.State.Audit.Single().Detail);
+
+        var v2 = Basis(2, "page two", v1.BasisDigest);
+        var second = store.Commit(scope, 1, new CaseCommit(v2, null, "reviewer", "basis.add", "second basis"));
+        Assert.Equal(2L, second.State.Revision);
+
+        Assert.Equal("page one", store.GetBasisVersion(scope, 1).Content);
+        Assert.Equal(v2.BasisDigest, store.GetBasisVersion(scope, 2).BasisDigest);
+        Assert.Throws<KeyNotFoundException>(() => store.GetBasisVersion(scope, 3));
+
+        var audit = store.ReadAudit(scope);
+        Assert.Equal(2, audit.Count);
+        Assert.Equal([1L, 2L], audit.Select(e => e.Sequence));
+        Assert.Equal([1L, 2L], audit.Select(e => e.Revision));
+        Assert.Equal(["first basis", "second basis"], audit.Select(e => e.Detail));
+    }
+
+    // AC4: stale revisions, invalid basis digests, and receipt conflicts leave persisted state unchanged.
+    [Fact]
+    public void AC4_failed_commits_leave_persisted_state_unchanged()
+    {
+        using var connection = OpenMigratedConnection(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "alice");
+        var v1 = Basis(1, "page one", "");
+        store.Commit(scope, 0, new CaseCommit(v1, "receipt-1", "reviewer", "basis.add", "first"));
+        var before = Snapshot(store, scope);
+
+        Assert.Throws<RevisionConflictException>(() =>
+            store.Commit(scope, 0, new CaseCommit(Basis(2, "stale", v1.BasisDigest), "receipt-2", "reviewer", "basis.add", "stale")));
+        Assert.Equal(before, Snapshot(store, scope));
+
+        var tamperedContent = new BasisVersion(2, "page two", Hex("other content"), Hex("|" + Hex("other content")), DateTimeOffset.UnixEpoch);
+        Assert.Throws<BasisIntegrityException>(() =>
+            store.Commit(scope, 1, new CaseCommit(tamperedContent, "receipt-3", "reviewer", "basis.add", "tampered")));
+        Assert.Equal(before, Snapshot(store, scope));
+
+        var wrongChain = Basis(2, "page two", "not-the-previous-digest");
+        Assert.Throws<BasisIntegrityException>(() =>
+            store.Commit(scope, 1, new CaseCommit(wrongChain, "receipt-4", "reviewer", "basis.add", "wrong chain")));
+        Assert.Equal(before, Snapshot(store, scope));
+
+        var skippedVersion = Basis(3, "page three", v1.BasisDigest);
+        Assert.Throws<BasisIntegrityException>(() =>
+            store.Commit(scope, 1, new CaseCommit(skippedVersion, "receipt-5", "reviewer", "basis.add", "skipped")));
+        Assert.Equal(before, Snapshot(store, scope));
+
+        Assert.Throws<ReceiptConflictException>(() =>
+            store.Commit(scope, 1, new CaseCommit(null, "receipt-1", "reviewer", "basis.add", "different detail")));
+        Assert.Equal(before, Snapshot(store, scope));
+    }
+
+    // AC4: an exact receipt replay returns the existing state without a new revision or audit event.
+    [Fact]
+    public void AC4_exact_receipt_replay_adds_no_revision_or_audit_event()
+    {
+        using var connection = OpenMigratedConnection(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "alice");
+        var commit = new CaseCommit(Basis(1, "page one", ""), "receipt-1", "reviewer", "basis.add", "first");
+
+        var first = store.Commit(scope, 0, commit);
+        var before = Snapshot(store, scope);
+
+        var replay = store.Commit(scope, 0, commit with { });
+        Assert.True(replay.Replayed);
+        Assert.Equal(first.State.Revision, replay.State.Revision);
+        Assert.Single(store.ReadAudit(scope));
+        Assert.Equal(before, Snapshot(store, scope));
+    }
+
+    private static SqliteConnection OpenMigratedConnection(out DbContextOptions<CaseStateDbContext> options)
+    {
+        var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlite(connection).Options;
+        // The migration's identity columns are SQL Server annotations, so SQLite would not auto-increment the
+        // decision and document keys. EnsureCreated builds the same tables from the model with SQLite identities;
+        // AC2 separately verifies the migration itself.
+        using var db = new CaseStateDbContext(options);
+        db.Database.EnsureCreated();
+        return connection;
+    }
+
+    private static BasisVersion Basis(int version, string content, string previousDigest)
+    {
+        var contentDigest = Hex(content);
+        return new BasisVersion(version, content, contentDigest, Hex(previousDigest + "|" + contentDigest), DateTimeOffset.UnixEpoch.AddDays(version));
+    }
+
+    private static string Snapshot(ICaseStateStore store, CaseScope scope) =>
+        JsonSerializer.Serialize(store.Read(scope));
+
+    private static string Hex(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static void AssertMapped(CaseStateDbContext db, Type entity, string schema, string table)
     {
