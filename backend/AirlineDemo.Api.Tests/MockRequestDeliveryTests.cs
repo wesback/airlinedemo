@@ -229,6 +229,41 @@ public class MockRequestDeliveryTests
     }
 
     [Fact]
+    public void Envelopes_differing_only_by_unpaired_surrogates_are_not_exact_replays()
+    {
+        var inbox = new MockRequestInbox();
+        var first = new DeliveryEnvelope("evt-1", "case-1", "rep-1", BasisId, BasisVersion, ScenarioTime,
+            "Engine\uD800", "ENG-123", "a signed return-readiness record");
+        var second = new DeliveryEnvelope("evt-1", "case-1", "rep-1", BasisId, BasisVersion, ScenarioTime,
+            "Engine\uD801", "ENG-123", "a signed return-readiness record");
+        inbox.Submit(first, Gap(), ScenarioTime);
+
+        var collided = inbox.Submit(second, Gap(), ScenarioTime);
+
+        Assert.Equal(DeliveryOutcome.Conflict, collided.Outcome);
+        Assert.Equal(409, collided.HttpStatus);
+        Assert.Null(collided.Receipt);
+        Assert.Single(inbox.Requests);
+    }
+
+    [Fact]
+    public void Delivery_has_no_external_messaging_dependency()
+    {
+        const System.Reflection.BindingFlags All = System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+        var inboxType = typeof(MockRequestInbox);
+
+        var referenced = inboxType.GetFields(All).Select(f => f.FieldType)
+            .Concat(inboxType.GetConstructors(All).SelectMany(c => c.GetParameters()).Select(p => p.ParameterType))
+            .Concat(inboxType.GetMethods(All).SelectMany(m => m.GetParameters().Select(p => p.ParameterType).Append(m.ReturnType)));
+
+        Assert.All(referenced, t => Assert.False(t.Namespace?.StartsWith("System.Net", StringComparison.Ordinal) ?? false, t.FullName));
+
+        var result = new MockRequestInbox().Submit(Env(), Gap(), ScenarioTime);
+        Assert.Equal(DeliveryOutcome.Delivered, result.Outcome);
+    }
+
+    [Fact]
     public void Document_embedded_instruction_text_is_not_expanded_into_the_request_body()
     {
         var inbox = new MockRequestInbox();

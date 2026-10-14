@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -237,14 +238,16 @@ public sealed class MockRequestInbox
             e.SerialNumber,
             e.MissingRequirement);
 
-    // Each field is prefixed with its length so no field value can shift a boundary and collide with another envelope.
+    // Each field is prefixed with its length in UTF-16 code units, then hashed as raw code units. UTF-8 would replace
+    // unpaired surrogates with U+FFFD and let distinct envelopes collide.
     private static string Digest(params string[] fields)
     {
-        var sb = new StringBuilder();
+        using var stream = new MemoryStream();
         foreach (var field in fields)
         {
-            sb.Append(field.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(field);
+            stream.Write(Encoding.ASCII.GetBytes(field.Length.ToString(CultureInfo.InvariantCulture) + ":"));
+            stream.Write(MemoryMarshal.AsBytes(field.AsSpan()));
         }
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
+        return Convert.ToHexString(SHA256.HashData(stream.GetBuffer().AsSpan(0, checked((int)stream.Length))));
     }
 }
