@@ -102,7 +102,7 @@ public static class IsolatedPdfParser
     /// runs under <c>prlimit --data</c>, a kernel-enforced cap on its private memory, so a decompression spike is
     /// stopped by the kernel rather than by sampling. The default worker also runs in a network namespace.
     /// </summary>
-    internal static ProcessStartInfo CreateStartInfo(IsolatedPdfParserOptions options, string workingDirectory)
+    public static ProcessStartInfo CreateStartInfo(IsolatedPdfParserOptions options, string workingDirectory)
     {
         var fileName = options.WorkerFileName ?? ResolveHost();
         var program = fileName;

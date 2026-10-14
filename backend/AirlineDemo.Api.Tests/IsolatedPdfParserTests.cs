@@ -6,6 +6,7 @@ using AirlineDemo.Api.Evidence.PdfWorker;
 
 namespace AirlineDemo.Api.Tests;
 
+[Collection("IsolatedPdfParser")]
 public class IsolatedPdfParserTests
 {
     private static byte[] Fixture(string name)
@@ -238,6 +239,21 @@ public class IsolatedPdfParserTests
         Assert.Contains("pdf-worker-", first);
         Assert.NotEqual(first, second);
         Assert.False(Directory.Exists(first));
+    }
+
+    // AC-4: the temporary working directory is deleted after the worker run, whatever its outcome.
+    [Fact]
+    public void Parse_DeletesItsTemporaryWorkingDirectoryAfterTheRun()
+    {
+        static HashSet<string> WorkerDirectories() =>
+            Directory.GetDirectories(Path.GetTempPath(), "pdf-worker-*").ToHashSet();
+
+        var before = WorkerDirectories();
+
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
+
+        Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
+        Assert.Empty(WorkerDirectories().Except(before).ToList());
     }
 
     [Theory]
