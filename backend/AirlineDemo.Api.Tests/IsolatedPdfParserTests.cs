@@ -256,6 +256,51 @@ public class IsolatedPdfParserTests
         Assert.Empty(WorkerDirectories().Except(before).ToList());
     }
 
+    // AC-4: each Parse run starts its worker in a distinct, empty, temporary directory that is gone afterwards.
+    [Fact]
+    public void Parse_RunsEachWorkerInADistinctEmptyTemporaryDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var record = Path.Combine(Path.GetTempPath(), "pdf-cwd-" + Guid.NewGuid().ToString("N"));
+        var recorded = new List<(string Directory, string Listing)>();
+        try
+        {
+            for (var run = 0; run < 2; run++)
+            {
+                var options = new IsolatedPdfParserOptions
+                {
+                    WorkerFileName = "/bin/sh",
+                    WorkerArguments = new[] { "-c", "{ pwd -P; ls -A; } > \"$0\"", record },
+                };
+
+                IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
+
+                var lines = File.ReadAllLines(record);
+                recorded.Add((lines[0], string.Join("|", lines.Skip(1))));
+                File.Delete(record);
+            }
+        }
+        finally
+        {
+            File.Delete(record);
+        }
+
+        var tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd('/');
+        foreach (var (directory, listing) in recorded)
+        {
+            Assert.Contains("pdf-worker-", directory);
+            Assert.StartsWith(Path.GetFullPath(tempRoot).TrimEnd('/'), Path.GetFullPath(directory));
+            Assert.Equal(string.Empty, listing);
+            Assert.False(Directory.Exists(directory));
+        }
+
+        Assert.NotEqual(recorded[0].Directory, recorded[1].Directory);
+    }
+
     [Theory]
     [InlineData(true, false, "root", false, true)]
     [InlineData(true, false, "app", false, false)]
