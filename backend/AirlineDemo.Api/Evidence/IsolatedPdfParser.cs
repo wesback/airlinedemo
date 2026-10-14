@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
+
 using AirlineDemo.Api.Evidence.PdfWorker;
 
 namespace AirlineDemo.Api.Evidence;
@@ -51,15 +53,7 @@ public static class IsolatedPdfParser
         try
         {
             Directory.CreateDirectory(workingDirectory);
-            if (OperatingSystem.IsWindows())
-            {
-                DenyWrite(workingDirectory);
-            }
-            else
-            {
-                // Read-only for the child: it cannot create files in its working directory.
-                File.SetUnixFileMode(workingDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
-            }
+            RestrictWorkingDirectory(workingDirectory);
 
             using var process = Process.Start(CreateStartInfo(options, workingDirectory));
             if (process is null)
@@ -67,7 +61,18 @@ public static class IsolatedPdfParser
                 return Retryable("worker could not be started; retry is possible");
             }
 
-            return Supervise(process, content, options);
+            // Windows has no prlimit: a Job Object caps the child's committed memory in the kernel.
+            WindowsJobObject? memoryJob = null;
+            if (OperatingSystem.IsWindows() && !WindowsJobObject.TryAssign(process, options.MemoryLimitBytes, out memoryJob))
+            {
+                process.Kill();
+                return Retryable("worker memory limit could not be enforced; the document was not accepted, retry is possible");
+            }
+
+            using (memoryJob)
+            {
+                return Supervise(process, content, options);
+            }
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException
             or System.ComponentModel.Win32Exception)
@@ -149,6 +154,19 @@ public static class IsolatedPdfParser
 
         startInfo.Environment.Clear();
         return startInfo;
+    }
+
+    /// <summary>Makes the child's working directory read-only: a Windows deny ACE, or no write bits on Unix.</summary>
+    internal static void RestrictWorkingDirectory(string directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            DenyWrite(directory);
+        }
+        else
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        }
     }
 
     /// <summary>Denies the child write access to its working directory on Windows.</summary>
@@ -361,4 +379,114 @@ public static class IsolatedPdfParser
 
     private static (EvidenceProcessingState State, string Reason, string Text) Retryable(string reason) =>
         (EvidenceProcessingState.RejectedRetryable, reason, string.Empty);
+}
+
+/// <summary>
+/// A Windows Job Object that caps the committed memory of one worker process. Kill-on-close ensures the worker
+/// dies with the parent's handle even if the parent is interrupted.
+/// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
+internal sealed class WindowsJobObject : IDisposable
+{
+    private const int JobObjectExtendedLimitInformation = 9;
+    private const uint JobObjectLimitProcessMemory = 0x00000100;
+    private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+
+    private readonly IntPtr handle;
+
+    private WindowsJobObject(IntPtr handle)
+    {
+        this.handle = handle;
+    }
+
+    /// <summary>Creates a job limited to <paramref name="memoryLimitBytes"/> per process and assigns the started child to it.</summary>
+    public static bool TryAssign(Process process, long memoryLimitBytes, out WindowsJobObject? job)
+    {
+        job = null;
+        var handle = CreateJobObjectW(IntPtr.Zero, IntPtr.Zero);
+        if (handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var candidate = new WindowsJobObject(handle);
+        var limits = new ExtendedLimits();
+        limits.Basic.LimitFlags = JobObjectLimitProcessMemory | JobObjectLimitKillOnJobClose;
+        limits.ProcessMemoryLimit = (nuint)memoryLimitBytes;
+
+        var size = Marshal.SizeOf<ExtendedLimits>();
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(limits, buffer, fDeleteOld: false);
+            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, buffer, (uint)size))
+            {
+                candidate.Dispose();
+                return false;
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+
+        if (!AssignProcessToJobObject(handle, process.Handle))
+        {
+            candidate.Dispose();
+            return false;
+        }
+
+        job = candidate;
+        return true;
+    }
+
+    public void Dispose()
+    {
+        CloseHandle(handle);
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "CreateJobObjectW")]
+    private static extern IntPtr CreateJobObjectW(IntPtr attributes, IntPtr name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicLimits
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public nuint MinimumWorkingSetSize;
+        public nuint MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public nuint Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ExtendedLimits
+    {
+        public BasicLimits Basic;
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+        public nuint ProcessMemoryLimit;
+        public nuint JobMemoryLimit;
+        public nuint PeakProcessMemoryUsed;
+        public nuint PeakJobMemoryUsed;
+    }
 }

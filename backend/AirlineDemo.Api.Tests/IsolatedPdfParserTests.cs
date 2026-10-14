@@ -35,12 +35,31 @@ public class IsolatedPdfParserTests
 
         var body = compressed.ToArray();
         var pdf = new MemoryStream();
-        Write(pdf, "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
-        Write(pdf, "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
-        Write(pdf, "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n");
-        Write(pdf, $"4 0 obj << /Length {body.Length} /Filter /FlateDecode >> stream\n");
+        var offsets = new List<long>();
+        void Object(string header)
+        {
+            offsets.Add(pdf.Position);
+            Write(pdf, header);
+        }
+
+        Write(pdf, "%PDF-1.4\n");
+        Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        Object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+        Object("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n");
+        Object($"4 0 obj << /Length {body.Length} /Filter /FlateDecode >> stream\n");
         pdf.Write(body);
-        Write(pdf, "\nendstream endobj\n%%EOF\n");
+        Write(pdf, "\nendstream endobj\n");
+
+        // A real cross-reference table with exact 20-byte entries, so PdfPig can locate every object.
+        var xrefOffset = pdf.Position;
+        var xref = new StringBuilder("xref\n0 5\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            xref.Append($"{offset:D10} 00000 n \n");
+        }
+
+        xref.Append($"trailer << /Root 1 0 R /Size 5 >>\nstartxref\n{xrefOffset}\n%%EOF\n");
+        Write(pdf, xref.ToString());
         return pdf.ToArray();
     }
 
@@ -221,6 +240,13 @@ public class IsolatedPdfParserTests
         Directory.CreateDirectory(workingDirectory);
         try
         {
+            IsolatedPdfParser.RestrictWorkingDirectory(workingDirectory);
+            if (OperatingSystem.IsLinux())
+            {
+                var mode = File.GetUnixFileMode(workingDirectory);
+                Assert.Equal(0, (int)(mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite | UnixFileMode.UserWrite)));
+            }
+
             var startInfo = IsolatedPdfParser.CreateStartInfo(new IsolatedPdfParserOptions(), workingDirectory);
 
             Assert.Empty(startInfo.Environment);
