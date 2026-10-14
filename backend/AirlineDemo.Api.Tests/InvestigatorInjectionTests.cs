@@ -80,7 +80,10 @@ public class InvestigatorInjectionTests
         public void Dispose() { }
     }
 
-    /// <summary>Case store with the case's own documents and one document belonging to another case.</summary>
+    /// <summary>
+    /// Case store with the case's own documents and one document belonging to another case. GetSourcePage deliberately
+    /// ignores the case id, so a cross-case read is blocked only by the investigator's own scope check.
+    /// </summary>
     private sealed class InjectionSource : ICaseReadSource
     {
         private readonly Dictionary<string, (string CaseId, string Text)> _docs = new()
@@ -95,7 +98,7 @@ public class InvestigatorInjectionTests
         public string? GetApprovedRequirements(string caseId) => caseId == CaseId ? "Reserve approval is required." : null;
 
         public string? GetSourcePage(string caseId, string documentId, int page) =>
-            _docs.TryGetValue(documentId, out var doc) && doc.CaseId == caseId && page == 1 ? doc.Text : null;
+            _docs.TryGetValue(documentId, out var doc) && page == 1 ? doc.Text : null;
 
         public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) =>
             GetInventory(caseId).Where(id => _docs[id].Text.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -127,9 +130,23 @@ public class InvestigatorInjectionTests
         Assert.Single(result.Claims);
         Assert.Equal(FiveTools.Order().ToArray(), model.Options[0]!.Tools!.Select(t => t.Name).Order().ToArray());
         Assert.DoesNotContain(model.Options[0]!.Tools!, t => t.Name == "send_to_recipient");
-        Assert.DoesNotContain(model.Requests.SelectMany(r => r).SelectMany(m => m.Contents.OfType<FunctionResultContent>()),
-            r => r.Result?.ToString()?.Contains(OtherCaseText, StringComparison.Ordinal) == true);
+
+        // The forbidden call was attempted and refused: it produced an error result, not a success.
+        var results = model.Requests.SelectMany(r => r).SelectMany(m => m.Contents.OfType<FunctionResultContent>()).ToList();
+        var forbidden = Assert.Single(results, r => r.CallId == "call-forbidden");
+        Assert.True(forbidden.Exception is not null || (forbidden.Result?.ToString() ?? string.Empty).Contains("not found", StringComparison.OrdinalIgnoreCase));
+
+        // The cross-case read is denied by the investigator's own scope check.
+        var cross = Assert.Single(results, r => r.CallId == "call-cross-case");
+        Assert.Contains("denied", cross.Result?.ToString() ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(results, r => r.Result?.ToString()?.Contains(OtherCaseText, StringComparison.Ordinal) == true);
         Assert.DoesNotContain(model.Requests.SelectMany(r => r).Select(m => m.Text), t => t.Contains(OtherCaseText, StringComparison.Ordinal));
+
+        // Task, identity, scope and policy stay the fixed instructions: the system message is exactly Instructions,
+        // and the injected text appears only in user content, never in the system role.
+        var sentInstructions = model.Options[0]!.Instructions ?? string.Empty;
+        Assert.Equal(BoundedInvestigator.Instructions.Trim(), sentInstructions.Trim());
+        Assert.DoesNotContain(text, sentInstructions, StringComparison.Ordinal);
     }
 
     [Theory]
