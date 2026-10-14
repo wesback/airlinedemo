@@ -283,6 +283,24 @@ public class MockRequestDeliveryTests
         Assert.Contains(WalkDispatchGraph(new[] { EmitCalliCaller() }, testAssembly).Violations, v => v.Contains("calli", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void No_dispatch_walk_reports_concrete_virtual_overrides()
+    {
+        var testAssembly = typeof(MockRequestDeliveryTests).Assembly;
+
+        var declared = WalkDispatchGraph(new[] { ((Action<FakeVirtualBase>)VirtualCaller).Method }, testAssembly).Violations;
+        Assert.Contains(declared, v => v.Contains("dispatches to API interface/abstract/virtual", StringComparison.Ordinal) && v.Contains(nameof(FakeVirtualBase.Run), StringComparison.Ordinal));
+
+        var overridingFramework = WalkDispatchGraph(new[] { ((Action<object>)FrameworkVirtualCaller).Method }, testAssembly).Violations;
+        Assert.Contains(overridingFramework, v => v.Contains("dispatches to API interface/abstract/virtual System.Object.ToString", StringComparison.Ordinal));
+    }
+
+    private class FakeVirtualBase { public virtual void Run() { } }
+    private sealed class FakeToStringOverride { public override string ToString() => "x"; }
+
+    private static void VirtualCaller(FakeVirtualBase value) => value.Run();
+    private static void FrameworkVirtualCaller(object value) => _ = value.ToString();
+
     [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "getpid")]
     private static extern int NativeGetPid();
 
