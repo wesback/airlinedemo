@@ -155,6 +155,8 @@ public class InvestigationLimitsTests
         Assert.Contains("fixture-model", values);
         Assert.Contains("basis-v1", values);
         Assert.Contains("doc-1#p1", values);
+        Assert.Contains(values, v => v?.StartsWith("trace-", StringComparison.Ordinal) == true);
+        Assert.Contains(values, v => v?.StartsWith("actor-", StringComparison.Ordinal) == true);
         Assert.DoesNotContain(values, v => v is not null && (v.Contains("Return readiness", StringComparison.Ordinal) || v.Contains("synthetic-analyst-01", StringComparison.Ordinal)));
     }
 
@@ -168,6 +170,7 @@ public class InvestigationLimitsTests
         var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
 
         AssertBreach(ex, limits, logger, InvestigationBreach.ToolCalls);
+        Assert.Contains(CaseReadTools.InventoryTool, Values(logger));
     }
 
     [Fact]

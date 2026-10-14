@@ -5,6 +5,7 @@ using AirlineDemo.Api.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AirlineDemo.Api.Investigation;
 
@@ -72,7 +73,9 @@ public sealed class BoundedInvestigator(
     private static readonly JsonSerializerOptions ClaimJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly IInvestigationLimits _limits = limits ?? NoInvestigationLimits.Instance;
-    private readonly InvestigationTelemetry? _telemetry = telemetry;
+    // Without telemetry, every investigation still emits its trace, to a null logger under a per-instance random key.
+    private readonly InvestigationTelemetry _telemetry = telemetry
+        ?? new InvestigationTelemetry(NullLogger.Instance, "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
 
     public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default)
     {
@@ -133,11 +136,7 @@ public sealed class BoundedInvestigator(
     // Identifiers only: no document text or prompt reaches the trace. The investigator never decides readiness, so its decision is always escalate.
     private void EmitTrace(string traceId, IReadOnlyList<string> toolsUsed, InvestigationResult? result, string outcome)
     {
-        if (_telemetry is not { } telemetry)
-        {
-            return;
-        }
-
+        var telemetry = _telemetry;
         var inventory = source.GetInventory(caseId).ToList();
         var claims = result?.Claims ?? Array.Empty<InvestigationClaim>();
         var citations = claims
@@ -265,7 +264,8 @@ public sealed class BoundedInvestigator(
         {
             _traces.Add(ModelCallGate.Authorize(manifest, new ModelRequest(evidenceVersion, dataRegion, evidence), registry));
             var request = messages.ToList();
-            var estimatedInputTokens = request.Sum(message => message.Text?.Length ?? 0) / 4;
+            // UTF-8 bytes are an upper bound on tokens, so token-heavy text cannot slip past the input guard.
+            var estimatedInputTokens = (int)Math.Min(int.MaxValue, request.Sum(message => (long)Encoding.UTF8.GetByteCount(message.Text ?? string.Empty)));
             if (limits.MaxOutputTokens is { } maxOutput)
             {
                 options = options?.Clone() ?? new ChatOptions();

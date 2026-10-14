@@ -74,7 +74,12 @@ public static partial class TelemetryRedaction
         "investigation.completed", "review.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
     };
 
-    private static readonly HashSet<string> AllowedTools = new(StringComparer.Ordinal) { "reserve-calc", "citation-search" };
+    // Investigator read tools (CaseReadTools) plus the earlier tool identifiers.
+    private static readonly HashSet<string> AllowedTools = new(StringComparer.Ordinal)
+    {
+        "reserve-calc", "citation-search",
+        "get_case_inventory", "get_approved_requirements", "get_source_page", "search_within_basis", "get_processing_status",
+    };
 
     private static readonly HashSet<string> AllowedOutcomes = new(StringComparer.Ordinal) { "approved", "rejected", "escalated" };
 
