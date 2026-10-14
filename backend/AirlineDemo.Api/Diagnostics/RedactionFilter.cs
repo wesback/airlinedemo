@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
@@ -22,9 +23,8 @@ public static partial class RedactionFilter
     [GeneratedRegex(@"(?i)\bbearer\s+[A-Za-z0-9\-._~+/]+=*")]
     private static partial Regex BearerToken();
 
-    // A JWT header is a base64url JSON object: "{" followed by a quote or whitespace encodes to "ey" or "ew" (eyJ, eyAi, ewog).
-    // The payload and signature may be short or empty (unsecured JWTs).
-    [GeneratedRegex(@"\be[wy][A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")]
+    // Shape only: three base64url segments of at least 8 characters each, separated by two dots. Nothing is decoded.
+    [GeneratedRegex(@"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])")]
     private static partial Regex Jwt();
 
     [GeneratedRegex(@"(?:__Host-|\.AspNetCore\.)[A-Za-z0-9_.-]+=[^;\s]+")]
@@ -37,56 +37,75 @@ public static partial class RedactionFilter
     public static object? Sanitize(string name, object? value) =>
         IsSensitiveName(name) ? TelemetryRedaction.Redacted : value is string text ? ScrubText(text) : value;
 
-    // The message keeps its text; the values bound to sensitive placeholders are replaced by the redaction marker.
-    private static string RenderMessage(string formatted, IEnumerable<KeyValuePair<string, object?>>? pairs)
+    // Renders the message from already-redacted values, so a sensitive value is never passed to a formatter or format specifier.
+    // Literal template text is written by developers and is not scanned.
+    private static string RenderTemplate(IReadOnlyList<KeyValuePair<string, object?>> pairs)
     {
-        var rendered = formatted;
-        var list = pairs?.ToList() ?? [];
-        var template = list.FirstOrDefault(p => p.Key == "{OriginalFormat}").Value as string;
-        foreach (var pair in list)
-        {
-            if (!IsSensitiveName(pair.Key))
-            {
-                continue;
-            }
-
-            var raw = pair.Value?.ToString();
-            if (!string.IsNullOrEmpty(raw))
-            {
-                rendered = rendered.Replace(raw, TelemetryRedaction.Redacted, StringComparison.Ordinal);
-            }
-
-            rendered = ReplaceFormattedValue(rendered, template, pair);
-        }
-
-        return ScrubText(rendered);
-    }
-
-    // A placeholder such as {passcode:D6} or {password,10} renders the value through its format specifier or alignment, so ToString() alone does not match.
-    private static string ReplaceFormattedValue(string rendered, string? template, KeyValuePair<string, object?> pair)
-    {
+        var template = pairs.FirstOrDefault(p => p.Key == "{OriginalFormat}").Value as string;
         if (template is null)
         {
-            return rendered;
+            return string.Join(" ", pairs.Where(p => p.Key != "{OriginalFormat}").Select(p => $"{p.Key}={p.Value}"));
         }
 
-        foreach (Match placeholder in Regex.Matches(template, @"\{" + Regex.Escape(pair.Key) + @"((?:,[^:}]*)?(?::[^}]*)?)\}"))
+        var rendered = new StringBuilder(template.Length);
+        for (var i = 0; i < template.Length; i++)
         {
-            try
+            var c = template[i];
+            if (c == '{' && i + 1 < template.Length && template[i + 1] == '{')
             {
-                var text = string.Format(CultureInfo.InvariantCulture, "{0" + placeholder.Groups[1].Value + "}", pair.Value).Trim();
-                if (text.Length > 0)
-                {
-                    rendered = rendered.Replace(text, TelemetryRedaction.Redacted, StringComparison.Ordinal);
-                }
+                rendered.Append('{');
+                i++;
             }
-            catch (FormatException)
+            else if (c == '}' && i + 1 < template.Length && template[i + 1] == '}')
             {
-                // The logger itself could not format this placeholder, so there is no rendered value to remove.
+                rendered.Append('}');
+                i++;
+            }
+            else if (c == '{')
+            {
+                var close = template.IndexOf('}', i);
+                if (close < 0)
+                {
+                    rendered.Append(template, i, template.Length - i);
+                    break;
+                }
+
+                rendered.Append(RenderPlaceholder(template.Substring(i + 1, close - i - 1), pairs));
+                i = close;
+            }
+            else
+            {
+                rendered.Append(c);
             }
         }
 
-        return rendered;
+        return rendered.ToString();
+    }
+
+    private static string RenderPlaceholder(string inner, IReadOnlyList<KeyValuePair<string, object?>> pairs)
+    {
+        var specStart = inner.IndexOfAny([',', ':']);
+        var name = specStart < 0 ? inner : inner[..specStart];
+        var spec = specStart < 0 ? string.Empty : inner[specStart..];
+        var pair = pairs.FirstOrDefault(p => p.Key == name);
+        if (pair.Key is null)
+        {
+            return "{" + inner + "}";
+        }
+
+        if (IsSensitiveName(name))
+        {
+            return TelemetryRedaction.Redacted;
+        }
+
+        try
+        {
+            return string.Format(CultureInfo.InvariantCulture, "{0" + spec + "}", pair.Value);
+        }
+        catch (FormatException)
+        {
+            return pair.Value?.ToString() ?? string.Empty;
+        }
     }
 
     public static IReadOnlyList<KeyValuePair<string, object?>> Redact(IEnumerable<KeyValuePair<string, object?>> pairs) =>
@@ -157,10 +176,15 @@ public static partial class RedactionFilter
             }
 
             var source = state as IEnumerable<KeyValuePair<string, object?>>;
-            var formatted = formatter(state, exception);
-            var message = RenderMessage(formatted, source);
-            var pairs = source is null ? null : Redact(source);
-            inner.Log(logLevel, eventId, new RedactedState(pairs, message), SanitizeException(exception), static (s, _) => s.Message);
+            if (source is null)
+            {
+                var plain = ScrubText(formatter(state, exception));
+                inner.Log(logLevel, eventId, new RedactedState(null, plain), SanitizeException(exception), static (s, _) => s.Message);
+                return;
+            }
+
+            var pairs = Redact(source);
+            inner.Log(logLevel, eventId, new RedactedState(pairs, RenderTemplate(pairs)), SanitizeException(exception), static (s, _) => s.Message);
         }
     }
 

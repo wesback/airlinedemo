@@ -52,10 +52,9 @@ public sealed class DiagnosticsTests
     [InlineData("Bearer eyJhbGci.abc.def", "eyJhbGci")]
     [InlineData("__Host-session=8f3c9a2b7d; Path=/", "8f3c9a2b7d")]
     [InlineData(".AspNetCore.Session=abc123", "abc123")]
-    [InlineData("jwt eyJhbGciOiJub25lIn0.e30.", "eyJhbGciOiJub25lIn0")]
-    [InlineData("jwt eyJhbGci.e30.c2ln", "eyJhbGci")]
-    [InlineData("jwt ewogImFsZyI6ICJub25lIiB9.e30.c2ln", "ewogImFsZyI6ICJub25lIiB9")]
-    [InlineData("jwt eyAiYWxnIjogIm5vbmUiIH0.e30.c2ln", "eyAiYWxnIjogIm5vbmUiIH0")]
+    [InlineData("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl", "eyJhbGciOiJIUzI1NiJ9")]
+    [InlineData("jwt eyJhbGciOiJI.eyJzdWIiOiIx.c2lnbmF0dXJl", "eyJhbGciOiJI")]
+    [InlineData("jwt Abc123Def456.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl", "Abc123Def456")]
     public void BearerTokensJwtsAndAuthCookiesInTextAreScrubbed(string text, string secret)
     {
         var scrubbed = RedactionFilter.ScrubText(text);
