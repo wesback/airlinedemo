@@ -1,0 +1,316 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "d30f0f4a610d2385c456466dd88fd8f2e2cce32f",
+  "round": 1,
+  "pipelineVersion": "53a15c1",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The logger and activity-tag paths redact values, but ActivityEvent tags are not processed. Sensitive content placed in an activity event can therefore leave the process unredacted.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 120,
+          "message": "Activity event attributes bypass redaction and can expose prompt or document text to the trace exporter.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd iterates only Activity.TagObjects and sanitizes those tags; it never inspects Activity.Events or their tags before the activity reaches the exporter.",
+            "failureScenario": "If instrumentation adds a prompt or document excerpt to an ActivityEvent tag, OnEnd leaves it unchanged and the configured trace exporter can send it out of the process, contrary to acceptance criterion 2 (OWASP A09:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several logging, scope, and activity tag redaction paths, but activity event attributes remain unredacted. The exporter registration tests verify provider presence rather than the required Application Insights exporter registrations.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 137,
+          "message": "Activity event attributes bypass redaction, allowing sensitive content to reach the trace exporter.",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd sanitizes Activity.TagObjects but does not inspect Activity.Events or their tags before the activity reaches the exporter.",
+            "failureScenario": "When instrumentation adds a prompt or document excerpt to an ActivityEvent tag, OnEnd leaves it unchanged and the Application Insights exporter can send it out of the process, contrary to acceptance criterion 2. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 214,
+          "message": "Acceptance criterion 1 is not fully tested: the registration assertions do not detect removal of either Application Insights exporter.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The trace registration test checks only whether TracerProvider resolves, and the log registration test checks only whether an OpenTelemetry ILoggerProvider exists. Neither assertion verifies that the corresponding Azure Monitor exporter is registered.",
+            "failureScenario": "If either Azure Monitor exporter registration is removed while its provider remains registered, these tests still pass, despite acceptance criterion 1 requiring separate checks that fail when either exporter registration is missing."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Activity event tags can reach the trace exporter without redaction. The configuration tests also check provider presence rather than each required exporter registration.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 136,
+          "message": "Activity event attributes bypass redaction and can expose raw prompt or document text (OWASP A09:2025).",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd sanitizes Activity.TagObjects but does not inspect Activity.Events or their tags before the activity reaches the exporter.",
+            "failureScenario": "If instrumentation adds a prompt or document excerpt to an ActivityEvent tag, OnEnd leaves it unchanged and the configured trace exporter can send it to Application Insights, exposing content the acceptance criteria require kept out of traces. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 220,
+          "message": "Acceptance criterion 1's registration tests do not verify the Application Insights exporters themselves.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The configured log test checks for an OpenTelemetry ILoggerProvider, and the trace test checks for a TracerProvider. Those providers can remain registered if their respective Azure Monitor exporter registration is removed.",
+            "failureScenario": "Remove AddAzureMonitorLogExporter or AddAzureMonitorTraceExporter while retaining the provider setup: the corresponding test still passes, although acceptance criterion 1 requires the tests to fail when either exporter registration is removed."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 80,
+      "total": 88,
+      "percent": 90.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "covered": 17,
+          "total": 17,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 62,
+          "total": 70,
+          "missed": [
+            78,
+            80,
+            84,
+            86,
+            93,
+            106,
+            116,
+            117
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
