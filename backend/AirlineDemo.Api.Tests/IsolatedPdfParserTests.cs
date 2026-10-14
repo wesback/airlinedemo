@@ -1,0 +1,132 @@
+using System.Diagnostics;
+using System.IO.Compression;
+using System.Text;
+using AirlineDemo.Api.Evidence;
+using AirlineDemo.Api.Evidence.PdfWorker;
+
+namespace AirlineDemo.Api.Tests;
+
+public class IsolatedPdfParserTests
+{
+    private static byte[] Fixture(string name)
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null && !Directory.Exists(Path.Combine(dir, "Fixtures", "PdfCorpus")))
+        {
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        return File.ReadAllBytes(Path.Combine(dir!, "Fixtures", "PdfCorpus", name));
+    }
+
+    /// <summary>A one-page PDF whose content stream inflates to 10 MB of zeros from a few kilobytes.</summary>
+    private static byte[] FlateBomb()
+    {
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            zlib.Write(new byte[10 * 1024 * 1024]);
+        }
+
+        var body = compressed.ToArray();
+        var pdf = new MemoryStream();
+        Write(pdf, "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        Write(pdf, "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+        Write(pdf, "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n");
+        Write(pdf, $"4 0 obj << /Length {body.Length} /Filter /FlateDecode >> stream\n");
+        pdf.Write(body);
+        Write(pdf, "\nendstream endobj\n%%EOF\n");
+        return pdf.ToArray();
+    }
+
+    private static void Write(MemoryStream stream, string text)
+    {
+        var bytes = Encoding.ASCII.GetBytes(text);
+        stream.Write(bytes);
+    }
+
+    [Fact]
+    public void ValidPdf_IsExtractedByChildProcess()
+    {
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"));
+
+        Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
+        Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
+    }
+
+    [Fact]
+    public void CorruptPdf_IsRejectedAsRetryable()
+    {
+        var outcome = IsolatedPdfParser.Parse(Fixture("corrupt.pdf"));
+
+        Assert.NotEqual(EvidenceProcessingState.Complete, outcome.State);
+        Assert.Equal(string.Empty, outcome.Text);
+    }
+
+    [Fact]
+    public void FlateBomb_FailsWithinLimits_AndServiceStillProcessesValidPdf()
+    {
+        var clock = Stopwatch.StartNew();
+        var bomb = IsolatedPdfParser.Parse(FlateBomb());
+        clock.Stop();
+
+        Assert.NotEqual(EvidenceProcessingState.Complete, bomb.State);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"bomb took {clock.Elapsed}");
+
+        var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"));
+        Assert.Equal(EvidenceProcessingState.Complete, valid.State);
+    }
+
+    [Fact]
+    public void HungWorker_IsKilledByTimeLimit()
+    {
+        var options = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = "/bin/sh",
+            WorkerArguments = new[] { "-c", "sleep 60" },
+            WallClockLimit = TimeSpan.FromSeconds(2),
+        };
+
+        var clock = Stopwatch.StartNew();
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
+        clock.Stop();
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Contains("time limit", outcome.Reason);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"hang took {clock.Elapsed}");
+    }
+
+    [Fact]
+    public void MemoryLimit_KillsWorkerAndReturnsRetryable()
+    {
+        var options = new IsolatedPdfParserOptions { MemoryLimitBytes = 1 };
+
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Contains("memory limit", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+    }
+
+    [Fact]
+    public void Child_StartsWithEmptyEnvironmentAndReadOnlyWorkingDirectory()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), "pdf-worker-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        try
+        {
+            var startInfo = IsolatedPdfParser.CreateStartInfo(new IsolatedPdfParserOptions(), workingDirectory);
+
+            Assert.Empty(startInfo.Environment);
+            Assert.False(startInfo.UseShellExecute);
+            Assert.True(startInfo.RedirectStandardInput);
+            Assert.True(startInfo.RedirectStandardOutput);
+            Assert.Equal(workingDirectory, startInfo.WorkingDirectory);
+            Assert.Contains(PdfWorkerEntry.Switch, startInfo.ArgumentList);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}

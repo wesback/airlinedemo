@@ -131,7 +131,7 @@ public static class EvidenceIntake
         var extracted = new List<(string Key, string Text)>(documents.Count);
         foreach (var document in documents)
         {
-            var outcome = ExtractText(document.Content);
+            var outcome = IsolatedPdfParser.Parse(document.Content);
             if (outcome.State != EvidenceProcessingState.Complete)
             {
                 return new EvidenceIntakeResult(outcome.State, $"{document.FileName}: {outcome.Reason}", Array.Empty<EvidenceBasisVersion>());
@@ -145,14 +145,21 @@ public static class EvidenceIntake
     }
 
     /// <summary>
-    /// Text is extracted in-process by PdfPig only; no OCR, network, native code or executable content is used.
-    /// Decompression-bomb and memory protection is NOT enforced here: the isolated-pdf-parsing story runs parsing
-    /// in a separate process with memory and time limits.
+    /// Runs only inside the isolated PDF worker process (see IsolatedPdfParser), never in the API process.
+    /// Text is extracted by PdfPig only; no OCR, network, native code or executable content is used.
+    /// <paramref name="withinMemoryLimit"/> lets the worker stop early when its working set exceeds the limit.
     /// </summary>
-    private static (EvidenceProcessingState State, string Reason, string Text) ExtractText(byte[] content)
+    internal static (EvidenceProcessingState State, string Reason, string Text) ExtractText(
+        byte[] content,
+        Func<bool>? withinMemoryLimit = null)
     {
         try
         {
+            if (withinMemoryLimit is not null && !withinMemoryLimit())
+            {
+                return (EvidenceProcessingState.RejectedRetryable, "worker memory limit exceeded; retry is possible", "");
+            }
+
             using var pdf = PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
 
             if (pdf.NumberOfPages > MaxPagesPerDocument)
@@ -168,6 +175,11 @@ public static class EvidenceIntake
             var text = new StringBuilder();
             foreach (var page in pdf.GetPages())
             {
+                if (withinMemoryLimit is not null && !withinMemoryLimit())
+                {
+                    return (EvidenceProcessingState.RejectedRetryable, "worker memory limit exceeded; retry is possible", "");
+                }
+
                 if (page.ExperimentalAccess.GetAnnotations().Any())
                 {
                     return (EvidenceProcessingState.RejectedPermanent, "annotations are not accepted", "");

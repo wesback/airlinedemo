@@ -12,4 +12,7 @@
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.24.0" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AirlineDemo.Api.Tests" />
+  </ItemGroup>
 </Project>
