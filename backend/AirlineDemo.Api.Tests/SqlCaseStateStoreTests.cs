@@ -107,6 +107,11 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<InvalidOperationException>(() =>
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString("Server=x;Database=y;Encrypt=True;"));
 
+        var forbidden = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString + "Password=secret;" })
+            .Build();
+        Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(forbidden));
+
         var program = File.ReadAllText(Path.Combine(SourceDirectory(), "..", "AirlineDemo.Api", "Program.cs"));
         Assert.Contains("AddCaseStateStore(builder.Configuration)", program);
     }
@@ -185,8 +190,10 @@ public sealed class SqlCaseStateStoreTests
         var store = new SqlCaseStateStore(options);
         var scope1 = store.CreateCase("case-1", "owner-a");
         var scope2 = store.CreateCase("case-2", "owner-b");
-        store.Commit(scope1, 0, new CaseCommit(null, null, "owner-a", "open", "case one"));
-        store.Commit(scope2, 0, new CaseCommit(null, null, "owner-b", "open", "case two"));
+        var basis1 = CaseStateStore.CreateBasisVersion(1, "basis for case one", string.Empty);
+        var basis2 = CaseStateStore.CreateBasisVersion(1, "basis for case two", string.Empty);
+        store.Commit(scope1, 0, new CaseCommit(basis1, null, "owner-a", "open", "case one"));
+        store.Commit(scope2, 0, new CaseCommit(basis2, null, "owner-b", "open", "case two"));
         store.Commit(scope2, 1, new CaseCommit(null, null, "owner-b", "review", "case two again"));
 
         Assert.Equal("case-1", store.AuthorizeCase("case-1", "owner-a").CaseId);
@@ -200,13 +207,21 @@ public sealed class SqlCaseStateStoreTests
 
         Assert.Equal(new[] { "case one" }, store.Read(scope1).Audit.Select(a => a.Detail));
         Assert.Equal(new[] { "case two", "case two again" }, store.ReadAudit(scope2).Select(a => a.Detail));
+        Assert.Equal(new[] { "case one" }, store.ReadAudit(scope1).Select(a => a.Detail));
+
+        Assert.Equal(new[] { "basis for case one" }, store.Read(scope1).Basis.Select(b => b.Content));
+        Assert.Equal(new[] { "basis for case two" }, store.Read(scope2).Basis.Select(b => b.Content));
+        Assert.Equal("basis for case one", store.GetBasisVersion(scope1, 1).Content);
+        Assert.Equal("basis for case two", store.GetBasisVersion(scope2, 1).Content);
+        Assert.Throws<KeyNotFoundException>(() => store.GetBasisVersion(scope1, 2));
+        Assert.Throws<KeyNotFoundException>(() => store.GetBasisVersion(scope2, 2));
 
         Assert.Throws<RevisionConflictException>(() =>
             store.Commit(scope1, 0, new CaseCommit(null, null, "owner-a", "stale", "should fail")));
         var after = store.Read(scope1);
         Assert.Equal(1L, after.Revision);
         Assert.Single(after.Audit);
-        Assert.Equal(1, CountAuditEvents(options));
+        Assert.Equal(3, CountAuditEvents(options));
 
         Assert.Equal(2L, store.Commit(scope1, 1, new CaseCommit(null, null, "owner-a", "close", "ok")).State.Revision);
     }
