@@ -268,6 +268,7 @@ public class InvestigationLimitsTests
         Assert.True(limits.Released);
         Assert.Equal(2, logger.States.Count);
         var values = Values(logger);
+        AssertBreachTraceFields(logger);
         Assert.Contains("escalated", values);
         Assert.Contains("escalate", values);
         Assert.Contains("fixture-deployment", values);
@@ -277,6 +278,31 @@ public class InvestigationLimitsTests
         Assert.Contains(values, v => v?.StartsWith("actor-", StringComparison.Ordinal) == true);
         Assert.DoesNotContain(values, v => v is not null && v.Contains("synthetic-analyst-01", StringComparison.Ordinal));
         Assert.DoesNotContain(values, v => v is not null && v.Contains("Return readiness", StringComparison.Ordinal));
+    }
+
+    // The breach trace carries the tools and citations fields; a breach yields no claims, so it cites nothing.
+    private static void AssertBreachTraceFields(TraceLogger logger)
+    {
+        var trace = logger.States[0];
+        Assert.Contains(trace, kv => kv.Key == "investigation.tools");
+        var citations = Assert.Single(trace, kv => kv.Key == "investigation.citations");
+        Assert.Equal(string.Empty, citations.Value?.ToString());
+    }
+
+    [Fact]
+    public async Task An_investigator_without_supplied_limits_still_enforces_the_default_limits()
+    {
+        var logger = new TraceLogger();
+        var model = new ScriptedClient(_ => Reply(GoodReply, outputTokens: 5_000));
+
+        var investigator = new BoundedInvestigator(
+            "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "basis-v1",
+            model, null, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => investigator.InvestigateAsync([Doc]));
+
+        Assert.Equal(InvestigationBreach.OutputTokens, ex.Breach);
+        AssertBreachTraceFields(logger);
     }
 
     [Fact]

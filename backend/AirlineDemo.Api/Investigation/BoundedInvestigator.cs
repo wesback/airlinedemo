@@ -71,7 +71,8 @@ public sealed class BoundedInvestigator(
 
     private static readonly JsonSerializerOptions ClaimJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    private readonly IInvestigationLimits _limits = limits ?? NoInvestigationLimits.Instance;
+    // Without supplied limits each investigation gets its own default limits, so none runs unbounded.
+    private readonly IInvestigationLimits? _suppliedLimits = limits;
     // Without telemetry the trace still goes to standard output, so no investigation's trace is dropped silently.
     private readonly InvestigationTelemetry _telemetry = telemetry
         ?? new InvestigationTelemetry(new ConsoleTraceLogger(), "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
@@ -93,21 +94,22 @@ public sealed class BoundedInvestigator(
         }
 
         // Every document text that reaches the model, including tool results, is added here before the next call is gated.
+        var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var evidence = new List<string>(documents);
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, _limits);
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits);
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
-        var tools = new CaseReadTools(caseId, source, _limits, evidence.Add);
+        var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
         var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
 
         InvestigationResult? result = null;
         var outcome = "escalated";
         try
         {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _limits.ExecutionToken);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, limits.ExecutionToken);
             var response = await agent.RunAsync(BuildPrompt(documents), cancellationToken: linked.Token);
             // The tool-calling loop can swallow a tool-side breach, so the recorded breach is checked after the run as well.
-            if (_limits.Breach is { } breach)
+            if (limits.Breach is { } breach)
             {
                 throw new InvestigationLimitExceededException(breach);
             }
@@ -116,7 +118,7 @@ public sealed class BoundedInvestigator(
             outcome = "approved";
             return result;
         }
-        catch (Exception ex) when (ex is not InvestigationLimitExceededException && _limits.Breach is { } tripped)
+        catch (Exception ex) when (ex is not InvestigationLimitExceededException && limits.Breach is { } tripped)
         {
             throw new InvestigationLimitExceededException(tripped);
         }
@@ -127,13 +129,13 @@ public sealed class BoundedInvestigator(
         }
         finally
         {
-            EmitTrace(traceId, gate.ToolsUsed, result, outcome);
-            (_limits as IDisposable)?.Dispose();
+            EmitTrace(traceId, gate.ToolsUsed, result, outcome, limits);
+            (limits as IDisposable)?.Dispose();
         }
     }
 
     // Identifiers only: no document text or prompt reaches the trace. The investigator never decides readiness, so its decision is always escalate.
-    private void EmitTrace(string traceId, IReadOnlyList<string> toolsUsed, InvestigationResult? result, string outcome)
+    private void EmitTrace(string traceId, IReadOnlyList<string> toolsUsed, InvestigationResult? result, string outcome, IInvestigationLimits limits)
     {
         var telemetry = _telemetry;
         var inventory = source.GetInventory(caseId).ToList();
@@ -150,7 +152,7 @@ public sealed class BoundedInvestigator(
             telemetry.ServiceVersion,
             telemetry.Environment,
             telemetry.ActorKey);
-        if (_limits.Breach is not null)
+        if (limits.Breach is not null)
         {
             TelemetryRedaction.EmitSecurityEvent(telemetry.Logger, TelemetryRedaction.SecurityEvents.BudgetExhausted, telemetry.ServiceVersion, telemetry.Environment);
         }
