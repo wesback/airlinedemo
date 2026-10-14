@@ -37,6 +37,12 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
+        // Without a drop to "nobody" the worker owns its working directory and could undo the read-only mode: fail closed.
+        if (OperatingSystem.IsLinux() && options.WorkerFileName is null && !DropsToNobody())
+        {
+            return Retryable("worker cannot be isolated from its working directory; the document was not accepted, retry is possible");
+        }
+
         var workingDirectory = Path.Combine(Path.GetTempPath(), "pdf-worker-" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -110,7 +116,7 @@ public static class IsolatedPdfParser
             }
 
             // Root bypasses directory mode bits, so a root worker could write the read-only directory: drop to nobody.
-            if (options.WorkerFileName is null && Environment.UserName == "root" && File.Exists(SetprivPath))
+            if (options.WorkerFileName is null && DropsToNobody())
             {
                 chain.AddRange(new[] { SetprivPath, $"--reuid={NobodyUid}", $"--regid={NobodyUid}", "--clear-groups", "--" });
             }
@@ -202,6 +208,9 @@ public static class IsolatedPdfParser
 
     private const string SetprivPath = "/usr/bin/setpriv";
 
+    /// <summary>True when the default Linux worker is started as root and can be switched to <see cref="NobodyUid"/>.</summary>
+    internal static bool DropsToNobody() => Environment.UserName == "root" && File.Exists(SetprivPath);
+
     /// <summary>Conventional uid/gid of the unprivileged "nobody" account the worker switches to when the API is root.</summary>
     private const int NobodyUid = 65534;
 
@@ -278,6 +287,12 @@ public static class IsolatedPdfParser
             {
                 return Terminate(process, "exceeded the output size limit");
             }
+        }
+
+        // The child can exit just after the deadline; the limit applies to the whole run, so check it again here.
+        if (clock.Elapsed > options.WallClockLimit)
+        {
+            return Terminate(process, $"exceeded the {options.WallClockLimit.TotalSeconds:0} second time limit");
         }
 
         if (!stdout.Wait(TimeSpan.FromSeconds(5)))
