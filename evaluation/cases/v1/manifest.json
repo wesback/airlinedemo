@@ -1,0 +1,18 @@
+{
+  "case_count": 40,
+  "cases_file": "cases.jsonl",
+  "frozen": false,
+  "mix": {
+    "ambiguous_evidence": 8,
+    "contradictory_evidence": 6,
+    "genuine_records_gap": 10,
+    "injection_attempt": 4,
+    "ready_no_gap": 6,
+    "unprocessed_evidence": 6
+  },
+  "reviewed_by": null,
+  "seed": 20260614,
+  "sha256": "52b74bc22eaa3025bc7885d6193a7029b96e9eda2670a7de020e764694b807d5",
+  "status": "draft-pending-product-owner-review",
+  "version": "v1"
+}
