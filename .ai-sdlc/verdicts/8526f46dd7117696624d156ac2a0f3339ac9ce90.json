@@ -1,0 +1,250 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 181,
+  "branch": "ai-sdlc/issue-181",
+  "commitSha": "8526f46dd7117696624d156ac2a0f3339ac9ce90",
+  "round": 0,
+  "pipelineVersion": "1692eaf",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Sql provider option is explicitly unavailable, contrary to the acceptance criteria. The persistence wiring test also exercises the store directly, so it can pass while endpoints still use an in-memory store and does not verify persisted decisions or audit events.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 53,
+          "message": "The configured SQL case-state provider is not wired; selecting Sql always fails startup.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When Persistence:Provider is 'Sql', CaseStatePath selects the 'Sql' branch.",
+            "failureScenario": "Starting the API with Persistence:Provider=Sql throws InvalidOperationException, so the setting cannot select the required SQL case-state provider."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 35,
+          "message": "AC-2 and AC-4 are not verified: the restart test bypasses the case endpoints and does not check persisted decisions or audit events. Add an endpoint-level restart test that verifies the case, decision, and audit events survive.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The restart test creates a case by calling ICaseStateStore directly, then checks only OwnerOf after creating a second host.",
+            "failureScenario": "If CaseStore or a case endpoint continues using an in-memory store, this test still passes because it never invokes an endpoint or checks that endpoint's state."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Sql configuration currently prevents startup, contrary to the provider-selection criterion. The restart test exercises the store directly, so it does not prove that endpoints use persistent state or that decisions and audit events survive a restart.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 56,
+          "message": "The configured Sql provider is rejected as unavailable, so Persistence:Provider does not select Sql as required.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "CaseStatePath reads Persistence:Provider and throws whenever its value is Sql.",
+            "failureScenario": "When an operator configures Persistence:Provider=Sql, resolving ICaseStateStore during application startup throws instead of selecting the SQL store, so the API cannot start with a provider the acceptance criteria say it must support."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 31,
+          "message": "The restart test bypasses the endpoints and checks only case ownership; it cannot detect an endpoint using in-memory state or verify persisted decisions and audit events.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Case_state_survives_host_restart_with_the_same_file_store calls ICaseStateStore.CreateCase directly, then checks OwnerOf after creating another host; it never calls a case endpoint or exercises CaseStore.RecordReview.",
+            "failureScenario": "If an endpoint is changed to use an in-memory case store while ICaseStateStore remains file-backed, this test still passes. It also does not verify that decisions and audit events survive restart, leaving the endpoint persistence behavior in the acceptance criteria untested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No reachable security vulnerability is evident in the changed code. Case access still depends on the endpoint authorization checks, while provider and file path values come from trusted application configuration.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 3,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 62,
+      "total": 66,
+      "percent": 93.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseStore.cs",
+          "covered": 33,
+          "total": 34,
+          "missed": [
+            70
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 29,
+          "total": 32,
+          "missed": [
+            56,
+            67,
+            68
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
