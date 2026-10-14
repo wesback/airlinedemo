@@ -81,11 +81,6 @@ public static class ClaimValidator
             }
         }
 
-        if (string.IsNullOrWhiteSpace(claim.Text) || !claim.Text.Contains(typedValue, StringComparison.Ordinal))
-        {
-            return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim text does not state typed value");
-        }
-
         return new ValidatedClaim(claim, kind, ClaimStatus.Supported, null);
     }
 

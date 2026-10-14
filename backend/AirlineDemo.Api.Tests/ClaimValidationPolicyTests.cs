@@ -343,19 +343,19 @@ public class ClaimValidationPolicyTests
     }
 
     [Fact]
-    public void Valid_quote_for_unrelated_claim_text_is_downgraded_and_cannot_establish_request()
+    public void Claim_naming_requirement_by_name_without_identifier_is_supported_and_routes_to_review_not_request()
     {
-        var unrelated = ClaimValidator.Validate(
-            Claim("return-status", 1, Quote, text: "Aircraft fuel load is complete."),
+        var byName = ClaimValidator.Validate(
+            Claim("return-status", 1, Quote, text: "Reserve approval is still outstanding for the return."),
             ClaimKind.MissingRequirement,
             Basis(),
             TypedValue);
 
-        var decision = FindingRouter.Route(Complete, [unrelated], identityAmbiguous: false);
+        var decision = FindingRouter.Route(Complete, [byName], identityAmbiguous: false);
 
-        Assert.Equal(ClaimStatus.Downgraded, unrelated.Status);
-        Assert.Equal("claim text does not state typed value", unrelated.Reason);
-        Assert.Equal(FindingOutcome.NoAction, decision.Outcome);
+        Assert.Equal(ClaimStatus.Supported, byName.Status);
+        Assert.Null(byName.Reason);
+        Assert.Equal(FindingOutcome.Review, decision.Outcome);
         Assert.Equal(0, decision.RequestCount);
     }
 
