@@ -1,0 +1,286 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "3fd5d16b955b7a972f585648fd805281116a19c6",
+  "round": 3,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The filter redacts sensitive names and free-form strings, but passes every value-type value through regardless of its property name. This leaves a reachable path for non-operational or sensitive numeric data to appear in logs.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 53,
+          "message": "Values of any value type bypass the operational-field restriction, allowing sensitive numeric values under ordinary property names to reach log providers.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Sanitize returns every ValueType unchanged before checking whether its property name is operational. Redact forwards that value to the provider, and RenderMessage can also retain it in the formatted message.",
+            "failureScenario": "If a caller logs a numeric passcode or other sensitive value under an ordinary field such as `answer`, the value reaches the log provider unchanged. The field is not an identifier, state, count, duration, or token usage, contrary to acceptance criterion 3. This can expose sensitive data through logging (OWASP A09:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The logger can still emit literal free-form content from structured templates, and value-type fields bypass the operational-field restriction. The trace test verifies the processor in isolation but does not verify that diagnostics setup registers it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 86,
+          "message": "Literal free-form text in structured log templates bypasses redaction and can expose prompt or document content.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RenderMessage keeps literal text from structured message templates and only applies ScrubText, which replaces bearer tokens and session cookies.",
+            "failureScenario": "A caller logs `Prompt: confidential lease clause {status}` with status `active`. The clause is literal template text, so it remains in the formatted message and reaches the provider, contrary to the requirement to keep raw prompt and document text out of logs. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 50,
+          "message": "Numeric and other value-type fields bypass the operational-name allowlist, so logs can contain unapproved fields.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Sanitize returns every ValueType unchanged before checking whether the property name is operational.",
+            "failureScenario": "A caller logs a numeric value under an unapproved field such as `answer` or `query`. The value reaches the provider even though the acceptance criterion limits logs to identifiers, states, counts, durations, and token usage."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 151,
+          "message": "The trace test bypasses the configured tracing pipeline and would pass if the redaction processor were removed from setup.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "TraceAttributesAreRedactedOnEnd calls the processor directly; it does not exercise the processor registered by AddAirlineDiagnostics. The connection-string test checks that a TracerProvider exists but not that it includes this processor.",
+            "failureScenario": "If AddAirlineDiagnostics stops registering RedactingActivityProcessor, the direct processor test still passes and the setup test still sees a TracerProvider, while exported trace attributes are no longer redacted. Acceptance criteria 2 and 4 are not verified for the configured tracing path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The filter covers named sensitive properties and common token patterns, but short unstructured text can reach log providers unchanged.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 63,
+          "message": "Short, single-token prompt or document text can pass through in plain messages and string scopes.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "FreeText returns short strings without whitespace unchanged. BeginScope uses it for string scopes, and RenderMessage uses it for messages without placeholders.",
+            "failureScenario": "A caller logs a one-word prompt such as `Confidential` as a plain message or string scope. It passes through unchanged to the logging provider, exposing raw content despite the criteria requiring sensitive content to stay out of logs. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 107,
+      "total": 115,
+      "percent": 93,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "covered": 14,
+          "total": 14,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 92,
+          "total": 100,
+          "missed": [
+            121,
+            123,
+            127,
+            129,
+            136,
+            149,
+            159,
+            160
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
