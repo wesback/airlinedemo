@@ -15,7 +15,11 @@ public sealed class AuthBoundaryTests
     private static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode })));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = Passcode,
+                    ["CaseState:Path"] = Path.Combine(Path.GetTempPath(), $"auth-boundary-{Guid.NewGuid():N}", "cases.json"),
+                })));
 
     private static Task<HttpResponseMessage> SignInRawAsync(HttpClient client, string? userId, string? passcode, CancellationToken ct) =>
         client.PostAsJsonAsync("/api/auth/sign-in", new { userId, passcode }, ct);

@@ -278,10 +278,15 @@ public sealed class TelemetryPrivacyTests
     public async Task Review_decision_emits_correlated_trace_through_the_app()
     {
         var logger = new CapturingLogger();
+        var caseStatePath = Path.Combine(Path.GetTempPath(), $"telemetry-{Guid.NewGuid():N}", "cases.json");
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = AppPasscode,
+                    ["CaseState:Path"] = caseStatePath,
+                }));
             builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
         });
         using var client = factory.CreateClient();
