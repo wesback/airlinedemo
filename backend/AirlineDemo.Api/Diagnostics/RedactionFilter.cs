@@ -41,7 +41,7 @@ public static partial class RedactionFilter
     // Free-form content (prompts, document text) is long or contains spaces; identifiers, states and counts are single tokens.
     public const int MaxFreeTextLength = 256;
 
-    // Strings survive only under operational names and only as single short tokens; numbers and flags are always operational.
+    // Strings, numbers and flags survive only under operational names; strings must also be single short tokens.
     public static object? Sanitize(string name, object? value)
     {
         if (IsSensitiveName(name))
@@ -52,7 +52,7 @@ public static partial class RedactionFilter
         return value switch
         {
             null => null,
-            ValueType => value,
+            ValueType when IsOperationalName(name) => value,
             string text when IsOperationalName(name) => FreeText(text),
             _ => TelemetryRedaction.Redacted,
         };
@@ -61,7 +61,35 @@ public static partial class RedactionFilter
     private static string FreeText(string text) =>
         text.Length > MaxFreeTextLength || text.Any(char.IsWhiteSpace) ? TelemetryRedaction.Redacted : ScrubText(text);
 
-    // Messages are only trusted as message templates: placeholder values are redacted, and literal text must be a single token.
+    // Literal text without placeholders is kept only as a single token made of operational words.
+    private static string LiteralText(string text) =>
+        text.Length is > 0 and <= MaxFreeTextLength && !text.Any(char.IsWhiteSpace)
+            && text.Split(new[] { '.', '_', '-' }).All(OperationalSegments.Contains)
+            ? ScrubText(text)
+            : TelemetryRedaction.Redacted;
+
+    [GeneratedRegex(@"\{[^{}]*\}")]
+    private static partial Regex Placeholder();
+
+    [GeneratedRegex(@"^\{[@$]?[A-Za-z_][A-Za-z0-9_]*(?:[,:][^{}]*)?\}$")]
+    private static partial Regex ValidPlaceholder();
+
+    // A template is trusted only when it is short and every brace is part of a well-formed placeholder;
+    // an interpolated string that carries content fails this.
+    private static bool IsTrustedTemplate(string template, IEnumerable<KeyValuePair<string, object?>>? pairs) =>
+        template.Length <= MaxFreeTextLength
+        && Placeholder().Matches(template).All(match => ValidPlaceholder().IsMatch(match.Value))
+        && Placeholder().Matches(template).All(match => HasValue(match.Value, pairs))
+        && !Placeholder().Replace(template, string.Empty).Any(c => c is '{' or '}');
+
+    // A placeholder without a bound value means the content was interpolated into the template text.
+    private static bool HasValue(string placeholder, IEnumerable<KeyValuePair<string, object?>>? pairs)
+    {
+        var name = placeholder.Trim('{', '}').Split(',', ':')[0].TrimStart('@', '$');
+        return pairs?.Any(pair => pair.Key == name) == true;
+    }
+
+    // Messages are only trusted as message templates: placeholder values are redacted and literal text is never free-form.
     private static string RenderMessage(string formatted, string? template, IEnumerable<KeyValuePair<string, object?>>? pairs)
     {
         if (template is null)
@@ -71,7 +99,12 @@ public static partial class RedactionFilter
 
         if (!template.Contains('{'))
         {
-            return FreeText(template);
+            return LiteralText(template);
+        }
+
+        if (!IsTrustedTemplate(template, pairs))
+        {
+            return TelemetryRedaction.Redacted;
         }
 
         var rendered = formatted;
@@ -145,7 +178,7 @@ public static partial class RedactionFilter
             object scope = state switch
             {
                 IEnumerable<KeyValuePair<string, object?>> pairs => new RedactedState(Redact(pairs), TelemetryRedaction.Redacted),
-                string text => FreeText(text),
+                string text => LiteralText(text),
                 _ => TelemetryRedaction.Redacted,
             };
             return inner.BeginScope(scope);

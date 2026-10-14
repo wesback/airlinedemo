@@ -3,6 +3,7 @@ using AirlineDemo.Api.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
 using OpenTelemetry.Trace;
 
 namespace AirlineDemo.Api.Tests;
@@ -99,6 +100,59 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void NumbersUnderUnlistedNamesAreRedactedButOperationalOnesKept()
+    {
+        Assert.Equal(TelemetryRedaction.Redacted, RedactionFilter.Sanitize("balance", 12345));
+        Assert.Equal(TelemetryRedaction.Redacted, RedactionFilter.Sanitize("flag", true));
+        Assert.Equal(7, RedactionFilter.Sanitize("retry_count", 7));
+    }
+
+    [Fact]
+    public void LiteralTemplateTextAndMalformedTemplatesAreRedacted()
+    {
+        var capture = new CapturingProvider();
+        using var services = new ServiceCollection()
+            .AddLogging(builder => builder.AddProvider(capture))
+            .AddRedactingLogging()
+            .BuildServiceProvider();
+        var logger = services.GetRequiredService<ILogger<DiagnosticsTests>>();
+
+        logger.LogInformation("Confidential");
+        logger.LogInformation("Lease clause 4 forbids subletting");
+        logger.LogInformation($"Interpolated {"Confidential"} content {{braces}}");
+        logger.LogInformation("Investigation {investigation_id} state {state}", "inv-1", "ready");
+
+        var messages = capture.Records.Select(r => r.Message).ToList();
+        Assert.All(messages.Take(3), m => Assert.Equal(TelemetryRedaction.Redacted, m));
+        Assert.Equal("Investigation inv-1 state ready", messages[3]);
+    }
+
+    [Fact]
+    public void ConfiguredTracingPipelineRedactsTraceAttributes()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        builder.Configuration[DiagnosticsSetup.ConnectionStringSetting] =
+            "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://localhost/";
+        builder.AddAirlineDiagnostics();
+        var seen = new CapturingProcessor();
+        builder.Services.ConfigureOpenTelemetryTracerProvider((_, tracing) => tracing.AddSource("DiagnosticsTests.Pipeline").AddProcessor(seen));
+        using var app = builder.Build();
+        using var provider = app.Services.GetRequiredService<TracerProvider>();
+        using var source = new ActivitySource("DiagnosticsTests.Pipeline");
+
+        using (var activity = source.StartActivity("chat"))
+        {
+            Assert.NotNull(activity);
+            activity!.SetTag("gen_ai.prompt", "Summarise the secret clause");
+            activity.SetTag("cookie", "session=8f3c9a2b7d");
+        }
+
+        var tags = Assert.Single(seen.Tags);
+        Assert.Equal(TelemetryRedaction.Redacted, tags["gen_ai.prompt"]);
+        Assert.Equal(TelemetryRedaction.Redacted, tags["cookie"]);
+    }
+
+    [Fact]
     public void OverlongFreeTextIsRedacted()
     {
         var longText = new string('x', RedactionFilter.MaxFreeTextLength + 1);
@@ -179,6 +233,13 @@ public sealed class DiagnosticsTests
             Assert.NotNull(app.Services.GetService<TracerProvider>());
             Assert.Contains(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
         }
+    }
+
+    private sealed class CapturingProcessor : BaseProcessor<Activity>
+    {
+        public List<Dictionary<string, object?>> Tags { get; } = [];
+
+        public override void OnEnd(Activity data) => Tags.Add(data.TagObjects.ToDictionary(t => t.Key, t => t.Value));
     }
 
     private sealed record CapturedRecord(string Message, IReadOnlyList<KeyValuePair<string, object?>> State, Exception? Exception);
