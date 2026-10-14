@@ -145,7 +145,7 @@ public class DockerfileTests
         var uid = userValue.Split(':')[0];
         Assert.False(string.IsNullOrWhiteSpace(uid));
         Assert.NotEqual("root", uid, StringComparer.OrdinalIgnoreCase);
-        Assert.NotEqual("0", uid);
+        Assert.False(int.TryParse(uid, out var numericUid) && numericUid == 0, $"Runtime USER '{uid}' resolves to root.");
 
         var workdir = body.LastOrDefault(l => l.StartsWith("WORKDIR ", StringComparison.OrdinalIgnoreCase));
         Assert.Equal("WORKDIR /app", workdir);
