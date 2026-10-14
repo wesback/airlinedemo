@@ -1,0 +1,305 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 191,
+  "branch": "ai-sdlc/issue-191",
+  "commitSha": "6912ac8f58ad2824c4e9df9738772749f0afdbc7",
+  "round": 2,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The default investigator path can discard traces when telemetry is omitted. The finished-investigation trace test also leaves the required tools-used field unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 77,
+          "message": "The default telemetry path silently discards the required investigation trace.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The constructor makes telemetry optional and substitutes NullLogger.Instance when it is omitted. EmitTrace then sends the record to that logger.",
+            "failureScenario": "A caller constructs BoundedInvestigator without telemetry and runs an investigation; the trace is sent to a null logger and is not recorded, contrary to the requirement that every investigation emit a correlated trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 111,
+          "message": "The trace test does not verify the tools-used field for a finished investigation, as required by the third acceptance criterion.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The finished-investigation trace test checks several trace values but does not exercise a successful tool call or assert the tools-used field. The tool-call test exercises a breach instead.",
+            "failureScenario": "If a finished investigation omits its tools-used field or fails to record a tool it used, the tests still pass, despite the trace acceptance criterion requiring that field on finished-investigation traces."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The limit tests cover the investigator breach paths, but the trace tests do not verify every required field on both outcomes. The pre-call input estimate also omits tool schemas, allowing a request to exceed the configured input-token limit before the breach is detected.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 121,
+          "message": "The trace tests do not verify all required fields on both finished and limit-breach traces. Add assertions for citations, tools used, and opaque identifiers for each outcome.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The finished trace test checks citations and opaque identifiers, while the shared breach assertion checks model, basis, and deployment. The breach test does not assert citations or opaque identifiers, and the finished test does not exercise or assert a tool name.",
+            "failureScenario": "If a limit-breach trace omits citations or an opaque identifier, or a finished trace omits tools used, these tests can still pass despite the trace acceptance criterion requiring those fields on both outcomes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 263,
+          "message": "The input-token guard can send an over-limit model request because it excludes tool schemas from the pre-call estimate and checks actual usage only after the response.",
+          "confidence": 0.85,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The pre-call estimate counts only message text bytes. Tool schemas are sent separately, and actual input usage is checked only after the model responds.",
+            "failureScenario": "When message text estimates to 16,000 tokens and the tool schemas add input tokens, the request is still sent over the per-call limit; the breach is detected only after the model has processed it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed code contains no concrete injection, authentication, or credential exposure issue. The required trace is not recorded when callers omit telemetry, and the tests leave required trace fields unchecked.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 77,
+          "message": "Omitting telemetry silently disables recording of the required investigation trace.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The constructor accepts telemetry as optional and replaces an omitted value with a NullLogger. EmitTrace sends the trace to that logger.",
+            "failureScenario": "A caller constructs BoundedInvestigator without telemetry and runs an investigation; the trace is sent to NullLogger and is not recorded, contrary to the criterion that every investigation emits a correlated trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 151,
+          "message": "The trace tests do not verify all required fields on both finished and limit-breach traces.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The finished-investigation test checks citations and opaque identifiers but does not exercise a successful tool call or assert tools-used. The breach helper checks model, basis, deployment, and outcome, but not citations or opaque identifiers.",
+            "failureScenario": "If a finished trace omits tools-used, or a breach trace omits citations or opaque identifiers, these tests still pass despite the trace acceptance criterion requiring those fields."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 170,
+      "total": 191,
+      "percent": 89,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 79,
+          "total": 87,
+          "missed": [
+            23,
+            112,
+            113,
+            295,
+            296,
+            297,
+            298,
+            299
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationLimits.cs",
+          "covered": 81,
+          "total": 94,
+          "missed": [
+            59,
+            61,
+            73,
+            87,
+            92,
+            101,
+            102,
+            103,
+            108,
+            120,
+            143,
+            144,
+            145
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
