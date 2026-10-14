@@ -1,0 +1,298 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 191,
+  "branch": "ai-sdlc/issue-191",
+  "commitSha": "1e108c711276f6f00414640180d7b1e8f8dbd685",
+  "round": 1,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The investigator exercises each limit breach, but trace emission can be skipped when telemetry is omitted, and the redaction rule removes the actual investigation tool names. The trace tests also leave required fields unchecked.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 102,
+          "message": "The trace redaction allowlist rejects every CaseReadTools name, so emitted investigation traces lose the required tools-used field.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "BoundedInvestigator records CaseReadTools function names and passes them to the trace emitter. The redaction rule accepts only reserve-calc and citation-search, while CaseReadTools uses get_case_inventory, get_approved_requirements, get_source_page, search_within_basis, and get_processing_status.",
+            "failureScenario": "When an investigation uses any CaseReadTools function, the joined tool names fail the allowlist and the trace records [redacted] instead of the tools used, violating the trace acceptance criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 136,
+          "message": "Telemetry is optional, so investigations can complete without emitting the trace required by the acceptance criteria.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The public constructor makes telemetry optional, and EmitTrace returns immediately when it is null.",
+            "failureScenario": "A caller constructs BoundedInvestigator without telemetry and runs an investigation; it completes or breaches without emitting the required correlated trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 151,
+          "message": "Criterion 3 is not fully covered: the finished and breach trace assertions do not verify tools-used or opaque identifiers.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The finished-trace test checks outcome, decision, model, deployment, basis, and citation, but does not assert tools or the opaque actor identifier. The breach helper also omits those assertions.",
+            "failureScenario": "If either trace omits the tools-used field or emits a non-opaque actor identifier, the named test still passes, despite criterion 3 requiring assertions for those fields on finished and limit-breach traces."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests exercise each breach path and both trace outcomes, but trace emission can be skipped when telemetry is omitted, the input-token guard can undercount token-heavy text, and the required tools field is not asserted.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 140,
+          "message": "Trace emission is silently disabled when telemetry is not supplied, so the every-investigation trace criterion is not guaranteed by this implementation.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "EmitTrace returns immediately when the optional telemetry argument was omitted from the BoundedInvestigator constructor.",
+            "failureScenario": "When a caller constructs BoundedInvestigator without telemetry, a finished or limit-stopped investigation emits no correlated trace, contrary to the requirement that every investigation emit one."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 266,
+          "message": "The input-token limit relies on a character-count estimate that can substantially undercount token-heavy input, allowing an over-limit request to reach the model.",
+          "confidence": 0.89,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "GetResponseAsync estimates input tokens as message text length divided by four, then sends the request after checking only that estimate; actual usage is checked after the model responds.",
+            "failureScenario": "A request containing 64,004 CJK characters can estimate to about 16,001 tokens while representing substantially more tokens under a tokenizer that counts those characters individually. The request is sent before the actual input-token check can breach, exceeding the per-call limit."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+          "line": 125,
+          "message": "The trace tests do not verify that tools used appear in the trace, leaving that required trace field untested.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The finished-investigation trace test asserts outcome, deployment, model, basis, and citation values, but it does not exercise a successful tool call or assert a tool name in the trace.",
+            "failureScenario": "If tool tracking or the investigation.tools trace field is removed, the current tests can still pass, despite the trace acceptance criterion requiring tools used to be carried by the trace."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability was identified in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 166,
+      "total": 187,
+      "percent": 88.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 80,
+          "total": 88,
+          "missed": [
+            22,
+            109,
+            110,
+            295,
+            296,
+            297,
+            298,
+            299
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationLimits.cs",
+          "covered": 81,
+          "total": 94,
+          "missed": [
+            59,
+            61,
+            73,
+            87,
+            92,
+            101,
+            102,
+            103,
+            108,
+            120,
+            143,
+            144,
+            145
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
