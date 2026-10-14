@@ -27,7 +27,7 @@ public static partial class RedactionFilter
     public static string ScrubText(string text) =>
         SessionCookie().Replace(BearerToken().Replace(text, TelemetryRedaction.Redacted), TelemetryRedaction.Redacted);
 
-    // Free-form content (prompts, document text) is never short; identifiers, states and counts are.
+    // Free-form content (prompts, document text) is long or contains spaces; identifiers, states and counts are single tokens.
     public const int MaxFreeTextLength = 256;
 
     public static object? Sanitize(string name, object? value)
@@ -40,7 +40,7 @@ public static partial class RedactionFilter
         return value switch
         {
             null => null,
-            string text when text.Length > MaxFreeTextLength => TelemetryRedaction.Redacted,
+            string text when text.Length > MaxFreeTextLength || text.Any(char.IsWhiteSpace) => TelemetryRedaction.Redacted,
             string text => ScrubText(text),
             ValueType => value,
             _ => ScrubText(value.ToString() ?? string.Empty),
@@ -118,10 +118,12 @@ public static partial class RedactionFilter
             {
                 foreach (var pair in source)
                 {
+                    // The formatted message embeds raw values, so every value the filter changes must be replaced there too.
                     var raw = pair.Value?.ToString();
-                    if (IsSensitiveName(pair.Key) && !string.IsNullOrEmpty(raw))
+                    var sanitized = Sanitize(pair.Key, pair.Value)?.ToString() ?? string.Empty;
+                    if (!string.IsNullOrEmpty(raw) && raw != sanitized)
                     {
-                        message = message.Replace(raw, TelemetryRedaction.Redacted, StringComparison.Ordinal);
+                        message = message.Replace(raw, sanitized, StringComparison.Ordinal);
                     }
                 }
             }

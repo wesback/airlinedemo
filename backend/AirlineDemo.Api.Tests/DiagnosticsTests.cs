@@ -3,6 +3,7 @@ using AirlineDemo.Api.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry.Trace;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -107,6 +108,24 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void FreeTextUnderUnlistedNamesIsRedactedInMessagesAndState()
+    {
+        var capture = new CapturingProvider();
+        using var services = new ServiceCollection()
+            .AddLogging(builder => builder.AddProvider(capture))
+            .AddRedactingLogging()
+            .BuildServiceProvider();
+        var logger = services.GetRequiredService<ILogger<DiagnosticsTests>>();
+
+        logger.LogInformation("Model said {answer}", "Lease clause 4 forbids subletting");
+
+        var record = Assert.Single(capture.Records);
+        Assert.DoesNotContain("Lease clause", record.Message);
+        Assert.DoesNotContain("Lease clause", string.Join(" ", record.State.Select(pair => pair.Value)));
+        Assert.Contains(TelemetryRedaction.Redacted, record.Message);
+    }
+
+    [Fact]
     public void TraceAttributesAreRedactedOnEnd()
     {
         var exported = new List<Activity>();
@@ -146,6 +165,7 @@ public sealed class DiagnosticsTests
         using (var app = withoutString.Build())
         {
             Assert.NotNull(app.Services.GetRequiredService<ILoggerFactory>());
+            Assert.Null(app.Services.GetService<TracerProvider>());
         }
 
         var withString = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
@@ -155,6 +175,7 @@ public sealed class DiagnosticsTests
         using (var app = withString.Build())
         {
             Assert.NotNull(app.Services.GetRequiredService<ILoggerFactory>());
+            Assert.NotNull(app.Services.GetService<TracerProvider>());
         }
     }
 
