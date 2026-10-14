@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using AirlineDemo.Api.Diagnostics;
@@ -6,18 +7,30 @@ namespace AirlineDemo.Api.Auth;
 
 public sealed record SignInRequest(string? UserId, string? Passcode);
 
+public sealed record PasscodeRequest(string? Passcode);
+
 public static class DemoAuthEndpoints
 {
     public const string CookieName = "__Host-demo-session";
+    public const string PasscodeCookieName = "__Host-demo-passcode";
     public const string CsrfHeaderName = "X-CSRF-Token";
     public const string PasscodeSetting = "Demo:Passcode";
+    public static readonly TimeSpan PasscodeLifetime = TimeSpan.FromMinutes(5);
     private const string GenericFailure = "Sign-in failed.";
 
     private static readonly CookieOptions SessionCookie = new() { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/", IsEssential = true };
+    private static readonly CookieOptions PasscodeCookieClear = new() { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/", IsEssential = true };
+
+    // Random server-side grant tokens -> expiry. The cookie carries only the token, never the passcode.
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> PasscodeGrants = new();
 
     public static IEndpointRouteBuilder MapDemoAuth(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/auth/users", () => Results.Ok(DemoFixture.Users.Select(u => new { u.Id, u.DisplayName, u.Role })));
+        app.MapGet("/api/auth/users", (HttpContext http, DemoSessionStore sessions, TimeProvider time) =>
+            CurrentSession(http, sessions) is not null || HasValidPasscodeStep(http, time)
+                ? Results.Ok(DemoFixture.Users.Select(u => new { u.Id, u.DisplayName, u.Role }))
+                : Unauthenticated());
+        app.MapPost("/api/auth/passcode", PasscodeStep);
         app.MapPost("/api/auth/sign-in", SignIn);
         app.MapPost("/api/auth/sign-out", SignOut);
         return app;
@@ -64,9 +77,64 @@ public static class DemoAuthEndpoints
         }
 
         throttle.Reset(source);
+        ClearPasscodeStep(http);
         var session = sessions.Create(user);
         http.Response.Cookies.Append(CookieName, session.Id, SessionCookie);
         return Results.Ok(SessionView(session));
+    }
+
+    private static IResult PasscodeStep(PasscodeRequest request, HttpContext http, IConfiguration config, PasscodeThrottle throttle, TimeProvider time, ILogger<DemoSessionStore> logger)
+    {
+        var source = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        if (throttle.IsLocked(source))
+        {
+            EmitAuthFailure(logger, config);
+            return Results.Json(new { error = GenericFailure }, statusCode: StatusCodes.Status429TooManyRequests);
+        }
+
+        var expected = config[PasscodeSetting];
+        var passcodeOk = !string.IsNullOrEmpty(expected) && Matches(request.Passcode ?? string.Empty, expected);
+        if (!passcodeOk)
+        {
+            throttle.RecordFailure(source);
+            EmitAuthFailure(logger, config);
+            return Results.Json(new { error = GenericFailure }, statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        throttle.Reset(source);
+        var token = IssuePasscodeGrant(time);
+        http.Response.Cookies.Append(PasscodeCookieName, token, new CookieOptions
+        {
+            HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Path = "/", IsEssential = true, MaxAge = PasscodeLifetime,
+        });
+        return Results.NoContent();
+    }
+
+    private static string IssuePasscodeGrant(TimeProvider time)
+    {
+        var now = time.GetUtcNow();
+        foreach (var (stale, expires) in PasscodeGrants)
+            if (now >= expires) PasscodeGrants.TryRemove(stale, out _);
+
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        PasscodeGrants[token] = now + PasscodeLifetime;
+        return token;
+    }
+
+    private static bool HasValidPasscodeStep(HttpContext http, TimeProvider time)
+    {
+        var token = http.Request.Cookies[PasscodeCookieName];
+        return !string.IsNullOrEmpty(token)
+            && PasscodeGrants.TryGetValue(token, out var expires)
+            && time.GetUtcNow() < expires;
+    }
+
+    private static void ClearPasscodeStep(HttpContext http)
+    {
+        var token = http.Request.Cookies[PasscodeCookieName];
+        if (string.IsNullOrEmpty(token)) return;
+        PasscodeGrants.TryRemove(token, out _);
+        http.Response.Cookies.Delete(PasscodeCookieName, PasscodeCookieClear);
     }
 
     private static IResult SignOut(HttpContext http, DemoSessionStore sessions)
