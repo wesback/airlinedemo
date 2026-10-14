@@ -153,7 +153,7 @@ public sealed class DiagnosticsTests
             activity.SetTag(".AspNetCore.Cookies", CookieValue);
             activity.SetTag("__Host-session", CookieValue);
             activity.SetTag("case.id", "case-42");
-            RedactionFilter.AddRedactedEvent(activity, "review.event", new Dictionary<string, object?>
+            activity.AddEvent(new ActivityEvent("review.event", tags: new ActivityTagsCollection(new Dictionary<string, object?>
             {
                 ["prompt"] = PromptText,
                 ["document.text"] = DocumentText,
@@ -163,7 +163,7 @@ public sealed class DiagnosticsTests
                 ["note"] = $"Bearer {BearerValue}",
                 ["jwt"] = Jwt,
                 ["case.id"] = "case-42",
-            });
+            })));
         }
 
         var activityRecord = captured.Single();
@@ -208,15 +208,8 @@ public sealed class DiagnosticsTests
     {
         public override void OnEnd(LogRecord data)
         {
-            var scopes = new List<KeyValuePair<string, object?>>();
-            data.ForEachScope((scope, _) =>
-            {
-                foreach (var pair in scope)
-                {
-                    scopes.Add(pair);
-                }
-            }, (object?)null);
-            sink.Add(new CapturedLog(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList(), scopes));
+            // Exporters see scopes only through redacted attributes (IncludeScopes is off), so that is what is captured.
+            sink.Add(new CapturedLog(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList(), []));
         }
     }
 

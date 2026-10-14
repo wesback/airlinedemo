@@ -58,8 +58,9 @@ public static class DiagnosticsSetup
         return services;
     }
 
-    // Redacts structured log attributes before any exporter sees them. Message text is not rewritten.
-    // Scope values reach exporters without passing through processors, so scopes are not exported at all.
+    // Redacts log attributes and scope values before any exporter sees them. Message text is not rewritten.
+    // Scopes are folded into the record's attributes so they pass through the same filter; exporting raw
+    // scopes would bypass it, so IncludeScopes stays off.
     public static OpenTelemetryLoggerOptions AddRedaction(this OpenTelemetryLoggerOptions options)
     {
         options.IncludeScopes = false;
@@ -75,24 +76,27 @@ public static class DiagnosticsSetup
     {
         public override void OnEnd(LogRecord data)
         {
-            if (data.Attributes is not { Count: > 0 } attributes)
+            var source = new List<KeyValuePair<string, object?>>();
+            if (data.Attributes is { } attributes)
             {
-                return;
+                source.AddRange(attributes);
             }
 
-            var redacted = RedactionFilter.RedactAttributes(attributes);
-            var changed = false;
-            for (var i = 0; i < attributes.Count; i++)
+            data.ForEachScope(static (scope, pairs) =>
             {
-                changed |= !Equals(attributes[i].Value, redacted[i].Value);
-            }
+                foreach (var pair in scope)
+                {
+                    pairs.Add(pair);
+                }
+            }, source);
 
-            if (!changed)
+            if (source.Count == 0)
             {
                 return;
             }
 
             // Re-render the message from the redacted values; the previously rendered text is never scanned.
+            var redacted = RedactionFilter.RedactAttributes(source);
             data.Attributes = redacted;
             data.FormattedMessage = RedactionFilter.RenderMessage(data.Body, redacted);
         }
@@ -104,16 +108,37 @@ public static class DiagnosticsSetup
         {
             foreach (var tag in data.TagObjects.ToList())
             {
-                var text = tag.Value?.ToString() ?? string.Empty;
-                var redacted = RedactionFilter.RedactValue(tag.Key, text) ?? string.Empty;
-                if (redacted != text)
+                if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
+                {
+                    data.SetTag(tag.Key, RedactionFilter.Redacted);
+                }
+                else if (!Equals(redacted, tag.Value))
                 {
                     data.SetTag(tag.Key, redacted);
                 }
             }
 
-            // Event tags are read-only once recorded (the SDK stores them as a linked list), so events are redacted
-            // when added, through RedactionFilter.AddRedactedEvent.
+            // Events recorded with Activity.AddEvent keep a reference to their tag collection, which stays mutable
+            // after recording, so event attributes are rewritten here, in the same pass as span tags.
+            foreach (var activityEvent in data.Events)
+            {
+                if (activityEvent.Tags is not ActivityTagsCollection eventTags)
+                {
+                    continue;
+                }
+
+                foreach (var tag in eventTags.ToList())
+                {
+                    if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
+                    {
+                        eventTags[tag.Key] = RedactionFilter.Redacted;
+                    }
+                    else if (!Equals(redacted, tag.Value))
+                    {
+                        eventTags[tag.Key] = redacted;
+                    }
+                }
+            }
         }
     }
 }
