@@ -1,0 +1,288 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 157,
+  "branch": "ai-sdlc/issue-157",
+  "commitSha": "b39499ae8c98e10b1d644d8f0a8e256a9d3df6a1",
+  "round": 0,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The final issue clarification requires structural witness validation followed by internal review for every gap claim. The router still creates requests automatically, and the validator still uses wording rules to accept or downgrade claims.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Policy/FindingRouter.cs",
+          "line": 58,
+          "message": "Supported MissingRequirement claims still create requests automatically. Route them to internal review so a person can confirm before a request is made.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After coverage and uncertainty checks, Route returns Request whenever any claim is MissingRequirement and supported. It does not route that claim to internal review.",
+            "failureScenario": "With complete coverage, a structurally valid MissingRequirement claim cites “R-42 is pending” and uses “R-42” as its typed value. ClaimValidator marks it Supported, and Route returns Request. The issue requires every gap claim to create an internal review task and no automatic request."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 139,
+          "message": "Missing-requirement validation still decides claim meaning from wording. Remove these keyword checks; a structurally valid claim must reach internal review regardless of whether its quote says the requirement is optional, waived, satisfied, or current.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "WitnessProblem uses negation, resolution, waiver, embedded-instruction, and open-gap keyword patterns to decide whether a MissingRequirement claim is supported.",
+            "failureScenario": "A valid current witness says “Requirement R-42 is optional.” with typed value “R-42.” The waiver and open-gap checks downgrade the claim based on wording, rather than preserving structural validation and routing the gap claim to internal review as required."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The witness and coverage checks are present, but the router still automatically creates a request for a supported missing-requirement claim, violating the added routing requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Policy/FindingRouter.cs",
+          "line": 61,
+          "message": "A supported MissingRequirement claim is routed directly to Request. Route these claims to internal review so a request requires a person's confirmation.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After coverage and uncertainty checks, Route returns FindingOutcome.Request whenever any claim is MissingRequirement and supported. It has no branch that sends a supported gap claim to internal review.",
+            "failureScenario": "With complete coverage and a structurally valid MissingRequirement claim whose typed value appears in a current witness, validation can mark the claim supported. Route then returns Request automatically, contrary to the added requirement that every such claim go to internal review and never create a request without a person's confirmation."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A structurally supported MissingRequirement claim can bypass human review and create a request automatically, contrary to the issue’s gap-claim routing requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Policy/FindingRouter.cs",
+          "line": 55,
+          "message": "Supported MissingRequirement claims create requests automatically. Route them to internal review; a person must confirm before a request can be created. OWASP A04:2025.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ClaimValidator can mark a MissingRequirement claim Supported when its typed value appears in a current witness and the quote matches the open-gap rules. FindingRouter then returns Request for any supported MissingRequirement claim.",
+            "failureScenario": "With complete coverage, an investigator submits a MissingRequirement claim whose typed value appears in a current, digest-valid quote stating that the requirement is pending. Validation marks it Supported and routing creates a request automatically, although the issue requires every structurally valid gap claim to go to internal review and only a person’s confirmation to lead to a request. OWASP A04:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ClaimValidationPolicyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
