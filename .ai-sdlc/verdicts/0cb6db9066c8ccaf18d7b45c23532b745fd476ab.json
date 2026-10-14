@@ -1,0 +1,276 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "0cb6db9066c8ccaf18d7b45c23532b745fd476ab",
+  "round": 2,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change redacts structured log values and trace attributes, but free-form scope text and some ordinary single-token values can still reach log providers. The connection-string test also does not verify the required log export.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 104,
+          "message": "Free-form scope text bypasses the redaction policy and can reach log providers unchanged.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "BeginScope converts non-structured scopes to strings and applies only ScrubText; structured scopes also use ScrubText(state.ToString()) for RedactedState.Message. ScrubText replaces bearer tokens and session cookies but does not redact free-form prompt or document text.",
+            "failureScenario": "When application code opens a scope with a prompt or document excerpt as a string, such as `BeginScope(\"Confidential lease clause\")`, the scope reaches the logging provider unchanged. This violates the requirement to keep raw prompts and document text out of every log (OWASP A09:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 41,
+          "message": "The filter allows arbitrary short text under ordinary property names, so logs are not limited to identifiers, states, counts, durations, and token usage.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Sanitize leaves short, single-token strings under nonsensitive property names unchanged unless they match a bearer-token or session-cookie pattern. Redact then forwards those values to the provider.",
+            "failureScenario": "If a caller logs a document excerpt such as `Confidential` under an ordinary name such as `answer`, the value has no whitespace and is under the length limit, so it reaches the provider unchanged. This violates the criterion that logs contain operational fields only and can expose raw document content (OWASP A09:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "Acceptance criterion 1 has no test verifying Application Insights log export when a connection string is configured.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "ConnectionStringIsReadFromConfigurationOnly checks for an ILoggerFactory and a TracerProvider when configured, but does not verify that an Application Insights log exporter is registered or receives logs.",
+            "failureScenario": "If Application Insights log export is removed while tracing remains configured, the test still passes even though acceptance criterion 1 requires both logs and traces to be sent to Application Insights."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several redaction paths, but short values under unlisted property names and free-form messages or scopes can still expose content. The connection-string test does not verify the required export behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 33,
+          "message": "The filter does not restrict log fields to identifiers, states, counts, durations, and token usage; short values under unlisted names can pass through.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Sanitize redacts values for sensitive property names and free-form strings, but passes short, whitespace-free strings under other names through ScrubText. ScrubText only replaces bearer tokens and session cookies.",
+            "failureScenario": "A caller logs a short prompt such as \"renewal clause\" under an ordinary property name like `answer`. The value contains no whitespace or token pattern, so it reaches the provider, despite the requirement that logs carry only operational fields. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 131,
+          "message": "Free-form messages and non-structured scopes can carry raw prompt or document text to log providers.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The logger formats the original message and only applies ScrubText before sending it to the provider. BeginScope also applies only ScrubText to non-structured scope values. Neither path redacts ordinary prompt or document text.",
+            "failureScenario": "A caller logs `Prompt: confidential lease clause` as a plain message, or begins a scope with that text. It contains no bearer token or session cookie, so the provider receives it unchanged. This exposes raw content the criteria require kept out of logs. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 155,
+          "message": "Acceptance criterion 1 lacks a test that verifies Application Insights log and trace export when configured and console-only behavior without a connection string.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "ConnectionStringIsReadFromConfigurationOnly checks that ILoggerFactory resolves and that a TracerProvider exists when configured; it does not verify log or trace export, nor that the no-connection-string configuration is console-only.",
+            "failureScenario": "If Application Insights exporters are removed while those services still resolve, the test passes even though configured logs and traces are not sent to Application Insights. If another exporter is registered without a connection string, the test also passes despite the console-only requirement. Acceptance criterion 1 remains unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The filter redacts listed property names and bearer or session-cookie patterns, but raw content can still pass through unstructured messages, string scopes, and unlisted fields.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 27,
+          "message": "Unstructured messages and string scopes can bypass redaction and expose raw prompts or document text (OWASP A09:2025).",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Unstructured log messages and string scopes reach ScrubText, which only replaces bearer tokens and session cookies.",
+            "failureScenario": "A caller logs a prompt directly as a message, or puts it in a string scope. If it contains no bearer token or session cookie, ScrubText returns it unchanged and the provider can export the raw prompt. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 44,
+          "message": "The filter does not restrict log fields to operational data, so arbitrary unlisted values can be exported (OWASP A09:2025).",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "For unlisted property names, Sanitize passes short strings without whitespace to ScrubText; ordinary text without token or cookie patterns is unchanged.",
+            "failureScenario": "A caller logs a private value such as `query=confidential` or `query=secret`. The property name is not sensitive and the value is short, so it reaches the provider, contrary to the criterion limiting logs to operational fields. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
