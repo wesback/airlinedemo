@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Reflection.Emit;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Policy;
 using AirlineDemo.Api.Requests;
@@ -249,18 +251,82 @@ public class MockRequestDeliveryTests
     [Fact]
     public void Delivery_has_no_external_messaging_dependency()
     {
-        const System.Reflection.BindingFlags All = System.Reflection.BindingFlags.Instance
-            | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
-        var inboxType = typeof(MockRequestInbox);
+        const BindingFlags All = BindingFlags.Instance | BindingFlags.Static
+            | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+        var apiAssembly = typeof(MockRequestInbox).Assembly;
+        var roots = new[] { typeof(MockRequestInbox), typeof(MockDeliveryPolicy), typeof(MockRequestTemplate) }
+            .SelectMany(t => t.GetMembers(All).OfType<MethodBase>());
 
-        var referenced = inboxType.GetFields(All).Select(f => f.FieldType)
-            .Concat(inboxType.GetConstructors(All).SelectMany(c => c.GetParameters()).Select(p => p.ParameterType))
-            .Concat(inboxType.GetMethods(All).SelectMany(m => m.GetParameters().Select(p => p.ParameterType).Append(m.ReturnType)));
+        var seen = new HashSet<MethodBase>();
+        var pending = new Queue<MethodBase>();
+        foreach (var root in roots)
+        {
+            if (seen.Add(root)) pending.Enqueue(root);
+        }
 
-        Assert.All(referenced, t => Assert.False(t.Namespace?.StartsWith("System.Net", StringComparison.Ordinal) ?? false, t.FullName));
+        Assert.Contains(seen, m => m.Name == nameof(MockRequestInbox.Submit));
+
+        while (pending.Count > 0)
+        {
+            var method = pending.Dequeue();
+            foreach (var callee in CalledMethods(method))
+            {
+                var owner = callee.DeclaringType;
+                Assert.False(owner?.Namespace?.StartsWith("System.Net", StringComparison.Ordinal) ?? false,
+                    $"{method.DeclaringType?.FullName}.{method.Name} calls {owner?.FullName}.{callee.Name}");
+                if (owner?.Assembly == apiAssembly && seen.Add(callee)) pending.Enqueue(callee);
+            }
+        }
 
         var result = new MockRequestInbox().Submit(Env(), Gap(), ScenarioTime);
         Assert.Equal(DeliveryOutcome.Delivered, result.Outcome);
+    }
+
+    private static readonly Dictionary<int, OpCode> OpCodeByValue = typeof(OpCodes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Select(f => (OpCode)f.GetValue(null)!)
+        .ToDictionary(op => (int)(ushort)op.Value);
+
+    /// <summary>Decodes the IL of <paramref name="method"/> and returns every method it references by token.</summary>
+    private static IEnumerable<MethodBase> CalledMethods(MethodBase method)
+    {
+        var il = method.GetMethodBody()?.GetILAsByteArray();
+        if (il is null) yield break;
+
+        var i = 0;
+        while (i < il.Length)
+        {
+            int code = il[i++];
+            if (code == 0xFE) code = 0xFE00 | il[i++];
+            var op = OpCodeByValue[code];
+            switch (op.OperandType)
+            {
+                case OperandType.InlineMethod:
+                    yield return method.Module.ResolveMethod(BitConverter.ToInt32(il, i));
+                    i += 4;
+                    break;
+                case OperandType.InlineNone:
+                    break;
+                case OperandType.ShortInlineBrTarget:
+                case OperandType.ShortInlineI:
+                case OperandType.ShortInlineVar:
+                    i += 1;
+                    break;
+                case OperandType.InlineVar:
+                    i += 2;
+                    break;
+                case OperandType.InlineI8:
+                case OperandType.InlineR:
+                    i += 8;
+                    break;
+                case OperandType.InlineSwitch:
+                    i += 4 + 4 * BitConverter.ToInt32(il, i);
+                    break;
+                default:
+                    i += 4;
+                    break;
+            }
+        }
     }
 
     [Fact]
