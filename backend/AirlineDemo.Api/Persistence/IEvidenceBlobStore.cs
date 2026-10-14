@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -41,26 +42,42 @@ public abstract class EvidenceBlobStoreBase(IEvidenceBlobContainer container) : 
 
         var sha = ComputeSha256(content);
         var prefix = documentId + "/";
+        var claimPrefix = prefix + "claims/";
         for (var attempt = 0; attempt < MaxAttempts; attempt++)
         {
-            var existing = (await container.ListNamesAsync(prefix, cancellationToken))
-                .Select(name => ParseName(prefix, name))
-                .OfType<EvidenceBlobVersion>()
-                .ToList();
+            var names = await container.ListNamesAsync(prefix, cancellationToken);
+            var stored = names.Select(name => ParseName(prefix, name)).OfType<EvidenceBlobVersion>().ToList();
+            var claimed = names.Select(name => ParseClaimVersion(claimPrefix, name)).OfType<int>().ToList();
 
-            var match = existing.Where(v => v.Sha256 == sha).OrderBy(v => v.Version).FirstOrDefault();
+            var match = stored.Where(v => v.Sha256 == sha).OrderBy(v => v.Version).FirstOrDefault();
             if (match is not null)
             {
                 return match;
             }
 
-            var next = existing.Count == 0 ? 1 : existing.Max(v => v.Version) + 1;
-            var name = prefix + $"v{next}-{sha}";
-            if (await container.TryCreateAsync(name, content, cancellationToken))
+            // A claim without a content blob belongs to a writer still in progress; adopt it when it holds this digest.
+            foreach (var version in claimed.Except(stored.Select(v => v.Version)).OrderBy(v => v))
             {
-                return new EvidenceBlobVersion(name, sha, next);
+                if (await ReadClaimAsync(claimPrefix, version, cancellationToken) == sha)
+                {
+                    var adopted = prefix + $"v{version}-{sha}";
+                    await container.TryCreateAsync(adopted, content, cancellationToken);
+                    return new EvidenceBlobVersion(adopted, sha, version);
+                }
             }
-            // Another writer took this version first; list again and retry.
+
+            // Each version number is claimed by creating a claim blob, which is unique per document, so two
+            // different documents can never receive the same version.
+            var next = stored.Select(v => v.Version).Concat(claimed).DefaultIfEmpty(0).Max() + 1;
+            if (!await container.TryCreateAsync(claimPrefix + $"v{next}", Encoding.UTF8.GetBytes(sha), cancellationToken))
+            {
+                // Another writer claimed this version first; list again and retry.
+                continue;
+            }
+
+            var name = prefix + $"v{next}-{sha}";
+            await container.TryCreateAsync(name, content, cancellationToken);
+            return new EvidenceBlobVersion(name, sha, next);
         }
 
         throw new InvalidOperationException("Could not allocate an evidence version after repeated conflicts.");
@@ -91,6 +108,24 @@ public abstract class EvidenceBlobStoreBase(IEvidenceBlobContainer container) : 
         }
 
         return content;
+    }
+
+    // Claim blobs are named "{documentId}/claims/v{version}" and hold the digest of the writer that claimed it.
+    private async Task<string?> ReadClaimAsync(string claimPrefix, int version, CancellationToken cancellationToken)
+    {
+        var bytes = await container.DownloadAsync(claimPrefix + $"v{version}", cancellationToken);
+        return bytes is null ? null : Encoding.UTF8.GetString(bytes);
+    }
+
+    private static int? ParseClaimVersion(string claimPrefix, string name)
+    {
+        if (!name.StartsWith(claimPrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var rest = name[claimPrefix.Length..];
+        return rest.StartsWith('v') && int.TryParse(rest[1..], out var version) && version >= 1 ? version : null;
     }
 
     // Blob names have the form "{documentId}/v{version}-{sha256}".

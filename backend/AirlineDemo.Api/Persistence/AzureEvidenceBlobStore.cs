@@ -24,8 +24,16 @@ public sealed class AzureEvidenceBlobStore(IEvidenceBlobContainer container) : E
             throw new ArgumentException("Expected an https container URI.", nameof(containerUri));
         }
 
-        var client = new BlobContainerClient(uri, new DefaultAzureCredential());
-        return new AzureEvidenceBlobStore(new BlobEvidenceContainer(client));
+        if (uri.Query.Length > 0)
+        {
+            throw new ArgumentException("Container URI must not carry a query string; SAS tokens are not accepted.", nameof(containerUri));
+        }
+
+        return new AzureEvidenceBlobStore(new BlobContainerClient(uri, new DefaultAzureCredential()));
+    }
+
+    public AzureEvidenceBlobStore(BlobContainerClient client) : this(new BlobEvidenceContainer(client))
+    {
     }
 }
 
