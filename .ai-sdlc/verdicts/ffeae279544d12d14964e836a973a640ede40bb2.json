@@ -1,0 +1,340 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "ffeae279544d12d14964e836a973a640ede40bb2",
+  "round": 2,
+  "pipelineVersion": "1f5e120",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Scope capture is disabled, so safe scope metadata is lost. The required TelemetryPrivacyTests.cs is also absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 55,
+          "message": "Disabling scope capture prevents the processor from preserving safe scope metadata as AC-02 requires.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AddRedaction sets IncludeScopes to false. The OpenTelemetry logger then does not attach a scope provider to LogRecord, so RedactingLogProcessor.OnEnd's ForEachScope call receives no scope values to filter.",
+            "failureScenario": "When a log call runs inside a scope containing safe metadata such as case.id, the metadata is omitted from exported logs, contrary to AC-02."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "AC-06 requires both DiagnosticsTests.cs and TelemetryPrivacyTests.cs; the latter is missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The change adds DiagnosticsTests.cs but does not add the explicitly required TelemetryPrivacyTests.cs or its named AC-02, AC-03, and AC-04 tests.",
+            "failureScenario": "The test suite can pass without running the required TelemetryPrivacyTests, leaving the acceptance criterion's required privacy regression coverage absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The exporter registration checks and direct Activity.AddEvent assertions are present. The logging test does not prove safe scope metadata survives, and the required TelemetryPrivacyTests.cs suite is absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 115,
+          "message": "The logging pipeline test does not verify that scopes are filtered while safe scope metadata is preserved, as required by AC-02.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test gathers scopes from CapturedLog.Scopes, but CaptureLogs constructs each CapturedLog with an empty scope list. Its safe-metadata assertion can pass from the unscoped log that already contains case.id=case-42.",
+            "failureScenario": "If scope enumeration or preservation is removed, the assertions still pass: scope values are never captured, and the passcode and cookie canaries also appear in unscoped logs. Safe scope metadata such as case.id would be lost, contrary to AC-02."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "AC-06 requires both DiagnosticsTests.cs and TelemetryPrivacyTests.cs; the latter and its named tests are missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff adds DiagnosticsTests.cs but does not add the TelemetryPrivacyTests.cs explicitly required by AC-06, including its named bearer/JWT/cookie-shape and configured-pipeline canary tests.",
+            "failureScenario": "The repository test command can pass without running the required TelemetryPrivacyTests suite, so AC-06's required test file and its specified regression checks are absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation drops safe scope metadata because it disables scope capture. The required TelemetryPrivacyTests.cs is also absent, leaving several acceptance criteria without their specified tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 63,
+          "message": "Disabling scope capture drops safe scope metadata instead of filtering sensitive scope entries and preserving the rest, contrary to AC-02.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AddRedaction sets IncludeScopes to false before the processor enumerates scopes with ForEachScope.",
+            "failureScenario": "When a caller logs inside a scope containing safe metadata such as case.id, the scope is not captured for the processor to filter, so the metadata is absent from exported logs despite AC-02 requiring it to be preserved."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "The required TelemetryPrivacyTests.cs and its criterion-specific tests are missing, leaving AC-02, AC-03, AC-04, and AC-06 without the named test coverage.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The change adds DiagnosticsTests.cs but no TelemetryPrivacyTests.cs; the tests also lack the criterion identifiers or names required to map them to the issue’s listed tests.",
+            "failureScenario": "The repository test command can pass without running the required TelemetryPrivacyTests checks for AC-02, AC-03, AC-04, and AC-06, so regressions in those specified behaviors are not covered by the required tests."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 137,
+      "total": 169,
+      "percent": 81.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "covered": 77,
+          "total": 97,
+          "missed": [
+            86,
+            87,
+            88,
+            89,
+            90,
+            91,
+            95,
+            96,
+            97,
+            98,
+            101,
+            102,
+            119,
+            120,
+            121,
+            133,
+            134,
+            140,
+            141,
+            142
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 59,
+          "total": 71,
+          "missed": [
+            41,
+            42,
+            62,
+            63,
+            82,
+            83,
+            117,
+            118,
+            123,
+            124,
+            126,
+            127
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
