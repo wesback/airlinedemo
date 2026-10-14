@@ -26,16 +26,18 @@ export type ActivityItem = {
   outcome: string;
   traceUrl: string | null;
 };
-export type DashboardData = { capabilities: Capability[]; activity: ActivityItem[] };
+export type QueueItem = { id: string; name: string; label: string };
+export type DashboardData = { capabilities: Capability[]; queue: QueueItem[]; activity: ActivityItem[] };
 
 export function safeLabel(label: unknown): string {
   return typeof label === 'string' && (KNOWN_LABELS as readonly string[]).includes(label) ? label : 'Unknown';
 }
 
-// Only same-origin relative paths are linkable; anything else (javascript:, data:, //host) is dropped.
+// Only same-origin relative paths are linkable; anything else (javascript:, data:, //host, /\host) is dropped.
+// Browsers strip tabs and newlines from URLs, so those are rejected too (e.g. "/\t/host").
 export function safeHref(url: string | null | undefined): string | null {
   if (typeof url !== 'string') return null;
-  return /^\/(?!\/)/.test(url) ? url : null;
+  return /^\/(?![/\\])/.test(url) && !/[\\\t\n\r]/.test(url) ? url : null;
 }
 
 type Props = {
@@ -90,6 +92,17 @@ export default function CapabilityDashboard({ data, onDecision }: Props) {
             </article>
           );
         })}
+      </section>
+
+      <section aria-labelledby="queue-heading">
+        <h2 id="queue-heading">Queue</h2>
+        <ul>
+          {data.queue.map((item) => (
+            <li key={item.id}>
+              <span>{safeLabel(item.label)}</span> {item.name}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section aria-labelledby="activity-heading">

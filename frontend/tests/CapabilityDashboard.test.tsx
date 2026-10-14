@@ -50,6 +50,7 @@ const baseData = (): DashboardData => ({
     },
     design('transition-planning', 'Transition planning'),
   ],
+  queue: [{ id: 'finding-1', name: 'Finding 1', label: 'Human decision' }],
   activity: [
     { sequence: 2, actor: 'reviewer', label: 'Human decision', outcome: 'accepted', traceUrl: null },
     { sequence: 1, actor: 'agent', label: 'AI agent', outcome: 'found', traceUrl: '/api/runs/run-1/trace' },
@@ -73,6 +74,30 @@ describe('capability labels', () => {
     render(<CapabilityDashboard data={data} />);
 
     expect(screen.getAllByText('Unknown', { selector: 'span' })).toHaveLength(2);
+    expect(screen.queryByRole('link', { name: 'Trace' })).toBeNull();
+  });
+
+  it('labels every queue item with its backend label, or Unknown when unrecognized', () => {
+    const data = baseData();
+    data.queue = [
+      { id: 'finding-1', name: 'Finding 1', label: 'Human decision' },
+      { id: 'finding-2', name: 'Finding 2', label: 'Robot' },
+    ];
+    render(<CapabilityDashboard data={data} />);
+
+    const queue = screen.getByRole('region', { name: 'Queue' });
+    expect(within(queue).getByText('Human decision', { selector: 'span' })).toBeTruthy();
+    expect(within(queue).getByText('Unknown', { selector: 'span' })).toBeTruthy();
+    expect(within(queue).queryByRole('link')).toBeNull();
+  });
+
+  it('drops backslash and tab/newline-smuggled protocol-relative URLs', () => {
+    const data = baseData();
+    data.activity[1].traceUrl = '/\\evil.example/x';
+    data.capabilities[0].evidence = [{ label: 'Evidence', url: '/\t/evil.example/x' }];
+    render(<CapabilityDashboard data={data} />);
+
+    expect(screen.queryByRole('link', { name: 'Evidence' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Trace' })).toBeNull();
   });
 

@@ -1,4 +1,6 @@
 using AirlineDemo.Api.Dashboard;
+using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Reviews;
 using Xunit;
 
 namespace AirlineDemo.Api.Tests;
@@ -87,6 +89,25 @@ public sealed class CapabilityProjectionTests
 
         Assert.Equal(new[] { "accept", "reject" }, card.Actions.Select(a => a.Id));
         Assert.Equal(2, card.OpenItems);
+    }
+
+    [Fact]
+    public void ForgedDecisionFromNonReviewerRoleIsRejectedByBackend()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"capability-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new CaseStateStore(path);
+            var result = TechnicalReviewPolicy.Decide(store, [], "records-analyst", "forged-actor", "case-a",
+                new TechnicalReviewCommand(1, 0, "accept", null), "trace-1");
+
+            Assert.Equal(TechnicalReviewOutcome.Forbidden, result.Outcome);
+            Assert.Null(result.Decision);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 
     [Fact]
