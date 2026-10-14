@@ -1,9 +1,11 @@
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddAirlineDiagnostics();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<DemoSessionStore>();
 builder.Services.AddSingleton<PasscodeThrottle>();
