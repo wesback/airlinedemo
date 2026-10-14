@@ -286,6 +286,10 @@ public class MockRequestDeliveryTests
                     $"{method.DeclaringType?.FullName}.{method.Name} calls {owner?.FullName}.{callee.Name} in {ownerAssembly}");
                 Assert.False(IsNativeOrBodylessApiMethod(callee, apiAssembly),
                     $"{method.DeclaringType?.FullName}.{method.Name} calls native or bodyless {owner?.FullName}.{callee.Name}");
+                Assert.False(IsReflectiveOrDynamicInvocation(callee),
+                    $"{method.DeclaringType?.FullName}.{method.Name} uses reflective or dynamic invocation via {owner?.FullName}.{callee.Name}");
+                Assert.False(IsUnresolvedApiDispatch(callee, apiAssembly),
+                    $"{method.DeclaringType?.FullName}.{method.Name} dispatches to API interface/abstract {owner?.FullName}.{callee.Name}; its implementations are not visible to the IL walk");
                 if (owner?.Assembly == apiAssembly && seen.Add(callee)) pending.Enqueue(callee);
             }
         }
@@ -315,6 +319,44 @@ public class MockRequestDeliveryTests
             && !method.IsAbstract
             && method.GetMethodBody() is null;
     }
+
+    private interface IFakeSender { void Send(string message); }
+
+    [Fact]
+    public void No_external_messaging_guards_flag_reflection_and_interface_dispatch()
+    {
+        var testAssembly = typeof(MockRequestDeliveryTests).Assembly;
+
+        Assert.True(IsReflectiveOrDynamicInvocation(typeof(MethodBase).GetMethod(nameof(MethodBase.Invoke), new[] { typeof(object), typeof(object[]) })!));
+        Assert.True(IsReflectiveOrDynamicInvocation(typeof(Activator).GetMethod(nameof(Activator.CreateInstance), Type.EmptyTypes)!));
+        Assert.True(IsReflectiveOrDynamicInvocation(typeof(Delegate).GetMethod(nameof(Delegate.DynamicInvoke))!));
+        Assert.False(IsReflectiveOrDynamicInvocation(typeof(string).GetMethod(nameof(string.Trim), Type.EmptyTypes)!));
+
+        var send = typeof(IFakeSender).GetMethod(nameof(IFakeSender.Send))!;
+        Assert.True(IsUnresolvedApiDispatch(send, testAssembly));
+        Assert.False(IsUnresolvedApiDispatch(send, typeof(MockRequestInbox).Assembly));
+    }
+
+    /// <summary>True for calls that can invoke arbitrary code without a visible call edge: reflection, Activator, dynamic delegate invocation, and marshalled function pointers.</summary>
+    private static bool IsReflectiveOrDynamicInvocation(MethodBase callee)
+    {
+        var owner = callee.DeclaringType;
+        if (owner is null) return false;
+        var ns = owner.Namespace ?? string.Empty;
+        return ns == "System.Reflection" || ns.StartsWith("System.Reflection.", StringComparison.Ordinal)
+            || owner == typeof(System.Runtime.InteropServices.Marshal)
+            || owner == typeof(System.Runtime.InteropServices.NativeLibrary)
+            || ns == "System.Runtime.Loader"
+            || owner == typeof(Type) || owner.IsSubclassOf(typeof(Type))
+            || owner == typeof(Activator)
+            || owner == typeof(AppDomain)
+            || (typeof(Delegate).IsAssignableFrom(owner) && callee.Name is "DynamicInvoke" or "CreateDelegate");
+    }
+
+    /// <summary>True for calls through API-defined interfaces or abstract methods: the concrete target is chosen at runtime, so the IL walk would not see it.</summary>
+    private static bool IsUnresolvedApiDispatch(MethodBase callee, Assembly apiAssembly) =>
+        callee.DeclaringType?.Assembly == apiAssembly
+        && (callee.DeclaringType.IsInterface || callee.IsAbstract);
 
     /// <summary>Decodes the IL of <paramref name="method"/> and returns every method it references by token.</summary>
     private static IEnumerable<MethodBase> CalledMethods(MethodBase method)
