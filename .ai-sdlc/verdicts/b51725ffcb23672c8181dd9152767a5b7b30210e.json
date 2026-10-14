@@ -1,0 +1,370 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "b51725ffcb23672c8181dd9152767a5b7b30210e",
+  "round": 0,
+  "pipelineVersion": "53a15c1",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The filter misses required trace event attributes and credential shapes, and it applies content-based redaction beyond the stated policy. The setup test also does not detect removal of either exporter registration.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 210,
+          "message": "Activity event attributes bypass redaction and can expose raw prompt or document text.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd sanitizes Activity.TagObjects but never inspects Activity.Events or their tags before the activity reaches the exporter.",
+            "failureScenario": "If instrumentation adds a prompt or document excerpt to an ActivityEvent attribute, the processor leaves it unchanged and the exporter can send it out of the process. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 33,
+          "message": "JWTs and __Host- cookie pairs are not redacted, despite being explicitly required value shapes.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ScrubText handles bearer tokens and a limited session-cookie regex, but has no JWT matcher and the cookie regex does not match names beginning with __Host-.",
+            "failureScenario": "A log or trace attribute named `state` contains a JWT or `__Host-session=abc123`. The value passes through FreeText and ScrubText unchanged, so it can reach the provider or exporter. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 67,
+          "message": "The filter redacts ordinary free text and unlisted fields, contrary to the requirement to redact only named properties and the specified value shapes.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "FreeText redacts any operational string containing whitespace, while Sanitize also redacts values under unlisted names; both add content-based filtering beyond the named properties and specified credential shapes.",
+            "failureScenario": "A log call records the valid operational state `awaiting review`; the filter replaces it with `[redacted]`. This violates the criterion that the filter not judge free text and leaves that restriction to logging code."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 221,
+          "message": "The configuration test does not verify Application Insights exporter registration separately for logs and traces.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "ConnectionStringIsReadFromConfigurationOnly checks for an OpenTelemetry logger provider and a TracerProvider, but those can exist without their respective Application Insights exporters.",
+            "failureScenario": "If either exporter registration is removed while the provider remains registered, the test still passes, despite the criterion requiring separate checks that logging and tracing each register an exporter when configured."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change does not redact ActivityEvent attributes and its value-shape handling differs from the specified JWT and cookie patterns. It also redacts free text contrary to criterion 3, and the setup test does not prove both exporter registrations.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 51,
+          "message": "The filter redacts free text and unlisted fields, beyond the name and value shapes specified in acceptance criterion 3.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Sanitize redacts values under every non-operational property name, and FreeText redacts operational strings containing whitespace. LiteralText also redacts free-form messages.",
+            "failureScenario": "When a caller logs a valid operational state such as `state=\"awaiting review\"`, the filter replaces it with `[redacted]`. This violates acceptance criterion 3, which says the filter must not judge free text."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 207,
+          "message": "Activity event attributes bypass redaction, so sensitive values can reach the trace exporter.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd sanitizes Activity.TagObjects but does not inspect Activity.Events or their tags before the activity reaches the exporter.",
+            "failureScenario": "If instrumentation adds a prompt to an ActivityEvent tag, the processor leaves it unchanged and the exporter can send it out of the process, contrary to acceptance criterion 2. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 34,
+          "message": "The value-shape redaction does not match the specified JWT and cookie shapes.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ScrubText matches bearer tokens and selected cookie names, but has no matcher for standalone JWTs or cookies whose names start with `__Host-`. It also matches names such as `session` that are outside the specified cookie shapes.",
+            "failureScenario": "A trace attribute with an ordinary name and value `eyJhbGci.abc.def`, or `__Host-session=abc123`, passes through unchanged. Conversely, `session=abc123` is redacted despite not matching the specified cookie-name prefixes. This violates acceptance criterion 2."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 221,
+          "message": "Acceptance criterion 1 lacks a test that independently verifies both Application Insights exporter registrations.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "ConnectionStringIsReadFromConfigurationOnly checks for an OpenTelemetry logger provider and a TracerProvider, plus the configured options value; it does not inspect the log and trace exporter registrations separately.",
+            "failureScenario": "If either Application Insights exporter registration is removed while the logger provider, TracerProvider, and options remain, the test still passes, despite acceptance criterion 1 requiring the test to fail when either registration is removed."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The filter leaves ActivityEvent tags outside its trace sanitization path. It also misses two required secret shapes, allowing standalone JWTs and `__Host-` cookies to reach telemetry when logged under operational names.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 210,
+          "message": "Activity event attributes bypass redaction and can expose prompt or document content (OWASP A09:2025).",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd sanitizes Activity.TagObjects but never inspects Activity.Events or their tags before the activity reaches the exporter.",
+            "failureScenario": "Instrumentation adds an ActivityEvent tag named `prompt` with a document excerpt. The tag is left unchanged, and the Application Insights exporter can send the excerpt out of the process. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 32,
+          "message": "Required JWT and `__Host-` cookie shapes can pass through unchanged in operational fields (OWASP A09:2025).",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Operational values pass through FreeText to ScrubText. ScrubText has no standalone JWT matcher, and SessionCookie does not match cookie names beginning `__Host-`.",
+            "failureScenario": "A caller logs a standalone JWT or `__Host-session=abc123` under an operational field such as `state`. Neither value contains whitespace; neither matches the implemented scrub patterns, so it reaches the log provider unchanged. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 122,
+      "total": 130,
+      "percent": 93.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "covered": 14,
+          "total": 14,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 107,
+          "total": 115,
+          "missed": [
+            154,
+            156,
+            160,
+            162,
+            169,
+            182,
+            192,
+            193
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
