@@ -33,9 +33,12 @@ public sealed class DiagnosticsTests
 
         using var provider = services.BuildServiceProvider();
         var registration = provider.GetRequiredService<DiagnosticsSetup.ExporterRegistration>();
+        // Exporter options run when the logger and tracer providers are built, so resolve both first.
+        _ = provider.GetRequiredService<ILoggerFactory>();
+        _ = provider.GetRequiredService<TracerProvider>();
 
-        Assert.True(registration.Logs);
-        Assert.True(registration.Traces);
+        Assert.True(registration.Logs, "Log exporter was not registered.");
+        Assert.True(registration.Traces, "Trace exporter was not registered.");
     }
 
     [Fact]
@@ -85,10 +88,11 @@ public sealed class DiagnosticsTests
     [Fact]
     public void Log_pipeline_removes_sentinels_from_structured_properties()
     {
-        var captured = new List<List<KeyValuePair<string, object?>>>();
+        var captured = new List<CapturedLog>();
         var services = new ServiceCollection();
         services.AddLogging(logging => logging.AddOpenTelemetry(o =>
         {
+            o.IncludeFormattedMessage = true;
             o.AddRedaction();
             o.AddProcessor(new CaptureLogs(captured));
         }));
@@ -101,7 +105,9 @@ public sealed class DiagnosticsTests
             "Attempt {Passcode} cookie {Cookie} bearer {Auth} jwt {Jwt} prompt {Prompt} doc {Document}",
             Passcode, CookieValue, $"Bearer {BearerValue}", Jwt, PromptText, DocumentText);
 
-        var output = string.Join("\n", captured.SelectMany(r => r.Select(a => $"{a.Key}={a.Value}")));
+        var attributes = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")));
+        var messages = string.Join("\n", captured.Select(r => r.Message));
+        var output = attributes + "\n" + messages;
 
         Assert.DoesNotContain(Passcode, output);
         Assert.DoesNotContain(CookieValue, output);
@@ -109,8 +115,10 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain("xyzabc12", output);
         Assert.DoesNotContain(PromptText, output);
         Assert.DoesNotContain(DocumentText, output);
-        Assert.Contains("case-42", output);
-        Assert.Contains("approved", output);
+        Assert.Contains("case-42", attributes);
+        Assert.Contains("approved", attributes);
+        Assert.Contains("case-42", messages);
+        Assert.Contains("approved", messages);
     }
 
     [Fact]
@@ -143,11 +151,13 @@ public sealed class DiagnosticsTests
         Assert.Contains("case.id=case-42", output);
     }
 
-    // LogRecord instances are pooled by the SDK, so snapshot the attributes during OnEnd.
-    private sealed class CaptureLogs(List<List<KeyValuePair<string, object?>>> sink) : BaseProcessor<LogRecord>
+    // LogRecord instances are pooled by the SDK, so snapshot the attributes and rendered message during OnEnd.
+    private sealed record CapturedLog(string Message, List<KeyValuePair<string, object?>> Attributes);
+
+    private sealed class CaptureLogs(List<CapturedLog> sink) : BaseProcessor<LogRecord>
     {
         public override void OnEnd(LogRecord data) =>
-            sink.Add((data.Attributes ?? []).ToList());
+            sink.Add(new CapturedLog(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList()));
     }
 
     private sealed class CaptureActivities(List<Activity> sink) : BaseProcessor<Activity>

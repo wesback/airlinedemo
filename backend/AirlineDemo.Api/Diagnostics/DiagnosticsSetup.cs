@@ -14,8 +14,13 @@ public static class DiagnosticsSetup
 {
     public const string ConnectionStringSetting = "APPLICATIONINSIGHTS_CONNECTION_STRING";
 
-    // Marker recording which exporters were registered; lets tests verify the DI wiring without Azure access.
-    public sealed record ExporterRegistration(bool Logs, bool Traces);
+    // Records which exporters were actually attached. Flags are set inside the exporter configuration
+    // callbacks, so they become true only when the logger/tracer providers are built.
+    public sealed class ExporterRegistration
+    {
+        public bool Logs { get; internal set; }
+        public bool Traces { get; internal set; }
+    }
 
     public static IServiceCollection AddAirlineDiagnostics(this IServiceCollection services, IConfiguration configuration)
     {
@@ -25,19 +30,29 @@ public static class DiagnosticsSetup
             return services;
         }
 
-        services.AddSingleton(new ExporterRegistration(Logs: true, Traces: true));
+        var registration = new ExporterRegistration();
+        services.AddSingleton(registration);
 
         services.AddLogging(logging => logging.AddOpenTelemetry(logs =>
         {
             logs.AddRedaction();
-            logs.AddAzureMonitorLogExporter(o => o.ConnectionString = connectionString);
+            logs.AddAzureMonitorLogExporter(o =>
+            {
+                o.ConnectionString = connectionString;
+                registration.Logs = true;
+            });
         }));
 
         services.AddOpenTelemetry().WithTracing(tracing =>
         {
             tracing.AddSource(TelemetryRedaction.ServiceName);
+            // Processors run in registration order, so redaction must be added before the exporter.
             tracing.AddRedaction();
-            tracing.AddAzureMonitorTraceExporter(o => o.ConnectionString = connectionString);
+            tracing.AddAzureMonitorTraceExporter(o =>
+            {
+                o.ConnectionString = connectionString;
+                registration.Traces = true;
+            });
         });
 
         return services;
@@ -50,7 +65,7 @@ public static class DiagnosticsSetup
         return options;
     }
 
-    // Redacts trace tags before export.
+    // Redacts span tags and span event attributes before export.
     public static TracerProviderBuilder AddRedaction(this TracerProviderBuilder builder) =>
         builder.AddProcessor(new RedactingActivityProcessor());
 
@@ -63,7 +78,21 @@ public static class DiagnosticsSetup
                 return;
             }
 
-            data.Attributes = RedactionFilter.RedactAttributes(attributes);
+            var redacted = RedactionFilter.RedactAttributes(attributes);
+            var changed = false;
+            for (var i = 0; i < attributes.Count; i++)
+            {
+                changed |= !Equals(attributes[i].Value, redacted[i].Value);
+            }
+
+            if (!changed)
+            {
+                return;
+            }
+
+            // Re-render the message from the redacted values; the previously rendered text is never scanned.
+            data.Attributes = redacted;
+            data.FormattedMessage = RedactionFilter.RenderMessage(data.Body, redacted);
         }
     }
 
@@ -78,6 +107,25 @@ public static class DiagnosticsSetup
                 if (redacted != text)
                 {
                     data.SetTag(tag.Key, redacted);
+                }
+            }
+
+            // ActivityEvent exposes its tags read-only, but the SDK stores them in a mutable ActivityTagsCollection.
+            foreach (var activityEvent in data.Events)
+            {
+                if (activityEvent.Tags is not IDictionary<string, object?> tags)
+                {
+                    continue;
+                }
+
+                foreach (var tag in tags.ToList())
+                {
+                    var text = tag.Value?.ToString() ?? string.Empty;
+                    var redacted = RedactionFilter.RedactValue(tag.Key, text) ?? string.Empty;
+                    if (redacted != text)
+                    {
+                        tags[tag.Key] = redacted;
+                    }
                 }
             }
         }

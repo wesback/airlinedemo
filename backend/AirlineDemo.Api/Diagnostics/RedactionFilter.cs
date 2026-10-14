@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace AirlineDemo.Api.Diagnostics;
@@ -43,6 +44,29 @@ public static partial class RedactionFilter
 
         var scrubbed = BearerPattern().Replace(value, "bearer " + Redacted);
         return JwtPattern().Replace(scrubbed, Redacted);
+    }
+
+    [GeneratedRegex(@"\{([A-Za-z0-9_.\-]+)(?:[,:][^}]*)?\}")]
+    private static partial Regex PlaceholderPattern();
+
+    // Renders a message template from already-redacted attribute values, so the text never holds the raw values.
+    public static string? RenderMessage(string? template, IReadOnlyList<KeyValuePair<string, object?>> attributes)
+    {
+        if (template is null)
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in attributes)
+        {
+            values[key] = value;
+        }
+
+        return PlaceholderPattern().Replace(template, match =>
+            values.TryGetValue(match.Groups[1].Value, out var value)
+                ? Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+                : match.Value);
     }
 
     public static IReadOnlyList<KeyValuePair<string, object?>> RedactAttributes(
