@@ -6,7 +6,11 @@ using AirlineDemo.Api.Requests;
 
 namespace AirlineDemo.Api.Tests;
 
-/// <summary>Covers FR-003 / AC-002 (eligibility and approved wording), AC-005 (replay, conflict, atomicity) and AC-008.</summary>
+/// <summary>
+/// Covers FR-003 / AC-002 (eligibility and approved wording), AC-005 (replay, conflict, atomicity) and AC-008.
+/// Story criteria: AC-01 eligibility and baseline, AC-02 rejected-state outcomes, AC-03 event identity and atomicity,
+/// AC-04 no external dispatch. Each test is tagged with the criterion it verifies.
+/// </summary>
 public class MockRequestDeliveryTests
 {
     private const string Quote = "Return readiness is pending reserve approval.";
@@ -46,6 +50,7 @@ public class MockRequestDeliveryTests
         int basisVersion = BasisVersion) =>
         new(eventId, "case-1", reportId, BasisId, basisVersion, ScenarioTime, "Engine", "ENG-123", missing);
 
+    // AC-01: eligible gap delivers one request with approved wording; baseline creates none.
     [Fact]
     public void Clear_validated_gap_delivers_exactly_one_request_with_approved_wording()
     {
@@ -78,18 +83,20 @@ public class MockRequestDeliveryTests
         Assert.Empty(inbox.Audit);
     }
 
+    // AC-02: each rejected state asserts its exact outcome; the complete eligible Gap() fixture is the control.
     [Theory]
-    [InlineData("incomplete coverage")]
-    [InlineData("failed finding")]
-    [InlineData("stale basis")]
-    [InlineData("ambiguous identity")]
-    [InlineData("conflict")]
-    [InlineData("downgraded")]
-    [InlineData("two gaps")]
-    [InlineData("no supported claims")]
-    [InlineData("gap with unsupported claim")]
-    [InlineData("gap with baseline claim")]
-    public void Ambiguous_conflicting_incomplete_failed_unsupported_or_stale_findings_create_no_request(string scenario)
+    [InlineData("incomplete coverage", DeliveryOutcome.Blocked)]
+    [InlineData("failed finding", DeliveryOutcome.Blocked)]
+    [InlineData("stale basis", DeliveryOutcome.Review)]
+    [InlineData("ambiguous identity", DeliveryOutcome.Review)]
+    [InlineData("conflict", DeliveryOutcome.Review)]
+    [InlineData("downgraded", DeliveryOutcome.Review)]
+    [InlineData("two gaps", DeliveryOutcome.Review)]
+    [InlineData("no supported claims", DeliveryOutcome.Blocked)]
+    [InlineData("gap with unsupported claim", DeliveryOutcome.Review)]
+    [InlineData("gap with baseline claim", DeliveryOutcome.Review)]
+    public void Ambiguous_conflicting_incomplete_failed_unsupported_or_stale_findings_create_no_request(
+        string scenario, DeliveryOutcome expected)
     {
         var inbox = new MockRequestInbox();
         var finding = scenario switch
@@ -104,17 +111,19 @@ public class MockRequestDeliveryTests
             "gap with unsupported claim" => Finding(
                 [Validated(ClaimKind.MissingRequirement), Validated(ClaimKind.Baseline, "Return readiness is cleared.")]),
             "gap with baseline claim" => Finding([Validated(ClaimKind.MissingRequirement), Validated(ClaimKind.Baseline)]),
-            _ => Finding([]),
+            "no supported claims" => Finding([]),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null),
         };
 
         var result = inbox.Submit(Env(), finding, ScenarioTime);
 
-        Assert.NotEqual(DeliveryOutcome.Delivered, result.Outcome);
+        Assert.Equal(expected, result.Outcome);
         Assert.Null(result.Receipt);
         Assert.Empty(inbox.Requests);
         Assert.Empty(inbox.Audit);
     }
 
+    // AC-03: exact replay returns the original receipt and leaves one request.
     [Fact]
     public void Exact_replay_returns_original_receipt_without_a_second_request()
     {
@@ -248,6 +257,7 @@ public class MockRequestDeliveryTests
         Assert.Single(inbox.Requests);
     }
 
+    // AC-04: delivery persists only through the in-memory mock inbox; no external dispatch.
     [Fact]
     public void Delivery_has_no_external_messaging_dependency()
     {

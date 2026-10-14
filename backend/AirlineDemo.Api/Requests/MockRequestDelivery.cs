@@ -81,7 +81,7 @@ public static class MockDeliveryPolicy
 
         if (envelope.BasisId != finding.CurrentBasisId || envelope.BasisVersion != finding.CurrentBasisVersion)
         {
-            return new DeliveryDecision(DeliveryDecisionKind.Blocked, "stale evidence basis");
+            return new DeliveryDecision(DeliveryDecisionKind.Review, "stale evidence basis");
         }
 
         if (finding.IdentityAmbiguous)
@@ -117,7 +117,7 @@ public static class MockDeliveryPolicy
 
         return finding.Claims.Any(c => c.Status == ClaimStatus.Supported && c.Kind == ClaimKind.Baseline)
             ? new DeliveryDecision(DeliveryDecisionKind.CompleteBaseline, "evidence-linked baseline")
-            : new DeliveryDecision(DeliveryDecisionKind.Review, "zero eligible examples");
+            : new DeliveryDecision(DeliveryDecisionKind.Blocked, "unsupported finding state: no supported claims");
     }
 }
 
