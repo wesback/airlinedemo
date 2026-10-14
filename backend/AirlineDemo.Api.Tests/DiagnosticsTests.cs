@@ -86,13 +86,14 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void Log_pipeline_removes_sentinels_from_structured_properties()
+    public void Log_pipeline_removes_sentinels_from_structured_properties_and_scopes()
     {
         var captured = new List<CapturedLog>();
         var services = new ServiceCollection();
         services.AddLogging(logging => logging.AddOpenTelemetry(o =>
         {
             o.IncludeFormattedMessage = true;
+            o.IncludeScopes = true;
             o.AddRedaction();
             o.AddProcessor(new CaptureLogs(captured));
         }));
@@ -104,10 +105,21 @@ public sealed class DiagnosticsTests
         logger.LogInformation(
             "Attempt {Passcode} cookie {Cookie} bearer {Auth} jwt {Jwt} prompt {Prompt} doc {Document}",
             Passcode, CookieValue, $"Bearer {BearerValue}", Jwt, PromptText, DocumentText);
+        using (logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["passcode"] = Passcode,
+            ["__Host-session"] = CookieValue,
+            [".AspNetCore.Cookies"] = CookieValue,
+            ["case.id"] = "case-42",
+        }))
+        {
+            logger.LogInformation("Scoped event {State}", "approved");
+        }
 
         var attributes = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")));
+        var scopes = string.Join("\n", captured.SelectMany(r => r.Scopes.Select(a => $"{a.Key}={a.Value}")));
         var messages = string.Join("\n", captured.Select(r => r.Message));
-        var output = attributes + "\n" + messages;
+        var output = attributes + "\n" + scopes + "\n" + messages;
 
         Assert.DoesNotContain(Passcode, output);
         Assert.DoesNotContain(CookieValue, output);
@@ -122,7 +134,7 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void Trace_pipeline_removes_sentinels_from_tags()
+    public void Trace_pipeline_removes_sentinels_from_tags_and_event_attributes()
     {
         var captured = new List<Activity>();
         using var source = new ActivitySource(TelemetryRedaction.ServiceName);
@@ -138,26 +150,53 @@ public sealed class DiagnosticsTests
             activity.SetTag("passcode", Passcode);
             activity.SetTag("cookie", CookieValue);
             activity.SetTag("note", $"Bearer {BearerValue}");
+            activity.SetTag(".AspNetCore.Cookies", CookieValue);
+            activity.SetTag("__Host-session", CookieValue);
             activity.SetTag("case.id", "case-42");
+            activity.AddEvent(new ActivityEvent("review.event", tags: new ActivityTagsCollection
+            {
+                ["prompt"] = PromptText,
+                ["document.text"] = DocumentText,
+                ["passcode"] = Passcode,
+                ["cookie"] = CookieValue,
+                [".AspNetCore.Cookies"] = CookieValue,
+                ["note"] = $"Bearer {BearerValue}",
+                ["jwt"] = Jwt,
+                ["case.id"] = "case-42",
+            }));
         }
 
-        var tags = captured.Single().TagObjects.Select(t => $"{t.Key}={t.Value}").ToList();
-        var output = string.Join("\n", tags);
+        var activityRecord = captured.Single();
+        var tags = string.Join("\n", activityRecord.TagObjects.Select(t => $"{t.Key}={t.Value}"));
 
-        Assert.DoesNotContain(PromptText, output);
-        Assert.DoesNotContain(Passcode, output);
-        Assert.DoesNotContain(CookieValue, output);
-        Assert.DoesNotContain(BearerValue, output);
-        Assert.Contains("case.id=case-42", output);
+        Assert.DoesNotContain(PromptText, tags);
+        Assert.DoesNotContain(Passcode, tags);
+        Assert.DoesNotContain(CookieValue, tags);
+        Assert.DoesNotContain(BearerValue, tags);
+        Assert.Contains("case.id=case-42", tags);
+
     }
 
-    // LogRecord instances are pooled by the SDK, so snapshot the attributes and rendered message during OnEnd.
-    private sealed record CapturedLog(string Message, List<KeyValuePair<string, object?>> Attributes);
+    // LogRecord instances are pooled by the SDK, so snapshot the attributes, scopes and rendered message during OnEnd.
+    private sealed record CapturedLog(
+        string Message,
+        List<KeyValuePair<string, object?>> Attributes,
+        List<KeyValuePair<string, object?>> Scopes);
 
     private sealed class CaptureLogs(List<CapturedLog> sink) : BaseProcessor<LogRecord>
     {
-        public override void OnEnd(LogRecord data) =>
-            sink.Add(new CapturedLog(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList()));
+        public override void OnEnd(LogRecord data)
+        {
+            var scopes = new List<KeyValuePair<string, object?>>();
+            data.ForEachScope((scope, _) =>
+            {
+                foreach (var pair in scope)
+                {
+                    scopes.Add(pair);
+                }
+            }, (object?)null);
+            sink.Add(new CapturedLog(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList(), scopes));
+        }
     }
 
     private sealed class CaptureActivities(List<Activity> sink) : BaseProcessor<Activity>

@@ -59,8 +59,10 @@ public static class DiagnosticsSetup
     }
 
     // Redacts structured log attributes before any exporter sees them. Message text is not rewritten.
+    // Scope values reach exporters without passing through processors, so scopes are not exported at all.
     public static OpenTelemetryLoggerOptions AddRedaction(this OpenTelemetryLoggerOptions options)
     {
+        options.IncludeScopes = false;
         options.AddProcessor(new RedactingLogProcessor());
         return options;
     }
@@ -113,7 +115,7 @@ public static class DiagnosticsSetup
             // ActivityEvent exposes its tags read-only, but the SDK stores them in a mutable ActivityTagsCollection.
             foreach (var activityEvent in data.Events)
             {
-                if (activityEvent.Tags is not IDictionary<string, object?> tags)
+                if (activityEvent.Tags is not ActivityTagsCollection tags)
                 {
                     continue;
                 }
