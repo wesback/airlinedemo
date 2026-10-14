@@ -335,6 +335,10 @@ public class MockRequestDeliveryTests
         var send = typeof(IFakeSender).GetMethod(nameof(IFakeSender.Send))!;
         Assert.True(IsUnresolvedApiDispatch(send, testAssembly));
         Assert.False(IsUnresolvedApiDispatch(send, typeof(MockRequestInbox).Assembly));
+
+        var hashCode = typeof(object).GetMethod(nameof(GetHashCode), Type.EmptyTypes)!;
+        Assert.True(IsUnresolvedApiDispatch(hashCode, typeof(DeliveryEnvelope).Assembly));
+        Assert.False(IsUnresolvedApiDispatch(typeof(string).GetMethod(nameof(string.Trim), Type.EmptyTypes)!, typeof(DeliveryEnvelope).Assembly));
     }
 
     /// <summary>True for calls that can invoke arbitrary code without a visible call edge: reflection, Activator, dynamic delegate invocation, and marshalled function pointers.</summary>
@@ -353,10 +357,22 @@ public class MockRequestDeliveryTests
             || (typeof(Delegate).IsAssignableFrom(owner) && callee.Name is "DynamicInvoke" or "CreateDelegate");
     }
 
-    /// <summary>True for calls through API-defined interfaces or abstract methods: the concrete target is chosen at runtime, so the IL walk would not see it.</summary>
-    private static bool IsUnresolvedApiDispatch(MethodBase callee, Assembly apiAssembly) =>
-        callee.DeclaringType?.Assembly == apiAssembly
-        && (callee.DeclaringType.IsInterface || callee.IsAbstract);
+    /// <summary>True for calls whose concrete target is chosen at runtime (interface, abstract, or virtual dispatch) and that the IL walk therefore cannot see: API-declared interface/abstract/virtual methods, and any virtual method the API overrides.</summary>
+    private static bool IsUnresolvedApiDispatch(MethodBase callee, Assembly apiAssembly)
+    {
+        if (callee.DeclaringType?.Assembly == apiAssembly
+            && (callee.DeclaringType.IsInterface || callee.IsAbstract || callee.IsVirtual))
+            return true;
+        return callee is MethodInfo { IsVirtual: true } virtualMethod && OverriddenInApi(virtualMethod, apiAssembly);
+    }
+
+    /// <summary>True when some API type declares a virtual method whose base definition is <paramref name="method"/>'s base definition.</summary>
+    private static bool OverriddenInApi(MethodInfo method, Assembly apiAssembly)
+    {
+        var baseDefinition = method.GetBaseDefinition();
+        return apiAssembly.GetTypes().Any(t => t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .Any(m => m.IsVirtual && m.GetBaseDefinition().Equals(baseDefinition)));
+    }
 
     /// <summary>Decodes the IL of <paramref name="method"/> and returns every method it references by token.</summary>
     private static IEnumerable<MethodBase> CalledMethods(MethodBase method)
