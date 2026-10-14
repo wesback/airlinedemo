@@ -37,8 +37,8 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
-        // Without a drop to "nobody" the worker owns its working directory and could undo the read-only mode: fail closed.
-        if (OperatingSystem.IsLinux() && options.WorkerFileName is null && !DropsToNobody())
+        // Root bypasses the read-only mode of the working directory, so root without a drop to "nobody" fails closed.
+        if (CannotIsolateWorker(OperatingSystem.IsLinux(), options.WorkerFileName is not null, Environment.UserName, File.Exists(SetprivPath)))
         {
             return Retryable("worker cannot be isolated from its working directory; the document was not accepted, retry is possible");
         }
@@ -210,6 +210,10 @@ public static class IsolatedPdfParser
 
     /// <summary>True when the default Linux worker is started as root and can be switched to <see cref="NobodyUid"/>.</summary>
     internal static bool DropsToNobody() => Environment.UserName == "root" && File.Exists(SetprivPath);
+
+    /// <summary>True when the default Linux worker would run as root with no way to drop to <see cref="NobodyUid"/>.</summary>
+    internal static bool CannotIsolateWorker(bool linux, bool customWorker, string userName, bool setprivAvailable) =>
+        linux && !customWorker && userName == "root" && !setprivAvailable;
 
     /// <summary>Conventional uid/gid of the unprivileged "nobody" account the worker switches to when the API is root.</summary>
     private const int NobodyUid = 65534;
@@ -487,7 +491,7 @@ internal sealed class LinuxCgroup : IDisposable
 internal sealed class WindowsJobObject : IDisposable
 {
     private const int JobObjectExtendedLimitInformation = 9;
-    private const uint JobObjectLimitProcessMemory = 0x00000100;
+    internal const uint JobObjectLimitProcessMemory = 0x00000100;
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
 
     private readonly IntPtr handle;
@@ -495,6 +499,15 @@ internal sealed class WindowsJobObject : IDisposable
     private WindowsJobObject(IntPtr handle)
     {
         this.handle = handle;
+    }
+
+    /// <summary>Builds the extended limit structure: a per-process memory cap that kills the job on close.</summary>
+    internal static ExtendedLimits BuildLimits(long memoryLimitBytes)
+    {
+        var limits = new ExtendedLimits();
+        limits.Basic.LimitFlags = JobObjectLimitProcessMemory | JobObjectLimitKillOnJobClose;
+        limits.ProcessMemoryLimit = (nuint)memoryLimitBytes;
+        return limits;
     }
 
     /// <summary>Creates a job limited to <paramref name="memoryLimitBytes"/> per process and assigns the started child to it.</summary>
@@ -508,9 +521,7 @@ internal sealed class WindowsJobObject : IDisposable
         }
 
         var candidate = new WindowsJobObject(handle);
-        var limits = new ExtendedLimits();
-        limits.Basic.LimitFlags = JobObjectLimitProcessMemory | JobObjectLimitKillOnJobClose;
-        limits.ProcessMemoryLimit = (nuint)memoryLimitBytes;
+        var limits = BuildLimits(memoryLimitBytes);
 
         var size = Marshal.SizeOf<ExtendedLimits>();
         var buffer = Marshal.AllocHGlobal(size);
@@ -559,7 +570,7 @@ internal sealed class WindowsJobObject : IDisposable
     private static extern bool CloseHandle(IntPtr handle);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct BasicLimits
+    internal struct BasicLimits
     {
         public long PerProcessUserTimeLimit;
         public long PerJobUserTimeLimit;
@@ -573,7 +584,7 @@ internal sealed class WindowsJobObject : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct ExtendedLimits
+    internal struct ExtendedLimits
     {
         public BasicLimits Basic;
         public ulong ReadOperationCount;

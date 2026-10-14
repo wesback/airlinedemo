@@ -171,6 +171,27 @@ public class IsolatedPdfParserTests
         }
     }
 
+    // Windows memory cap: the Job Object limit is built without any Windows call, so this runs on every platform.
+    [Fact]
+    public void JobObjectLimits_CapProcessMemoryAndKillOnClose()
+    {
+        var limits = WindowsJobObject.BuildLimits(512L * 1024 * 1024);
+
+        Assert.NotEqual(0u, limits.Basic.LimitFlags & WindowsJobObject.JobObjectLimitProcessMemory);
+        Assert.Equal((nuint)(512L * 1024 * 1024), limits.ProcessMemoryLimit);
+    }
+
+    [Theory]
+    [InlineData(true, false, "root", false, true)]
+    [InlineData(true, false, "app", false, false)]
+    [InlineData(true, false, "root", true, false)]
+    [InlineData(true, true, "root", false, false)]
+    [InlineData(false, false, "root", false, false)]
+    public void WorkerIsolationRefusal_OnlyAppliesToRootWithoutDrop(bool linux, bool customWorker, string user, bool setprivAvailable, bool expected)
+    {
+        Assert.Equal(expected, IsolatedPdfParser.CannotIsolateWorker(linux, customWorker, user, setprivAvailable));
+    }
+
     // AC-2 (output bound): a child that writes more than OutputLimitBytes is killed and nothing is buffered without limit.
     [Fact]
     public void OversizedWorkerOutput_IsKilledAndReturnsRetryable()
