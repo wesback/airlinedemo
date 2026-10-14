@@ -136,6 +136,94 @@ public class DemoCaseTests
         }
     }
 
+    private sealed record ExpectedOutcome(
+        string Situation, bool Accepted, string? RejectionPrefix, string? FindingPrefix, string PolicyAction);
+
+    private static readonly Dictionary<string, ExpectedOutcome> Outcomes = new()
+    {
+        ["DOC-01"] = new("baseline-complete", true, null, null, "ingest-and-link-aircraft"),
+        ["DOC-02"] = new("baseline-complete", true, null, null, "ingest-and-link-engine"),
+        ["DOC-03"] = new("baseline-complete", true, null, null, "ingest-and-link-component"),
+        ["DOC-04"] = new("missing-required-history", false, "REQUIRED_HISTORY_MISSING:", null, "reject-and-request-history"),
+        ["DOC-05"] = new("ambiguous-identity", false, null, "AMBIGUOUS_IDENTITY:", "hold-for-human-identity-check"),
+        ["DOC-06"] = new("corrupt-file", false, "CORRUPT_FILE:", null, "reject-and-request-resubmission"),
+        ["DOC-07"] = new("truncated-file", false, "TRUNCATED_FILE:", null, "reject-and-request-resubmission"),
+        ["DOC-08"] = new("contradictory-later-document", false, null, "CONTRADICTION:", "hold-and-flag-for-review; DOC-04 is not overwritten"),
+        ["DOC-09"] = new("partner-linked-response", true, null, "LINKED:", "link-partner-response-to-DOC-03"),
+    };
+
+    private static string? StringOrNull(JsonElement element, string name)
+    {
+        var value = element.GetProperty(name);
+        return value.ValueKind == JsonValueKind.Null ? null : value.GetString();
+    }
+
+    [Fact]
+    public void ExpectedJsonOutcomesMatchEachSituation()
+    {
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(FixtureDir(), "expected.json")));
+        var documents = json.RootElement.GetProperty("documents").EnumerateArray().ToList();
+
+        Assert.Equal(Outcomes.Keys.OrderBy(k => k, StringComparer.Ordinal), documents.Select(d => d.GetProperty("id").GetString()!).OrderBy(k => k, StringComparer.Ordinal));
+        foreach (var document in documents)
+        {
+            var id = document.GetProperty("id").GetString()!;
+            var expected = Outcomes[id];
+            Assert.Equal(expected.Situation, document.GetProperty("situation").GetString());
+            Assert.Equal(expected.Accepted, document.GetProperty("accepted").GetBoolean());
+            Assert.Equal(expected.PolicyAction, document.GetProperty("policyAction").GetString());
+
+            var rejection = StringOrNull(document, "rejectionReason");
+            var finding = StringOrNull(document, "finding");
+            if (expected.RejectionPrefix is null)
+            {
+                Assert.Null(rejection);
+            }
+            else
+            {
+                Assert.NotNull(rejection);
+                Assert.StartsWith(expected.RejectionPrefix, rejection);
+            }
+
+            if (expected.FindingPrefix is null)
+            {
+                Assert.Null(finding);
+            }
+            else
+            {
+                Assert.NotNull(finding);
+                Assert.StartsWith(expected.FindingPrefix, finding);
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadmeListsEachDocumentWithIdFileTypeSituationAndDescription()
+    {
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(FixtureDir(), "expected.json")));
+        var documents = json.RootElement.GetProperty("documents").EnumerateArray().ToList();
+        var rows = File.ReadAllLines(Path.Combine(FixtureDir(), "README.md"))
+            .Where(l => l.StartsWith("| DOC-", StringComparison.Ordinal))
+            .Select(l => l.Split('|', StringSplitOptions.TrimEntries)[1..^1])
+            .ToDictionary(c => c[0], StringComparer.Ordinal);
+
+        Assert.Equal(documents.Count, rows.Count);
+        foreach (var document in documents)
+        {
+            var id = document.GetProperty("id").GetString()!;
+            Assert.Equal(
+                new[]
+                {
+                    id,
+                    document.GetProperty("file").GetString(),
+                    document.GetProperty("type").GetString(),
+                    document.GetProperty("situation").GetString(),
+                    document.GetProperty("shows").GetString(),
+                },
+                rows[id]);
+        }
+    }
+
     [Fact]
     public void CommittedFilesContainNoForbiddenPatterns()
     {
