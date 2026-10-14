@@ -320,7 +320,7 @@ public class ClaimValidationPolicyTests
 
         var decision = FindingRouter.Route(Complete, [downgraded], identityAmbiguous: false);
 
-        Assert.Equal(FindingOutcome.Review, decision.Outcome);
+        Assert.Equal(FindingOutcome.NoAction, decision.Outcome);
         Assert.Equal(0, decision.RequestCount);
     }
 
@@ -355,7 +355,7 @@ public class ClaimValidationPolicyTests
 
         Assert.Equal(ClaimStatus.Downgraded, unrelated.Status);
         Assert.Equal("claim text does not state typed value", unrelated.Reason);
-        Assert.Equal(FindingOutcome.Review, decision.Outcome);
+        Assert.Equal(FindingOutcome.NoAction, decision.Outcome);
         Assert.Equal(0, decision.RequestCount);
     }
 
@@ -372,7 +372,7 @@ public class ClaimValidationPolicyTests
 
         Assert.Equal(ClaimStatus.Downgraded, mixed.Status);
         Assert.Equal("claim text not stated by witness quote", mixed.Reason);
-        Assert.Equal(FindingOutcome.Review, decision.Outcome);
+        Assert.Equal(FindingOutcome.NoAction, decision.Outcome);
         Assert.Equal(0, decision.RequestCount);
     }
 
@@ -383,7 +383,7 @@ public class ClaimValidationPolicyTests
         var decision = FindingRouter.Route(Complete, [result], identityAmbiguous: false);
 
         Assert.Equal(ClaimStatus.Downgraded, result.Status);
-        Assert.Equal(FindingOutcome.Review, decision.Outcome);
+        Assert.Equal(FindingOutcome.NoAction, decision.Outcome);
         Assert.Equal(0, decision.RequestCount);
     }
 

@@ -13,6 +13,8 @@ public enum FindingOutcome
     Blocked,
     Review,
     CompleteBaseline,
+    /// <summary>A structurally invalid claim creates no task and no request.</summary>
+    NoAction,
 }
 
 /// <summary>Deterministic decision. A complete baseline is never automatically accepted.</summary>
@@ -42,23 +44,21 @@ public static class FindingRouter
             return new FindingDecision(FindingOutcome.Review, 0, "ambiguous identity");
         }
 
-        if (claims.Any(c => c.Kind == ClaimKind.Conflict))
+        // Only structurally supported claims can drive routing; downgraded claims are ignored entirely.
+        if (claims.Any(c => c.Status == ClaimStatus.Supported && c.Kind == ClaimKind.Conflict))
         {
             return new FindingDecision(FindingOutcome.Review, 0, "conflicting evidence");
         }
 
-        if (claims.Any(c => c.Status == ClaimStatus.Downgraded))
-        {
-            return new FindingDecision(FindingOutcome.Review, 0, "unsupported citation downgraded");
-        }
-
         if (!claims.Any(c => c.Status == ClaimStatus.Supported))
         {
-            return new FindingDecision(FindingOutcome.Review, 0, "zero eligible examples");
+            return claims.Any(c => c.Status == ClaimStatus.Downgraded)
+                ? new FindingDecision(FindingOutcome.NoAction, 0, "unsupported citation downgraded")
+                : new FindingDecision(FindingOutcome.Review, 0, "zero eligible examples");
         }
 
         // A structurally valid gap claim is only a candidate: a person must confirm it before any request exists.
-        if (claims.Any(c => c.Kind == ClaimKind.MissingRequirement))
+        if (claims.Any(c => c.Status == ClaimStatus.Supported && c.Kind == ClaimKind.MissingRequirement))
         {
             return new FindingDecision(FindingOutcome.Review, 0, "supported missing requirement needs internal review");
         }
