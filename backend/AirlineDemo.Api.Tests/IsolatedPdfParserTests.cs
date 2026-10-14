@@ -340,6 +340,39 @@ public class IsolatedPdfParserTests
             && (r.FileSystemRights & write) == write);
     }
 
+    // AC-4: a started child sees no inherited variable. /usr/bin/env prints the environment it receives, so this
+    // fails if the Environment.Clear() in CreateStartInfo is removed.
+    [Fact]
+    public void Started_Child_ReceivesNoInheritedEnvironment()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        const string sentinel = "PDF_WORKER_ENV_PROBE";
+        var workingDirectory = Path.Combine(Path.GetTempPath(), "pdf-worker-env-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        try
+        {
+            Environment.SetEnvironmentVariable(sentinel, "inherited");
+            var options = new IsolatedPdfParserOptions { WorkerFileName = "/usr/bin/env" };
+            var startInfo = IsolatedPdfParser.CreateStartInfo(options, workingDirectory);
+
+            using var process = Process.Start(startInfo)!;
+            var output = process.StandardOutput.ReadToEnd();
+            Assert.True(process.WaitForExit(10_000));
+
+            Assert.DoesNotContain(sentinel, output);
+            Assert.Equal(string.Empty, output.Trim());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(sentinel, null);
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     // AC-4: the child starts with an empty environment and a working directory of its own (no secrets, no store access).
     [Fact]
     public void Child_StartsWithEmptyEnvironmentAndReadOnlyWorkingDirectory()
