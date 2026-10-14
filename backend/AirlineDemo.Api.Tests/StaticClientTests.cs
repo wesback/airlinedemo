@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Xml.Linq;
 using AirlineDemo.Api.Security;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -37,6 +38,7 @@ public sealed class StaticClientTests : IDisposable
         {
             builder.UseEnvironment("Production");
             builder.UseContentRoot(_contentRoot);
+            builder.UseWebRoot(Path.Combine(_contentRoot, "wwwroot"));
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = "test-passcode" }));
         });
@@ -89,13 +91,39 @@ public sealed class StaticClientTests : IDisposable
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        foreach (var path in new[] { "/", "/cases/42/review", "/assets/app-3f9c1a.js" })
+        foreach (var path in new[] { "/", "/cases/42/review", "/assets/app-3f9c1a.js", "/api/does-not-exist" })
         {
             using var response = await client.GetAsync(path);
 
             Assert.Equal(TransportSecurity.ContentSecurityPolicy, response.Headers.GetValues("Content-Security-Policy").Single());
             Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
         }
+    }
+
+    [Fact]
+    public void Publish_builds_frontend_and_stages_dist_into_wwwroot()
+    {
+        var project = XDocument.Load(Path.Combine(FindRepoRoot(), "backend", "AirlineDemo.Api", "AirlineDemo.Api.csproj"));
+        var target = project.Descendants("Target").Single(t => (string?)t.Attribute("Name") == "BuildAndStageClient");
+
+        Assert.Equal("ComputeResolvedFilesToPublishList", (string?)target.Attribute("AfterTargets"));
+        var exec = target.Descendants("Exec").Single().Attribute("Command")?.Value ?? string.Empty;
+        Assert.Contains("npm --prefix", exec);
+        Assert.Contains("run build", exec);
+        Assert.Contains("frontend/dist", target.Descendants("ClientBuildFile").Single().Attribute("Include")?.Value);
+        var staged = target.Descendants("ResolvedFileToPublish").Single().Attribute("RelativePath")?.Value;
+        Assert.StartsWith("wwwroot/", staged);
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "backend", "AirlineDemo.Api", "AirlineDemo.Api.csproj")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new InvalidOperationException("Repository root not found.");
     }
 
     [Fact]

@@ -13,8 +13,25 @@ public static class StaticClient
     {
         app.UseDefaultFiles();
         app.UseStaticFiles();
-        app.MapFallback("/api/{**rest}", () => Results.Json(new { error = "not_found" }, statusCode: StatusCodes.Status404NotFound));
-        app.MapFallbackToFile("index.html");
+        app.MapFallback(async context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                await context.Response.WriteAsJsonAsync(new { error = "not_found" });
+                return;
+            }
+
+            var index = app.Environment.WebRootFileProvider.GetFileInfo("index.html");
+            if (!index.Exists)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.SendFileAsync(index);
+        });
         return app;
     }
 }
