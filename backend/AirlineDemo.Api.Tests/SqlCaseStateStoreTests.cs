@@ -316,9 +316,9 @@ public sealed class SqlCaseStateStoreTests
     {
         var after = store.Read(scope);
         Assert.Equal(before.Revision, after.Revision);
-        Assert.Equal(before.Basis.Select(b => b.BasisDigest), after.Basis.Select(b => b.BasisDigest));
+        Assert.Equal(before.Basis, after.Basis);
         Assert.Equal(before.ReceiptIds, after.ReceiptIds);
-        Assert.Equal(before.Audit.Select(a => a.Detail), after.Audit.Select(a => a.Detail));
+        Assert.Equal(before.Audit, after.Audit);
         Assert.Equal(auditBefore, CountAuditEvents(options));
         Assert.Equal(decisionsBefore, CaptureDecisions(options, before.CaseId));
     }
