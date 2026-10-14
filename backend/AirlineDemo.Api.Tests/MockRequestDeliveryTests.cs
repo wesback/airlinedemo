@@ -277,8 +277,9 @@ public class MockRequestDeliveryTests
             foreach (var callee in CalledMethods(method))
             {
                 var owner = callee.DeclaringType;
-                Assert.False(owner?.Namespace?.StartsWith("System.Net", StringComparison.Ordinal) ?? false,
-                    $"{method.DeclaringType?.FullName}.{method.Name} calls {owner?.FullName}.{callee.Name}");
+                var ownerAssembly = owner?.Assembly.GetName().Name ?? string.Empty;
+                Assert.True(owner?.Assembly == apiAssembly || AllowedFrameworkAssemblies.Contains(ownerAssembly),
+                    $"{method.DeclaringType?.FullName}.{method.Name} calls {owner?.FullName}.{callee.Name} in {ownerAssembly}");
                 if (owner?.Assembly == apiAssembly && seen.Add(callee)) pending.Enqueue(callee);
             }
         }
@@ -286,6 +287,14 @@ public class MockRequestDeliveryTests
         var result = new MockRequestInbox().Submit(Env(), Gap(), ScenarioTime);
         Assert.Equal(DeliveryOutcome.Delivered, result.Outcome);
     }
+
+    /// <summary>Framework assemblies a delivery path may use for pure computation. Anything else (Process, sockets, HTTP, third-party SDKs) fails the test.</summary>
+    private static readonly HashSet<string> AllowedFrameworkAssemblies = new(StringComparer.Ordinal)
+    {
+        "System.Private.CoreLib", "System.Runtime", "System.Runtime.Extensions", "System.Collections",
+        "System.Collections.Concurrent", "System.Linq", "System.Memory", "System.Threading",
+        "System.Threading.Tasks", "System.Text.RegularExpressions", "System.Text.Json", "System.Security.Cryptography",
+    };
 
     private static readonly Dictionary<int, OpCode> OpCodeByValue = typeof(OpCodes)
         .GetFields(BindingFlags.Public | BindingFlags.Static)
