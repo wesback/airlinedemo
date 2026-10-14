@@ -101,6 +101,8 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<InvalidOperationException>(() =>
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString(connectionString + "UID=app;"));
         Assert.Throws<InvalidOperationException>(() =>
+            CaseStateStoreRegistration.ValidateManagedIdentityConnectionString(connectionString + "User=app;"));
+        Assert.Throws<InvalidOperationException>(() =>
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString(connectionString + "Password=secret;"));
         Assert.Throws<InvalidOperationException>(() =>
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString(connectionString + "Access Token=token;"));

@@ -263,7 +263,7 @@ public static class CaseStateStoreRegistration
 
     private const string RequiredAuthentication = "Active Directory Managed Identity";
 
-    private static readonly string[] ForbiddenKeys = ["userid", "uid", "password", "pwd", "accesstoken"];
+    private static readonly string[] ForbiddenKeys = ["userid", "user", "uid", "password", "pwd", "accesstoken"];
 
     /// <summary>
     /// Uses the Azure SQL store when <c>ConnectionStrings:CaseState</c> is set; without it, the file-backed store
