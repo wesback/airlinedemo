@@ -27,6 +27,9 @@ public static partial class RedactionFilter
     public static string ScrubText(string text) =>
         SessionCookie().Replace(BearerToken().Replace(text, TelemetryRedaction.Redacted), TelemetryRedaction.Redacted);
 
+    // Free-form content (prompts, document text) is never short; identifiers, states and counts are.
+    public const int MaxFreeTextLength = 256;
+
     public static object? Sanitize(string name, object? value)
     {
         if (IsSensitiveName(name))
@@ -37,6 +40,7 @@ public static partial class RedactionFilter
         return value switch
         {
             null => null,
+            string text when text.Length > MaxFreeTextLength => TelemetryRedaction.Redacted,
             string text => ScrubText(text),
             ValueType => value,
             _ => ScrubText(value.ToString() ?? string.Empty),
@@ -45,6 +49,21 @@ public static partial class RedactionFilter
 
     public static IReadOnlyList<KeyValuePair<string, object?>> Redact(IEnumerable<KeyValuePair<string, object?>> pairs) =>
         pairs.Select(pair => new KeyValuePair<string, object?>(pair.Key, Sanitize(pair.Key, pair.Value))).ToList();
+
+    // Exception messages are free-form and may carry secrets, so only the type, a scrubbed stack trace and the inner chain are kept.
+    public static Exception? SanitizeException(Exception? exception) =>
+        exception is null ? null : new RedactedException(
+            exception.GetType().FullName ?? nameof(Exception),
+            exception.StackTrace is null ? null : ScrubText(exception.StackTrace),
+            SanitizeException(exception.InnerException));
+
+    internal sealed class RedactedException(string typeName, string? stackTrace, Exception? inner)
+        : Exception($"{typeName}: {TelemetryRedaction.Redacted}", inner)
+    {
+        private readonly string? _stackTrace = stackTrace;
+
+        public override string? StackTrace => _stackTrace;
+    }
 
     internal sealed class RedactedState(IReadOnlyList<KeyValuePair<string, object?>>? pairs, string message)
         : IReadOnlyList<KeyValuePair<string, object?>>
@@ -77,7 +96,10 @@ public static partial class RedactionFilter
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         {
-            object scope = state is IEnumerable<KeyValuePair<string, object?>> pairs ? Redact(pairs) : state;
+            var text = ScrubText(state.ToString() ?? string.Empty);
+            object scope = state is IEnumerable<KeyValuePair<string, object?>> pairs
+                ? new RedactedState(Redact(pairs), text)
+                : text;
             return inner.BeginScope(scope);
         }
 
@@ -105,11 +127,11 @@ public static partial class RedactionFilter
             }
 
             var pairs = source is null ? null : Redact(source);
-            inner.Log(logLevel, eventId, new RedactedState(pairs, ScrubText(message)), exception, static (s, _) => s.Message);
+            inner.Log(logLevel, eventId, new RedactedState(pairs, ScrubText(message)), SanitizeException(exception), static (s, _) => s.Message);
         }
     }
 
-    internal sealed class RedactingActivityProcessor : BaseProcessor<Activity>
+    public sealed class RedactingActivityProcessor : BaseProcessor<Activity>
     {
         public override void OnEnd(Activity data)
         {
