@@ -137,6 +137,26 @@ public static partial class RedactionFilter
                     data.SetTag(tag.Key, sanitized);
                 }
             }
+
+            var events = data.Events.ToList();
+            if (!events.Any(e => e.Tags.Any(t => !Equals(Sanitize(t.Key, t.Value), t.Value))))
+            {
+                return;
+            }
+
+            // Activity offers no API to change event tags in place, so the events are rebuilt with redacted tags.
+            (EventsField ?? throw new InvalidOperationException("Activity event storage is unavailable; refusing to export unredacted events."))
+                .SetValue(data, null);
+            foreach (var activityEvent in events)
+            {
+                data.AddEvent(new ActivityEvent(
+                    activityEvent.Name,
+                    activityEvent.Timestamp,
+                    new ActivityTagsCollection(activityEvent.Tags.Select(t => new KeyValuePair<string, object?>(t.Key, Sanitize(t.Key, t.Value))))));
+            }
         }
+
+        private static readonly System.Reflection.FieldInfo? EventsField =
+            typeof(Activity).GetField("_events", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
     }
 }

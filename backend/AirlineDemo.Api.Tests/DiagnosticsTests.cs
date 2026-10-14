@@ -224,6 +224,40 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain("eyJhbGci", (string)tags["note"]!);
     }
 
+    [Fact]
+    public void ActivityEventAttributesAreRedactedOnEnd()
+    {
+        var exported = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "DiagnosticsTests.Events",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var source = new ActivitySource("DiagnosticsTests.Events");
+        var processor = new RedactionFilter.RedactingActivityProcessor();
+
+        using (var activity = source.StartActivity("chat"))
+        {
+            Assert.NotNull(activity);
+            activity!.AddEvent(new ActivityEvent("model.input", tags: new ActivityTagsCollection
+            {
+                ["gen_ai.prompt"] = "Summarise the secret clause",
+                ["document"] = "Confidential lease text",
+                ["cookie"] = "__Host-session=8f3c9a2b7d",
+                ["gen_ai.usage.input_tokens"] = 128,
+            }));
+            processor.OnEnd(activity);
+            exported.Add(activity);
+        }
+
+        var eventTags = exported.Single().Events.Single().Tags.ToDictionary(t => t.Key, t => t.Value);
+        Assert.Equal(TelemetryRedaction.Redacted, eventTags["gen_ai.prompt"]);
+        Assert.Equal(TelemetryRedaction.Redacted, eventTags["document"]);
+        Assert.Equal(TelemetryRedaction.Redacted, eventTags["cookie"]);
+        Assert.Equal(128, eventTags["gen_ai.usage.input_tokens"]);
+    }
+
     private const string TestConnectionString =
         "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://localhost/";
 
@@ -243,7 +277,10 @@ public sealed class DiagnosticsTests
         set.AddAirlineDiagnostics();
         using (var app = set.Build())
         {
-            Assert.NotNull(app.Services.GetService<TracerProvider>());
+            var tracerProvider = app.Services.GetService<TracerProvider>();
+            Assert.NotNull(tracerProvider);
+            Assert.True(ReachesType(tracerProvider!, "AzureMonitorTraceExporter"), "The Application Insights trace exporter must be registered.");
+            Assert.True(ReachesType(tracerProvider!, "RedactingActivityProcessor"), "The redaction processor must be registered.");
         }
     }
 
@@ -263,8 +300,54 @@ public sealed class DiagnosticsTests
         set.AddAirlineDiagnostics();
         using (var app = set.Build())
         {
-            Assert.Contains(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
+            var loggerProvider = Assert.Single(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
+            Assert.True(ReachesType(loggerProvider, "AzureMonitorLogExporter"), "The Application Insights log exporter must be registered.");
         }
+    }
+
+    // Walks the provider's object graph (bounded depth) to find the exporter the SDK actually holds.
+    private static bool ReachesType(object root, string typeName)
+    {
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+
+        bool Visit(object? value, int depth)
+        {
+            if (value is null || depth > 8 || value is string || value.GetType().IsPrimitive || !seen.Add(value))
+            {
+                return false;
+            }
+
+            if (value.GetType().FullName!.Contains(typeName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (value is System.Collections.IEnumerable items)
+            {
+                foreach (var item in items)
+                {
+                    if (Visit(item, depth + 1))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            for (var type = value.GetType(); type is not null && type != typeof(object); type = type.BaseType)
+            {
+                foreach (var field in type.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
+                {
+                    if (!field.FieldType.IsValueType && Visit(field.GetValue(value), depth + 1))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        return Visit(root, 0);
     }
 
     [Fact]
