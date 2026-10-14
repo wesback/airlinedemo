@@ -105,6 +105,19 @@ public sealed class StaticClientTests : IDisposable
         AssertSecurityHeaders(preflightResponse);
     }
 
+    private static readonly string[] BrowserSecurityHeaders =
+    [
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "X-XSS-Protection",
+        "Referrer-Policy",
+        "Permissions-Policy",
+        "Cross-Origin-Opener-Policy",
+        "Cross-Origin-Embedder-Policy",
+        "Cross-Origin-Resource-Policy",
+        "Content-Security-Policy-Report-Only",
+    ];
+
     private static void AssertSecurityHeaders(HttpResponseMessage response)
     {
         // Literal DD-028 policy, so the test fails if the constant drifts from the PRD.
@@ -112,6 +125,10 @@ public sealed class StaticClientTests : IDisposable
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             response.Headers.GetValues("Content-Security-Policy").Single());
         Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
+        // DD-028: exactly two security headers (CSP and HSTS); no other browser security header may be added.
+        var headerNames = response.Headers.Select(h => h.Key)
+            .Concat(response.Content?.Headers.Select(h => h.Key) ?? []);
+        Assert.Empty(headerNames.Intersect(BrowserSecurityHeaders, StringComparer.OrdinalIgnoreCase));
         // DD-028: no CORS, so no cross-origin allow header is ever emitted on the page or assets.
         Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
         Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
@@ -124,14 +141,24 @@ public sealed class StaticClientTests : IDisposable
         var repoRoot = FindRepoRoot();
         var project = Path.Combine(repoRoot, "backend", "AirlineDemo.Api", "AirlineDemo.Api.csproj");
         var outputDir = Path.Combine(Path.GetTempPath(), "static-client-publish-" + Guid.NewGuid().ToString("N"));
+        var distDir = Path.Combine(repoRoot, "frontend", "dist");
 
         try
         {
+            // Remove any previous build output so a passing test proves publish itself built the frontend, not stale dist.
+            if (Directory.Exists(distDir))
+            {
+                Directory.Delete(distDir, recursive: true);
+            }
+
             RunDotnet("publish", project, "-c", "Release", "--no-restore", "-o", outputDir);
 
-            Assert.True(File.Exists(Path.Combine(repoRoot, "frontend", "dist", "index.html")), "npm build did not produce frontend/dist/index.html.");
+            var distIndex = Path.Combine(distDir, "index.html");
+            Assert.True(File.Exists(distIndex), "npm build did not produce frontend/dist/index.html.");
             var wwwroot = Path.Combine(outputDir, "wwwroot");
-            Assert.True(File.Exists(Path.Combine(wwwroot, "index.html")), "Published wwwroot is missing index.html.");
+            var publishedIndex = Path.Combine(wwwroot, "index.html");
+            Assert.True(File.Exists(publishedIndex), "Published wwwroot is missing index.html.");
+            Assert.Equal(File.ReadAllBytes(distIndex), File.ReadAllBytes(publishedIndex));
             Assert.NotEmpty(Directory.GetFiles(Path.Combine(wwwroot, "assets"), "*.js"));
         }
         finally
