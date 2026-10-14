@@ -276,6 +276,33 @@ public class MockRequestDeliveryTests
         Assert.NotEmpty(WalkDispatchGraph(new[] { ((Action)AsyncCaller).Method }, testAssembly).Violations);
         Assert.NotEmpty(WalkDispatchGraph(new[] { ((Action)ReflectionCaller).Method }, testAssembly).Violations);
         Assert.NotEmpty(WalkDispatchGraph(new[] { ((Action)ProcessCaller).Method }, testAssembly).Violations);
+
+        Assert.Contains(WalkDispatchGraph(new[] { ((Action)PInvokeCaller).Method }, testAssembly).Violations, v => v.Contains("native", StringComparison.Ordinal));
+        Assert.Contains(WalkDispatchGraph(new[] { ((Action<Func<string>>)DelegateInvokeCaller).Method }, testAssembly).Violations, v => v.Contains("reflective or dynamic invocation", StringComparison.Ordinal));
+        Assert.Contains(WalkDispatchGraph(new[] { ((Action<Action>)DelegateDynamicInvokeCaller).Method }, testAssembly).Violations, v => v.Contains("DynamicInvoke", StringComparison.Ordinal));
+        Assert.Contains(WalkDispatchGraph(new[] { EmitCalliCaller() }, testAssembly).Violations, v => v.Contains("calli", StringComparison.Ordinal));
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "getpid")]
+    private static extern int NativeGetPid();
+
+    private static void PInvokeCaller() => _ = NativeGetPid();
+    private static void DelegateInvokeCaller(Func<string> callback) => _ = callback();
+    private static void DelegateDynamicInvokeCaller(Action callback) => callback.DynamicInvoke();
+
+    /// <summary>Emits a static method that loads a function pointer and calls it with <c>calli</c>, which C# cannot produce without unsafe code.</summary>
+    private static MethodInfo EmitCalliCaller()
+    {
+        var module = AssemblyBuilder
+            .DefineDynamicAssembly(new AssemblyName("CalliFixture"), AssemblyBuilderAccess.Run)
+            .DefineDynamicModule("CalliFixture");
+        var type = module.DefineType("CalliCaller", TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+        var method = type.DefineMethod("Call", MethodAttributes.Public | MethodAttributes.Static, typeof(void), Type.EmptyTypes);
+        var il = method.GetILGenerator();
+        il.Emit(OpCodes.Ldftn, typeof(GC).GetMethod(nameof(GC.Collect), Type.EmptyTypes)!);
+        il.EmitCalli(OpCodes.Calli, CallingConventions.Standard, typeof(void), Type.EmptyTypes, null);
+        il.Emit(OpCodes.Ret);
+        return type.CreateType().GetMethod("Call")!;
     }
 
     private static void PlainHelperCaller() => _ = string.Empty.Trim();
