@@ -26,7 +26,7 @@ public sealed class DiagnosticsTests
             .Build();
 
     [Fact]
-    public void Exporters_are_registered_when_connection_string_is_configured()
+    public void ApplicationInsights_exporters_follow_connection_string_configuration()
     {
         var services = new ServiceCollection();
         services.AddAirlineDiagnostics(Config("InstrumentationKey=00000000-0000-0000-0000-000000000000"));
@@ -86,7 +86,7 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void Log_pipeline_removes_sentinels_from_structured_properties_and_scopes()
+    public void Log_properties_and_scopes_redact_sensitive_values_and_keep_safe_metadata()
     {
         var captured = new List<CapturedLog>();
         var services = new ServiceCollection();
@@ -110,7 +110,7 @@ public sealed class DiagnosticsTests
             ["passcode"] = Passcode,
             ["__Host-session"] = CookieValue,
             [".AspNetCore.Cookies"] = CookieValue,
-            ["case.id"] = "case-42",
+            ["case.id"] = "scope-case-5521",
         }))
         {
             logger.LogInformation("Scoped event {State}", "approved");
@@ -128,13 +128,14 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain(PromptText, output);
         Assert.DoesNotContain(DocumentText, output);
         Assert.Contains("case-42", attributes);
+        Assert.Contains("case.id=scope-case-5521", attributes);
         Assert.Contains("approved", attributes);
         Assert.Contains("case-42", messages);
         Assert.Contains("approved", messages);
     }
 
     [Fact]
-    public void Trace_pipeline_removes_sentinels_from_tags_and_event_attributes()
+    public void Trace_pipeline_redacts_span_tags_and_direct_activity_event_attributes()
     {
         var captured = new List<Activity>();
         using var source = new ActivitySource(TelemetryRedaction.ServiceName);
@@ -208,7 +209,7 @@ public sealed class DiagnosticsTests
     {
         public override void OnEnd(LogRecord data)
         {
-            // Exporters see scopes only through redacted attributes (IncludeScopes is off), so that is what is captured.
+            // Scopes are folded into the redacted attributes and removed from the record, so the attributes carry them.
             sink.Add(new CapturedLog(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList(), []));
         }
     }

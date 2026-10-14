@@ -58,12 +58,12 @@ public static class DiagnosticsSetup
         return services;
     }
 
-    // Redacts log attributes and scope values before any exporter sees them. Message text is not rewritten.
-    // Scopes are folded into the record's attributes so they pass through the same filter; exporting raw
-    // scopes would bypass it, so IncludeScopes stays off.
+    // Redacts log attributes and scope values before any exporter sees them. Message text is re-rendered from the
+    // redacted values. Scopes are read by the processor, folded into the attributes through the same filter, and
+    // then removed from the record so exporters cannot read the raw scope values.
     public static OpenTelemetryLoggerOptions AddRedaction(this OpenTelemetryLoggerOptions options)
     {
-        options.IncludeScopes = false;
+        options.IncludeScopes = true;
         options.AddProcessor(new RedactingLogProcessor());
         return options;
     }
@@ -74,6 +74,30 @@ public static class DiagnosticsSetup
 
     private sealed class RedactingLogProcessor : BaseProcessor<LogRecord>
     {
+        // LogRecord keeps its scope provider internal; it is cleared after scopes are copied so exporters see no raw scopes.
+        private const System.Reflection.BindingFlags AnyInstance =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+
+        private static readonly Action<LogRecord> ClearScopeProvider = ResolveScopeProviderClearer();
+
+        private static Action<LogRecord> ResolveScopeProviderClearer()
+        {
+            var property = typeof(LogRecord).GetProperty("ScopeProvider", AnyInstance);
+            if (property is not null && property.CanWrite)
+            {
+                return record => property.SetValue(record, null);
+            }
+
+            var field = typeof(LogRecord).GetField("scopeProvider", AnyInstance)
+                ?? typeof(LogRecord).GetField("_scopeProvider", AnyInstance);
+            if (field is not null)
+            {
+                return record => field.SetValue(record, null);
+            }
+
+            throw new InvalidOperationException("LogRecord exposes no scope provider to clear; scopes cannot be removed before export.");
+        }
+
         public override void OnEnd(LogRecord data)
         {
             var source = new List<KeyValuePair<string, object?>>();
@@ -89,6 +113,7 @@ public static class DiagnosticsSetup
                     pairs.Add(pair);
                 }
             }, source);
+            ClearScopeProvider(data);
 
             // Exception messages and stack traces are free text that the filter cannot check, so only the type name is kept.
             if (data.Exception is { } exception)
