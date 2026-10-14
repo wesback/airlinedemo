@@ -76,7 +76,11 @@ public sealed class PersistenceWiringTests
         // The reviewer's scope is case-001 only; case-002 must be denied with no data, even after restart.
         using var outOfScope = await SendAsync(secondClient, HttpMethod.Get, "/api/cases/case-002", restored, null, ct);
         Assert.Equal(HttpStatusCode.NotFound, outOfScope.StatusCode);
-        Assert.DoesNotContain("case-002", await outOfScope.Content.ReadAsStringAsync(ct));
+        var denialBody = await outOfScope.Content.ReadAsStringAsync(ct);
+        Assert.True(string.IsNullOrWhiteSpace(denialBody), $"Denial response must carry no case data, got: {denialBody}");
+        Assert.DoesNotContain("case-002", denialBody);
+        Assert.DoesNotContain("revision", denialBody);
+        Assert.DoesNotContain("status", denialBody);
 
         var store = second.Services.GetRequiredService<ICaseStateStore>();
         var audit = store.ReadAudit(store.AuthorizeCase("case-001", CaseStore.SeedOwner));
