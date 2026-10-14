@@ -86,6 +86,12 @@ public static partial class RedactionFilter
         var result = new List<KeyValuePair<string, object?>>(attributes.Count);
         foreach (var (key, value) in attributes)
         {
+            // Log properties and scopes with a sensitive name are dropped, not kept as placeholders.
+            if (IsSensitiveKey(key))
+            {
+                continue;
+            }
+
             if (TryRedact(key, value, out var redacted))
             {
                 result.Add(new KeyValuePair<string, object?>(key, redacted));

@@ -90,6 +90,13 @@ public static class DiagnosticsSetup
                 }
             }, source);
 
+            // Exception messages and stack traces are free text that the filter cannot check, so only the type name is kept.
+            if (data.Exception is { } exception)
+            {
+                source.Add(new KeyValuePair<string, object?>("exception.type", exception.GetType().FullName));
+                data.Exception = null;
+            }
+
             if (source.Count == 0)
             {
                 return;
@@ -122,7 +129,7 @@ public static class DiagnosticsSetup
             // after recording, so event attributes are rewritten here, in the same pass as span tags.
             foreach (var activityEvent in data.Events)
             {
-                if (activityEvent.Tags is not ActivityTagsCollection eventTags)
+                if (activityEvent.Tags is not { } eventTags)
                 {
                     continue;
                 }
@@ -131,14 +138,25 @@ public static class DiagnosticsSetup
                 {
                     if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
                     {
-                        eventTags[tag.Key] = RedactionFilter.Redacted;
+                        SetEventTag(eventTags, tag.Key, RedactionFilter.Redacted);
                     }
                     else if (!Equals(redacted, tag.Value))
                     {
-                        eventTags[tag.Key] = redacted;
+                        SetEventTag(eventTags, tag.Key, redacted);
                     }
                 }
             }
+        }
+
+        // Activity stores event tags in an internal list (TagsLinkedList), not ActivityTagsCollection, so the
+        // value is replaced through that list's Set method. If the method is missing the export fails closed.
+        private static void SetEventTag(object eventTags, string key, object? value)
+        {
+            var set = eventTags.GetType()
+                .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+                .FirstOrDefault(m => m.Name == "Set" && m.GetParameters() is [{ ParameterType: var p }] && p == typeof(KeyValuePair<string, object?>))
+                ?? throw new InvalidOperationException("Activity event tag list has no Set method; event attributes cannot be redacted.");
+            set.Invoke(eventTags, [new KeyValuePair<string, object?>(key, value)]);
         }
     }
 }
