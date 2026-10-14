@@ -1,3 +1,4 @@
+using AirlineDemo.Api;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
@@ -26,6 +27,7 @@ app.MapDemoAuth();
 app.MapCaseEndpoints();
 app.MapTechnicalReviewEndpoints();
 app.MapDemoRunReset();
+app.MapStaticClient();
 
 app.Run();
 
