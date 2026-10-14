@@ -153,6 +153,20 @@ public sealed class ObligationEvaluationTests
     }
 
     [Fact]
+    public void Duplicate_current_drafts_in_history_are_reduced_to_one()
+    {
+        var first = ObligationEvaluator.Evaluate(Make([Missing()]), At(12), []);
+        var duplicate = first.NewDraft! with { Id = "duplicate-draft" };
+
+        var result = ObligationEvaluator.Evaluate(Make([Missing()]), At(13), [first.NewDraft!, duplicate]);
+
+        Assert.Single(result.Drafts.Where(d => d.Status == NoticeDraftStatus.Current));
+        Assert.Equal("duplicate-draft", result.Drafts.Single(d => d.Status == NoticeDraftStatus.Current).Id);
+        Assert.Equal(NoticeDraftStatus.Superseded, result.Drafts.Single(d => d.Id == first.NewDraft!.Id).Status);
+        Assert.Null(result.NewDraft);
+    }
+
+    [Fact]
     public void Existing_current_draft_is_not_duplicated()
     {
         var first = ObligationEvaluator.Evaluate(Make([Missing()]), At(12), []);
