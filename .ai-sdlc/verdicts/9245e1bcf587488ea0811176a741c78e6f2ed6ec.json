@@ -1,0 +1,287 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 185,
+  "branch": "ai-sdlc/issue-185",
+  "commitSha": "9245e1bcf587488ea0811176a741c78e6f2ed6ec",
+  "round": 2,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The passcode step exposes the seeded-user picker without validating the passcode, and the sign-in request omits the required anti-forgery header. The tests do not catch either defect.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 28,
+          "message": "The seeded-user picker is shown without validating the passcode, contrary to the first acceptance criterion. This exposes user metadata before the sign-in gate (OWASP A01:2025).",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "continueWithPasscode checks only that the passcode is nonempty, then fetches /api/auth/users without sending or validating it and displays the returned users.",
+            "failureScenario": "A visitor enters an incorrect passcode; if /api/auth/users returns the seeded users, the picker appears before any successful passcode step, exposing the roster."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 50,
+          "message": "The sign-in POST omits the required anti-forgery header, despite the criterion requiring it on every state-changing request.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "signIn sends a state-changing POST to /api/auth/sign-in with only a Content-Type header; it has no anti-forgery token.",
+            "failureScenario": "When the server requires the specified anti-forgery header, submitting the sign-in form sends no token and the request is rejected (OWASP A01:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/SignIn.test.tsx",
+          "line": 38,
+          "message": "The tests do not verify that an incorrect passcode keeps the seeded-user picker hidden, as required by the first acceptance criterion.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The passcode-step test enters a nonempty value and checks that users appear; the wrong-passcode test reaches the picker before submitting sign-in.",
+            "failureScenario": "If any nonempty passcode reveals the picker, these tests still pass, so the first acceptance criterion's successful-passcode gate is unverified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/SignIn.test.tsx",
+          "line": 70,
+          "message": "The tests do not verify the anti-forgery header on sign-in, leaving the second acceptance criterion's requirement for every state-changing request untested.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The anti-forgery test checks the sign-out request header; no test checks the sign-in request header.",
+            "failureScenario": "If the sign-in POST omits its required anti-forgery header, the current tests still pass because the header assertion covers only sign-out."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The passcode step reveals the seeded-user picker before validating the passcode, and the sign-in request omits the required anti-forgery header. Both behaviors violate the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 28,
+          "message": "The seeded-user picker appears without validating the passcode, contrary to the first acceptance criterion. This exposes user information before the sign-in gate (OWASP A01:2025).",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "continueWithPasscode checks only that the passcode is nonempty, then fetches /api/auth/users and displays the returned users without validating the passcode.",
+            "failureScenario": "An unauthenticated visitor enters an incorrect nonempty passcode; if /api/auth/users returns the seeded users, the picker reveals their names and roles before any successful passcode step."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 49,
+          "message": "The sign-in POST omits the required anti-forgery header, despite the criterion requiring it on every state-changing request (OWASP A01:2025).",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "signIn sends a state-changing POST to /api/auth/sign-in with only a Content-Type header; it does not send the required anti-forgery token.",
+            "failureScenario": "When the server requires the specified anti-forgery header, submitting the sign-in form sends no token and the request is rejected. The tests check the sign-out header but do not catch this omission."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The passcode step reveals seeded-user data without validating the passcode, and the sign-in POST lacks the required anti-forgery header.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 29,
+          "message": "The seeded-user roster can be disclosed before passcode validation, contrary to the first acceptance criterion (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The passcode handler checks only that the field is nonempty, then fetches /api/auth/users without sending or validating the passcode and displays the response.",
+            "failureScenario": "An unauthenticated visitor enters any nonempty value; if the endpoint returns the seeded users, the visitor sees their names and roles without passing the required sign-in step."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 52,
+          "message": "The sign-in request omits the required anti-forgery token header (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The state-changing POST to /api/auth/sign-in sends only Content-Type; the anti-forgery token is not included.",
+            "failureScenario": "When the server requires its specified anti-forgery header, submitting the sign-in form omits it and the server rejects the request, preventing sign-in."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/SignIn.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
