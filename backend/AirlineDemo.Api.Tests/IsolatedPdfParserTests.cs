@@ -390,7 +390,7 @@ public class IsolatedPdfParserTests
     [Fact]
     public void Started_Child_ReceivesNoInheritedEnvironment()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsWindows())
         {
             return;
         }
@@ -401,7 +401,14 @@ public class IsolatedPdfParserTests
         try
         {
             Environment.SetEnvironmentVariable(sentinel, "inherited");
-            var options = new IsolatedPdfParserOptions { WorkerFileName = "/usr/bin/env" };
+            // Windows: cmd.exe /c set prints the environment it receives (full path, since PATH is cleared).
+            var options = OperatingSystem.IsWindows()
+                ? new IsolatedPdfParserOptions
+                {
+                    WorkerFileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                    WorkerArguments = new[] { "/c", "set" },
+                }
+                : new IsolatedPdfParserOptions { WorkerFileName = "/usr/bin/env" };
             var startInfo = IsolatedPdfParser.CreateStartInfo(options, workingDirectory);
 
             using var process = Process.Start(startInfo)!;
@@ -409,7 +416,10 @@ public class IsolatedPdfParserTests
             Assert.True(process.WaitForExit(10_000));
 
             Assert.DoesNotContain(sentinel, output);
-            Assert.Equal(string.Empty, output.Trim());
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.Equal(string.Empty, output.Trim());
+            }
         }
         finally
         {
