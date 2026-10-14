@@ -142,8 +142,12 @@ public class InvestigationLimitsTests
         var logger = new TraceLogger();
         using var limits = Limits();
 
-        var result = await Investigator(new ScriptedClient(_ => Reply(GoodReply)), limits, logger).InvestigateAsync([Doc]);
+        var calls = 0;
+        var model = new ScriptedClient(_ => calls++ == 0 ? Task.FromResult(SourcePageCall()) : Reply(GoodReply));
 
+        var result = await Investigator(model, limits, logger).InvestigateAsync([Doc]);
+
+        Assert.Equal(2, calls);
         Assert.Single(result.Claims);
         Assert.True(limits.Released);
         Assert.Null(limits.Breach);
@@ -154,6 +158,7 @@ public class InvestigationLimitsTests
         Assert.Contains("fixture-deployment", values);
         Assert.Contains("fixture-model", values);
         Assert.Contains("basis-v1", values);
+        Assert.Contains(CaseReadTools.SourcePageTool, values);
         Assert.Contains("doc-1#p1", values);
         Assert.Contains(values, v => v?.StartsWith("trace-", StringComparison.Ordinal) == true);
         Assert.Contains(values, v => v?.StartsWith("actor-", StringComparison.Ordinal) == true);
@@ -232,6 +237,10 @@ public class InvestigationLimitsTests
 
     private static readonly byte[] TestKey = System.Text.Encoding.UTF8.GetBytes("synthetic-test-key-not-a-secret");
 
+    // UTF-8 bytes of the tool names, descriptions and JSON schemas the investigator declares on every model call.
+    private static int SchemaBytes() => new CaseReadTools("case-1", new CaseSource(), NoInvestigationLimits.Instance, _ => { })
+        .Functions.Sum(f => System.Text.Encoding.UTF8.GetByteCount(f.Name + f.Description + f.JsonSchema.GetRawText()));
+
     private static BoundedInvestigator Investigator(IChatClient model, IInvestigationLimits limits, TraceLogger logger) => new(
         "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "basis-v1",
         model, limits, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
@@ -242,6 +251,12 @@ public class InvestigationLimitsTests
     });
 
     private static ChatResponse ToolCall(string name) => new(new ChatMessage(ChatRole.Assistant, new List<AIContent> { new FunctionCallContent("call-1", name) }));
+
+    // Reads doc-1 page 1, whose text is the synthetic Doc, so the tool result passes the model-call gate.
+    private static ChatResponse SourcePageCall() => new(new ChatMessage(ChatRole.Assistant, new List<AIContent>
+    {
+        new FunctionCallContent("call-1", CaseReadTools.SourcePageTool, new Dictionary<string, object?> { ["documentId"] = "doc-1", ["page"] = 1 }),
+    }));
 
     private static List<string?> Values(TraceLogger logger) => logger.States.SelectMany(s => s).Select(kv => kv.Value?.ToString()).ToList();
 
@@ -258,7 +273,28 @@ public class InvestigationLimitsTests
         Assert.Contains("fixture-deployment", values);
         Assert.Contains("fixture-model", values);
         Assert.Contains("basis-v1", values);
+        Assert.Contains(values, v => v?.StartsWith("trace-", StringComparison.Ordinal) == true);
+        Assert.Contains(values, v => v?.StartsWith("actor-", StringComparison.Ordinal) == true);
+        Assert.DoesNotContain(values, v => v is not null && v.Contains("synthetic-analyst-01", StringComparison.Ordinal));
         Assert.DoesNotContain(values, v => v is not null && v.Contains("Return readiness", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_input_guard_counts_tool_schemas_so_an_over_limit_request_is_never_sent()
+    {
+        var logger = new TraceLogger();
+        using var limits = Limits(new InvestigationLimitOptions { MaxInputTokensPerCall = SchemaBytes() });
+        var sent = 0;
+        var model = new ScriptedClient(_ =>
+        {
+            sent++;
+            return Reply(GoodReply);
+        });
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
+
+        AssertBreach(ex, limits, logger, InvestigationBreach.InputTokens);
+        Assert.Equal(0, sent);
     }
 
     private sealed class CaseSource : ICaseReadSource

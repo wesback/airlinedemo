@@ -5,7 +5,6 @@ using AirlineDemo.Api.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AirlineDemo.Api.Investigation;
 
@@ -73,9 +72,9 @@ public sealed class BoundedInvestigator(
     private static readonly JsonSerializerOptions ClaimJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly IInvestigationLimits _limits = limits ?? NoInvestigationLimits.Instance;
-    // Without telemetry, every investigation still emits its trace, to a null logger under a per-instance random key.
+    // Without telemetry the trace still goes to standard output, so no investigation's trace is dropped silently.
     private readonly InvestigationTelemetry _telemetry = telemetry
-        ?? new InvestigationTelemetry(NullLogger.Instance, "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
+        ?? new InvestigationTelemetry(new ConsoleTraceLogger(), "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
 
     public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default)
     {
@@ -235,6 +234,25 @@ public sealed class BoundedInvestigator(
         return claims;
     }
 
+    // Writes each trace record as key=value pairs. Only opaque identifiers reach the trace, so standard output is safe.
+    private sealed class ConsoleTraceLogger : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (state is IEnumerable<KeyValuePair<string, object?>> fields)
+            {
+                Console.WriteLine(string.Join(' ', fields.Select(field => $"{field.Key}={field.Value}")));
+                return;
+            }
+
+            Console.WriteLine(formatter(state, exception));
+        }
+    }
+
     private sealed record ClaimDto(string? Text, List<WitnessDto>? Witnesses);
 
     private sealed record WitnessDto(string? DocumentId, int Page, string? Quote);
@@ -264,8 +282,8 @@ public sealed class BoundedInvestigator(
         {
             _traces.Add(ModelCallGate.Authorize(manifest, new ModelRequest(evidenceVersion, dataRegion, evidence), registry));
             var request = messages.ToList();
-            // UTF-8 bytes are an upper bound on tokens, so token-heavy text cannot slip past the input guard.
-            var estimatedInputTokens = (int)Math.Min(int.MaxValue, request.Sum(message => (long)Encoding.UTF8.GetByteCount(message.Text ?? string.Empty)));
+            // UTF-8 bytes of the messages and declared tool schemas are an upper bound on tokens, so neither can slip past the input guard.
+            var estimatedInputTokens = (int)Math.Min(int.MaxValue, EstimateInputBytes(request, options));
             if (limits.MaxOutputTokens is { } maxOutput)
             {
                 options = options?.Clone() ?? new ChatOptions();
@@ -300,6 +318,11 @@ public sealed class BoundedInvestigator(
         }
 
         private static bool IsTransient(Exception ex) => ex is HttpRequestException or TimeoutException;
+
+        private static long EstimateInputBytes(IEnumerable<ChatMessage> request, ChatOptions? options) =>
+            request.Sum(message => (long)Encoding.UTF8.GetByteCount(message.Text ?? string.Empty))
+            + (options?.Tools ?? Array.Empty<AITool>()).Sum(tool => (long)Encoding.UTF8.GetByteCount(
+                tool.Name + tool.Description + (tool is AIFunctionDeclaration declaration ? declaration.JsonSchema.GetRawText() : string.Empty)));
 
         public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
