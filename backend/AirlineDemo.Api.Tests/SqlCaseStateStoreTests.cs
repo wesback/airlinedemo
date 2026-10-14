@@ -275,33 +275,35 @@ public sealed class SqlCaseStateStoreTests
 
         var before = store.Read(scope);
         var auditBefore = CountAuditEvents(options);
+        var decisionsBefore = CaptureDecisions(options, before.CaseId);
+        Assert.NotEmpty(decisionsBefore);
 
         // Exact receipt replay: no new revision, no new audit event.
         var replay = store.Commit(scope, 0, new CaseCommit(basis, "receipt-r", "owner-r", "open", "first"));
         Assert.True(replay.Replayed);
-        AssertStateUnchanged(store, options, scope, before, auditBefore);
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
 
         // Same receipt ID with a different payload is a conflict.
         Assert.Throws<ReceiptConflictException>(() =>
             store.Commit(scope, before.Revision, new CaseCommit(null, "receipt-r", "owner-r", "close", "changed")));
-        AssertStateUnchanged(store, options, scope, before, auditBefore);
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
 
         // Stale expected revision.
         Assert.Throws<RevisionConflictException>(() =>
             store.Commit(scope, 0, new CaseCommit(null, null, "owner-r", "stale", "stale")));
-        AssertStateUnchanged(store, options, scope, before, auditBefore);
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
 
         // Invalid basis: wrong content digest, then wrong chain digest.
         var next = CaseStateStore.CreateBasisVersion(2, "basis r2", basis.BasisDigest);
         var badContent = next with { ContentDigest = "bad" };
         Assert.Throws<BasisIntegrityException>(() =>
             store.Commit(scope, before.Revision, new CaseCommit(badContent, null, "owner-r", "bad", "bad content")));
-        AssertStateUnchanged(store, options, scope, before, auditBefore);
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
 
         var badChain = next with { BasisDigest = "bad" };
         Assert.Throws<BasisIntegrityException>(() =>
             store.Commit(scope, before.Revision, new CaseCommit(badChain, null, "owner-r", "bad", "bad chain")));
-        AssertStateUnchanged(store, options, scope, before, auditBefore);
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
     }
 
     private static void AssertStateUnchanged(
@@ -309,7 +311,8 @@ public sealed class SqlCaseStateStoreTests
         DbContextOptions<CaseStateDbContext> options,
         CaseScope scope,
         CaseState before,
-        int auditBefore)
+        int auditBefore,
+        IReadOnlyList<(string ReceiptId, string Fingerprint)> decisionsBefore)
     {
         var after = store.Read(scope);
         Assert.Equal(before.Revision, after.Revision);
@@ -317,6 +320,19 @@ public sealed class SqlCaseStateStoreTests
         Assert.Equal(before.ReceiptIds, after.ReceiptIds);
         Assert.Equal(before.Audit.Select(a => a.Detail), after.Audit.Select(a => a.Detail));
         Assert.Equal(auditBefore, CountAuditEvents(options));
+        Assert.Equal(decisionsBefore, CaptureDecisions(options, before.CaseId));
+    }
+
+    private static IReadOnlyList<(string ReceiptId, string Fingerprint)> CaptureDecisions(
+        DbContextOptions<CaseStateDbContext> options,
+        string caseId)
+    {
+        using var db = new CaseStateDbContext(options);
+        return db.CaseDecisions
+            .Where(d => d.CaseId == caseId)
+            .OrderBy(d => d.Id)
+            .Select(d => new ValueTuple<string, string>(d.ReceiptId, d.Fingerprint))
+            .ToList();
     }
 
     private static SqliteConnection OpenMigratedSqlite(out DbContextOptions<CaseStateDbContext> options)
