@@ -59,6 +59,12 @@ public sealed record LegalReviewRecord(
     int BasisVersion,
     bool Simulated);
 
+// Delivery seam. Recording a legal decision must never call it; tests use it to prove that nothing is sent.
+public interface INoticeSender
+{
+    void Send(NoticeDraft draft);
+}
+
 public static class ObligationEvaluator
 {
     private static readonly ObligationState[] Precedence =
@@ -132,9 +138,9 @@ public static class ObligationEvaluator
         return new ObligationEvaluation(state, reasons, updated, newDraft);
     }
 
-    // Records a simulated legal decision only. Nothing is sent and the obligation state is not changed.
+    // Records a simulated legal decision only. The sender is never invoked, and the obligation state is not changed.
     public static LegalReviewRecord RecordLegalDecision(
-        NoticeDraft draft, string actor, string decision, string reason, DateTimeOffset decidedAtUtc)
+        NoticeDraft draft, string actor, string decision, string reason, DateTimeOffset decidedAtUtc, INoticeSender? sender = null)
     {
         if (string.IsNullOrWhiteSpace(actor)) throw new ArgumentException("Actor is required.", nameof(actor));
         if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("Reason is required.", nameof(reason));

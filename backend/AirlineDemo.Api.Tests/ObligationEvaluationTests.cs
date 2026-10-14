@@ -220,16 +220,25 @@ public sealed class ObligationEvaluationTests
         Assert.Equal(ObligationState.AtRisk, ObligationEvaluator.Evaluate(Make([Missing()]), At(13), first.Drafts).State);
     }
 
+    private sealed class RecordingNoticeSender : INoticeSender
+    {
+        public List<NoticeDraft> Sent { get; } = [];
+
+        public void Send(NoticeDraft draft) => Sent.Add(draft);
+    }
+
     [Fact]
     public void Legal_decision_sends_nothing_and_leaves_draft_history_unchanged()
     {
         var first = ObligationEvaluator.Evaluate(Make([Missing()]), At(12), []);
         var draft = first.NewDraft!;
+        var sender = new RecordingNoticeSender();
 
-        var record = ObligationEvaluator.RecordLegalDecision(draft, "legal-1", "signed-off", "Synthetic check passed", At(13));
+        var record = ObligationEvaluator.RecordLegalDecision(draft, "legal-1", "signed-off", "Synthetic check passed", At(13), sender);
         var afterDecision = ObligationEvaluator.Evaluate(Make([Missing()]), At(13), first.Drafts);
 
         Assert.True(record.Simulated);
+        Assert.Empty(sender.Sent);
         Assert.Equal(draft, first.NewDraft);
         Assert.Equal(first.Drafts, afterDecision.Drafts);
         Assert.Single(afterDecision.Drafts);
