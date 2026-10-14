@@ -1,0 +1,493 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 178,
+  "branch": "ai-sdlc/issue-178",
+  "commitSha": "7d45196eb383da894d6955f7615cb5f34971aef7",
+  "round": 1,
+  "pipelineVersion": "4387444",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The supervisor can accept a worker result that completes just after the wall-clock deadline, so the 30-second limit is not consistently enforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 301,
+          "message": "The wall-clock limit can be bypassed when the worker exits just after the deadline. Check elapsed time after the wait as well, before accepting the worker result.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Supervise checks the elapsed time only inside the loop after WaitForExit(PollMilliseconds) reports that the process is still running. If that wait observes the process exit, the loop ends without another time-limit check.",
+            "failureScenario": "A worker that finishes just after the 30-second limit but before the current polling wait returns is treated as successful, and its result can be accepted despite exceeding the configured wall-clock limit."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests map to the behavioral acceptance criteria and exercise intake routing, child-process parsing, time and memory limits, the decompression bomb, and the empty environment. I found no in-scope test defect.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Linux worker can change the permissions on its own working directory, so the configured read-only mode does not hold if parsing is exploited.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 148,
+          "message": "The Linux working-directory mode can be changed by the worker because it runs as the directory owner. Run the worker under an identity that cannot change the directory permissions or use a restriction it cannot bypass.",
+          "confidence": 0.84,
+          "category": "security A02:2025",
+          "evidence": {
+            "codePathTraced": "On Linux, RestrictWorkingDirectory sets the directory to mode 0555, but the worker normally runs with the API process identity, which owns that directory. The owner can change its permissions.",
+            "failureScenario": "If a crafted PDF exploits the parser on a non-root Linux deployment, code in the worker can chmod its working directory to add write permission, then create files there. The directory is therefore not effectively read-only to the worker."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 220,
+      "total": 421,
+      "percent": 52.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 5,
+          "total": 10,
+          "missed": [
+            182,
+            183,
+            201,
+            202,
+            203
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "covered": 197,
+          "total": 327,
+          "missed": [
+            48,
+            49,
+            55,
+            56,
+            57,
+            68,
+            69,
+            70,
+            71,
+            79,
+            80,
+            81,
+            82,
+            83,
+            84,
+            102,
+            104,
+            105,
+            114,
+            115,
+            116,
+            169,
+            170,
+            171,
+            184,
+            185,
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195,
+            196,
+            197,
+            214,
+            215,
+            229,
+            230,
+            237,
+            238,
+            239,
+            252,
+            273,
+            274,
+            284,
+            285,
+            289,
+            290,
+            303,
+            304,
+            305,
+            306,
+            309,
+            310,
+            323,
+            324,
+            325,
+            326,
+            327,
+            328,
+            364,
+            365,
+            366,
+            379,
+            380,
+            381,
+            388,
+            389,
+            390,
+            406,
+            407,
+            408,
+            409,
+            418,
+            419,
+            425,
+            426,
+            427,
+            428,
+            429,
+            443,
+            445,
+            446,
+            447,
+            448,
+            449,
+            450,
+            452,
+            453,
+            460,
+            480,
+            481,
+            482,
+            483,
+            487,
+            488,
+            489,
+            490,
+            491,
+            492,
+            495,
+            496,
+            497,
+            498,
+            500,
+            501,
+            503,
+            504,
+            505,
+            506,
+            507,
+            508,
+            510,
+            512,
+            513,
+            514,
+            516,
+            517,
+            518,
+            519,
+            522,
+            523,
+            524,
+            527,
+            528,
+            529
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/PdfWorker/PdfWorkerEntry.cs",
+          "covered": 17,
+          "total": 80,
+          "missed": [
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            36,
+            37,
+            38,
+            49,
+            50,
+            51,
+            52,
+            53,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            83,
+            84,
+            85,
+            86,
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            134
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 4,
+          "missed": [
+            7,
+            8,
+            9
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
