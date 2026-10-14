@@ -24,12 +24,32 @@ public static class PdfWorkerEntry
 
     internal static PdfWorkerResponse Execute(Stream stdin, Func<bool> withinMemoryLimit)
     {
+        // The PDF library swallows allocation failures while decoding streams, so an out-of-memory
+        // exception anywhere during parsing marks the document as over the memory limit.
+        var outOfMemory = false;
+        void OnFirstChance(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
+        {
+            if (e.Exception is OutOfMemoryException)
+            {
+                outOfMemory = true;
+            }
+        }
+
+        AppDomain.CurrentDomain.FirstChanceException += OnFirstChance;
         try
         {
             using var input = new MemoryStream();
             stdin.CopyTo(input);
 
             var outcome = EvidenceIntake.ExtractText(input.ToArray(), withinMemoryLimit);
+            if (outOfMemory)
+            {
+                return new PdfWorkerResponse(
+                    EvidenceProcessingState.RejectedRetryable.ToString(),
+                    "exceeded the memory limit; retry is possible",
+                    string.Empty);
+            }
+
             return new PdfWorkerResponse(outcome.State.ToString(), outcome.Reason, outcome.Text);
         }
         catch (OutOfMemoryException)
@@ -45,6 +65,10 @@ public static class PdfWorkerEntry
                 EvidenceProcessingState.RejectedRetryable.ToString(),
                 "worker failed to read the document; retry is possible",
                 string.Empty);
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= OnFirstChance;
         }
     }
 

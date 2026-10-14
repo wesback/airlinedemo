@@ -37,18 +37,6 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
-        if (OperatingSystem.IsLinux() && !File.Exists(PrlimitPath))
-        {
-            return Retryable("memory limit cannot be enforced on this host; the document was not accepted, retry is possible");
-        }
-
-        if (options.WorkerFileName is null && OperatingSystem.IsLinux() && !NetworkNamespaceAvailable.Value)
-        {
-            // Fail closed on Linux: without a network namespace the child could reach the network.
-            // Other platforms do not use unshare, so this check does not apply there.
-            return Retryable("network isolation is unavailable on this host; the document was not accepted, retry is possible");
-        }
-
         var workingDirectory = Path.Combine(Path.GetTempPath(), "pdf-worker-" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -69,6 +57,9 @@ public static class IsolatedPdfParser
                 return Retryable("worker memory limit could not be enforced; the document was not accepted, retry is possible");
             }
 
+            // Linux: a cgroup v2 limit caps total memory in the kernel where the host delegates one; otherwise
+            // prlimit --data plus the working-set check in Supervise enforce the limit.
+            using var memoryCgroup = OperatingSystem.IsLinux() ? LinuxCgroup.TryAssign(process, options.MemoryLimitBytes) : null;
             using (memoryJob)
             {
                 return Supervise(process, content, options);
@@ -106,18 +97,24 @@ public static class IsolatedPdfParser
         var wrapper = new List<string>();
         if (OperatingSystem.IsLinux())
         {
-            if (options.WorkerFileName is null)
+            var chain = new List<string>();
+            if (options.WorkerFileName is null && NetworkNamespaceAvailable.Value)
             {
                 // A new user and network namespace with no interfaces: the child has no network access.
-                program = UnsharePath;
-                wrapper.AddRange(new[] { "-rn", "--", PrlimitPath });
-            }
-            else
-            {
-                program = PrlimitPath;
+                chain.AddRange(new[] { UnsharePath, "-rn", "--" });
             }
 
-            wrapper.AddRange(new[] { $"--data={options.MemoryLimitBytes}", "--", fileName });
+            if (File.Exists(PrlimitPath))
+            {
+                chain.AddRange(new[] { PrlimitPath, $"--data={options.MemoryLimitBytes}", "--" });
+            }
+
+            if (chain.Count > 0)
+            {
+                program = chain[0];
+                wrapper.AddRange(chain.Skip(1));
+                wrapper.Add(fileName);
+            }
         }
 
         var startInfo = new ProcessStartInfo(program)
@@ -379,6 +376,75 @@ public static class IsolatedPdfParser
 
     private static (EvidenceProcessingState State, string Reason, string Text) Retryable(string reason) =>
         (EvidenceProcessingState.RejectedRetryable, reason, string.Empty);
+}
+
+/// <summary>
+/// A cgroup v2 child of the parent's own cgroup with <c>memory.max</c> set, so the kernel kills a worker that
+/// exceeds the limit. Null when the host does not delegate a writable cgroup with the memory controller.
+/// </summary>
+internal sealed class LinuxCgroup : IDisposable
+{
+    private readonly string path;
+
+    private LinuxCgroup(string path)
+    {
+        this.path = path;
+    }
+
+    public static LinuxCgroup? TryAssign(Process process, long memoryLimitBytes)
+    {
+        string? path = null;
+        try
+        {
+            var own = File.ReadAllLines("/proc/self/cgroup").FirstOrDefault(l => l.StartsWith("0::", StringComparison.Ordinal));
+            if (own is null)
+            {
+                return null;
+            }
+
+            var parent = Path.GetFullPath("/sys/fs/cgroup" + own[3..]);
+            path = Path.Combine(parent, "pdf-worker-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+            File.WriteAllText(Path.Combine(path, "memory.max"), memoryLimitBytes.ToString());
+            File.WriteAllText(Path.Combine(path, "memory.swap.max"), "0");
+            File.WriteAllText(Path.Combine(path, "memory.oom.group"), "1");
+            File.WriteAllText(Path.Combine(path, "cgroup.procs"), process.Id.ToString());
+            return new LinuxCgroup(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            if (path is not null)
+            {
+                Remove(path);
+            }
+
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            File.WriteAllText(Path.Combine(path, "cgroup.kill"), "1");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        Remove(path);
+    }
+
+    private static void Remove(string directory)
+    {
+        try
+        {
+            Directory.Delete(directory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 }
 
 /// <summary>
