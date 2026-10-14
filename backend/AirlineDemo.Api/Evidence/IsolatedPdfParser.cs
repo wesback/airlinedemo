@@ -43,11 +43,14 @@ public static class IsolatedPdfParser
             return Retryable("worker cannot be isolated from its working directory; the document was not accepted, retry is possible");
         }
 
-        var workingDirectory = Path.Combine(Path.GetTempPath(), "pdf-worker-" + Guid.NewGuid().ToString("N"));
+        var workingDirectory = ChooseWorkingDirectory();
         try
         {
-            Directory.CreateDirectory(workingDirectory);
-            RestrictWorkingDirectory(workingDirectory);
+            if (OperatingSystem.IsWindows())
+            {
+                Directory.CreateDirectory(workingDirectory);
+                RestrictWorkingDirectory(workingDirectory);
+            }
 
             using var process = Process.Start(CreateStartInfo(options, workingDirectory));
             if (process is null)
@@ -80,7 +83,10 @@ public static class IsolatedPdfParser
         {
             try
             {
-                Directory.Delete(workingDirectory, recursive: false);
+                if (OperatingSystem.IsWindows())
+                {
+                    Directory.Delete(workingDirectory, recursive: false);
+                }
             }
             catch (IOException)
             {
@@ -164,6 +170,15 @@ public static class IsolatedPdfParser
         startInfo.Environment.Clear();
         return startInfo;
     }
+
+    /// <summary>
+    /// Windows: a fresh temp directory with a deny ACE. Unix: the filesystem root, which the worker can neither write nor
+    /// chmod because root owns it; a directory the worker owned could be made writable again by the worker itself.
+    /// </summary>
+    internal static string ChooseWorkingDirectory() =>
+        OperatingSystem.IsWindows()
+            ? Path.Combine(Path.GetTempPath(), "pdf-worker-" + Guid.NewGuid().ToString("N"))
+            : "/";
 
     /// <summary>
     /// Makes the child's working directory read-only: a Windows deny ACE, or mode 0555 on Unix. On Unix the child runs
@@ -549,10 +564,36 @@ internal sealed class WindowsJobObject : IDisposable
         return true;
     }
 
+    /// <summary>Reads back whether <paramref name="process"/> is in this job and the limits the kernel holds for it.</summary>
+    internal (bool InJob, ExtendedLimits Limits) Inspect(Process process)
+    {
+        var inJob = IsProcessInJob(process.Handle, handle, out var result) && result;
+        var size = Marshal.SizeOf<ExtendedLimits>();
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            return QueryInformationJobObject(handle, JobObjectExtendedLimitInformation, buffer, (uint)size, IntPtr.Zero)
+                ? (inJob, Marshal.PtrToStructure<ExtendedLimits>(buffer))
+                : (inJob, default);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     public void Dispose()
     {
         CloseHandle(handle);
     }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length, IntPtr returnLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsProcessInJob(IntPtr process, IntPtr job, [MarshalAs(UnmanagedType.Bool)] out bool result);
 
     [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "CreateJobObjectW")]
     private static extern IntPtr CreateJobObjectW(IntPtr attributes, IntPtr name);

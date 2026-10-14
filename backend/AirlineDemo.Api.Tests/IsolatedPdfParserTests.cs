@@ -181,6 +181,59 @@ public class IsolatedPdfParserTests
         Assert.Equal((nuint)(512L * 1024 * 1024), limits.ProcessMemoryLimit);
     }
 
+    // Windows: TryAssign must put the started child in a job whose kernel limits hold the cap; removing it fails here.
+    [Fact]
+    public void JobObject_TryAssign_AppliesMemoryCapToChild()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var child = Process.Start(new ProcessStartInfo("cmd.exe", "/c more")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true,
+        })!;
+        try
+        {
+            Assert.True(WindowsJobObject.TryAssign(child, 256L * 1024 * 1024, out var job));
+            using (job)
+            {
+                var (inJob, limits) = job!.Inspect(child);
+
+                Assert.True(inJob);
+                Assert.NotEqual(0u, limits.Basic.LimitFlags & WindowsJobObject.JobObjectLimitProcessMemory);
+                Assert.Equal((nuint)(256L * 1024 * 1024), limits.ProcessMemoryLimit);
+            }
+        }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                child.Kill();
+            }
+        }
+    }
+
+    // Unix: the worker's working directory must not be one the worker owns (it could chmod it) nor writable by others.
+    [Fact]
+    public void WorkingDirectory_OnUnixIsRootOwnedAndNotWritable()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = IsolatedPdfParser.ChooseWorkingDirectory();
+        var mode = File.GetUnixFileMode(directory);
+
+        Assert.Equal("/", directory);
+        Assert.Equal(0, (int)(mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)));
+    }
+
     [Theory]
     [InlineData(true, false, "root", false, true)]
     [InlineData(true, false, "app", false, false)]
