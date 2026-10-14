@@ -32,6 +32,12 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
+        if (options.WorkerFileName is null && !NetworkNamespaceAvailable.Value)
+        {
+            // Fail closed: without a network namespace the child could reach the network.
+            return Retryable("network isolation is unavailable on this host; the document was not accepted, retry is possible");
+        }
+
         var workingDirectory = Path.Combine(Path.GetTempPath(), "pdf-worker-" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -74,7 +80,7 @@ public static class IsolatedPdfParser
     internal static ProcessStartInfo CreateStartInfo(IsolatedPdfParserOptions options, string workingDirectory)
     {
         var fileName = options.WorkerFileName ?? ResolveHost();
-        var inNetworkNamespace = options.WorkerFileName is null && NetworkNamespaceAvailable.Value;
+        var inNetworkNamespace = options.WorkerFileName is null;
         var startInfo = new ProcessStartInfo(inNetworkNamespace ? UnsharePath : fileName)
         {
             UseShellExecute = false,
@@ -87,13 +93,10 @@ public static class IsolatedPdfParser
 
         if (options.WorkerFileName is null)
         {
-            if (inNetworkNamespace)
-            {
-                // A new user and network namespace with no interfaces: the child has no network access.
-                startInfo.ArgumentList.Add("-rn");
-                startInfo.ArgumentList.Add("--");
-                startInfo.ArgumentList.Add(fileName);
-            }
+            // A new user and network namespace with no interfaces: the child has no network access.
+            startInfo.ArgumentList.Add("-rn");
+            startInfo.ArgumentList.Add("--");
+            startInfo.ArgumentList.Add(fileName);
 
             if (string.Equals(Path.GetFileNameWithoutExtension(fileName), "dotnet", StringComparison.OrdinalIgnoreCase))
             {
@@ -118,6 +121,8 @@ public static class IsolatedPdfParser
 
     /// <summary>True when Linux allows an unprivileged network namespace; checked once per process.</summary>
     private static readonly Lazy<bool> NetworkNamespaceAvailable = new(ProbeNetworkNamespace);
+
+    internal static bool NetworkIsolationAvailable => NetworkNamespaceAvailable.Value;
 
     private static bool ProbeNetworkNamespace()
     {

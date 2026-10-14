@@ -14,24 +14,22 @@ public static class PdfWorkerEntry
 
     public static int Run()
     {
-        var response = Execute();
+        using var stdin = Console.OpenStandardInput();
+        var response = Execute(stdin, WithinMemoryLimit);
         using var stdout = Console.OpenStandardOutput();
         JsonSerializer.Serialize(stdout, response);
         stdout.Flush();
         return 0;
     }
 
-    private static PdfWorkerResponse Execute()
+    internal static PdfWorkerResponse Execute(Stream stdin, Func<bool> withinMemoryLimit)
     {
         try
         {
             using var input = new MemoryStream();
-            using (var stdin = Console.OpenStandardInput())
-            {
-                stdin.CopyTo(input);
-            }
+            stdin.CopyTo(input);
 
-            var outcome = EvidenceIntake.ExtractText(input.ToArray(), WithinMemoryLimit);
+            var outcome = EvidenceIntake.ExtractText(input.ToArray(), withinMemoryLimit);
             return new PdfWorkerResponse(outcome.State.ToString(), outcome.Reason, outcome.Text);
         }
         catch (Exception)

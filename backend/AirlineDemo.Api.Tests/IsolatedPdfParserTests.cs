@@ -19,13 +19,17 @@ public class IsolatedPdfParserTests
         return File.ReadAllBytes(Path.Combine(dir!, "Fixtures", "PdfCorpus", name));
     }
 
-    /// <summary>A one-page PDF whose content stream inflates to 10 MB of zeros from a few kilobytes.</summary>
+    /// <summary>A one-page PDF whose content stream inflates to 600 MB of zeros (above the 512 MB limit) from a few hundred kilobytes.</summary>
     private static byte[] FlateBomb()
     {
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
         {
-            zlib.Write(new byte[10 * 1024 * 1024]);
+            var chunk = new byte[1024 * 1024];
+            for (var i = 0; i < 600; i++)
+            {
+                zlib.Write(chunk);
+            }
         }
 
         var body = compressed.ToArray();
@@ -49,6 +53,7 @@ public class IsolatedPdfParserTests
     [Fact]
     public void ValidPdf_IsExtractedByChildProcess()
     {
+        RequireNetworkIsolation();
         var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"));
 
         Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
@@ -58,6 +63,7 @@ public class IsolatedPdfParserTests
     [Fact]
     public void CorruptPdf_IsRejectedAsRetryable()
     {
+        RequireNetworkIsolation();
         var outcome = IsolatedPdfParser.Parse(Fixture("corrupt.pdf"));
 
         Assert.NotEqual(EvidenceProcessingState.Complete, outcome.State);
@@ -68,11 +74,15 @@ public class IsolatedPdfParserTests
     [Fact]
     public void FlateBomb_FailsWithinLimits_AndServiceStillProcessesValidPdf()
     {
+        RequireNetworkIsolation();
         var clock = Stopwatch.StartNew();
         var bomb = IsolatedPdfParser.Parse(FlateBomb());
         clock.Stop();
 
-        Assert.NotEqual(EvidenceProcessingState.Complete, bomb.State);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, bomb.State);
+        Assert.True(
+            bomb.Reason.Contains("memory limit") || bomb.Reason.Contains("time limit"),
+            $"bomb was not stopped by a limit: {bomb.Reason}");
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"bomb took {clock.Elapsed}");
 
         var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"));
@@ -103,6 +113,7 @@ public class IsolatedPdfParserTests
     [Fact]
     public void MemoryLimit_KillsWorkerAndReturnsRetryable()
     {
+        RequireNetworkIsolation();
         var options = new IsolatedPdfParserOptions { MemoryLimitBytes = 1 };
 
         var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
@@ -110,6 +121,58 @@ public class IsolatedPdfParserTests
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
         Assert.Contains("memory limit", outcome.Reason);
         Assert.Equal(string.Empty, outcome.Text);
+    }
+
+    /// <summary>Tests that run the real child need the network namespace; skip them where the host denies it (fail-closed).</summary>
+    private static void RequireNetworkIsolation()
+    {
+        if (!IsolatedPdfParser.NetworkIsolationAvailable)
+        {
+            Assert.Skip("unprivileged network namespaces are unavailable on this host");
+        }
+    }
+
+    // AC-1: intake routes every PDF through IsolatedPdfParser; a hung worker stops intake before anything is stored.
+    [Fact]
+    public void Intake_RoutesPdfThroughIsolatedParser_AndStoresNothingWhenWorkerIsKilled()
+    {
+        var options = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = "/bin/sh",
+            WorkerArguments = new[] { "-c", "sleep 60" },
+            WallClockLimit = TimeSpan.FromSeconds(2),
+        };
+        var store = new EvidenceBasisStore();
+        var documents = new[] { new EvidenceDocument("valid.pdf", Fixture("valid-text.pdf")) };
+
+        var result = EvidenceIntake.Process(documents, store, options);
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, result.State);
+        Assert.Contains("time limit", result.Reason);
+        Assert.Null(store.Latest("valid.pdf"));
+    }
+
+    // AC-1: the worker entry point turns stdin bytes into a JSON-ready response.
+    [Fact]
+    public void WorkerEntry_ExtractsValidPdfAndRejectsCorruptPdf()
+    {
+        var valid = PdfWorkerEntry.Execute(new MemoryStream(Fixture("valid-text.pdf")), () => true);
+        var corrupt = PdfWorkerEntry.Execute(new MemoryStream(Fixture("corrupt.pdf")), () => true);
+
+        Assert.Equal(EvidenceProcessingState.Complete.ToString(), valid.State);
+        Assert.False(string.IsNullOrWhiteSpace(valid.Text));
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable.ToString(), corrupt.State);
+        Assert.Equal(string.Empty, corrupt.Text);
+    }
+
+    [Fact]
+    public void WorkerEntry_StopsWhenMemoryLimitIsExceeded()
+    {
+        var response = PdfWorkerEntry.Execute(new MemoryStream(Fixture("valid-text.pdf")), () => false);
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable.ToString(), response.State);
+        Assert.Contains("memory limit", response.Reason);
+        Assert.Equal(string.Empty, response.Text);
     }
 
     // AC-4: the child starts with an empty environment and a working directory of its own (no secrets, no store access).

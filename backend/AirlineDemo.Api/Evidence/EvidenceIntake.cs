@@ -97,7 +97,10 @@ public static class EvidenceIntake
     /// Validates a package and commits extracted text as new basis versions only when every document is accepted.
     /// A rejected package creates no basis content, so no partial basis is ever stored.
     /// </summary>
-    public static EvidenceIntakeResult Process(IReadOnlyList<EvidenceDocument> documents, EvidenceBasisStore store)
+    public static EvidenceIntakeResult Process(
+        IReadOnlyList<EvidenceDocument> documents,
+        EvidenceBasisStore store,
+        IsolatedPdfParserOptions? parserOptions = null)
     {
         if (documents.Count > MaxDocuments)
         {
@@ -131,7 +134,7 @@ public static class EvidenceIntake
         var extracted = new List<(string Key, string Text)>(documents.Count);
         foreach (var document in documents)
         {
-            var outcome = IsolatedPdfParser.Parse(document.Content);
+            var outcome = IsolatedPdfParser.Parse(document.Content, parserOptions);
             if (outcome.State != EvidenceProcessingState.Complete)
             {
                 return new EvidenceIntakeResult(outcome.State, $"{document.FileName}: {outcome.Reason}", Array.Empty<EvidenceBasisVersion>());
