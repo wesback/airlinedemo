@@ -155,10 +155,9 @@ public sealed class MockRequestInbox
     private readonly Dictionary<(string CaseId, string ReportId), string> _reportEvent = new();
     private readonly List<DeliveryReceipt> _requests = [];
     private readonly List<string> _audit = [];
-    private readonly Action<string>? _beforeCommit;
 
-    /// <param name="beforeCommit">Fault-injection hook, invoked under the lock before any state changes.</param>
-    public MockRequestInbox(Action<string>? beforeCommit = null) => _beforeCommit = beforeCommit;
+    /// <summary>Fault-injection switch: when true, the write boundary throws before any state changes.</summary>
+    public bool InjectWriteFailure { get; set; }
 
     public IReadOnlyList<DeliveryReceipt> Requests
     {
@@ -218,7 +217,10 @@ public sealed class MockRequestInbox
                 MockRequestTemplate.Version,
                 MockRequestTemplate.Render(envelope, requestId));
 
-            _beforeCommit?.Invoke(envelope.EventId);
+            if (InjectWriteFailure)
+            {
+                throw new InvalidOperationException("injected write failure");
+            }
 
             _byEvent[envelope.EventId] = (fingerprint, receipt);
             _reportEvent[(envelope.CaseId, envelope.ReportId)] = envelope.EventId;

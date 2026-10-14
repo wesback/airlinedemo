@@ -203,20 +203,13 @@ public class MockRequestDeliveryTests
     [Fact]
     public void Injected_write_failure_leaves_no_partial_receipt_or_audit_and_retry_delivers_once()
     {
-        var fail = true;
-        var inbox = new MockRequestInbox(_ =>
-        {
-            if (fail)
-            {
-                throw new InvalidOperationException("injected write failure");
-            }
-        });
+        var inbox = new MockRequestInbox { InjectWriteFailure = true };
 
         Assert.Throws<InvalidOperationException>(() => inbox.Submit(Env(), Gap(), ScenarioTime));
         Assert.Empty(inbox.Requests);
         Assert.Empty(inbox.Audit);
 
-        fail = false;
+        inbox.InjectWriteFailure = false;
         var retry = inbox.Submit(Env(), Gap(), ScenarioTime);
 
         Assert.Equal(DeliveryOutcome.Delivered, retry.Outcome);
@@ -330,6 +323,7 @@ public class MockRequestDeliveryTests
         Assert.True(IsReflectiveOrDynamicInvocation(typeof(MethodBase).GetMethod(nameof(MethodBase.Invoke), new[] { typeof(object), typeof(object[]) })!));
         Assert.True(IsReflectiveOrDynamicInvocation(typeof(Activator).GetMethod(nameof(Activator.CreateInstance), Type.EmptyTypes)!));
         Assert.True(IsReflectiveOrDynamicInvocation(typeof(Delegate).GetMethod(nameof(Delegate.DynamicInvoke))!));
+        Assert.True(IsReflectiveOrDynamicInvocation(typeof(Func<string>).GetMethod("Invoke")!));
         Assert.False(IsReflectiveOrDynamicInvocation(typeof(string).GetMethod(nameof(string.Trim), Type.EmptyTypes)!));
 
         var send = typeof(IFakeSender).GetMethod(nameof(IFakeSender.Send))!;
@@ -354,7 +348,7 @@ public class MockRequestDeliveryTests
             || owner == typeof(Type) || owner.IsSubclassOf(typeof(Type))
             || owner == typeof(Activator)
             || owner == typeof(AppDomain)
-            || (typeof(Delegate).IsAssignableFrom(owner) && callee.Name is "DynamicInvoke" or "CreateDelegate");
+            || (typeof(Delegate).IsAssignableFrom(owner) && callee.Name is "Invoke" or "DynamicInvoke" or "BeginInvoke" or "CreateDelegate");
     }
 
     /// <summary>True for calls whose concrete target is chosen at runtime (interface, abstract, or virtual dispatch) and that the IL walk therefore cannot see: API-declared interface/abstract/virtual methods, and any virtual method the API overrides.</summary>
@@ -386,6 +380,9 @@ public class MockRequestDeliveryTests
             int code = il[i++];
             if (code == 0xFE) code = 0xFE00 | il[i++];
             var op = OpCodeByValue[code];
+            // calli takes its target from the stack, so no method token is visible to the walk.
+            if (op == OpCodes.Calli)
+                Assert.Fail($"{method.DeclaringType?.FullName}.{method.Name} uses calli (indirect call through a function pointer)");
             switch (op.OperandType)
             {
                 case OperandType.InlineMethod:
