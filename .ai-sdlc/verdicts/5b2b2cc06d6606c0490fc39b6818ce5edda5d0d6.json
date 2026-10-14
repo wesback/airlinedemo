@@ -1,0 +1,276 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "5b2b2cc06d6606c0490fc39b6818ce5edda5d0d6",
+  "round": 0,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds useful redaction for structured log state and activity tags, but exceptions and unstructured scopes bypass it, and arbitrary log fields are not restricted to the permitted set. The tests also do not cover connection-string setup or trace-attribute redaction.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 95,
+          "message": "Exceptions bypass redaction, so sensitive content in exception messages or stack traces can leave the process.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "RedactingLogger.Log passes the original exception to inner.Log after sanitizing only the formatted message and structured state.",
+            "failureScenario": "A caller logs an exception whose message or stack contains a prompt or bearer token; the logging provider receives the unsanitized exception and can export that content to Application Insights. This is OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 67,
+          "message": "Non-structured scopes bypass the filter and can export bearer tokens or session cookies.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "BeginScope redacts only enumerable key-value scopes; other scope values are passed directly to the inner logger.",
+            "failureScenario": "A caller begins a scope with a string containing a session cookie or bearer token; the provider includes that unredacted scope in its log record. This is OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 40,
+          "message": "The filter does not enforce the allowed log-field set; arbitrary unlisted fields and values pass through.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Sanitize returns non-sensitive value types unchanged and scrubs strings only for bearer-token and selected session-cookie patterns; it does not restrict property names to the permitted telemetry fields.",
+            "failureScenario": "A log record contains an unapproved field such as email or query with ordinary text; its name is not sensitive and its value matches neither pattern, so the value is emitted despite the criterion limiting logs to identifiers, states, counts, durations, and token usage."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "Missing behavior tests for Application Insights setup with and without the connection string, and for redaction of trace attributes.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The tests exercise name sanitization, text scrubbing, and captured log records, but do not configure diagnostics with or without a connection string or exercise RedactingActivityProcessor.",
+            "failureScenario": "The connection-string setup could stop exporting logs or traces, or the trace processor could stop redacting prompt attributes, while every test in this file still passes. Acceptance criteria 1 and the trace portion of 2 would therefore be unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The logging wrapper leaves exception data and some free-form message content unredacted. The tests also do not verify the configured export path or trace-attribute redaction.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 109,
+          "message": "Sensitive content can reach log providers through exceptions and free-form messages. This exposes data the acceptance criteria require kept out of logs (OWASP A04:2025).",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingLogger.Log passes the original exception to inner.Log; it also sends the formatted message through ScrubText, which only replaces bearer tokens and session cookies.",
+            "failureScenario": "A caller logs an exception whose message contains a passcode or prompt, or logs free-form prompt text under a nonsensitive property name. The downstream provider receives that content without redaction."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "Acceptance criterion 1 has no test for configured Application Insights export or the no-connection-string console-only behavior.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests cover sanitizer helpers and captured log records, but do not exercise AddAirlineDiagnostics configuration or verify that logs and traces are exported when a connection string is set.",
+            "failureScenario": "If connection-string handling or Application Insights registration is removed or broken, the named tests still pass, leaving acceptance criterion 1 unverified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "Acceptance criterion 2 has no test for redaction of trace attributes.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests call Sanitize and ScrubText and capture logger records, but none creates an Activity and verifies its attributes after RedactingActivityProcessor.OnEnd.",
+            "failureScenario": "If the trace processor is removed or stops sanitizing attributes, all current tests still pass while sensitive trace attributes can be exported."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new logger wrapper redacts structured properties and formatted messages, but string scopes and exception objects bypass it. Both paths can send sensitive values to configured log providers.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 69,
+          "message": "String log scopes bypass redaction and can expose sensitive content in exported logs (OWASP A09:2025).",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingLogger.BeginScope passes non-structured scope state directly to the inner logger without calling ScrubText or Sanitize.",
+            "failureScenario": "If application code opens a scope containing a prompt, document text, bearer token, or session cookie as a string, a provider can record that value unchanged."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 96,
+          "message": "The original exception bypasses redaction and may expose sensitive content through exception telemetry (OWASP A09:2025).",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingLogger.Log sanitizes the message and structured state, but passes the original exception object to inner.Log.",
+            "failureScenario": "If an exception message or attached detail contains a passcode, cookie, prompt, or document text, a provider that records exception telemetry can export that content unchanged."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
