@@ -1,4 +1,5 @@
 using AirlineDemo.Api.Investigation;
+using Microsoft.Extensions.AI;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -135,7 +136,158 @@ public class InvestigationLimitsTests
         Assert.DoesNotContain(values, v => v is not null && v.Contains("Return readiness", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task A_finished_investigation_returns_claims_releases_limits_and_traces_its_fields()
+    {
+        var logger = new TraceLogger();
+        using var limits = Limits();
+
+        var result = await Investigator(new ScriptedClient(_ => Reply(GoodReply)), limits, logger).InvestigateAsync([Doc]);
+
+        Assert.Single(result.Claims);
+        Assert.True(limits.Released);
+        Assert.Null(limits.Breach);
+        Assert.Single(logger.States);
+        var values = Values(logger);
+        Assert.Contains("approved", values);
+        Assert.Contains("escalate", values);
+        Assert.Contains("fixture-deployment", values);
+        Assert.Contains("fixture-model", values);
+        Assert.Contains("basis-v1", values);
+        Assert.Contains("doc-1#p1", values);
+        Assert.DoesNotContain(values, v => v is not null && (v.Contains("Return readiness", StringComparison.Ordinal) || v.Contains("synthetic-analyst-01", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task A_tool_call_breach_stops_the_investigation_with_an_explicit_recorded_breach()
+    {
+        var logger = new TraceLogger();
+        using var limits = Limits(new InvestigationLimitOptions { MaxToolCalls = 0 });
+        var model = new ScriptedClient(_ => Task.FromResult(ToolCall(CaseReadTools.InventoryTool)));
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
+
+        AssertBreach(ex, limits, logger, InvestigationBreach.ToolCalls);
+    }
+
+    [Fact]
+    public async Task An_input_token_breach_stops_the_investigation_with_no_result_and_a_recorded_breach()
+    {
+        var logger = new TraceLogger();
+        using var limits = Limits(new InvestigationLimitOptions { MaxInputTokensPerCall = 1 });
+        var model = new ScriptedClient(_ => Reply(GoodReply));
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
+
+        AssertBreach(ex, limits, logger, InvestigationBreach.InputTokens);
+    }
+
+    [Fact]
+    public async Task An_output_token_breach_stops_the_investigation_with_no_result_and_a_recorded_breach()
+    {
+        var logger = new TraceLogger();
+        using var limits = Limits();
+        var model = new ScriptedClient(_ => Reply(GoodReply, outputTokens: 5_000));
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
+
+        AssertBreach(ex, limits, logger, InvestigationBreach.OutputTokens);
+    }
+
+    [Fact]
+    public async Task A_time_breach_stops_the_investigation_with_no_result_and_a_recorded_breach()
+    {
+        var logger = new TraceLogger();
+        using var limits = Limits(new InvestigationLimitOptions { Timeout = TimeSpan.FromMilliseconds(30) });
+        var model = new ScriptedClient(async ct =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(10), ct);
+            return await Reply(GoodReply);
+        });
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
+
+        AssertBreach(ex, limits, logger, InvestigationBreach.Time);
+    }
+
+    [Fact]
+    public async Task A_retry_breach_stops_the_investigation_with_no_result_and_a_recorded_breach()
+    {
+        var logger = new TraceLogger();
+        using var limits = Limits(new InvestigationLimitOptions { MaxRetries = 0 });
+        var model = new ScriptedClient(_ => throw new HttpRequestException("transient failure"));
+
+        var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => Investigator(model, limits, logger).InvestigateAsync([Doc]));
+
+        AssertBreach(ex, limits, logger, InvestigationBreach.Retries);
+    }
+
+    private const string Doc = "SYNTHETIC EVIDENCE: Return readiness is pending reserve approval.";
+
+    private const string GoodReply =
+        """[{"text":"Return readiness is pending","witnesses":[{"documentId":"doc-1","page":1,"quote":"Return readiness is pending reserve approval."}]}]""";
+
     private static readonly byte[] TestKey = System.Text.Encoding.UTF8.GetBytes("synthetic-test-key-not-a-secret");
+
+    private static BoundedInvestigator Investigator(IChatClient model, IInvestigationLimits limits, TraceLogger logger) => new(
+        "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "basis-v1",
+        model, limits, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
+
+    private static Task<ChatResponse> Reply(string text, long? outputTokens = null) => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, text))
+    {
+        Usage = outputTokens is null ? null : new UsageDetails { InputTokenCount = 1, OutputTokenCount = outputTokens },
+    });
+
+    private static ChatResponse ToolCall(string name) => new(new ChatMessage(ChatRole.Assistant, new List<AIContent> { new FunctionCallContent("call-1", name) }));
+
+    private static List<string?> Values(TraceLogger logger) => logger.States.SelectMany(s => s).Select(kv => kv.Value?.ToString()).ToList();
+
+    // A breach must release resources, leave no authoritative result, and emit one trace with outcome escalated plus the budget event.
+    private static void AssertBreach(InvestigationLimitExceededException ex, InvestigationLimits limits, TraceLogger logger, InvestigationBreach breach)
+    {
+        Assert.Equal(breach, ex.Breach);
+        Assert.Equal(breach, limits.Breach);
+        Assert.True(limits.Released);
+        Assert.Equal(2, logger.States.Count);
+        var values = Values(logger);
+        Assert.Contains("escalated", values);
+        Assert.Contains("escalate", values);
+        Assert.Contains("fixture-deployment", values);
+        Assert.Contains("fixture-model", values);
+        Assert.Contains("basis-v1", values);
+        Assert.DoesNotContain(values, v => v is not null && v.Contains("Return readiness", StringComparison.Ordinal));
+    }
+
+    private sealed class CaseSource : ICaseReadSource
+    {
+        public IReadOnlyList<string> GetInventory(string caseId) => ["doc-1"];
+
+        public string? GetApprovedRequirements(string caseId) => null;
+
+        public string? GetSourcePage(string caseId, string documentId, int page) => documentId == "doc-1" && page == 1 ? Doc : null;
+
+        public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) => [];
+
+        public string? GetProcessingStatus(string caseId) => null;
+    }
+
+    /// <summary>Model stub that answers with the given response factory.</summary>
+    private sealed class ScriptedClient(Func<CancellationToken, Task<ChatResponse>> respond) : IChatClient
+    {
+        public ChatClientMetadata Metadata { get; } = new("scripted");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            respond(cancellationToken);
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
 
     private static ApprovedModelManifest ApprovedManifest() => ApprovedModelManifest.Parse(
         """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"eastus2","contentFilter":"enabled"}""");

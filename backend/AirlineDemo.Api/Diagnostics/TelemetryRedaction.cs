@@ -15,7 +15,7 @@ public static partial class TelemetryRedaction
     private static readonly HashSet<string> AllowedKeys = new(StringComparer.Ordinal)
     {
         "event.name", "trace.id", "service.name", "service.version", "deployment.environment",
-        "investigation.basis_version", "gen_ai.request.model", "investigation.tools",
+        "investigation.basis_version", "gen_ai.request.model", "investigation.model", "investigation.tools",
         "investigation.citations", "investigation.decision", "enduser.pseudo.id",
         "investigation.outcome", "error.type",
     };
@@ -46,7 +46,8 @@ public static partial class TelemetryRedaction
         IReadOnlyList<string> CitationIds,
         string Decision,
         string ActorId,
-        string Outcome);
+        string Outcome,
+        string? ModelName = null);
 
     private static readonly HashSet<string> DeniedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -97,6 +98,7 @@ public static partial class TelemetryRedaction
         ["trace.id"] = v => TraceIdRule.IsMatch(v),
         ["investigation.basis_version"] = v => BasisRule.IsMatch(v),
         ["gen_ai.request.model"] = v => DeploymentRule.IsMatch(v),
+        ["investigation.model"] = v => DeploymentRule.IsMatch(v) || v == "unknown",
         ["investigation.tools"] = v => v.Length == 0 || v.Split(',').All(t => AllowedTools.Contains(t)),
         ["investigation.citations"] = v => v.Length == 0 || v.Split(',').All(c => CitationRule.IsMatch(c)),
         ["investigation.decision"] = v => AllowedDecisions.Contains(v),
@@ -155,6 +157,7 @@ public static partial class TelemetryRedaction
             new("trace.id", trace.TraceId),
             new("investigation.basis_version", trace.BasisVersion),
             new("gen_ai.request.model", trace.ModelDeployment),
+            new("investigation.model", trace.ModelName ?? "unknown"),
             new("investigation.tools", string.Join(",", trace.Tools)),
             new("investigation.citations", string.Join(",", trace.CitationIds)),
             new("investigation.decision", trace.Decision),

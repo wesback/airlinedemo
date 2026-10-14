@@ -148,7 +148,7 @@ public sealed class BoundedInvestigator(
         TelemetryRedaction.EmitInvestigationTrace(
             telemetry.Logger,
             new TelemetryRedaction.InvestigationTraceRecord(
-                traceId, evidenceVersion, manifest.DeploymentName ?? "unknown", toolsUsed, citations, "escalate", telemetry.ActorId, outcome),
+                traceId, evidenceVersion, manifest.DeploymentName ?? "unknown", toolsUsed, citations, "escalate", telemetry.ActorId, outcome, manifest.Model ?? "unknown"),
             telemetry.ServiceVersion,
             telemetry.Environment,
             telemetry.ActorKey);
