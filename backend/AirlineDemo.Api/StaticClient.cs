@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Http;
 namespace AirlineDemo.Api;
 
 /// <summary>
-/// Serves the built React client from wwwroot on the same origin (DD-013, DD-028). Unknown non-API paths fall back
-/// to index.html for client-side routes; unknown /api/* paths return a JSON 404 instead of the page.
+/// Serves the built React client from wwwroot on the same origin (DD-013, DD-028). Unknown extensionless non-API paths
+/// fall back to index.html for client-side routes; unknown file-like paths and /api/* paths return 404 (JSON for the API).
 /// </summary>
 public static class StaticClient
 {
@@ -19,6 +19,12 @@ public static class StaticClient
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 await context.Response.WriteAsJsonAsync(new { error = "not_found" });
+                return;
+            }
+
+            if (Path.HasExtension(context.Request.Path.Value))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;
             }
 

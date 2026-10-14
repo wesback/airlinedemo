@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 
+// Runs test classes one at a time: the publish test spawns dotnet and the telemetry tests share a global listener.
+[assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)]
+
 namespace AirlineDemo.Api.Tests;
 
 /// <summary>
@@ -70,6 +73,19 @@ public sealed class StaticClientTests : IDisposable
     }
 
     [Fact]
+    public async Task Missing_asset_returns_404_not_the_page()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/assets/missing-0a1b2c.js");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain("<title>reviewer</title>", body);
+    }
+
+    [Fact]
     public async Task Unknown_api_path_returns_json_404_not_the_page()
     {
         using var factory = CreateFactory();
@@ -105,18 +121,25 @@ public sealed class StaticClientTests : IDisposable
         AssertSecurityHeaders(preflightResponse);
     }
 
-    private static readonly string[] BrowserSecurityHeaders =
-    [
-        "X-Content-Type-Options",
-        "X-Frame-Options",
-        "X-XSS-Protection",
-        "Referrer-Policy",
-        "Permissions-Policy",
-        "Cross-Origin-Opener-Policy",
-        "Cross-Origin-Embedder-Policy",
-        "Cross-Origin-Resource-Policy",
-        "Content-Security-Policy-Report-Only",
-    ];
+    // Response headers the framework produces on its own; every other header must be one of the two DD-028 headers.
+    private static readonly HashSet<string> FrameworkResponseHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Content-Type",
+        "Content-Length",
+        "Content-Encoding",
+        "Date",
+        "Server",
+        "Last-Modified",
+        "ETag",
+        "Accept-Ranges",
+        "Vary",
+        "Cache-Control",
+        "Expires",
+        "Location",
+        "Connection",
+        "Keep-Alive",
+        "Transfer-Encoding",
+    };
 
     private static void AssertSecurityHeaders(HttpResponseMessage response)
     {
@@ -125,10 +148,14 @@ public sealed class StaticClientTests : IDisposable
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             response.Headers.GetValues("Content-Security-Policy").Single());
         Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
-        // DD-028: exactly two security headers (CSP and HSTS); no other browser security header may be added.
-        var headerNames = response.Headers.Select(h => h.Key)
-            .Concat(response.Content?.Headers.Select(h => h.Key) ?? []);
-        Assert.Empty(headerNames.Intersect(BrowserSecurityHeaders, StringComparer.OrdinalIgnoreCase));
+        // DD-028: exactly two security headers (CSP and HSTS). Any response header that is neither framework-produced
+        // nor one of those two fails, so no other security header can slip in.
+        var unexpectedHeaders = response.Headers.Select(h => h.Key)
+            .Concat(response.Content?.Headers.Select(h => h.Key) ?? [])
+            .Where(name => !FrameworkResponseHeaders.Contains(name))
+            .Where(name => name is not ("Content-Security-Policy" or "Strict-Transport-Security"))
+            .ToArray();
+        Assert.Empty(unexpectedHeaders);
         // DD-028: no CORS, so no cross-origin allow header is ever emitted on the page or assets.
         Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
         Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
