@@ -80,6 +80,7 @@ public class MockRequestDeliveryTests
 
     [Theory]
     [InlineData("incomplete coverage")]
+    [InlineData("failed finding")]
     [InlineData("stale basis")]
     [InlineData("ambiguous identity")]
     [InlineData("conflict")]
@@ -94,6 +95,7 @@ public class MockRequestDeliveryTests
         var finding = scenario switch
         {
             "incomplete coverage" => Finding([Validated(ClaimKind.MissingRequirement)], new ProcessingCoverage(2, 1, 1, 0)),
+            "failed finding" => Finding([Validated(ClaimKind.MissingRequirement)], new ProcessingCoverage(2, 2, 1, 0)),
             "stale basis" => Finding([Validated(ClaimKind.MissingRequirement)], basisVersion: BasisVersion + 1),
             "ambiguous identity" => Finding([Validated(ClaimKind.MissingRequirement)], ambiguous: true),
             "conflict" => Finding([Validated(ClaimKind.Conflict)]),
