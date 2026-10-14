@@ -1,9 +1,12 @@
 using System.Runtime.CompilerServices;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Persistence.Migrations;
 using AirlineDemo.Api.Reviews;
 using AirlineDemo.Api.Runs;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -56,6 +59,20 @@ public sealed class SqlCaseStateStoreTests
             check.Parameters.AddWithValue("$name", table);
             Assert.Equal(1L, (long)check.ExecuteScalar()!);
         }
+
+        // SQLite ignores schemas, so check the migration's own operations for the schema of each table.
+        var operations = new InitialCaseStateSchema().UpOperations.ToList();
+        var created = operations.OfType<CreateTableOperation>().ToDictionary(o => o.Name, o => o.Schema);
+        Assert.Equal("dbo", created["cases"]);
+        Assert.Equal("dbo", created["case_documents"]);
+        Assert.Equal("dbo", created["case_decisions"]);
+        Assert.Equal("audit", created["case_events"]);
+
+        var ensured = operations.OfType<EnsureSchemaOperation>().Select(o => o.Name).ToArray();
+        Assert.Contains("audit", ensured);
+        var auditIndex = operations.FindIndex(o => o is EnsureSchemaOperation e && e.Name == "audit");
+        var eventsIndex = operations.FindIndex(o => o is CreateTableOperation c && c.Name == "case_events");
+        Assert.True(auditIndex >= 0 && auditIndex < eventsIndex, "audit schema must be created before audit.case_events");
     }
 
     private static void AssertMapped(CaseStateDbContext db, Type entity, string schema, string table)

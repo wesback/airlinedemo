@@ -12,6 +12,8 @@ public class InitialCaseStateSchema : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.EnsureSchema(name: "audit");
+
         migrationBuilder.CreateTable(
             name: "cases",
             schema: "dbo",
