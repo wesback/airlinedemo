@@ -65,7 +65,7 @@ internal sealed record CaseStoreDocument(int SchemaVersion, List<CaseState> Case
 /// persists atomically: on any failure neither memory nor the file changes.
 /// The audit log is exposed read-only; there is no update or delete operation.
 /// </summary>
-public sealed class CaseStateStore
+public sealed class CaseStateStore : ICaseStateStore
 {
     private const int SchemaVersion = 1;
     private const int LockAttempts = 500;

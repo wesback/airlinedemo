@@ -10,7 +10,7 @@ public sealed record DemoRunResetResult(string NewRunId, CaseState NewRun, DemoR
 
 // Starts a clean run for the authorized owner. The selected run is only authorized, never written,
 // so its audit, receipts and revision stay as they were. Reset accepts no evaluator input.
-public sealed class DemoRunReset(CaseStateStore store)
+public sealed class DemoRunReset(ICaseStateStore store)
 {
     public DemoRunResetResult Reset(string runId, string owner, string newRunId, string? fixtureId, string? applicationVersion)
     {

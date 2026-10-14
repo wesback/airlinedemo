@@ -15,7 +15,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<DemoSessionStore>();
 builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddSingleton<CaseStore>();
-builder.Services.AddSingleton(_ => new CaseStateStore(
+builder.Services.AddSingleton<ICaseStateStore>(_ => new CaseStateStore(
     builder.Configuration["CaseState:Path"] ?? Path.Combine(AppContext.BaseDirectory, "case-state.json")));
 builder.Services.AddSingleton<DemoRunReset>();
 var app = builder.Build();
