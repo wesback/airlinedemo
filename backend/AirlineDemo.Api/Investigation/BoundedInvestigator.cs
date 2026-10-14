@@ -1,7 +1,10 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Investigation;
 
@@ -13,7 +16,17 @@ public interface IInvestigationLimits
 {
     ValueTask BeforeToolCallAsync(CancellationToken cancellationToken);
     ValueTask BeforeModelCallAsync(CancellationToken cancellationToken);
+    ValueTask BeforeModelCallAsync(int estimatedInputTokens, CancellationToken cancellationToken) => BeforeModelCallAsync(cancellationToken);
+    ValueTask AfterModelCallAsync(long? inputTokens, long? outputTokens, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    // Returns true after a backoff when the failed model call may be retried; false means rethrow the failure.
+    ValueTask<bool> TryBackoffAsync(int retriesUsed, CancellationToken cancellationToken) => ValueTask.FromResult(false);
+    CancellationToken ExecutionToken => CancellationToken.None;
+    InvestigationBreach? Breach => null;
+    int? MaxOutputTokens => null;
 }
+
+/// <summary>Where an investigation's correlated trace is emitted. The actor is pseudonymised with ActorKey before emission.</summary>
+public sealed record InvestigationTelemetry(ILogger Logger, string ActorId, byte[] ActorKey, string ServiceVersion, string Environment);
 
 public sealed class NoInvestigationLimits : IInvestigationLimits
 {
@@ -43,7 +56,8 @@ public sealed class BoundedInvestigator(
     string dataRegion,
     string evidenceVersion,
     IChatClient modelClient,
-    IInvestigationLimits? limits = null)
+    IInvestigationLimits? limits = null,
+    InvestigationTelemetry? telemetry = null)
 {
     public const string UntrustedBegin = "<<<UNTRUSTED_DOCUMENT>>>";
     public const string UntrustedEnd = "<<<END_UNTRUSTED_DOCUMENT>>>";
@@ -57,7 +71,11 @@ public sealed class BoundedInvestigator(
 
     private static readonly JsonSerializerOptions ClaimJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    private readonly IInvestigationLimits _limits = limits ?? NoInvestigationLimits.Instance;
+    // Without supplied limits, or with the no-op limits, each investigation gets its own default limits, so none runs unbounded.
+    private readonly IInvestigationLimits? _suppliedLimits = limits is NoInvestigationLimits ? null : limits;
+    // Without telemetry the trace still goes to standard output, so no investigation's trace is dropped silently.
+    private readonly InvestigationTelemetry _telemetry = telemetry
+        ?? new InvestigationTelemetry(new ConsoleTraceLogger(), "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
 
     public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default)
     {
@@ -76,14 +94,68 @@ public sealed class BoundedInvestigator(
         }
 
         // Every document text that reaches the model, including tool results, is added here before the next call is gated.
+        var limits = _suppliedLimits ?? new InvestigationLimits();
+        var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var evidence = new List<string>(documents);
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, _limits);
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits);
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
-        var tools = new CaseReadTools(caseId, source, _limits, evidence.Add);
+        var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
         var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
 
-        var response = await agent.RunAsync(BuildPrompt(documents), cancellationToken: cancellationToken);
-        return new InvestigationResult(VerifyClaims(response.Text), gate.Traces);
+        InvestigationResult? result = null;
+        var outcome = "escalated";
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, limits.ExecutionToken);
+            var response = await agent.RunAsync(BuildPrompt(documents), cancellationToken: linked.Token);
+            // The tool-calling loop can swallow a tool-side breach, so the recorded breach is checked after the run as well.
+            if (limits.Breach is { } breach)
+            {
+                throw new InvestigationLimitExceededException(breach);
+            }
+
+            result = new InvestigationResult(VerifyClaims(response.Text), gate.Traces);
+            outcome = "approved";
+            return result;
+        }
+        catch (Exception ex) when (ex is not InvestigationLimitExceededException && limits.Breach is { } tripped)
+        {
+            throw new InvestigationLimitExceededException(tripped);
+        }
+        catch (InvestigationOutputException)
+        {
+            outcome = "rejected";
+            throw;
+        }
+        finally
+        {
+            EmitTrace(traceId, gate.ToolsUsed, result, outcome, limits);
+            (limits as IDisposable)?.Dispose();
+        }
+    }
+
+    // Identifiers only: no document text or prompt reaches the trace. The investigator never decides readiness, so its decision is always escalate.
+    private void EmitTrace(string traceId, IReadOnlyList<string> toolsUsed, InvestigationResult? result, string outcome, IInvestigationLimits limits)
+    {
+        var telemetry = _telemetry;
+        var inventory = source.GetInventory(caseId).ToList();
+        var claims = result?.Claims ?? Array.Empty<InvestigationClaim>();
+        var citations = claims
+            .SelectMany(claim => claim.Witnesses)
+            .Select(witness => $"doc-{inventory.IndexOf(witness.DocumentId) + 1}#p{witness.Page}")
+            .Distinct()
+            .ToList();
+        TelemetryRedaction.EmitInvestigationTrace(
+            telemetry.Logger,
+            new TelemetryRedaction.InvestigationTraceRecord(
+                traceId, evidenceVersion, manifest.DeploymentName ?? "unknown", toolsUsed, citations, "escalate", telemetry.ActorId, outcome, manifest.Model ?? "unknown"),
+            telemetry.ServiceVersion,
+            telemetry.Environment,
+            telemetry.ActorKey);
+        if (limits.Breach is not null)
+        {
+            TelemetryRedaction.EmitSecurityEvent(telemetry.Logger, TelemetryRedaction.SecurityEvents.BudgetExhausted, telemetry.ServiceVersion, telemetry.Environment);
+        }
     }
 
     private static string BuildPrompt(IReadOnlyList<string> documents)
@@ -164,6 +236,25 @@ public sealed class BoundedInvestigator(
         return claims;
     }
 
+    // Writes each trace record as key=value pairs. Only opaque identifiers reach the trace, so standard output is safe.
+    private sealed class ConsoleTraceLogger : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (state is IEnumerable<KeyValuePair<string, object?>> fields)
+            {
+                Console.WriteLine(string.Join(' ', fields.Select(field => $"{field.Key}={field.Value}")));
+                return;
+            }
+
+            Console.WriteLine(formatter(state, exception));
+        }
+    }
+
     private sealed record ClaimDto(string? Text, List<WitnessDto>? Witnesses);
 
     private sealed record WitnessDto(string? DocumentId, int Page, string? Quote);
@@ -179,17 +270,75 @@ public sealed class BoundedInvestigator(
         IInvestigationLimits limits) : DelegatingChatClient(inner)
     {
         private readonly List<ModelCallTrace> _traces = [];
+        private readonly List<string> _toolsUsed = [];
 
         public IReadOnlyList<ModelCallTrace> Traces => _traces;
 
+        public IReadOnlyList<string> ToolsUsed => _toolsUsed;
+
+        // Each attempt is a model call: it is authorized, checked against the call limit, and counted before it is sent.
         public override async Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
             _traces.Add(ModelCallGate.Authorize(manifest, new ModelRequest(evidenceVersion, dataRegion, evidence), registry));
-            await limits.BeforeModelCallAsync(cancellationToken);
-            return await base.GetResponseAsync(messages, options, cancellationToken);
+            var request = messages.ToList();
+            // UTF-8 bytes of the messages and declared tool schemas are an upper bound on tokens, so neither can slip past the input guard.
+            var estimatedInputTokens = (int)Math.Min(int.MaxValue, EstimateInputBytes(request, options));
+            if (limits.MaxOutputTokens is { } maxOutput)
+            {
+                options = options?.Clone() ?? new ChatOptions();
+                options.MaxOutputTokens = Math.Min(options.MaxOutputTokens ?? maxOutput, maxOutput);
+            }
+
+            for (var retriesUsed = 0; ; retriesUsed++)
+            {
+                await limits.BeforeModelCallAsync(estimatedInputTokens, cancellationToken);
+                try
+                {
+                    var response = await base.GetResponseAsync(request, options, cancellationToken);
+                    await limits.AfterModelCallAsync(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, cancellationToken);
+                    foreach (var call in response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>())
+                    {
+                        if (!_toolsUsed.Contains(call.Name))
+                        {
+                            _toolsUsed.Add(call.Name);
+                        }
+                    }
+
+                    return response;
+                }
+                catch (Exception ex) when (IsTransient(ex))
+                {
+                    if (!await limits.TryBackoffAsync(retriesUsed, cancellationToken))
+                    {
+                        throw;
+                    }
+                }
+            }
+        }
+
+        private static bool IsTransient(Exception ex) => ex is HttpRequestException or TimeoutException;
+
+        private static long EstimateInputBytes(IEnumerable<ChatMessage> request, ChatOptions? options) =>
+            request.Sum(message => message.Contents.Sum(content => content is TextContent text
+                ? (long)Encoding.UTF8.GetByteCount(text.Text ?? string.Empty)
+                : EstimateContentBytes(content)))
+            + (options?.Tools ?? Array.Empty<AITool>()).Sum(tool => (long)Encoding.UTF8.GetByteCount(
+                tool.Name + tool.Description + (tool is AIFunctionDeclaration declaration ? declaration.JsonSchema.GetRawText() : string.Empty)));
+
+        // Function calls and results are sent to the model too, so their serialized form counts toward the input limit.
+        private static long EstimateContentBytes(AIContent content)
+        {
+            try
+            {
+                return JsonSerializer.SerializeToUtf8Bytes(content, content.GetType(), AIJsonUtilities.DefaultOptions).LongLength;
+            }
+            catch (Exception ex) when (ex is NotSupportedException or JsonException or InvalidOperationException)
+            {
+                return int.MaxValue;
+            }
         }
 
         public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

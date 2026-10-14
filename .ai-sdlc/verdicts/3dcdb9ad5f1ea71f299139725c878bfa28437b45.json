@@ -1,0 +1,216 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 178,
+  "branch": "ai-sdlc/issue-178",
+  "commitSha": "3dcdb9ad5f1ea71f299139725c878bfa28437b45",
+  "round": 2,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation routes intake through a supervised child process and covers the listed parser scenarios. However, the child retains the API identity’s filesystem permissions, so an exploited parser can write to accessible evidence-store paths.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 43,
+          "message": "The child process does not have enforced write isolation from the evidence store, as required by AC-4.",
+          "confidence": 0.95,
+          "category": "security A01:2025",
+          "evidence": {
+            "codePathTraced": "Parse creates a temporary working directory and makes it read-only only on non-Windows systems. The worker otherwise runs with the API process identity, and no filesystem restriction prevents access to evidence-store paths.",
+            "failureScenario": "If a crafted PDF exploits the worker, the child can write to evidence-store paths accessible to the API identity. On Windows, it can also write to its working directory because no read-only restriction is applied there."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover valid and corrupt PDFs, worker time and memory limits, intake routing, and the empty environment. The worker's filesystem access is not isolated, so a compromised parser can still write to evidence-store paths available to the API identity.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 46,
+          "message": "The read-only working directory does not restrict the worker's access to the evidence store. Run it with filesystem permissions that deny writes to the store.",
+          "confidence": 0.93,
+          "category": "security A01:2025",
+          "evidence": {
+            "codePathTraced": "Parse makes the temporary working directory read-only on non-Windows systems, then starts the worker under the API process identity. No filesystem restriction prevents that process from accessing other paths.",
+            "failureScenario": "If a crafted PDF exploits the parser, the worker can write to evidence-store paths accessible to the API identity. The child therefore does not meet the acceptance criterion requiring no write access to the evidence store."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The child process is not isolated from evidence-store writes. A parser exploit could use the API process identity to modify stored evidence.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 94,
+          "message": "The worker has no enforced filesystem restriction preventing writes to the evidence store.",
+          "confidence": 0.93,
+          "category": "security A01:2025",
+          "evidence": {
+            "codePathTraced": "The worker runs under the API process identity. The code clears its environment and makes its temporary working directory read-only, but does not restrict access to other filesystem paths, including the evidence store.",
+            "failureScenario": "If a crafted PDF exploits the parser, code running in the worker can write to evidence-store paths that the API identity can access, despite the stated isolation requirement."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

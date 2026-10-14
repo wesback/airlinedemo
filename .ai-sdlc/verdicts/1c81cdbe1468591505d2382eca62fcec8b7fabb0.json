@@ -1,0 +1,271 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 191,
+  "branch": "ai-sdlc/issue-191",
+  "commitSha": "1c81cdbe1468591505d2382eca62fcec8b7fabb0",
+  "round": 4,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The investigator’s pre-call token guard can undercount tool results and send a request above the required input-token limit. The remaining stated limit and trace behaviors have corresponding coverage in the changed test file.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 325,
+          "message": "The pre-call input limit estimate omits function-result content, so an over-limit request can reach the model before the actual usage check detects the breach.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "GatedModelClient.EstimateInputBytes counts ChatMessage.Text and tool schemas. Tool results are carried in FunctionResultContent, which is not included in the text estimate; actual input usage is checked only after the model responds.",
+            "failureScenario": "A read tool returns a large source page as a function result. The next model request's estimate omits that result, so it can exceed the 16,000-token limit and still be sent; the breach is detected only after the model processes it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the listed limit breaches and both trace outcomes. The input-token estimate still misses function-call content in model history, leaving a reachable path that sends an over-limit request.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 323,
+          "message": "The input-token guard omits non-text message content, including function-call arguments, so a later tool-loop request can exceed the per-call limit before the breach is detected.",
+          "confidence": 0.85,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "GatedModelClient.EstimateInputBytes counts only ChatMessage.Text and declared tool schemas. After a tool call, the next model request can include FunctionCallContent arguments in the message history, which this estimate omits; actual usage is checked only after the model responds.",
+            "failureScenario": "A model returns a large function-call payload, and the following request includes that payload alongside text near the 16,000-token limit. The estimate can remain under the cap while the actual request exceeds it, so the over-limit request reaches the model."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability was identified in the changed code. The trace emitter redacts values before logging, and the trace fields are constrained to identifiers or enumerated values.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 183,
+      "total": 207,
+      "percent": 88.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 92,
+          "total": 103,
+          "missed": [
+            22,
+            113,
+            114,
+            242,
+            244,
+            254,
+            315,
+            316,
+            317,
+            318,
+            319
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationLimits.cs",
+          "covered": 81,
+          "total": 94,
+          "missed": [
+            59,
+            61,
+            73,
+            87,
+            92,
+            101,
+            102,
+            103,
+            108,
+            120,
+            143,
+            144,
+            145
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

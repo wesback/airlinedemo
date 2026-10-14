@@ -1,0 +1,211 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 147,
+  "branch": "ai-sdlc/issue-147",
+  "commitSha": "7cea7085b407211fc0e623b954b8671638c7e8fb",
+  "round": 0,
+  "pipelineVersion": "4387444",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The evaluator covers the stated state and UTC-window cases, but a partially resolved obligation can retain an outdated current draft.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Obligations/ObligationEvaluator.cs",
+          "line": 107,
+          "message": "Supersede drafts when new evidence makes their contents obsolete, even if the obligation remains AtRisk. Otherwise a current draft can still list requirements that are now satisfied, contrary to the acceptance criterion that new evidence makes obsolete drafts non-current while preserving history.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Evaluate supersedes a current draft only when its basis differs or the obligation leaves AtRisk; it does not compare the draft with the current missing requirements.",
+            "failureScenario": "A draft lists REQ-1 and REQ-2 as missing. New evidence satisfies REQ-1 while REQ-2 remains missing on the same basis and within the notice window. The obligation stays AtRisk, so the old draft remains Current with an outdated body, and no replacement is created."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The evaluator behavior is broadly covered, including precedence, current-basis review, UTC boundaries, and draft history. The no-send acceptance criterion lacks a test that would fail if recording a legal decision triggered delivery.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ObligationEvaluationTests.cs",
+          "line": 200,
+          "message": "The legal-decision test does not verify the acceptance criterion that no notice is sent.",
+          "confidence": 0.83,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Legal_sign_off_records_simulated_decision_without_changing_state calls RecordLegalDecision and checks the returned record and later obligation state, but does not observe any notification or sending boundary.",
+            "failureScenario": "If RecordLegalDecision were changed to send a notice when recording a signed-off decision, these assertions could still pass, so the test would not fail when the required no-send behavior is removed."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability is reachable in the changed code. Legal decisions are recorded as simulated data; this code does not send notices or expose an authentication or authorization path.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ObligationEvaluationTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 95,
+      "total": 96,
+      "percent": 99,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Obligations/ObligationEvaluator.cs",
+          "covered": 95,
+          "total": 96,
+          "missed": [
+            103
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

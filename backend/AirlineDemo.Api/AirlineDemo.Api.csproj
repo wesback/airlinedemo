@@ -22,4 +22,7 @@
       <ResolvedFileToPublish Include="@(ClientBuildFile)" RelativePath="wwwroot/%(ClientBuildFile.RecursiveDir)%(ClientBuildFile.Filename)%(ClientBuildFile.Extension)" CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AirlineDemo.Api.Tests" />
+  </ItemGroup>
 </Project>

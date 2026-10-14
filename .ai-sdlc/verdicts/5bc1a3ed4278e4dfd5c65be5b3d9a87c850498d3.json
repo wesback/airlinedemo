@@ -1,0 +1,367 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 178,
+  "branch": "ai-sdlc/issue-178",
+  "commitSha": "5bc1a3ed4278e4dfd5c65be5b3d9a87c850498d3",
+  "round": 1,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The parser is launched in a child process and has time and memory supervision, but the required network and evidence-store isolation is not enforced across supported environments. The tests also do not verify that intake delegates parsing to the isolated parser.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 94,
+          "message": "The child is not reliably isolated from the network or evidence store. An empty environment and a read-only working directory do not restrict access to other paths, and network isolation is conditional.",
+          "confidence": 0.96,
+          "category": "security A01:2025",
+          "evidence": {
+            "codePathTraced": "Parse starts the worker under the API process identity. CreateStartInfo clears its environment and sets a working directory, but applies no filesystem restriction; network isolation is attempted only on Linux when unshare is available, with no restriction on other platforms or when the probe fails.",
+            "failureScenario": "If a crafted PDF exploits the parser on Windows, or on Linux where the namespace probe fails, the child can make network requests and write to evidence-store paths accessible to the API identity. The explicit isolation requirement is therefore unmet."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 30,
+          "message": "AC-1 lacks a test for the intake integration. Add a test that exercises intake and fails if it stops calling IsolatedPdfParser.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The AC-1 tests call IsolatedPdfParser.Parse directly. None exercises EvidenceIntake.Process or another intake path that verifies it delegates PDF parsing to IsolatedPdfParser.",
+            "failureScenario": "If EvidenceIntake is changed back to parse PDFs in-process, these direct parser tests still pass while AC-1 is broken."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The worker lacks the required network and evidence-store isolation. The tests also do not verify intake routing or show that the decompression bomb exceeds and triggers the configured limits.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 108,
+          "message": "The worker is not isolated from network access or writes to the evidence store as required.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "CreateStartInfo clears the environment and sets a working directory, but does not restrict the child’s network access or permissions outside that directory. On platforms without the Linux network namespace, it launches the worker directly.",
+            "failureScenario": "If a crafted PDF exploits the parser, the child runs as the API identity and can connect to internal services or write to evidence-store paths that identity can access. The child therefore does not meet the isolation criterion (OWASP A02:2025, Security Misconfiguration)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 30,
+          "message": "Acceptance criterion 1 lacks a test proving intake routes PDFs through IsolatedPdfParser.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests call IsolatedPdfParser.Parse directly; none exercises EvidenceIntake.Process through its intake path.",
+            "failureScenario": "If EvidenceIntake is changed to call the old in-process ExtractText method, all these direct parser tests can still pass while acceptance criterion 1 is broken."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 69,
+          "message": "The bomb test does not verify the required limit behavior: its 10 MiB stream is below the 512 MiB limit, and it accepts any rejection reason.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "FlateBomb creates a stream that inflates to 10 MiB, below the configured 512 MiB limit, and the test only asserts that parsing is not Complete.",
+            "failureScenario": "If the worker has no memory or time limit, this fixture can still be rejected as malformed PDF data and the test can pass. It does not establish that a decompression bomb exceeding the limit is stopped by that limit, as required by criterion 3."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The child process has time and working-set checks, but its launch does not reliably isolate it from the network or the evidence store.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 75,
+          "message": "The worker lacks enforced network and evidence-store isolation when the Linux network namespace is unavailable.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Network isolation is enabled only when the Linux namespace probe succeeds. Otherwise, the worker starts directly with the API process identity. Clearing its environment and restricting its working directory do not restrict network access or access to other filesystem paths.",
+            "failureScenario": "On Windows or a Linux host where the namespace probe fails, a crafted PDF that exploits the parser can run code in the worker, connect to internal services, or write to evidence-store paths accessible to the API identity. The worker therefore does not meet the stated network and evidence-store isolation requirement (OWASP A02:2025, Security Misconfiguration)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 127,
+      "total": 207,
+      "percent": 61.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 1,
+          "total": 7,
+          "missed": [
+            158,
+            159,
+            160,
+            178,
+            179,
+            180
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "covered": 124,
+          "total": 171,
+          "missed": [
+            47,
+            48,
+            53,
+            54,
+            55,
+            56,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            91,
+            93,
+            94,
+            95,
+            96,
+            125,
+            126,
+            140,
+            141,
+            148,
+            149,
+            150,
+            163,
+            190,
+            191,
+            195,
+            196,
+            204,
+            205,
+            206,
+            207,
+            210,
+            211,
+            224,
+            225,
+            226,
+            227,
+            228,
+            229,
+            254,
+            255,
+            256,
+            263,
+            264,
+            265
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/PdfWorker/PdfWorkerEntry.cs",
+          "covered": 1,
+          "total": 25,
+          "missed": [
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            25,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            34,
+            35,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            44,
+            47
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 4,
+          "missed": [
+            7,
+            8,
+            9
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
