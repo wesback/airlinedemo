@@ -13,8 +13,12 @@ function json(body: unknown, status = 200) {
 }
 
 function stubApi(handlers: Record<string, (init?: RequestInit) => Response>) {
+  const all: Record<string, (init?: RequestInit) => Response> = {
+    'POST /api/auth/passcode': () => new Response(null, { status: 204 }),
+    ...handlers,
+  };
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    const handler = handlers[`${init?.method ?? 'GET'} ${url}`];
+    const handler = all[`${init?.method ?? 'GET'} ${url}`];
     if (!handler) throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
     return handler(init);
   });
@@ -48,18 +52,49 @@ describe('sign-in page', () => {
   });
 
   it('shows one generic message for a wrong passcode without saying which part was wrong', async () => {
-    stubApi({
+    const fetchMock = stubApi({
+      'POST /api/auth/passcode': () => json({ error: 'Sign-in failed.' }, 401),
       'GET /api/auth/users': () => json(users),
-      'POST /api/auth/sign-in': () => json({ error: 'Sign-in failed.' }, 401),
     });
     render(<SignIn />);
-    await enterPasscodeAndPick('wrong', 'Ada');
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'wrong' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Sign-in failed. Check your details and try again.');
     expect(alert.textContent).not.toMatch(/user|passcode|password/i);
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.getByLabelText('Demo passcode')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/users')).toBe(false);
+  });
+
+  it('checks the passcode before loading users, with no session token', async () => {
+    const fetchMock = stubApi({ 'GET /api/auth/users': () => json(users) });
+    render(<SignIn />);
+    await enterPasscodeAndPick('demo-pass', 'Ada');
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/users')).toBe(true));
+
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls.indexOf('/api/auth/passcode')).toBeGreaterThanOrEqual(0);
+    expect(urls.indexOf('/api/auth/passcode')).toBeLessThan(urls.indexOf('/api/auth/users'));
+    const passcodeCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/passcode');
+    const headers = passcodeCall?.[1]?.headers as Record<string, string>;
+    expect(headers['X-CSRF-Token']).toBeUndefined();
+    expect(JSON.parse(String(passcodeCall?.[1]?.body))).toEqual({ passcode: 'demo-pass' });
+  });
+
+  it('keeps the picker hidden and tells the user to wait when the passcode check is throttled', async () => {
+    const fetchMock = stubApi({
+      'POST /api/auth/passcode': () => json({ error: 'Sign-in failed.' }, 429),
+      'GET /api/auth/users': () => json(users),
+    });
+    render(<SignIn />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'anything' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Wait a few minutes');
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/users')).toBe(false);
   });
 
   it('does not request or show the seeded users until a passcode is entered', async () => {

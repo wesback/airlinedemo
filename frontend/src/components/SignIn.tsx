@@ -30,6 +30,19 @@ export default function SignIn() {
     }
     setBusy(true);
     try {
+      const check = await fetch('/api/auth/passcode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passcode }),
+      });
+      if (check.status === 429) {
+        setMessage(THROTTLED);
+        return;
+      }
+      if (!check.ok) {
+        setMessage(GENERIC_FAILURE);
+        return;
+      }
       const response = await fetch('/api/auth/users');
       if (!response.ok) throw new Error('user list failed');
       setUsers(await response.json());
