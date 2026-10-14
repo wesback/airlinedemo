@@ -221,6 +221,42 @@ public sealed class ObligationEvaluationTests
     }
 
     [Fact]
+    public void Legal_decision_sends_nothing_and_leaves_draft_history_unchanged()
+    {
+        var first = ObligationEvaluator.Evaluate(Make([Missing()]), At(12), []);
+        var draft = first.NewDraft!;
+
+        var record = ObligationEvaluator.RecordLegalDecision(draft, "legal-1", "signed-off", "Synthetic check passed", At(13));
+        var afterDecision = ObligationEvaluator.Evaluate(Make([Missing()]), At(13), first.Drafts);
+
+        Assert.True(record.Simulated);
+        Assert.Equal(draft, first.NewDraft);
+        Assert.Equal(first.Drafts, afterDecision.Drafts);
+        Assert.Single(afterDecision.Drafts);
+        Assert.Equal(NoticeDraftStatus.Current, afterDecision.Drafts.Single().Status);
+        Assert.Null(afterDecision.NewDraft);
+    }
+
+    [Fact]
+    public void Partially_resolved_at_risk_obligation_supersedes_obsolete_draft_and_replaces_it()
+    {
+        var first = ObligationEvaluator.Evaluate(Make([Missing("REQ-1"), Missing("REQ-2")]), At(12), []);
+        var original = first.NewDraft!;
+        Assert.Equal(["REQ-1", "REQ-2"], original.EvidenceRequirementIds);
+
+        // REQ-1 is now evidenced on the current basis; REQ-2 is still missing, so the obligation stays at risk.
+        var partial = ObligationEvaluator.Evaluate(Make([Satisfied("REQ-1"), Missing("REQ-2")]), At(13), first.Drafts);
+
+        Assert.Equal(ObligationState.AtRisk, partial.State);
+        Assert.Equal(2, partial.Drafts.Count);
+        Assert.Equal(NoticeDraftStatus.Superseded, partial.Drafts.Single(d => d.Id == original.Id).Status);
+        Assert.Equal(original.Body, partial.Drafts.Single(d => d.Id == original.Id).Body);
+        Assert.NotNull(partial.NewDraft);
+        Assert.Equal(["REQ-2"], partial.NewDraft!.EvidenceRequirementIds);
+        Assert.Single(partial.Drafts.Where(d => d.Status == NoticeDraftStatus.Current));
+    }
+
+    [Fact]
     public void Legal_rejection_is_recorded_and_requires_actor_and_reason()
     {
         var draft = ObligationEvaluator.Evaluate(Make([Missing()]), At(12), []).NewDraft!;

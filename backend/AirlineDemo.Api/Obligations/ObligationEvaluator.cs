@@ -103,9 +103,12 @@ public static class ObligationEvaluator
             _ => false,
         });
 
-        // Drafts that no longer match the current basis or the at-risk state become non-current; history is preserved.
+        // Drafts become non-current when the basis moves, the state leaves at-risk, or the missing requirements change; history is preserved.
+        var missingIds = missing.Select(r => r.Id).ToList();
         var updated = drafts.Select(d => d.Status == NoticeDraftStatus.Current
-            && (d.BasisVersion != obligation.CurrentBasisVersion || state != ObligationState.AtRisk)
+            && (d.BasisVersion != obligation.CurrentBasisVersion
+                || state != ObligationState.AtRisk
+                || !d.EvidenceRequirementIds.SequenceEqual(missingIds))
                 ? d with { Status = NoticeDraftStatus.Superseded }
                 : d).ToList();
 
@@ -115,12 +118,11 @@ public static class ObligationEvaluator
             && day >= obligation.NoticeWindowStartUtc && day <= obligation.NoticeWindowEndUtc;
         if (state == ObligationState.AtRisk && inWindow && !overdue && !hasCurrent)
         {
-            var missingIds = missing.Select(r => r.Id).ToList();
             newDraft = new NoticeDraft(
                 Id: $"{obligation.Id}-draft-{updated.Count + 1}",
                 ObligationId: obligation.Id,
                 BasisVersion: obligation.CurrentBasisVersion,
-                EvidenceRequirementIds: reqs.Select(r => r.Id).ToList(),
+                EvidenceRequirementIds: missingIds,
                 CreatedUtc: asOf,
                 Status: NoticeDraftStatus.Current,
                 Body: $"Synthetic notice draft for {obligation.Id}: missing {string.Join(", ", missingIds)} on basis v{obligation.CurrentBasisVersion}.");
