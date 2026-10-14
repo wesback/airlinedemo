@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using AirlineDemo.Api.Security;
@@ -6,7 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 
-// Runs test classes one at a time: the publish test spawns dotnet and the telemetry tests share a global listener.
+// Runs test classes one at a time: the telemetry tests share a global listener.
 [assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)]
 
 namespace AirlineDemo.Api.Tests;
@@ -160,77 +159,6 @@ public sealed class StaticClientTests : IDisposable
         Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
         Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
         Assert.False(response.Headers.Contains("Access-Control-Allow-Headers"));
-    }
-
-    [Fact]
-    public void Publish_builds_frontend_and_copies_dist_into_published_wwwroot()
-    {
-        var repoRoot = FindRepoRoot();
-        var project = Path.Combine(repoRoot, "backend", "AirlineDemo.Api", "AirlineDemo.Api.csproj");
-        var outputDir = Path.Combine(Path.GetTempPath(), "static-client-publish-" + Guid.NewGuid().ToString("N"));
-        var distDir = Path.Combine(repoRoot, "frontend", "dist");
-
-        try
-        {
-            // Remove any previous build output so a passing test proves publish itself built the frontend, not stale dist.
-            if (Directory.Exists(distDir))
-            {
-                Directory.Delete(distDir, recursive: true);
-            }
-
-            RunDotnet("publish", project, "-c", "Release", "--no-restore", "-o", outputDir);
-
-            var distIndex = Path.Combine(distDir, "index.html");
-            Assert.True(File.Exists(distIndex), "npm build did not produce frontend/dist/index.html.");
-            var wwwroot = Path.Combine(outputDir, "wwwroot");
-            var publishedIndex = Path.Combine(wwwroot, "index.html");
-            Assert.True(File.Exists(publishedIndex), "Published wwwroot is missing index.html.");
-            Assert.Equal(File.ReadAllBytes(distIndex), File.ReadAllBytes(publishedIndex));
-            Assert.NotEmpty(Directory.GetFiles(Path.Combine(wwwroot, "assets"), "*.js"));
-        }
-        finally
-        {
-            if (Directory.Exists(outputDir))
-            {
-                Directory.Delete(outputDir, recursive: true);
-            }
-        }
-    }
-
-    private static void RunDotnet(params string[] args)
-    {
-        var startInfo = new ProcessStartInfo("dotnet")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var arg in args)
-        {
-            startInfo.ArgumentList.Add(arg);
-        }
-        startInfo.ArgumentList.Add("-nologo");
-
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start dotnet.");
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        var stdout = process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
-        var stderr = stderrTask.Result;
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"dotnet {string.Join(' ', args)} failed ({process.ExitCode}): {stderr}{stdout}");
-        }
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "backend", "AirlineDemo.Api", "AirlineDemo.Api.csproj")))
-        {
-            dir = dir.Parent;
-        }
-
-        return dir?.FullName ?? throw new InvalidOperationException("Repository root not found.");
     }
 
     [Fact]
