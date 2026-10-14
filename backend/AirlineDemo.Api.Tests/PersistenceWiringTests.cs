@@ -73,9 +73,36 @@ public sealed class PersistenceWiringTests
         Assert.Equal(2, body.GetProperty("revision").GetInt32());
         Assert.Equal("accepted", body.GetProperty("status").GetString());
 
+        // The reviewer's scope is case-001 only; case-002 must be denied with no data, even after restart.
+        using var outOfScope = await SendAsync(secondClient, HttpMethod.Get, "/api/cases/case-002", restored, null, ct);
+        Assert.Equal(HttpStatusCode.NotFound, outOfScope.StatusCode);
+        Assert.DoesNotContain("case-002", await outOfScope.Content.ReadAsStringAsync(ct));
+
         var store = second.Services.GetRequiredService<ICaseStateStore>();
         var audit = store.ReadAudit(store.AuthorizeCase("case-001", CaseStore.SeedOwner));
         Assert.Contains(audit, e => e.Action == CaseStore.AcceptAction);
+    }
+
+    [Fact]
+    public void Sql_case_provider_selects_the_sql_store()
+    {
+        using var factory = CreateFactory(NewCaseStatePath(),
+            ("Persistence:CaseStateProvider", "Sql"),
+            ("Persistence:CaseStateConnectionString", "Server=localhost;Database=cases;Trusted_Connection=True;"));
+
+        Assert.IsType<SqlCaseStateStore>(factory.Services.GetRequiredService<ICaseStateStore>());
+    }
+
+    [Fact]
+    public void Sql_case_provider_without_connection_string_fails_startup()
+    {
+        var ex = Assert.ThrowsAny<Exception>(() =>
+        {
+            using var factory = CreateFactory(NewCaseStatePath(), ("Persistence:CaseStateProvider", "Sql"));
+            _ = factory.Services.GetRequiredService<ICaseStateStore>();
+        });
+
+        Assert.Contains("Persistence:CaseStateConnectionString is required", ex.ToString());
     }
 
     [Fact]
@@ -105,11 +132,11 @@ public sealed class PersistenceWiringTests
     {
         var ex = Assert.ThrowsAny<Exception>(() =>
         {
-            using var factory = CreateFactory(NewCaseStatePath(), ("Persistence:Provider", "Bogus"));
+            using var factory = CreateFactory(NewCaseStatePath(), ("Persistence:CaseStateProvider", "Bogus"));
             _ = factory.Services.GetRequiredService<ICaseStateStore>();
         });
 
-        Assert.Contains("Persistence:Provider 'Bogus' is not supported", ex.ToString());
+        Assert.Contains("Persistence:CaseStateProvider 'Bogus' is not supported", ex.ToString());
     }
 
     [Fact]

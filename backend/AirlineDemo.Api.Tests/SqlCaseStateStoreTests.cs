@@ -32,7 +32,9 @@ public sealed class SqlCaseStateStoreTests
         Assert.Equal(typeof(ICaseStateStore), typeof(TechnicalReviewPolicy).GetMethod(nameof(TechnicalReviewPolicy.ScopeFor))!.GetParameters()[0].ParameterType);
 
         var program = File.ReadAllText(Path.Combine(SourceDirectory(), "..", "AirlineDemo.Api", "Program.cs"));
-        Assert.Contains("AddSingleton<ICaseStateStore>(_ => new CaseStateStore(", program);
+        Assert.Contains("AddSingleton<ICaseStateStore>(_ => CreateCaseStateStore(config));", program);
+        Assert.Contains("\"File\" => new CaseStateStore(", program);
+        Assert.Contains("\"Sql\" => new SqlCaseStateStore(", program);
     }
 
     // AC2: EF model maps the four tables; the versioned migration applies to an in-memory SQLite connection.

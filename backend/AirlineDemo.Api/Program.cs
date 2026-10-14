@@ -4,6 +4,7 @@ using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 using AirlineDemo.Api.Reviews;
+using Microsoft.EntityFrameworkCore;
 
 if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Switch)
 {
@@ -38,23 +39,26 @@ app.MapStaticClient();
 
 app.Run();
 
-// Persistence:Provider selects the case-state store (File | Sql); Persistence:EvidenceProvider selects the
+// Persistence:CaseStateProvider selects the case-state store (File | Sql); Persistence:EvidenceProvider selects the
 // evidence document store (Memory | Blob). Unknown or unavailable values fail startup.
 // Settings are read when each store is resolved, so host overrides (including test settings) apply.
 static void AddPersistence(IServiceCollection services, IConfiguration config)
 {
-    services.AddSingleton<ICaseStateStore>(_ => new CaseStateStore(CaseStatePath(config)));
+    services.AddSingleton<ICaseStateStore>(_ => CreateCaseStateStore(config));
     services.AddSingleton<IEvidenceBlobStore>(_ => EvidenceStore(config));
 }
 
-static string CaseStatePath(IConfiguration config)
+static ICaseStateStore CreateCaseStateStore(IConfiguration config)
 {
-    var provider = config["Persistence:Provider"] ?? "File";
+    var provider = config["Persistence:CaseStateProvider"] ?? "File";
     return provider switch
     {
-        "File" => config["CaseState:Path"] ?? Path.Combine(AppContext.BaseDirectory, "case-state.json"),
-        "Sql" => throw new InvalidOperationException("Persistence:Provider 'Sql' is not available in this build; use 'File'."),
-        _ => throw new InvalidOperationException($"Persistence:Provider '{provider}' is not supported; use 'File' or 'Sql'."),
+        "File" => new CaseStateStore(config["CaseState:Path"] ?? Path.Combine(AppContext.BaseDirectory, "case-state.json")),
+        "Sql" => new SqlCaseStateStore(new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlServer(config["Persistence:CaseStateConnectionString"]
+                ?? throw new InvalidOperationException("Persistence:CaseStateConnectionString is required when Persistence:CaseStateProvider is 'Sql'."))
+            .Options),
+        _ => throw new InvalidOperationException($"Persistence:CaseStateProvider '{provider}' is not supported; use 'File' or 'Sql'."),
     };
 }
 
