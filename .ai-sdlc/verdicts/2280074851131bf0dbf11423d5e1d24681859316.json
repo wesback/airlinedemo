@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 194,
+  "branch": "ai-sdlc/issue-194",
+  "commitSha": "2280074851131bf0dbf11423d5e1d24681859316",
+  "round": 1,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover fixture registration, delimiter wrapping, the advertised tool set, forbidden tool rejection, and cross-case read denial. They do not reliably detect a change to the investigator's task, identity, or policy as required by M-05.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs",
+          "line": 121,
+          "message": "M-05's task, identity, and policy protections are not meaningfully tested. The instructions assertion uses the implementation's own constant as its expected value, and the model stub ignores both fixture content and instructions. Add assertions against the required fixed instructions or a fixture-sensitive stub that detects those changes.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test compares the model instructions with BoundedInvestigator.Instructions, while HostileChatClient returns the same fixed response regardless of the fixture or instructions.",
+            "failureScenario": "If injected text changes the investigator's task, identity, or policy while the options still match the BoundedInvestigator.Instructions constant, the stub's fixed response and existing assertions can pass without detecting that change."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover fixture registration, the exposed tool set, delimiter wrapping, and cross-case reads. However, the instruction assertion is self-referential and can pass if the investigator's task, identity, or policy protections are changed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs",
+          "line": 151,
+          "message": "M-05's task, identity, and policy protections are not meaningfully tested. Assert the expected fixed instructions independently of BoundedInvestigator.Instructions.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test compares the instructions sent to the model with BoundedInvestigator.Instructions, so both the expected and actual values change together if that constant is altered.",
+            "failureScenario": "If the investigator's instructions are changed so injected text can alter its task, identity, or policy, the equality assertion can still pass. The test does not independently verify those M-05 protections."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover fixture registration, delimiter placement, the advertised tool set, and denial of the cross-case read. They do not demonstrate that injected fixture text cannot change the investigator's task, identity, or policy.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs",
+          "line": 152,
+          "message": "M-05's task, identity, and policy protections are not tested against fixture-sensitive behavior. Add a test that fails if injected document text changes those constraints.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HostileChatClient returns the same tool calls and claims regardless of fixture content. The assertion compares the configured instructions with BoundedInvestigator.Instructions, so it does not check whether hostile fixture text can change the investigator's task, identity, or policy.",
+            "failureScenario": "If a future investigator lets injected text change its task or identity while keeping the delimiter, five-tool set, and cross-case check intact, these tests still pass. M-05 requires those protections to be covered."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 3,
+      "total": 3,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/CaseReadTools.cs",
+          "covered": 3,
+          "total": 3,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

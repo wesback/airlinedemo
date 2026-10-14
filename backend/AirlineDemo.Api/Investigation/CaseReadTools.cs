@@ -54,6 +54,12 @@ public sealed class CaseReadTools(string caseId, ICaseReadSource source, IInvest
     private async Task<string> GetSourcePageAsync(string documentId, int page, CancellationToken cancellationToken)
     {
         await limits.BeforeToolCallAsync(cancellationToken);
+        // Scope check: the document must belong to this case, whatever the underlying source returns for other cases.
+        if (!source.GetInventory(caseId).Contains(documentId))
+        {
+            return "denied: document page is not part of this case";
+        }
+
         var text = source.GetSourcePage(caseId, documentId, page);
         return text is null ? "denied: document page is not part of this case" : Untrusted(text);
     }

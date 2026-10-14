@@ -1,0 +1,287 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 180,
+  "branch": "ai-sdlc/issue-180",
+  "commitSha": "e99a85ca13604f3763780d49190d4da56f069aab",
+  "round": 0,
+  "pipelineVersion": "8edfbf6",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The sequential contract tests cover digest naming, idempotent writes, changed content, reads, and rejection of key or SAS connection strings. Concurrent writes of different content can still create duplicate version numbers.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/IEvidenceBlobStore.cs",
+          "line": 52,
+          "message": "Concurrent writes with different content can both receive the same version number. Allocate versions with a conflict mechanism that is unique per document, not only per digest-bearing blob name.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "StoreAsync lists existing versions, chooses max + 1, then creates a name containing that version and the content digest. TryCreateAsync only conflicts when the complete blob name already exists.",
+            "failureScenario": "Two callers store different content for the same document at the same time. Both list an empty prefix and choose version 1; because their digests differ, both blob names are unique and both writes succeed. The document then has two different blobs numbered v1, violating the versioning criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation has a reachable race that can assign the same version to different documents. The Azure contract tests bypass the Blob SDK adapter, leaving its required behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/IEvidenceBlobStore.cs",
+          "line": 53,
+          "message": "Concurrent writes with different content can both receive the same version number. Recheck or atomically allocate the version so each distinct write gets a new version.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "StoreAsync lists existing versions, chooses the next version, then creates a blob whose name includes both that version and the content digest. Different digests therefore produce different blob names.",
+            "failureScenario": "Two concurrent writes with different content both list an empty prefix and choose version 1. Since their digest-based names differ, both creates succeed and the store returns two different documents as version 1."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceBlobStoreTests.cs",
+          "line": 20,
+          "message": "The Azure contract test does not use the required recording double of the Blob client, so it cannot catch defects in the Azure SDK adapter and does not satisfy the Azure test-double acceptance criterion.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The Azure contract test injects RecordingBlobContainer, which implements IEvidenceBlobContainer directly. It never constructs or calls BlobEvidenceContainer, the adapter that invokes the Azure Blob SDK.",
+            "failureScenario": "If BlobEvidenceContainer stops setting IfNoneMatch or mishandles Azure create conflicts, the tests still pass because the injected in-memory double supplies the no-overwrite behavior itself."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation uses DefaultAzureCredential, but its URI validation still accepts a container URI containing a SAS query token. That leaves a credential path the acceptance criteria explicitly prohibit.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/AzureEvidenceBlobStore.cs",
+          "line": 20,
+          "message": "Reject SAS query parameters in container URIs; the HTTPS check allows SAS-bearing URIs despite the requirement to reject SAS credentials.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Create rejects connection-string fields named AccountKey or SharedAccessSignature, then accepts any absolute HTTPS URI and passes it intact to BlobContainerClient.",
+            "failureScenario": "If configuration supplies a container URI such as https://acct.blob.core.windows.net/evidence?sv=2024&sig=<token>, the URI passes validation and the SAS remains in the client's request URI. The SAS can authorize blob operations, so access may rely on a configured SAS instead of DefaultAzureCredential."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceBlobStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 89,
+      "total": 127,
+      "percent": 70.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/AzureEvidenceBlobStore.cs",
+          "covered": 16,
+          "total": 45,
+          "missed": [
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            42,
+            43,
+            46,
+            47,
+            48,
+            49,
+            50,
+            53,
+            54,
+            55,
+            56,
+            58,
+            59,
+            60,
+            62,
+            65,
+            67,
+            68,
+            69,
+            71,
+            72,
+            73,
+            75
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/IEvidenceBlobStore.cs",
+          "covered": 53,
+          "total": 62,
+          "missed": [
+            38,
+            39,
+            66,
+            100,
+            101,
+            106,
+            107,
+            112,
+            113
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/InMemoryEvidenceBlobStore.cs",
+          "covered": 20,
+          "total": 20,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 9,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

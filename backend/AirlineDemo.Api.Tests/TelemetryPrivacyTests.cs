@@ -404,7 +404,19 @@ public sealed class TelemetryPrivacyTests
 
     private sealed class CapturingLogger : ILogger
     {
-        public List<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = new();
+        private readonly object gate = new();
+        private readonly List<IReadOnlyList<KeyValuePair<string, object?>>> states = new();
+
+        public IReadOnlyList<IReadOnlyList<KeyValuePair<string, object?>>> States
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return states.ToList();
+                }
+            }
+        }
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -416,7 +428,11 @@ public sealed class TelemetryPrivacyTests
             if (state is IReadOnlyList<KeyValuePair<string, object?>> list)
             {
                 // Snapshot now: framework state can be backed by request features disposed after the response.
-                States.Add(list.ToList());
+                var snapshot = list.ToList();
+                lock (gate)
+                {
+                    states.Add(snapshot);
+                }
             }
         }
     }
