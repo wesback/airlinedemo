@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using AirlineDemo.Api.Diagnostics;
+using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 
@@ -23,6 +25,7 @@ public sealed class DiagnosticsTests
     [InlineData("authorization")]
     [InlineData("token")]
     [InlineData("access_token")]
+    [InlineData("secret")]
     public void SensitiveNamesAreRedacted(string name) =>
         Assert.Equal(TelemetryRedaction.Redacted, RedactionFilter.Sanitize(name, "anything"));
 
@@ -35,6 +38,7 @@ public sealed class DiagnosticsTests
     [InlineData("cookie")]
     [InlineData("authorization")]
     [InlineData("token")]
+    [InlineData("secret")]
     public void ListedSensitiveNamesAreMatchedByName(string name) =>
         Assert.True(RedactionFilter.IsSensitiveName(name), $"'{name}' must stay on the sensitive-name list.");
 
@@ -235,15 +239,18 @@ public sealed class DiagnosticsTests
             Assert.DoesNotContain(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
         }
 
-        var withString = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
-        withString.Configuration[DiagnosticsSetup.ConnectionStringSetting] =
+        const string connectionString =
             "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://localhost/";
+        var withString = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
+        withString.Configuration[DiagnosticsSetup.ConnectionStringSetting] = connectionString;
         withString.AddAirlineDiagnostics();
         using (var app = withString.Build())
         {
             Assert.NotNull(app.Services.GetRequiredService<ILoggerFactory>());
             Assert.NotNull(app.Services.GetService<TracerProvider>());
             Assert.Contains(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
+            // The Application Insights exporter is wired to the configured connection string, not a code literal.
+            Assert.Equal(connectionString, app.Services.GetRequiredService<IOptions<AzureMonitorOptions>>().Value.ConnectionString);
         }
     }
 
