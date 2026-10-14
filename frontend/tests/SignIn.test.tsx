@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SignIn from '../src/components/SignIn';
 
@@ -57,6 +58,8 @@ describe('sign-in page', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Sign-in failed. Check your details and try again.');
     expect(alert.textContent).not.toMatch(/user|passcode|password/i);
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.getByLabelText('Demo passcode')).toBeTruthy();
   });
 
   it('tells the user to wait when the response is throttled', async () => {
@@ -83,6 +86,9 @@ describe('sign-in page', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('You are signed out.'));
     const signOutCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/sign-out');
     expect((signOutCall?.[1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-123');
+    expect(screen.queryByText(/Signed in as/)).toBeNull();
+    expect((screen.getByLabelText('Demo passcode') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByRole('radio')).toBeNull();
   });
 
   it('forces sign-out before switching users: no picker or passcode is shown while signed in', async () => {
@@ -140,24 +146,22 @@ describe('sign-in page', () => {
     expect(screen.getByRole('button', { name: 'Sign in' }).getAttribute('type')).toBe('submit');
   });
 
-  it('uses native controls so keyboard submission reaches the same handlers as a click', async () => {
+  it('is keyboard-operable: Enter submits the passcode, Space selects a user, Enter signs in', async () => {
+    const user = userEvent.setup();
     const fetchMock = stubApi({
       'GET /api/auth/users': () => json(users),
       'POST /api/auth/sign-in': () => json({ id: 'agent-2', displayName: 'Ben Approver', role: 'Approver', csrfToken: 'csrf-456' }),
     });
     render(<SignIn />);
 
-    const passcodeForm = screen.getByLabelText('Demo passcode').closest('form');
-    expect(passcodeForm).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
-    fireEvent.submit(passcodeForm!);
-
+    await user.type(screen.getByLabelText('Demo passcode'), 'demo-pass{Enter}');
     const radio = await screen.findByRole('radio', { name: 'Ben Approver (Approver)' });
-    fireEvent.click(radio);
+    radio.focus();
+    await user.keyboard(' ');
     expect((radio as HTMLInputElement).checked).toBe(true);
-    const pickerForm = radio.closest('form');
-    expect(pickerForm).toBeTruthy();
-    fireEvent.submit(pickerForm!);
+
+    screen.getByRole('button', { name: 'Sign in' }).focus();
+    await user.keyboard('{Enter}');
 
     expect(await screen.findByText('Signed in as Ben Approver.')).toBeTruthy();
     const signInCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/sign-in');
