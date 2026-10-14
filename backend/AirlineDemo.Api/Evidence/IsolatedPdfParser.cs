@@ -46,11 +46,8 @@ public static class IsolatedPdfParser
         var workingDirectory = ChooseWorkingDirectory();
         try
         {
-            if (OperatingSystem.IsWindows())
-            {
-                Directory.CreateDirectory(workingDirectory);
-                RestrictWorkingDirectory(workingDirectory);
-            }
+            Directory.CreateDirectory(workingDirectory);
+            RestrictWorkingDirectory(workingDirectory);
 
             using var process = Process.Start(CreateStartInfo(options, workingDirectory));
             if (process is null)
@@ -83,10 +80,13 @@ public static class IsolatedPdfParser
         {
             try
             {
-                if (OperatingSystem.IsWindows())
+                if (!OperatingSystem.IsWindows())
                 {
-                    Directory.Delete(workingDirectory, recursive: false);
+                    // The directory was made read-only before the run; the owner must be able to write again to delete it.
+                    File.SetUnixFileMode(workingDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                 }
+
+                Directory.Delete(workingDirectory, recursive: true);
             }
             catch (IOException)
             {
@@ -172,13 +172,10 @@ public static class IsolatedPdfParser
     }
 
     /// <summary>
-    /// Windows: a fresh temp directory with a deny ACE. Unix: the filesystem root, which the worker can neither write nor
-    /// chmod because root owns it; a directory the worker owned could be made writable again by the worker itself.
+    /// A fresh, empty temp directory for one run. The parent creates it and deletes it after the child exits.
     /// </summary>
     internal static string ChooseWorkingDirectory() =>
-        OperatingSystem.IsWindows()
-            ? Path.Combine(Path.GetTempPath(), "pdf-worker-" + Guid.NewGuid().ToString("N"))
-            : "/";
+        Path.Combine(Path.GetTempPath(), "pdf-worker-" + Guid.NewGuid().ToString("N"));
 
     /// <summary>
     /// Makes the child's working directory read-only: a Windows deny ACE, or mode 0555 on Unix. On Unix the child runs

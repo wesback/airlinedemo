@@ -229,18 +229,15 @@ public class IsolatedPdfParserTests
 
     // Unix: the worker's working directory must not be one the worker owns (it could chmod it) nor writable by others.
     [Fact]
-    public void WorkingDirectory_OnUnixIsRootOwnedAndNotWritable()
+    public void WorkingDirectory_IsFreshPerRunUnderTempPath()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        var first = IsolatedPdfParser.ChooseWorkingDirectory();
+        var second = IsolatedPdfParser.ChooseWorkingDirectory();
 
-        var directory = IsolatedPdfParser.ChooseWorkingDirectory();
-        var mode = File.GetUnixFileMode(directory);
-
-        Assert.Equal("/", directory);
-        Assert.Equal(0, (int)(mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)));
+        Assert.StartsWith(Path.GetTempPath(), first);
+        Assert.Contains("pdf-worker-", first);
+        Assert.NotEqual(first, second);
+        Assert.False(Directory.Exists(first));
     }
 
     [Theory]
@@ -347,8 +344,12 @@ public class IsolatedPdfParserTests
                 Assert.True(DeniesWrite(workingDirectory));
             }
 
+            // The sentinel is inherited by ProcessStartInfo from this process; only an explicit Clear removes it.
+            const string sentinel = "PDF_WORKER_TEST_SENTINEL";
+            Environment.SetEnvironmentVariable(sentinel, "inherited");
             var startInfo = IsolatedPdfParser.CreateStartInfo(new IsolatedPdfParserOptions(), workingDirectory);
 
+            Assert.False(startInfo.Environment.ContainsKey(sentinel));
             Assert.Empty(startInfo.Environment);
             Assert.False(startInfo.UseShellExecute);
             Assert.True(startInfo.RedirectStandardInput);
@@ -358,6 +359,7 @@ public class IsolatedPdfParserTests
         }
         finally
         {
+            Environment.SetEnvironmentVariable("PDF_WORKER_TEST_SENTINEL", null);
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
