@@ -32,6 +32,13 @@ public static class PdfWorkerEntry
             var outcome = EvidenceIntake.ExtractText(input.ToArray(), withinMemoryLimit);
             return new PdfWorkerResponse(outcome.State.ToString(), outcome.Reason, outcome.Text);
         }
+        catch (OutOfMemoryException)
+        {
+            return new PdfWorkerResponse(
+                EvidenceProcessingState.RejectedRetryable.ToString(),
+                "exceeded the memory limit; retry is possible",
+                string.Empty);
+        }
         catch (Exception)
         {
             return new PdfWorkerResponse(

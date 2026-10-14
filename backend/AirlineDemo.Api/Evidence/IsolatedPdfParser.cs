@@ -35,6 +35,11 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
+        if (OperatingSystem.IsLinux() && !File.Exists(PrlimitPath))
+        {
+            return Retryable("memory limit cannot be enforced on this host; the document was not accepted, retry is possible");
+        }
+
         if (options.WorkerFileName is null && OperatingSystem.IsLinux() && !NetworkNamespaceAvailable.Value)
         {
             // Fail closed on Linux: without a network namespace the child could reach the network.
@@ -46,7 +51,11 @@ public static class IsolatedPdfParser
         try
         {
             Directory.CreateDirectory(workingDirectory);
-            if (!OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows())
+            {
+                DenyWrite(workingDirectory);
+            }
+            else
             {
                 // Read-only for the child: it cannot create files in its working directory.
                 File.SetUnixFileMode(workingDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
@@ -80,12 +89,33 @@ public static class IsolatedPdfParser
         }
     }
 
-    /// <summary>Builds the child's start info: no shell, no inherited environment, redirected stdin/stdout.</summary>
+    /// <summary>
+    /// Builds the child's start info: no shell, no inherited environment, redirected stdin/stdout. On Linux the child
+    /// runs under <c>prlimit --data</c>, a kernel-enforced cap on its private memory, so a decompression spike is
+    /// stopped by the kernel rather than by sampling. The default worker also runs in a network namespace.
+    /// </summary>
     internal static ProcessStartInfo CreateStartInfo(IsolatedPdfParserOptions options, string workingDirectory)
     {
         var fileName = options.WorkerFileName ?? ResolveHost();
-        var useUnshare = options.WorkerFileName is null && OperatingSystem.IsLinux();
-        var startInfo = new ProcessStartInfo(useUnshare ? UnsharePath : fileName)
+        var program = fileName;
+        var wrapper = new List<string>();
+        if (OperatingSystem.IsLinux())
+        {
+            if (options.WorkerFileName is null)
+            {
+                // A new user and network namespace with no interfaces: the child has no network access.
+                program = UnsharePath;
+                wrapper.AddRange(new[] { "-rn", "--", PrlimitPath });
+            }
+            else
+            {
+                program = PrlimitPath;
+            }
+
+            wrapper.AddRange(new[] { $"--data={options.MemoryLimitBytes}", "--", fileName });
+        }
+
+        var startInfo = new ProcessStartInfo(program)
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -95,17 +125,13 @@ public static class IsolatedPdfParser
             WorkingDirectory = workingDirectory,
         };
 
-        if (useUnshare)
+        foreach (var argument in wrapper)
         {
-            // A new user and network namespace with no interfaces: the child has no network access.
-            startInfo.ArgumentList.Add("-rn");
-            startInfo.ArgumentList.Add("--");
+            startInfo.ArgumentList.Add(argument);
         }
 
         if (options.WorkerFileName is null)
         {
-            startInfo.ArgumentList.Add(fileName);
-
             if (string.Equals(Path.GetFileNameWithoutExtension(fileName), "dotnet", StringComparison.OrdinalIgnoreCase))
             {
                 startInfo.ArgumentList.Add(typeof(IsolatedPdfParser).Assembly.Location);
@@ -125,7 +151,27 @@ public static class IsolatedPdfParser
         return startInfo;
     }
 
+    /// <summary>Denies the child write access to its working directory on Windows.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void DenyWrite(string directory)
+    {
+        var info = new DirectoryInfo(directory);
+        var security = info.GetAccessControl();
+        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null),
+            System.Security.AccessControl.FileSystemRights.WriteData
+                | System.Security.AccessControl.FileSystemRights.AppendData
+                | System.Security.AccessControl.FileSystemRights.CreateFiles
+                | System.Security.AccessControl.FileSystemRights.CreateDirectories,
+            System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+            System.Security.AccessControl.PropagationFlags.None,
+            System.Security.AccessControl.AccessControlType.Deny));
+        info.SetAccessControl(security);
+    }
+
     private const string UnsharePath = "/usr/bin/unshare";
+
+    private const string PrlimitPath = "/usr/bin/prlimit";
 
     /// <summary>True when Linux allows an unprivileged network namespace; checked once per process.</summary>
     private static readonly Lazy<bool> NetworkNamespaceAvailable = new(ProbeNetworkNamespace);

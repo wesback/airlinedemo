@@ -198,6 +198,10 @@ public static class EvidenceIntake
 
             return (EvidenceProcessingState.Complete, "accepted", text.ToString());
         }
+        catch (OutOfMemoryException)
+        {
+            return (EvidenceProcessingState.RejectedRetryable, "exceeded the memory limit; retry is possible", "");
+        }
         catch (Exception)
         {
             return (EvidenceProcessingState.RejectedRetryable, "PdfPig could not open or read the document; retry is possible", "");

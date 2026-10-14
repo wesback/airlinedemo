@@ -26,6 +26,7 @@ public class IsolatedPdfParserTests
         using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
         {
             var chunk = new byte[1024 * 1024];
+            Array.Fill(chunk, (byte)' ');
             for (var i = 0; i < 600; i++)
             {
                 zlib.Write(chunk);
@@ -121,11 +122,34 @@ public class IsolatedPdfParserTests
     [Fact]
     public void MemoryLimit_KillsWorkerAndReturnsRetryable()
     {
+        // A 1-byte cap stops the child before it can read the PDF: it must not complete.
         var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker(memoryLimitBytes: 1));
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
-        Assert.Contains("memory limit", outcome.Reason);
         Assert.Equal(string.Empty, outcome.Text);
+    }
+
+    // AC-2: the memory cap is a kernel limit on the child (Linux), so removing it from the start info fails this test.
+    [Fact]
+    public void Child_IsStartedWithHardMemoryLimit()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), "pdf-worker-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        try
+        {
+            var startInfo = IsolatedPdfParser.CreateStartInfo(new IsolatedPdfParserOptions(), workingDirectory);
+
+            Assert.Contains($"--data={512L * 1024 * 1024}", startInfo.ArgumentList);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     // AC-2 (output bound): a child that writes more than OutputLimitBytes is killed and nothing is buffered without limit.
