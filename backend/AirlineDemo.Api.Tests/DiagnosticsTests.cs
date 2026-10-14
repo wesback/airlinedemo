@@ -247,6 +247,38 @@ public sealed class DiagnosticsTests
         }
     }
 
+    [Fact]
+    public void SensitiveFieldsInStructuredScopesAreRedacted()
+    {
+        var capture = new CapturingProvider();
+        using var services = new ServiceCollection()
+            .AddLogging(builder => builder.AddProvider(capture))
+            .AddRedactingLogging()
+            .BuildServiceProvider();
+        var logger = services.GetRequiredService<ILogger<DiagnosticsTests>>();
+
+        using (logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["prompt"] = "Summarise the secret clause",
+            ["document"] = "Confidential lease text",
+            ["passcode"] = "4815",
+            ["cookie"] = "session=8f3c9a2b7d",
+            ["authorization"] = "Bearer eyJhbGci",
+            ["investigation_id"] = "inv-7",
+        }))
+        {
+            logger.LogInformation("Scoped work");
+        }
+
+        var scope = Assert.Single(capture.Scopes);
+        foreach (var secret in new[] { "Summarise the secret clause", "Confidential lease text", "4815", "8f3c9a2b7d", "eyJhbGci" })
+        {
+            Assert.DoesNotContain(secret, scope);
+        }
+        Assert.Contains("prompt=[redacted]", scope);
+        Assert.Contains("investigation_id=inv-7", scope);
+    }
+
     private sealed class CapturingProcessor : BaseProcessor<Activity>
     {
         public List<Dictionary<string, object?>> Tags { get; } = [];
@@ -273,7 +305,9 @@ public sealed class DiagnosticsTests
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         {
-            provider.Scopes.Add(state.ToString() ?? string.Empty);
+            provider.Scopes.Add(state is IEnumerable<KeyValuePair<string, object?>> pairs
+                ? string.Join(" ", pairs.Select(pair => $"{pair.Key}={pair.Value}"))
+                : state.ToString() ?? string.Empty);
             return null;
         }
 
