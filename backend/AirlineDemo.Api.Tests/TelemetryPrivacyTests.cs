@@ -404,7 +404,7 @@ public sealed class TelemetryPrivacyTests
 
     private sealed class CapturingLogger : ILogger
     {
-        public List<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = new();
+        public System.Collections.Concurrent.ConcurrentQueue<IReadOnlyList<KeyValuePair<string, object?>>> States { get; } = new();
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -416,7 +416,7 @@ public sealed class TelemetryPrivacyTests
             if (state is IReadOnlyList<KeyValuePair<string, object?>> list)
             {
                 // Snapshot now: framework state can be backed by request features disposed after the response.
-                States.Add(list.ToList());
+                States.Enqueue(list.ToList());
             }
         }
     }

@@ -131,7 +131,7 @@ public sealed class DiagnosticsTests
         var exported = new List<Activity>();
         using var listener = new ActivityListener
         {
-            ShouldListenTo = _ => true,
+            ShouldListenTo = source => source.Name == "DiagnosticsTests",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
         };
         ActivitySource.AddActivityListener(listener);
@@ -166,6 +166,7 @@ public sealed class DiagnosticsTests
         {
             Assert.NotNull(app.Services.GetRequiredService<ILoggerFactory>());
             Assert.Null(app.Services.GetService<TracerProvider>());
+            Assert.DoesNotContain(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
         }
 
         var withString = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
@@ -176,6 +177,7 @@ public sealed class DiagnosticsTests
         {
             Assert.NotNull(app.Services.GetRequiredService<ILoggerFactory>());
             Assert.NotNull(app.Services.GetService<TracerProvider>());
+            Assert.Contains(app.Services.GetServices<ILoggerProvider>(), p => p.GetType().FullName!.Contains("OpenTelemetry"));
         }
     }
 

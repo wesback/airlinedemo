@@ -15,8 +15,19 @@ public static partial class RedactionFilter
         "prompt", "document", "text", "passcode", "password", "cookie", "authorization", "token", "secret",
     };
 
+    // Only these names may carry a string value: identifiers, states, counts, durations and token usage.
+    private static readonly HashSet<string> OperationalSegments = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "id", "ids", "state", "status", "count", "counts", "citations", "duration", "ms", "usage", "tokens", "total",
+        "decision", "revision", "kind", "code", "outcome", "event", "type", "model", "trace", "span", "route", "level",
+        "operation", "attempts", "latency", "version", "service", "name", "environment", "deployment", "span",
+    };
+
     public static bool IsSensitiveName(string name) =>
         name.Split(new[] { '.', '_', '-' }).Any(SensitiveSegments.Contains);
+
+    public static bool IsOperationalName(string name) =>
+        name.Split(new[] { '.', '_', '-' }).Any(OperationalSegments.Contains);
 
     [GeneratedRegex(@"(?i)\bbearer\s+[A-Za-z0-9\-._~+/]+=*")]
     private static partial Regex BearerToken();
@@ -30,6 +41,7 @@ public static partial class RedactionFilter
     // Free-form content (prompts, document text) is long or contains spaces; identifiers, states and counts are single tokens.
     public const int MaxFreeTextLength = 256;
 
+    // Strings survive only under operational names and only as single short tokens; numbers and flags are always operational.
     public static object? Sanitize(string name, object? value)
     {
         if (IsSensitiveName(name))
@@ -40,11 +52,45 @@ public static partial class RedactionFilter
         return value switch
         {
             null => null,
-            string text when text.Length > MaxFreeTextLength || text.Any(char.IsWhiteSpace) => TelemetryRedaction.Redacted,
-            string text => ScrubText(text),
             ValueType => value,
-            _ => ScrubText(value.ToString() ?? string.Empty),
+            string text when IsOperationalName(name) => FreeText(text),
+            _ => TelemetryRedaction.Redacted,
         };
+    }
+
+    private static string FreeText(string text) =>
+        text.Length > MaxFreeTextLength || text.Any(char.IsWhiteSpace) ? TelemetryRedaction.Redacted : ScrubText(text);
+
+    // Messages are only trusted as message templates: placeholder values are redacted, and literal text must be a single token.
+    private static string RenderMessage(string formatted, string? template, IEnumerable<KeyValuePair<string, object?>>? pairs)
+    {
+        if (template is null)
+        {
+            return TelemetryRedaction.Redacted;
+        }
+
+        if (!template.Contains('{'))
+        {
+            return FreeText(template);
+        }
+
+        var rendered = formatted;
+        foreach (var pair in pairs ?? [])
+        {
+            if (pair.Key == "{OriginalFormat}")
+            {
+                continue;
+            }
+
+            var raw = pair.Value?.ToString();
+            var sanitized = Sanitize(pair.Key, pair.Value)?.ToString() ?? string.Empty;
+            if (!string.IsNullOrEmpty(raw) && raw != sanitized)
+            {
+                rendered = rendered.Replace(raw, sanitized, StringComparison.Ordinal);
+            }
+        }
+
+        return ScrubText(rendered);
     }
 
     public static IReadOnlyList<KeyValuePair<string, object?>> Redact(IEnumerable<KeyValuePair<string, object?>> pairs) =>
@@ -96,10 +142,12 @@ public static partial class RedactionFilter
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         {
-            var text = ScrubText(state.ToString() ?? string.Empty);
-            object scope = state is IEnumerable<KeyValuePair<string, object?>> pairs
-                ? new RedactedState(Redact(pairs), text)
-                : text;
+            object scope = state switch
+            {
+                IEnumerable<KeyValuePair<string, object?>> pairs => new RedactedState(Redact(pairs), TelemetryRedaction.Redacted),
+                string text => FreeText(text),
+                _ => TelemetryRedaction.Redacted,
+            };
             return inner.BeginScope(scope);
         }
 
@@ -113,23 +161,11 @@ public static partial class RedactionFilter
             }
 
             var source = state as IEnumerable<KeyValuePair<string, object?>>;
-            var message = formatter(state, exception);
-            if (source is not null)
-            {
-                foreach (var pair in source)
-                {
-                    // The formatted message embeds raw values, so every value the filter changes must be replaced there too.
-                    var raw = pair.Value?.ToString();
-                    var sanitized = Sanitize(pair.Key, pair.Value)?.ToString() ?? string.Empty;
-                    if (!string.IsNullOrEmpty(raw) && raw != sanitized)
-                    {
-                        message = message.Replace(raw, sanitized, StringComparison.Ordinal);
-                    }
-                }
-            }
-
+            var formatted = formatter(state, exception);
+            var template = source?.FirstOrDefault(pair => pair.Key == "{OriginalFormat}").Value as string;
+            var message = RenderMessage(formatted, template, source);
             var pairs = source is null ? null : Redact(source);
-            inner.Log(logLevel, eventId, new RedactedState(pairs, ScrubText(message)), SanitizeException(exception), static (s, _) => s.Message);
+            inner.Log(logLevel, eventId, new RedactedState(pairs, message), SanitizeException(exception), static (s, _) => s.Message);
         }
     }
 
