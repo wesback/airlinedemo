@@ -62,6 +62,33 @@ describe('sign-in page', () => {
     expect(screen.getByLabelText('Demo passcode')).toBeTruthy();
   });
 
+  it('does not request or show the seeded users until a passcode is entered', async () => {
+    const fetchMock = stubApi({ 'GET /api/auth/users': () => json(users) });
+    render(<SignIn />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Enter the demo passcode.');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('radio')).toBeNull();
+  });
+
+  it('sends sign-in as JSON with no session token and keeps the picker hidden after a rejected sign-in', async () => {
+    const fetchMock = stubApi({
+      'GET /api/auth/users': () => json(users),
+      'POST /api/auth/sign-in': () => json({ error: 'Sign-in failed.' }, 401),
+    });
+    render(<SignIn />);
+    await enterPasscodeAndPick('wrong', 'Ada');
+    await screen.findByRole('alert');
+
+    const signInCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/sign-in');
+    const headers = signInCall?.[1]?.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers['X-CSRF-Token']).toBeUndefined();
+    expect(screen.queryByRole('radio')).toBeNull();
+  });
+
   it('tells the user to wait when the response is throttled', async () => {
     stubApi({
       'GET /api/auth/users': () => json(users),
