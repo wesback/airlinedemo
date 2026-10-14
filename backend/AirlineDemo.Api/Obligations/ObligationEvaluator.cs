@@ -111,6 +111,8 @@ public static class ObligationEvaluator
 
         // Drafts become non-current when the basis moves, the state leaves at-risk, or the missing requirements change; history is preserved.
         var missingIds = missing.Select(r => r.Id).ToList();
+        var inWindow = DateOnly.FromDateTime(asOf.UtcDateTime) is var day
+            && day >= obligation.NoticeWindowStartUtc && day <= obligation.NoticeWindowEndUtc;
         // Only the most recent current draft can survive, so duplicate current drafts in the history collapse to one.
         var lastCurrentIndex = -1;
         for (var i = 0; i < drafts.Count; i++)
@@ -119,14 +121,13 @@ public static class ObligationEvaluator
             && (i != lastCurrentIndex
                 || d.BasisVersion != obligation.CurrentBasisVersion
                 || state != ObligationState.AtRisk
+                || !inWindow
                 || !d.EvidenceRequirementIds.SequenceEqual(missingIds))
                 ? d with { Status = NoticeDraftStatus.Superseded }
                 : d).ToList();
 
         NoticeDraft? newDraft = null;
         var hasCurrent = updated.Any(d => d.Status == NoticeDraftStatus.Current);
-        var inWindow = DateOnly.FromDateTime(asOf.UtcDateTime) is var day
-            && day >= obligation.NoticeWindowStartUtc && day <= obligation.NoticeWindowEndUtc;
         if (state == ObligationState.AtRisk && inWindow && !overdue && !hasCurrent)
         {
             newDraft = new NoticeDraft(

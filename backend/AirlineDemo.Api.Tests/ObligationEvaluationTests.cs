@@ -83,6 +83,24 @@ public sealed class ObligationEvaluationTests
     }
 
     [Fact]
+    public void Blocked_takes_precedence_over_needs_review_when_ambiguous_and_stale_coexist()
+    {
+        var result = ObligationEvaluator.Evaluate(Make([Ambiguous("REQ-1"), Satisfied("REQ-2", basis: 1)]), At(12), []);
+        Assert.Equal(ObligationState.Blocked, result.State);
+        Assert.Contains(result.Reasons, r => r.Contains("REQ-1") && r.Contains("ambiguous"));
+        Assert.Contains(result.Reasons, r => r.Contains("REQ-2") && r.Contains("not on current basis"));
+    }
+
+    [Fact]
+    public void Current_draft_is_superseded_once_notice_window_has_ended()
+    {
+        var created = ObligationEvaluator.Evaluate(Make([Missing()]), At(14), []).NewDraft!;
+        var result = ObligationEvaluator.Evaluate(Make([Missing()]), new DateTimeOffset(2026, 10, 15, 0, 0, 0, TimeSpan.Zero), [created]);
+        Assert.Equal(NoticeDraftStatus.Superseded, result.Drafts.Single().Status);
+        Assert.Null(result.NewDraft);
+    }
+
+    [Fact]
     public void Ambiguous_evidence_with_authorized_review_still_blocks()
     {
         var result = ObligationEvaluator.Evaluate(Make([Ambiguous()], Authorized), At(12), []);
