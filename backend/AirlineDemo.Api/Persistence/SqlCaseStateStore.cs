@@ -301,8 +301,10 @@ public static class CaseStateStoreRegistration
                 "ConnectionStrings:CaseState must not contain a user ID, password, or access token; use managed identity.");
         }
 
-        if (!pairs.Any(p => p.Key == "authentication"
-            && string.Equals(p.Value, RequiredAuthentication, StringComparison.OrdinalIgnoreCase)))
+        // A repeated Authentication key would let a later value override the managed identity setting.
+        var authentication = pairs.Where(p => p.Key == "authentication").ToList();
+        if (authentication.Count != 1
+            || !string.Equals(authentication[0].Value, RequiredAuthentication, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 $"ConnectionStrings:CaseState must specify Authentication={RequiredAuthentication}.");
