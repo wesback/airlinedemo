@@ -197,6 +197,7 @@ public class MockRequestDeliveryTests
 
         Assert.Equal(DeliveryOutcome.ScenarioTimeMismatch, result.Outcome);
         Assert.Equal(400, result.HttpStatus);
+        Assert.Null(result.Receipt);
         Assert.Empty(inbox.Requests);
         Assert.Empty(inbox.Audit);
     }
