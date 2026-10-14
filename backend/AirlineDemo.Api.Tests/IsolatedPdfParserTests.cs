@@ -171,6 +171,15 @@ public class IsolatedPdfParserTests
         }
     }
 
+    // Root must not use a user namespace (-r): the later switch to uid 65534 would be unmapped and every PDF would fail.
+    [Fact]
+    public void UnshareFlags_UseNoUserNamespaceForRoot()
+    {
+        var expected = Environment.UserName == "root" ? "-n" : "-rn";
+
+        Assert.Equal(expected, IsolatedPdfParser.UnshareFlags());
+    }
+
     // Windows memory cap: the Job Object limit is built without any Windows call, so this runs on every platform.
     [Fact]
     public void JobObjectLimits_CapProcessMemoryAndKillOnClose()

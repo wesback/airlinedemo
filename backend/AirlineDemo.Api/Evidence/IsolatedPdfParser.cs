@@ -112,8 +112,8 @@ public static class IsolatedPdfParser
             var chain = new List<string>();
             if (options.WorkerFileName is null && NetworkNamespaceAvailable.Value)
             {
-                // A new user and network namespace with no interfaces: the child has no network access.
-                chain.AddRange(new[] { UnsharePath, "-rn", "--" });
+                // A network namespace with no interfaces: the child has no network access.
+                chain.AddRange(new[] { UnsharePath, UnshareFlags(), "--" });
             }
 
             if (File.Exists(PrlimitPath))
@@ -233,6 +233,12 @@ public static class IsolatedPdfParser
     /// <summary>Conventional uid/gid of the unprivileged "nobody" account the worker switches to when the API is root.</summary>
     private const int NobodyUid = 65534;
 
+    /// <summary>
+    /// Root creates a plain network namespace: <c>-r</c> would map root into a user namespace where the later switch to
+    /// <see cref="NobodyUid"/> has no mapping and fails. Other users need <c>-r</c> to create the namespace at all.
+    /// </summary>
+    internal static string UnshareFlags() => Environment.UserName == "root" ? "-n" : "-rn";
+
     /// <summary>True when Linux allows an unprivileged network namespace; checked once per process.</summary>
     private static readonly Lazy<bool> NetworkNamespaceAvailable = new(ProbeNetworkNamespace);
 
@@ -251,7 +257,7 @@ public static class IsolatedPdfParser
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
-                ArgumentList = { "-rn", "--", "true" },
+                ArgumentList = { UnshareFlags(), "--", "true" },
             });
             if (probe is null)
             {
