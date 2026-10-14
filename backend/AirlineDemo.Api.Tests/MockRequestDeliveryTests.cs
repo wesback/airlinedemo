@@ -86,6 +86,8 @@ public class MockRequestDeliveryTests
     [InlineData("downgraded")]
     [InlineData("two gaps")]
     [InlineData("no supported claims")]
+    [InlineData("gap with unsupported claim")]
+    [InlineData("gap with baseline claim")]
     public void Ambiguous_conflicting_incomplete_failed_unsupported_or_stale_findings_create_no_request(string scenario)
     {
         var inbox = new MockRequestInbox();
@@ -97,6 +99,9 @@ public class MockRequestDeliveryTests
             "conflict" => Finding([Validated(ClaimKind.Conflict)]),
             "downgraded" => Finding([Validated(ClaimKind.MissingRequirement, "Return readiness is cleared.")]),
             "two gaps" => Finding([Validated(ClaimKind.MissingRequirement), Validated(ClaimKind.MissingRequirement)]),
+            "gap with unsupported claim" => Finding(
+                [Validated(ClaimKind.MissingRequirement), Validated(ClaimKind.Baseline, "Return readiness is cleared.")]),
+            "gap with baseline claim" => Finding([Validated(ClaimKind.MissingRequirement), Validated(ClaimKind.Baseline)]),
             _ => Finding([]),
         };
 

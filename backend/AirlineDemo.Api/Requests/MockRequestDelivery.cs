@@ -102,6 +102,11 @@ public static class MockDeliveryPolicy
         var gaps = finding.Claims.Count(c => c.Status == ClaimStatus.Supported && c.Kind == ClaimKind.MissingRequirement);
         if (gaps == 1)
         {
+            if (finding.Claims.Count != 1)
+            {
+                return new DeliveryDecision(DeliveryDecisionKind.Review, "ambiguous: gap mixed with other claims");
+            }
+
             return new DeliveryDecision(DeliveryDecisionKind.Eligible, "clear validated gap on current basis");
         }
 
