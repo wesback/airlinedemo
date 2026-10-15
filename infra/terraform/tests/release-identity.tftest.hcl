@@ -351,6 +351,11 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
+    condition     = length(regexall("user_assigned_identity[.](?:build|release)[.]", join("\n", [for f in fileset(path.module, "*.tf") : file("${path.module}/${f}")]))) == 9 && length(regexall("user_assigned_identity[.](?:build|release)[.]", file("${path.module}/release-identity.tf"))) == 9
+    error_message = "The build and release identities may be referenced only by the nine known references in release-identity.tf (five role principals, two federated credentials, two outputs). Any extra reference, including one through a local, fails."
+  }
+
+  assert {
     condition     = !can(regex("client_secret|storage_key|access_key|access_policy|azuread_application_password|admin_password", file("${path.module}/release-identity.tf")))
     error_message = "The workflow identities must not be given a client secret, storage key, or Key Vault access policy."
   }
