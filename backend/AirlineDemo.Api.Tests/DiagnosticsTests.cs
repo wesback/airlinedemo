@@ -336,7 +336,16 @@ public sealed class DiagnosticsTests
         Assert.Equal("diagnostic event", scoped.Message);
         Assert.Contains(scoped.Attributes, a => a.Key == "case.id" && (string?)a.Value == "case-42");
         Assert.Contains(scoped.Attributes, a => a.Key == "error.type" && (string?)a.Value == "invalid-operation");
-        Assert.DoesNotContain(FormattedCanary, string.Join("\n", scoped.Attributes.Select(a => $"{a.Key}={a.Value}")));
+        // AC-05: no captured field (attributes, body, formatted message, exception text) carries the canaries or exception details.
+        var scopedOutput = string.Join("\n", scoped.Attributes.Select(a => $"{a.Key}={a.Value}"))
+            + "\n" + scoped.Message
+            + "\n" + (scoped.FormattedMessage ?? string.Empty)
+            + "\n" + (scoped.ExceptionText ?? string.Empty);
+        Assert.DoesNotContain(FormattedCanary, scopedOutput);
+        Assert.DoesNotContain(ExceptionCanary, scopedOutput);
+        Assert.DoesNotContain(InnerCanary, scopedOutput);
+        Assert.DoesNotContain("   at ", scopedOutput);
+        Assert.DoesNotContain("System.InvalidOperationException", scopedOutput);
 
         // An error.type value that fails the allowlist rule is omitted.
         captured.Clear();
