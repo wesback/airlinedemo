@@ -87,7 +87,7 @@ public sealed class SqlCaseStateStoreTests
         const string connectionString =
             "Server=tcp:case-state.database.windows.net,1433;Database=casestate;Encrypt=True;Authentication=Active Directory Managed Identity;";
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString })
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString })
             .Build();
 
         var services = new ServiceCollection();
@@ -113,14 +113,14 @@ public sealed class SqlCaseStateStoreTests
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString("Server=x;Database=y;Encrypt=True;"));
 
         var forbidden = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString + "Password=secret;" })
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString + "Password=secret;" })
             .Build();
         Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(forbidden));
 
         foreach (var suffix in new[] { "User ID=app;", "UID=app;", "Password=secret;", "PWD=secret;", "Access Token=token;" })
         {
             var configured = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString + suffix })
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString + suffix })
                 .Build();
             Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(configured));
         }
@@ -129,7 +129,7 @@ public sealed class SqlCaseStateStoreTests
         foreach (var duplicate in new[] { "Authentication=Active Directory Default;", "Authentication=Active Directory Managed Identity;" })
         {
             var configured = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString + duplicate })
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString + duplicate })
                 .Build();
             Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(configured));
         }

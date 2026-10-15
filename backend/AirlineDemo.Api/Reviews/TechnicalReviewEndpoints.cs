@@ -136,7 +136,7 @@ public static class TechnicalReviewEndpoints
         });
     }
 
-    private static IResult RecordDecision(string caseId, TechnicalReviewCommand body, HttpContext http, DemoSessionStore sessions, ICaseStateStore store, IConfiguration config, ILogger<DemoSessionStore> logger)
+    static IResult RecordDecision(string caseId, TechnicalReviewCommand body, HttpContext http, DemoSessionStore sessions, ICaseStateStore store, IConfiguration config, ILogger<DemoSessionStore> logger)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null)

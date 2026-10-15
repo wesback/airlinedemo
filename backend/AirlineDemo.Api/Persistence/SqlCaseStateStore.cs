@@ -358,17 +358,31 @@ public static class CaseStateStoreRegistration
     private static readonly string[] ForbiddenKeys = ["userid", "user", "uid", "password", "pwd", "accesstoken"];
 
     /// <summary>
-    /// Uses the Azure SQL store when <c>ConnectionStrings:CaseState</c> is set; without it, the file-backed store
-    /// stays in place for local development and tests. The SQL connection string must use managed identity only.
+    /// Selects the case-state store with <c>Persistence:CaseStateProvider</c>: <c>File</c> (default) or <c>Sql</c>.
+    /// <c>Sql</c> reads <c>ConnectionStrings:CaseState</c>, which must use managed identity only.
+    /// Unknown values fail registration.
     /// </summary>
     public static IServiceCollection AddCaseStateStore(this IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString(ConnectionStringName);
-        if (string.IsNullOrWhiteSpace(connectionString))
+        var provider = configuration["Persistence:CaseStateProvider"];
+        if (string.IsNullOrWhiteSpace(provider) || string.Equals(provider, "File", StringComparison.OrdinalIgnoreCase))
         {
             services.AddSingleton<ICaseStateStore>(_ => new CaseStateStore(
                 configuration["CaseState:Path"] ?? Path.Combine(AppContext.BaseDirectory, "case-state.json")));
             return services;
+        }
+
+        if (!string.Equals(provider, "Sql", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Persistence:CaseStateProvider must be File or Sql, but was '{provider}'.");
+        }
+
+        var connectionString = configuration.GetConnectionString(ConnectionStringName);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                "ConnectionStrings:CaseState is required when Persistence:CaseStateProvider is Sql.");
         }
 
         ValidateManagedIdentityConnectionString(connectionString);
@@ -380,6 +394,11 @@ public static class CaseStateStoreRegistration
     /// <summary>Rejects any connection string that carries a username, password, or token, or that does not use managed identity.</summary>
     public static void ValidateManagedIdentityConnectionString(string connectionString)
     {
+        if (connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries).Any(s => !s.Contains('=')))
+        {
+            throw new InvalidOperationException("ConnectionStrings:CaseState must contain only key=value pairs.");
+        }
+
         var pairs = connectionString
             .Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Select(p => p.Split('=', 2))
