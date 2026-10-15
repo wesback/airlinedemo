@@ -306,6 +306,24 @@ public sealed class SqlCaseStateStoreTests
         AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
     }
 
+    [Fact]
+    public void AC1_read_of_missing_case_is_rejected()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-missing", "owner-m");
+
+        // Make the case row unavailable, then read with its previously issued scope.
+        using (var db = new CaseStateDbContext(options))
+        {
+            db.Cases.Remove(db.Cases.Single(c => c.CaseId == "case-missing"));
+            db.SaveChanges();
+        }
+
+        Assert.Throws<CaseAccessDeniedException>(() => store.Read(scope));
+        Assert.Throws<CaseAccessDeniedException>(() => store.GetBasisVersion(scope, 1));
+    }
+
     private static void AssertStateUnchanged(
         SqlCaseStateStore store,
         DbContextOptions<CaseStateDbContext> options,
