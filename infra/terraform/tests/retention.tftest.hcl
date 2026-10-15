@@ -105,7 +105,7 @@ run "audit_grants_remain_append_only" {
   }
 
   assert {
-    condition     = length([for s in output.migration_sql_grant_statements : s if (strcontains(s, "ALTER") || strcontains(s, "CONTROL")) && !strcontains(s, "[id-airline-migration]")]) == 0
+    condition     = length([for s in output.migration_sql_grant_statements : s if(strcontains(s, "ALTER") || strcontains(s, "CONTROL")) && !strcontains(s, "[id-airline-migration]")]) == 0
     error_message = "Every schema-change grant in the migration statements must target the migration identity."
   }
 
