@@ -47,8 +47,7 @@ variable "egress_allowed_destinations" {
 }
 
 variable "sql_database_name" {
-  type    = string
-  default = "airlinedemo"
+  type = string
 }
 
 variable "sql_server_name" {
@@ -147,4 +146,32 @@ variable "terraform_state_backend" {
     condition     = var.terraform_state_backend.use_azuread_auth == true && var.terraform_state_backend.locking_enabled == true && length(var.terraform_state_backend.storage_account_name) > 0
     error_message = "terraform_state_backend requires use_azuread_auth = true, locking_enabled = true and a state storage account name."
   }
+}
+
+variable "acr_name" {
+  type = string
+}
+
+variable "container_apps_environment_name" {
+  type = string
+}
+
+variable "container_app_name" {
+  type = string
+}
+
+variable "image_digest" {
+  description = "Immutable digest of the application image, for example sha256:<64 lowercase hex characters>."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
+    error_message = "image_digest must be a sha256 digest (sha256 followed by 64 lowercase hex characters), not a tag."
+  }
+}
+
+variable "demo_passcode_secret_uri" {
+  description = "Key Vault secret URI of the demo passcode. The Container App references it as a secret; the value is never inlined."
+  type        = string
+  nullable    = false
 }

@@ -32,6 +32,7 @@ locals {
     blob  = "privatelink.blob.core.windows.net"
     model = "privatelink.openai.azure.com"
     kv    = "privatelink.vaultcore.azure.net"
+    acr   = "privatelink.azurecr.io"
   }
 
   private_endpoints = {
@@ -39,6 +40,7 @@ locals {
     blob  = { resource_id = azurerm_storage_account.blob.id, subresource = "blob", zone = "blob" }
     model = { resource_id = azurerm_cognitive_account.model.id, subresource = "account", zone = "model" }
     kv    = { resource_id = azurerm_key_vault.kv.id, subresource = "vault", zone = "kv" }
+    acr   = { resource_id = azurerm_container_registry.acr.id, subresource = "registry", zone = "acr" }
   }
 
   presenter_reviewer_rules = { for i, c in var.presenter_reviewer_cidrs : tostring(i) => c }
@@ -62,6 +64,15 @@ resource "azurerm_subnet" "app" {
   resource_group_name  = azurerm_resource_group.demo.name
   virtual_network_name = azurerm_virtual_network.demo.name
   address_prefixes     = [var.app_subnet_cidr]
+
+  delegation {
+    name = "container-apps-environment"
+
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
 }
 
 resource "azurerm_subnet" "private_endpoints" {
