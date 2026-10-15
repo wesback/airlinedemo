@@ -1,0 +1,271 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 226,
+  "branch": "ai-sdlc/issue-226",
+  "commitSha": "5582420918d74875cf5c3b4e4b885c5b0248faa3",
+  "round": 1,
+  "pipelineVersion": "10776a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The ingress allowlist fix is present, but the changed contract tests can pass with ineffective app-level ingress restrictions. M14 also still omits assertions for the model account's required transport and encryption settings.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 69,
+          "message": "M-13 still does not verify that app ingress restrictions use the configured CIDRs or deny every caller when the list is empty. Assert the exact restriction ranges and actions.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M13 checks that an allow restriction iterates over local.presenter_reviewer_rules and has action Allow, but it never checks ip_address_range against the configured CIDR. Its empty-list checks only search for a length condition and a Deny action.",
+            "failureScenario": "If the allow restriction uses 0.0.0.0/0, or the empty-list Deny restriction uses a narrower range, these assertions still pass while unapproved callers can reach the app."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 106,
+          "message": "M-14 still does not test the model account's required TLS 1.2 and Microsoft-managed encryption settings against that resource.",
+          "confidence": 0.87,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M14 inspects the model resource but only checks for the absence of customer_managed_key and that local_auth_enabled is false; it makes no assertion about the model account's minimum TLS version or an affirmative Microsoft-managed encryption setting.",
+            "failureScenario": "If the model account's TLS setting is weakened or its required encryption setting is removed, M14 can still pass because neither setting is asserted in the model block."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The ingress implementation now adds app-level IP restrictions, and the prior public-access findings appear addressed. Two earlier test findings remain: the contract test does not bind ingress allows to the configured CIDRs or guard Storage's Microsoft-managed encryption.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 64,
+          "message": "M-13 still does not verify that ingress allow rules use the configured CIDRs. Assert the ip_address_range binding and deny behavior for an unlisted caller.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M13 checks that the ingress allow restriction iterates local.presenter_reviewer_rules and uses action Allow, but does not check that ip_address_range uses the configured CIDR value.",
+            "failureScenario": "If the allow rule's ip_address_range is changed to 0.0.0.0/0, the contract test still passes and callers outside presenter_reviewer_cidrs can reach the app."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 102,
+          "message": "M-14 still does not verify Microsoft-managed encryption for Storage. Assert that the Storage resource has no customer-managed key configuration.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M14 checks Storage's TLS and infrastructure encryption settings, but does not check that Storage avoids customer-managed encryption keys.",
+            "failureScenario": "If a customer_managed_key configuration is added to the Storage account while infrastructure_encryption_enabled remains true, this test still passes despite the Microsoft-managed encryption requirement."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The ingress restriction was added, addressing the direct exposure finding. Three previously raised test findings remain: the contract tests do not fully bind ingress to the allowlist, verify model transport and encryption, or exclude broad egress access.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 61,
+          "message": "M-13 still does not prove ingress is limited to presenter_reviewer_cidrs. Assert each allow rule uses its configured CIDR as ip_address_range.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M13 checks that ingress rules iterate over local.presenter_reviewer_rules and use Allow, but it does not assert that ip_address_range is the configured CIDR value.",
+            "failureScenario": "If the allow rule's ip_address_range is changed to 0.0.0.0/0, M13 still passes, and callers outside presenter_reviewer_cidrs can reach the app."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 111,
+          "message": "M-14 still does not verify the model account's required TLS and encryption settings. Assert those settings against the model resource.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M14 checks SQL and Storage TLS settings, but the model block is only checked for absence of customer_managed_key and for local_auth_enabled; it does not assert model TLS or Microsoft-managed encryption.",
+            "failureScenario": "If the model account loses its required TLS or encryption configuration, M14 still passes because its matching TLS assertion is on SQL and it has no model encryption assertion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 150,
+          "message": "M-18 still does not prove model egress is limited to approved destinations. Assert the configured destination list and that no broader allow rule exists.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M18 checks for a destination_address_prefix using each.value and for_each = local.egress_rules, but it does not verify that the allowed destinations are restricted to egress_allowed_destinations or rule out an additional broad allow rule.",
+            "failureScenario": "If a broad outbound allow rule is added alongside the checked rule, M18 still passes and the app can send model traffic to unapproved destinations."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 15,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -90,32 +90,57 @@ mock_provider "azurerm" {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
     }
   }
+
+  mock_resource "azurerm_container_app_environment" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/managedEnvironments/cae-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_container_app" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_container_registry" {
+    defaults = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest"
+      login_server = "acrdemotest.azurecr.io"
+    }
+  }
 }
 
 variables {
-  subscription_id               = "00000000-0000-0000-0000-000000000000"
-  tenant_id                     = "11111111-1111-1111-1111-111111111111"
-  location                      = "uksouth"
-  resource_group_name           = "rg-demo-test"
-  vnet_address_space            = ["10.60.0.0/16"]
-  app_subnet_cidr               = "10.60.1.0/24"
-  private_endpoint_subnet_cidr  = "10.60.2.0/24"
-  presenter_reviewer_cidrs      = ["203.0.113.0/24"]
-  egress_allowed_destinations   = ["198.51.100.0/24"]
-  sql_server_name               = "sql-demo-test"
-  sql_admin_group_name          = "grp-demo-sql-admins"
-  sql_admin_group_object_id     = "22222222-2222-2222-2222-222222222222"
-  storage_account_name          = "stdemotest"
-  key_vault_name                = "kv-demo-test"
-  model_account_name            = "aoai-demo-test"
-  model_endpoint_subdomain      = "aoai-demo-test"
-  terraform_principal_object_id = "33333333-3333-3333-3333-333333333333"
-  budget_amount                 = 100
-  budget_start_date             = "2026-11-01T00:00:00Z"
-  budget_contact_emails         = ["ops@example.invalid"]
-  telemetry_reader_group_id     = "44444444-4444-4444-4444-444444444444"
-  security_response_owner       = { name = "Response Owner", email = "owner@example.invalid" }
-  security_alert_settings       = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
+  subscription_id                 = "00000000-0000-0000-0000-000000000000"
+  tenant_id                       = "11111111-1111-1111-1111-111111111111"
+  location                        = "uksouth"
+  resource_group_name             = "rg-demo-test"
+  vnet_address_space              = ["10.60.0.0/16"]
+  app_subnet_cidr                 = "10.60.1.0/24"
+  private_endpoint_subnet_cidr    = "10.60.2.0/24"
+  presenter_reviewer_cidrs        = ["203.0.113.0/24"]
+  egress_allowed_destinations     = ["198.51.100.0/24"]
+  sql_server_name                 = "sql-demo-test"
+  sql_admin_group_name            = "grp-demo-sql-admins"
+  sql_admin_group_object_id       = "22222222-2222-2222-2222-222222222222"
+  storage_account_name            = "stdemotest"
+  key_vault_name                  = "kv-demo-test"
+  model_account_name              = "aoai-demo-test"
+  model_endpoint_subdomain        = "aoai-demo-test"
+  terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
+  budget_amount                   = 100
+  budget_start_date               = "2026-11-01T00:00:00Z"
+  budget_contact_emails           = ["ops@example.invalid"]
+  telemetry_reader_group_id       = "44444444-4444-4444-4444-444444444444"
+  sql_database_name               = "airlinedemo"
+  acr_name                        = "acrdemotest"
+  container_apps_environment_name = "cae-demo-test"
+  container_app_name              = "ca-airline-demo-test"
+  image_digest                    = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  demo_passcode_secret_uri        = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
+  security_response_owner         = { name = "Response Owner", email = "owner@example.invalid" }
+  security_alert_settings         = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
   terraform_state_backend = {
     storage_account_name = "stdemotfstate"
     container_name       = "tfstate"
@@ -251,6 +276,7 @@ run "M-14_app_grants_bind_to_app_principal_not_migration" {
     target = azurerm_user_assigned_identity.app
     values = {
       principal_id = "55555555-5555-5555-5555-555555555555"
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app-mock"
     }
   }
 
