@@ -21,12 +21,13 @@ public sealed class FinanceEndpointsTests
     private const string Case = "case-001";
     private static readonly DateTimeOffset AsOf = new(2026, 10, 13, 1, 0, 0, TimeSpan.Zero);
 
-    private static WebApplicationFactory<Program> CreateFactory() =>
+    private static WebApplicationFactory<Program> CreateFactory(bool fixedTime = true) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode }));
-            builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(new FixedTimeProvider(AsOf)));
+            if (fixedTime)
+                builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(new FixedTimeProvider(AsOf)));
         });
 
     private static async Task<string> SignInCookieAsync(HttpClient client, string userId)
@@ -93,7 +94,10 @@ public sealed class FinanceEndpointsTests
         await using var factory = CreateFactory();
         using var client = factory.CreateClient();
         var obligation = Obligation();
-        factory.Services.GetRequiredService<FinanceInputStore>().Set(Case, new FinanceInputs(null, null, obligation, []));
+        var store = factory.Services.GetRequiredService<FinanceInputStore>();
+        store.Set(Case, new FinanceInputs(null, null, obligation, []));
+        store.Set("case-999", new FinanceInputs(null, null, obligation, []));
+        store.Set("case-002", new FinanceInputs(null, null, obligation, []));
         var expected = ObligationEvaluator.Evaluate(obligation, AsOf, []);
 
         using var unauthenticated = await client.GetAsync($"/api/cases/{Case}/obligations");
@@ -116,6 +120,18 @@ public sealed class FinanceEndpointsTests
         var reviewerCookie = await SignInCookieAsync(client, "reviewer");
         using var reviewerOutOfScope = await SendAsync(client, "/api/cases/case-002/obligations", reviewerCookie);
         Assert.Equal(HttpStatusCode.NotFound, reviewerOutOfScope.StatusCode);
+    }
+
+    [Fact]
+    public async Task Obligations_resolve_time_from_production_registration()
+    {
+        await using var factory = CreateFactory(fixedTime: false);
+        using var client = factory.CreateClient();
+        factory.Services.GetRequiredService<FinanceInputStore>().Set(Case, new FinanceInputs(null, null, Obligation(), []));
+
+        var cookie = await SignInCookieAsync(client, "presenter");
+        using var response = await SendAsync(client, $"/api/cases/{Case}/obligations", cookie);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private static async Task<HttpResponseMessage> SendAsync(HttpClient client, string path, string cookie)
