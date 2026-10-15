@@ -65,6 +65,8 @@ public static class DiagnosticsSetup
         private const System.Reflection.BindingFlags AnyInstance =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
 
+        private const string FixedLogBody = "diagnostic event";
+
         private static readonly Action<LogRecord> ClearScopeProvider = ResolveScopeProviderClearer();
 
         private static Action<LogRecord> ResolveScopeProviderClearer()
@@ -82,9 +84,6 @@ public static class DiagnosticsSetup
                 // OpenTelemetry adds the raw message template as {OriginalFormat}; it is free text, so it is never kept.
                 source.AddRange(attributes.Where(a => a.Key != "{OriginalFormat}"));
             }
-
-            // Scopes do not make a message structured: rendered text can only be trusted when the log call supplied properties.
-            var hasLogProperties = source.Count > 0;
 
             data.ForEachScope(static (scope, pairs) =>
             {
@@ -112,20 +111,11 @@ public static class DiagnosticsSetup
                 data.Exception = null;
             }
 
-            // Without log properties the rendered text could carry free text, even when scopes exist, so no message text is kept.
-            if (!hasLogProperties)
-            {
-                // Body holds the unrendered message (interpolated text lands there), so it is cleared with the rendered text.
-                data.Body = null;
-                data.FormattedMessage = null;
-                data.Attributes = hasStructuredData ? RedactionFilter.RedactAttributes(source) : null;
-                return;
-            }
-
-            // Re-render the message from the redacted values; the previously rendered text is never scanned.
-            var redacted = RedactionFilter.RedactAttributes(source);
-            data.Attributes = redacted;
-            data.FormattedMessage = RedactionFilter.RenderMessage(data.Body, redacted);
+            // Body and rendered message are always replaced by the fixed text, so no interpolated or formatted message is exported.
+            // Without log properties, no attributes are kept either unless the scopes produced safe metadata.
+            data.Attributes = hasStructuredData ? RedactionFilter.RedactAttributes(source) : null;
+            data.Body = FixedLogBody;
+            data.FormattedMessage = FixedLogBody;
         }
     }
 

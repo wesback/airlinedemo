@@ -247,8 +247,7 @@ public sealed class DiagnosticsTests
         Assert.Contains("case-42", attributes);
         Assert.Contains("case.id=scope-case-5521", attributes);
         Assert.Contains("approved", attributes);
-        Assert.Contains("case-42", messages);
-        Assert.Contains("approved", messages);
+        Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
 
         // Sensitive entries must be dropped by name, not merely given placeholder values.
         var keys = captured.SelectMany(r => r.Attributes.Select(a => a.Key).Concat(r.Scopes.Select(s => s.Key)))
@@ -295,6 +294,10 @@ public sealed class DiagnosticsTests
         logger.LogError(thrown, $"Operation failed {FormattedCanary}");
         logger.LogError(thrown, "Operation failed");
 
+        // AC-05: every exported record carries the fixed body, whatever the call supplied.
+        Assert.Equal(2, captured.Count);
+        Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
+
         var output = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")).Concat(captured.Select(r => r.Message)));
         Assert.DoesNotContain(ExceptionCanary, output);
         Assert.DoesNotContain(InnerCanary, output);
@@ -305,6 +308,7 @@ public sealed class DiagnosticsTests
         // With structured data, the exception type is still not exported because it fails the error.type allowlist.
         captured.Clear();
         logger.LogError(thrown, "Operation failed for {Case}", "case-42");
+        Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
         var structured = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")).Concat(captured.Select(r => r.Message)));
         Assert.Contains("case-42", structured);
         Assert.DoesNotContain(ExceptionCanary, structured);
@@ -429,7 +433,7 @@ public sealed class DiagnosticsTests
         public override void OnEnd(LogRecord data)
         {
             // Scopes are folded into the redacted attributes and removed from the record, so the attributes carry them.
-            sink.Add(new CapturedLog((data.FormattedMessage ?? string.Empty) + "\n" + (data.Body ?? string.Empty), (data.Attributes ?? []).ToList(), []));
+            sink.Add(new CapturedLog(data.Body ?? string.Empty, (data.Attributes ?? []).ToList(), []));
         }
     }
 
