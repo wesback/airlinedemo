@@ -2,7 +2,7 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.7.0"
+version: "0.8.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.7.0 | Last Updated: 2026-10-14
+> **aircraft-return-readiness** | Status: Draft | Version: 0.8.0 | Last Updated: 2026-10-14
 
 ## Executive Summary
 
@@ -99,6 +99,8 @@ These source design positions are carried forward as draft product decisions, no
 | DD-036 | This PRD file on the default branch is the only source of requirements and its front-matter version is authoritative. A different source version cited by any generated artifact, such as a threat model, is an error in that artifact, and is regenerated from the current PRD at the next planning run. |
 | DD-037 | No formal security review applies to this synthetic demonstrator. The threat model is advisory: its mitigations are built and tested as acceptance criteria, but no review sign-off gates release or deployment stories. |
 | DD-038 | The rehearsal story builds the checklist, the timing and trace-capture scripts and the evidence template for AC-012 and AC-019. The product owner performs the rehearsal once the environment exists and commits the real evidence (run identifiers, timings, trace, decision, recorded fallback) in a pull request. The story is complete only with that evidence attached; no evidence is ever generated or fabricated. |
+| DD-039 | The frozen 40-case evaluation suite contains exactly 10 cases in each of four categories: complete baseline, missing history, ambiguous identity, and blocked or unprocessed evidence. |
+| DD-040 | Arm D is the single-call comparator for Arm B and uses the same approved model deployment configuration as Arm B, without iterative tool use or agent citation reflection. |
 
 ## Product Goals
 
