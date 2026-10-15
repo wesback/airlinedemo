@@ -86,18 +86,19 @@ run "model_deployment_inputs_are_required" {
     error_message = "The model deployment must use the model_name and model_version inputs."
   }
 
+  # Each variable block is isolated by splitting on the declaration keyword, so inline and multi-line defaults are both detected.
   assert {
-    condition     = var.model_deployment_name != null && !can(regex("(?m)^\\s+default\\s*=", regex("(?ms)^variable \"model_deployment_name\" \\{.*?^\\}", file("variables.tf"))))
+    condition     = var.model_deployment_name != null && length(try(split("\nvariable ", split("variable \"model_deployment_name\"", file("variables.tf"))[1])[0], "")) > 0 && !can(regex("(?m)\\bdefault\\s*=", split("\nvariable ", split("variable \"model_deployment_name\"", file("variables.tf"))[1])[0]))
     error_message = "model_deployment_name must be a required input with no default value."
   }
 
   assert {
-    condition     = var.model_name != null && !can(regex("(?m)^\\s+default\\s*=", regex("(?ms)^variable \"model_name\" \\{.*?^\\}", file("variables.tf"))))
+    condition     = var.model_name != null && length(try(split("\nvariable ", split("variable \"model_name\"", file("variables.tf"))[1])[0], "")) > 0 && !can(regex("(?m)\\bdefault\\s*=", split("\nvariable ", split("variable \"model_name\"", file("variables.tf"))[1])[0]))
     error_message = "model_name must be a required input with no default value."
   }
 
   assert {
-    condition     = var.model_version != null && !can(regex("(?m)^\\s+default\\s*=", regex("(?ms)^variable \"model_version\" \\{.*?^\\}", file("variables.tf"))))
+    condition     = var.model_version != null && length(try(split("\nvariable ", split("variable \"model_version\"", file("variables.tf"))[1])[0], "")) > 0 && !can(regex("(?m)\\bdefault\\s*=", split("\nvariable ", split("variable \"model_version\"", file("variables.tf"))[1])[0]))
     error_message = "model_version must be a required input with no default value."
   }
 }
@@ -154,5 +155,20 @@ run "model_endpoint_remains_private_and_keyless" {
   assert {
     condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && length(azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].private_dns_zone_ids) == 1 && can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-[^\"]*\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf"))) && can(regex("zone\\s*=\\s*\"model\"\\s*\\}", file("main.tf")))
     error_message = "The model private endpoint must register in its DNS zone group with exactly one private DNS zone."
+  }
+}
+
+# AC: MODEL-INFRA-04 (the model endpoint's zone key must be "model", and the zone group must resolve that key)
+run "model_endpoint_dns_zone_group_targets_model_zone" {
+  command = plan
+
+  assert {
+    condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && can(regex("(?m)^\\s*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id,\\s*subresource\\s*=\\s*\"account\",\\s*zone\\s*=\\s*\"model\"\\s*\\}", file("main.tf")))
+    error_message = "The model private endpoint must be mapped to the account subresource of the model account and to the model DNS zone key."
+  }
+
+  assert {
+    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-\\$\\{each\\.key\\}\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
+    error_message = "Each private endpoint's DNS zone group must resolve its own zone key (each.value.zone) to the matching private DNS zone."
   }
 }
