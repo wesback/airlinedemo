@@ -1,5 +1,6 @@
 using AirlineDemo.Api;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
@@ -12,6 +13,7 @@ if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEn
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddAirlineDiagnostics(builder.Configuration);
 builder.Services.AddSingleton<DemoSessionStore>();
 builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddSingleton<CaseStore>();

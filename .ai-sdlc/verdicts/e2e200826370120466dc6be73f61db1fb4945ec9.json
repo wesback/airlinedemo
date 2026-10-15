@@ -1,0 +1,270 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "e2e200826370120466dc6be73f61db1fb4945ec9",
+  "round": 1,
+  "pipelineVersion": "1f5e120",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The configured logging pipeline drops scopes, including safe metadata that AC-02 requires it to retain. The required TelemetryPrivacyTests.cs is also absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 55,
+          "message": "The logging setup disables scope capture, so the processor cannot preserve safe scope metadata as AC-02 requires.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AddRedaction sets IncludeScopes to false before the log processor calls ForEachScope, so scopes are not captured for filtering.",
+            "failureScenario": "When a log call runs inside a scope containing safe metadata such as case.id, that metadata is omitted from telemetry instead of being preserved as required by AC-02."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "AC-06 requires both DiagnosticsTests.cs and TelemetryPrivacyTests.cs; the latter and its named tests are missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The change adds DiagnosticsTests.cs but does not add the explicitly required TelemetryPrivacyTests.cs or its AC-02, AC-03, and AC-04 tests.",
+            "failureScenario": "The test command can pass without running the required TelemetryPrivacyTests, so the test-file requirement in AC-06 is unmet."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The logging setup omits safe scope metadata, and sensitive-name entries are retained instead of dropped. The required TelemetryPrivacyTests regression coverage is also absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 55,
+          "message": "Scope handling drops safe metadata instead of filtering sensitive entries and preserving safe ones, contrary to AC-02.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AddRedaction sets IncludeScopes to false before RedactingLogProcessor.OnEnd calls ForEachScope.",
+            "failureScenario": "A log call inside a scope containing safe metadata such as case.id reaches the processor without that scope entry, so the metadata is missing from exported telemetry despite AC-02 requiring it to be preserved."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 101,
+          "message": "Sensitive-name entries are retained with a replacement value instead of being dropped as required by AC-02.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "TryRedact returns true with the value [redacted] for a sensitive key, and RedactAttributes retains every entry for which TryRedact returns true.",
+            "failureScenario": "A log property or span tag named prompt remains in the output with the value [redacted], rather than being dropped as AC-02 requires."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "The required TelemetryPrivacyTests coverage for AC-02, AC-03, AC-04, and AC-06 is missing from this change.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff adds DiagnosticsTests.cs but does not add the required criterion-specific tests in TelemetryPrivacyTests.cs; the existing TelemetryPrivacyTests file does not contain the named bearer/JWT/cookie, JWT-prefix, or configured-pipeline canary tests.",
+            "failureScenario": "The repository test command can pass without running the TelemetryPrivacyTests required by AC-02, AC-03, AC-04, and AC-06, leaving those specified regression checks absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The configured log pipeline redacts attributes and formatted messages but leaves attached exception details untouched, allowing sensitive exception messages to reach the exporter.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 73,
+          "message": "Exception details bypass log redaction and can send sensitive values to Application Insights (OWASP A09:2025).",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingLogProcessor.OnEnd filters attributes and rebuilds FormattedMessage, but leaves LogRecord.Exception unchanged before the configured Azure Monitor log exporter receives the record.",
+            "failureScenario": "A caller logs an exception whose message contains a prompt, document text, credential, or personal identifier. The processor does not redact the exception, so its details can be exported to Application Insights. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

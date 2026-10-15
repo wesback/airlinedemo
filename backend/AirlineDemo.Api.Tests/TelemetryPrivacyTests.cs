@@ -9,12 +9,131 @@ using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Trace;
 
 namespace AirlineDemo.Api.Tests;
 
 public sealed class TelemetryPrivacyTests
 {
+    [Fact]
+    public void Bearer_jwt_and_cookie_name_shapes_are_redacted()
+    {
+        const string bearer = "opaque-Token_123";
+        const string cookieA = "SECRETVALUE-A1";
+        const string cookieB = "SECRETVALUE-B2";
+        const string jwt = "eyJhbGciOi.eyJzdWIiOiIx.c2lnbmF0dXJl";
+
+        var bearerOut = RedactionFilter.RedactValue("note", $"sent Bearer {bearer} now")!;
+        var cookieOut = RedactionFilter.RedactValue("note", $"__Host-sid={cookieA}; .AspNetCore.Cookies={cookieB}; theme=dark")!;
+        var jwtOut = RedactionFilter.RedactValue("note", $"token {jwt} end")!;
+
+        Assert.DoesNotContain(bearer, bearerOut);
+        Assert.Contains("now", bearerOut);
+        Assert.DoesNotContain(cookieA, cookieOut);
+        Assert.DoesNotContain(cookieB, cookieOut);
+        Assert.Contains("theme=dark", cookieOut);
+        Assert.DoesNotContain(jwt, jwtOut);
+        Assert.Contains("end", jwtOut);
+    }
+
+    [Fact]
+    public void Jwt_redaction_does_not_assume_header_prefix()
+    {
+        foreach (var jwt in new[] { "Q1234567ABCDEF.payload123.signature99", "abcdefgh.ijklmnop.qrstuvwx", "eyJhbGciOi.payload123.signature99" })
+        {
+            var output = RedactionFilter.RedactValue("note", $"value {jwt} end")!;
+            Assert.DoesNotContain(jwt, output);
+            Assert.Contains("end", output);
+        }
+    }
+
+    [Fact]
+    public void Logging_and_trace_pipelines_exclude_sensitive_canaries_and_keep_safe_metadata()
+    {
+        var logs = new List<PipelineLogEntry>();
+        var spans = new List<Activity>();
+
+        var services = new ServiceCollection();
+        services.AddLogging(logging => logging.AddOpenTelemetry(o =>
+        {
+            o.IncludeFormattedMessage = true;
+            o.AddRedaction();
+            o.AddProcessor(new PipelineLogSink(logs));
+        }));
+        using var loggers = services.BuildServiceProvider();
+        var logger = loggers.GetRequiredService<ILogger<TelemetryPrivacyTests>>();
+
+        using (logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["passcode"] = Canaries[2],
+            ["case.id"] = "scope-case-5521",
+        }))
+        {
+            logger.LogInformation(
+                "Review {State} prompt {Prompt} document {Document} note {Note} auth {Auth} email {Email}",
+                "approved", Canaries[0], Canaries[1], "__Host-sid=" + Canaries[3] + "; theme=dark",
+                "Bearer " + Canaries[4], Canaries[5]);
+        }
+
+        using var tracing = Sdk.CreateTracerProviderBuilder()
+            .AddSource(TelemetryRedaction.ServiceName)
+            .AddRedaction()
+            .AddProcessor(new PipelineSpanSink(spans))
+            .Build();
+        using var source = new ActivitySource(TelemetryRedaction.ServiceName);
+        using (var activity = source.StartActivity("review"))
+        {
+            activity!.SetTag("prompt", Canaries[0]);
+            activity.SetTag("gen_ai.prompt", Canaries[0]);
+            activity.SetTag("document.text", Canaries[1]);
+            activity.SetTag("case.id", "trace-case-8810");
+            activity.AddEvent(new ActivityEvent("review.event", tags: new ActivityTagsCollection(new Dictionary<string, object?>
+            {
+                ["passcode"] = Canaries[2],
+                ["auth"] = "Bearer " + Canaries[4],
+                ["jwt"] = "eyJhbGciOi.eyJzdWIiOiIx.c2lnbmF0dXJl",
+                ["note"] = "__Host-sid=" + Canaries[3] + "; theme=dark",
+                ["case.id"] = "trace-case-8810",
+            })));
+        }
+
+        var logOutput = string.Join("\n",
+            logs.Select(e => e.Message).Concat(logs.SelectMany(e => e.Attributes.Select(a => $"{a.Key}={a.Value}"))));
+        var spanOutput = string.Join("\n",
+            spans.SelectMany(s => s.TagObjects.Select(t => $"{t.Key}={t.Value}"))
+                .Concat(spans.SelectMany(s => s.Events).SelectMany(e => e.Tags?.Select(t => $"{t.Key}={t.Value}") ?? Enumerable.Empty<string>())));
+        var output = logOutput + "\n" + spanOutput;
+
+        foreach (var canary in Canaries)
+        {
+            Assert.DoesNotContain(canary, output);
+        }
+        Assert.DoesNotContain("eyJhbGciOi.eyJzdWIiOiIx.c2lnbmF0dXJl", output);
+
+        Assert.Contains("scope-case-5521", logOutput);
+        Assert.Contains("approved", logOutput);
+        Assert.Contains("theme=dark", logOutput);
+        Assert.Contains("trace-case-8810", spanOutput);
+        Assert.Contains("case.id=trace-case-8810", spanOutput);
+    }
+
+    private sealed record PipelineLogEntry(string Message, List<KeyValuePair<string, object?>> Attributes);
+
+    private sealed class PipelineLogSink(List<PipelineLogEntry> sink) : BaseProcessor<LogRecord>
+    {
+        public override void OnEnd(LogRecord data) =>
+            sink.Add(new PipelineLogEntry((data.FormattedMessage ?? string.Empty) + "\n" + (data.Body ?? string.Empty), (data.Attributes ?? []).ToList()));
+    }
+
+    private sealed class PipelineSpanSink(List<Activity> sink) : BaseProcessor<Activity>
+    {
+        public override void OnEnd(Activity data) => sink.Add(data);
+    }
+
     private static readonly byte[] TestKey = Encoding.UTF8.GetBytes("synthetic-test-key-not-a-secret");
     private const string AppPasscode = "test-passcode";
 

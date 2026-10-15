@@ -1,0 +1,402 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "4cce65c3bc01558af7cbcf9d0d88c6bbac1a60ea",
+  "round": 0,
+  "pipelineVersion": "1f5e120",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 6,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change leaves direct activity events and several required personal identifier keys unredacted, and its logging setup drops safe scope metadata. Required privacy tests are also missing, leaving specified behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 101,
+          "message": "Directly recorded ActivityEvent attributes bypass redaction, contrary to AC-03.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd rewrites span tags, but does not inspect Activity.Events. Event redaction occurs only in RedactionFilter.AddRedactedEvent.",
+            "failureScenario": "A caller adds an ActivityEvent with Activity.AddEvent and a sensitive attribute such as prompt or authorization. OnEnd leaves the attribute unchanged, so the trace exporter can receive it unredacted. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 14,
+          "message": "The sensitive-name filter omits the personal identifier keys required by AC-02.",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "IsSensitiveKey checks only the names in SensitiveKeys and the two cookie-name prefixes; the listed personal identifier names are absent.",
+            "failureScenario": "A log property or span tag named email, user.name, phone, address, enduser.id, or user.id with a plain value passes RedactValue unchanged and can reach telemetry. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 55,
+          "message": "The logging setup disables scope export instead of filtering scope values and preserving approved scope metadata.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AddRedaction sets IncludeScopes to false, so scope entries never reach the log processor or exporter.",
+            "failureScenario": "A caller places safe metadata such as case.id in a log scope. The configured pipeline omits it instead of retaining it while filtering sensitive scope entries, violating AC-02."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 112,
+          "message": "Arbitrary non-scalar values are stringified and retained when their text does not match a redaction rule; omit values that cannot be safely represented.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactObject converts every non-scalar value to a string and applies only key-name and bearer/JWT shape checks.",
+            "failureScenario": "A non-scalar object under a safe key has a ToString() value containing plain prompt or document text. The filter preserves that string, and it can be exported despite AC-02 requiring unrepresentable non-scalars to be omitted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 22,
+          "message": "Bearer redaction does not cover every non-whitespace token value required by AC-02.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "BearerPattern accepts only a restricted token-character set after the Bearer scheme.",
+            "failureScenario": "A value such as `Bearer !` matches the criterion’s non-whitespace token shape but not this regex, so the credential remains in the exported value. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "The required TelemetryPrivacyTests.cs and its named criterion tests are missing; the existing event test also does not exercise direct Activity.AddEvent as AC-03 requires.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff adds DiagnosticsTests.cs but no TelemetryPrivacyTests.cs. Its trace test records events through AddRedactedEvent, not direct Activity.AddEvent, and the required TelemetryPrivacyTests methods are absent.",
+            "failureScenario": "The test suite can pass without running the explicitly required TelemetryPrivacyTests for AC-02, AC-03, AC-04, and AC-06; removing direct-event filtering or a required redaction rule would not be caught by those named tests."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The exporter registration test is wired to the exporter configuration callbacks, but the implementation still drops all scopes, omits required sensitive keys, and leaves directly added activity events unfiltered. Required TelemetryPrivacyTests.cs coverage is also missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 55,
+          "message": "Scope handling does not meet AC-02: it drops every scope instead of filtering sensitive entries and preserving safe metadata.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AddRedaction sets IncludeScopes to false, so scope entries are excluded before RedactingLogProcessor can filter them.",
+            "failureScenario": "When a caller logs inside a scope containing safe metadata such as case.id, that metadata is omitted from exported logs instead of being preserved as AC-02 requires. The test also sets IncludeScopes before AddRedaction, which turns it off, and never asserts safe scope metadata is captured."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 17,
+          "message": "The sensitive-name filter omits seven identifiers required by AC-02, allowing those values into exported telemetry (OWASP A04:2025).",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "IsSensitiveKey checks the SensitiveKeys set and cookie-name prefixes. The set omits email, user.email, user.name, phone, address, enduser.id, and user.id.",
+            "failureScenario": "A log property or span tag named user.email with a personal email value is not filtered and can reach the configured exporter. This violates AC-02's explicit name list (OWASP A04:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 103,
+          "message": "Directly added ActivityEvent attributes bypass redaction, contrary to AC-03.",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd rewrites span tags but does not inspect events; AddRedactedEvent filters only events added through that helper.",
+            "failureScenario": "A producer adds an ActivityEvent directly with Activity.AddEvent and includes a prompt or document.text attribute. OnEnd leaves the event attribute unchanged, so the trace exporter can receive the sensitive value (OWASP A04:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 114,
+          "message": "Non-scalar values that cannot be safely represented are stringified and exported instead of omitted as AC-02 requires.",
+          "confidence": 0.95,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "For non-scalar values, RedactObject converts the object to a string and applies only key and token-shape checks; it does not omit values that cannot be safely represented.",
+            "failureScenario": "A structured object whose ToString() returns personal or other free text under a nonsensitive key is exported unchanged because that text does not match the bearer or JWT patterns (OWASP A04:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "The required TelemetryPrivacyTests.cs is absent, leaving its explicitly named acceptance-criterion tests unimplemented.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The change adds DiagnosticsTests.cs but does not include the explicitly required TelemetryPrivacyTests.cs or its named tests for AC-02, AC-03, and AC-04.",
+            "failureScenario": "The test suite can pass without running the required privacy tests, so regressions in bearer, JWT, cookie-name, and pipeline-canary behavior have no coverage from the named test file."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The trace processor leaves directly added activity event attributes unfiltered, several required personal identifier keys are not redacted, and the bearer pattern can leave credential suffixes behind.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 106,
+          "message": "Directly recorded ActivityEvent attributes bypass redaction and can export sensitive values (OWASP A09:2025).",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd redacts span tags but does not inspect recorded Activity.Events; only calls to RedactionFilter.AddRedactedEvent filter event tags.",
+            "failureScenario": "A caller adds an event with prompt, document, or credential attributes using Activity.AddEvent, then ends the activity. The processor leaves those values intact and the configured trace exporter can send them to Application Insights. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 15,
+          "message": "Several explicitly listed personal identifier fields are absent from the redaction rules and can be exported in telemetry (OWASP A09:2025).",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactObject relies on IsSensitiveKey, whose sensitive-name set omits email, user.email, user.name, phone, address, enduser.id, and user.id.",
+            "failureScenario": "A log property, scope entry, span tag, or event attribute uses one of those names with a personal identifier. The filter leaves its value unchanged, allowing the configured exporter to send it to Application Insights. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "line": 25,
+          "message": "The bearer-token pattern does not cover every non-whitespace token character, so it can leave part of a credential in telemetry (OWASP A09:2025).",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "BearerPattern only matches a limited token character set, although RedactValue applies it to all values.",
+            "failureScenario": "A value such as `Bearer abc:def` matches only `Bearer abc`; `:def` remains in the exported value. Bearer values containing other non-whitespace characters likewise bypass the required full-value redaction. OWASP A09:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 116,
+      "total": 126,
+      "percent": 92.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "covered": 60,
+          "total": 62,
+          "missed": [
+            79,
+            80
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 55,
+          "total": 63,
+          "missed": [
+            37,
+            38,
+            57,
+            58,
+            89,
+            90,
+            112,
+            114
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

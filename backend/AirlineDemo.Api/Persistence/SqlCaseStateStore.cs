@@ -181,6 +181,88 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         return new CommitResult(Load(db, row.CaseId), Replayed: false);
     }
 
+    public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
+    {
+        using var db = NewContext();
+        return Load(db, scope.CaseId).WorkItems ?? Array.Empty<WorkItem>();
+    }
+
+    /// <summary>Creates a work item at the current revision; the store assigns the creation timestamp.</summary>
+    public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor)
+    {
+        WorkItemRules.Validate(draft);
+        return MutateWorkItems(scope, expectedRevision, actor, "create-work-item", draft.ItemId, (db, caseId, now) =>
+        {
+            if (FindWorkItem(db, caseId, draft.ItemId) is not null)
+            {
+                throw new InvalidOperationException("Work item already exists in this case.");
+            }
+
+            db.WorkItems.Add(new WorkItemRow
+            {
+                CaseId = caseId,
+                ItemId = draft.ItemId,
+                CapabilityId = draft.CapabilityId,
+                State = draft.State,
+                Owner = draft.Owner,
+                CreatedAt = now,
+            });
+        });
+    }
+
+    public CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor)
+    {
+        WorkItemRules.RequireText(itemId, nameof(itemId));
+        WorkItemRules.RequireText(state, nameof(state));
+        return MutateWorkItems(scope, expectedRevision, actor, "change-work-item-state", itemId + " -> " + state, (db, caseId, _) =>
+        {
+            var row = FindWorkItem(db, caseId, itemId) ?? throw new KeyNotFoundException("Work item not found for this case.");
+            row.State = state;
+        });
+    }
+
+    /// <summary>Runs one work-item change in a serializable transaction with the revision check and one audit event.</summary>
+    private CommitResult MutateWorkItems(
+        CaseScope scope,
+        long expectedRevision,
+        string actor,
+        string action,
+        string detail,
+        Action<CaseStateDbContext, string, DateTimeOffset> change)
+    {
+        using var db = NewContext();
+        using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
+
+        var row = FindCase(db, scope.CaseId) ?? throw new CaseAccessDeniedException();
+        if (expectedRevision != row.Revision)
+        {
+            throw new RevisionConflictException();
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        change(db, row.CaseId, now);
+        row.Revision += 1;
+        db.CaseEvents.Add(new CaseEventRow
+        {
+            CaseId = row.CaseId,
+            Revision = row.Revision,
+            Actor = actor,
+            Action = action,
+            Detail = detail,
+            At = now,
+        });
+
+        db.SaveChanges();
+        tx.Commit();
+        return new CommitResult(Load(db, row.CaseId), Replayed: false);
+    }
+
+    private static WorkItemRow? FindWorkItem(CaseStateDbContext db, string caseId, string itemId) =>
+        db.WorkItems
+            .Where(w => w.CaseId == caseId && w.ItemId == itemId)
+            .AsEnumerable()
+            .FirstOrDefault(w => Same(w.CaseId, caseId) && Same(w.ItemId, itemId));
+
     private CaseStateDbContext NewContext() => new(_options);
 
     /// <summary>Finds a case by key, then applies an ordinal check so the database collation cannot widen a match.</summary>
@@ -222,6 +304,15 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             .Select((e, i) => new AuditEvent(i + 1, e.Revision, e.Actor, e.Action, e.Detail, e.At))
             .ToList();
 
+        var items = db.WorkItems
+            .Where(w => w.CaseId == caseId)
+            .AsEnumerable()
+            .Where(w => Same(w.CaseId, caseId))
+            .OrderBy(w => w.CreatedAt)
+            .ThenBy(w => w.ItemId, StringComparer.Ordinal)
+            .Select(w => new WorkItem(w.CaseId, w.ItemId, w.CapabilityId, w.State, w.Owner, w.CreatedAt))
+            .ToList();
+
         var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var decision in decisions)
         {
@@ -235,7 +326,8 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             basis.AsReadOnly(),
             decisions.Select(d => d.ReceiptId).ToList().AsReadOnly(),
             audit.AsReadOnly(),
-            new ReadOnlyDictionary<string, string>(fingerprints));
+            new ReadOnlyDictionary<string, string>(fingerprints),
+            items.AsReadOnly());
     }
 
     private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.Ordinal);
