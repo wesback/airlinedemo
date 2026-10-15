@@ -83,6 +83,9 @@ public static class DiagnosticsSetup
                 source.AddRange(attributes.Where(a => a.Key != "{OriginalFormat}"));
             }
 
+            // Scopes do not make a message structured: rendered text can only be trusted when the log call supplied properties.
+            var hasLogProperties = source.Count > 0;
+
             data.ForEachScope(static (scope, pairs) =>
             {
                 foreach (var pair in scope)
@@ -109,13 +112,13 @@ public static class DiagnosticsSetup
                 data.Exception = null;
             }
 
-            // Without properties or scopes the rendered text could carry free text, so only the fixed body is kept.
-            if (!hasStructuredData)
+            // Without log properties the rendered text could carry free text, even when scopes exist, so no message text is kept.
+            if (!hasLogProperties)
             {
                 // Body holds the unrendered message (interpolated text lands there), so it is cleared with the rendered text.
                 data.Body = null;
                 data.FormattedMessage = null;
-                data.Attributes = null;
+                data.Attributes = hasStructuredData ? RedactionFilter.RedactAttributes(source) : null;
                 return;
             }
 

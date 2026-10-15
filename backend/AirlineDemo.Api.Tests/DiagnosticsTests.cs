@@ -312,6 +312,37 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void Logging_pipeline_omits_interpolated_message_when_only_scopes_are_present_and_keeps_allowlisted_error_type()
+    {
+        const string FormattedCanary = "SENTINEL-SCOPED-FORMATTED";
+        var captured = new List<CapturedLog>();
+        var services = new ServiceCollection();
+        services.AddLogging(logging => logging.AddOpenTelemetry(o =>
+        {
+            o.IncludeFormattedMessage = true;
+            o.IncludeScopes = true;
+            o.AddRedaction();
+            o.AddProcessor(new CaptureLogs(captured));
+        }));
+
+        using var provider = services.BuildServiceProvider();
+        var logger = provider.GetRequiredService<ILogger<DiagnosticsTests>>();
+
+        using (logger.BeginScope(new List<KeyValuePair<string, object?>> { new("case.id", "case-42") }))
+        {
+            logger.LogError(new airline.demo.boom("ignored"), $"Operation failed {FormattedCanary}");
+        }
+
+        var record = captured.Single();
+        var output = string.Join("\n", record.Attributes.Select(a => $"{a.Key}={a.Value}")) + "\n" + record.Message;
+        Assert.DoesNotContain(FormattedCanary, output);
+        Assert.Contains("case.id=case-42", output);
+        // AC-05: an error.type that passes the allowlist rule is preserved.
+        Assert.Contains("error.type=airline.demo.boom", output);
+        Assert.DoesNotContain("ignored", output);
+    }
+
+    [Fact]
     public void Trace_pipeline_redacts_span_tags_and_direct_activity_event_attributes()
     {
         var captured = new List<Activity>();
