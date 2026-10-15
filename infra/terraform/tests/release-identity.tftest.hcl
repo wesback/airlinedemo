@@ -203,12 +203,12 @@ run "registry_is_private_and_pull_scoped" {
   }
 
   assert {
-    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("role_definition_name\\s*=\\s*\"Acr", b)) > 0 && length(regexall("(scope|principal_id)\\s*=\\s*(local|var)\\.", b)) > 0]) == 0
-    error_message = "An AcrPull or AcrPush assignment must name its scope and principal by resource address. One that takes either from a local or variable could grant the app identity or another principal registry access this test cannot see, so it fails."
+    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("role_definition_name\\s*=\\s*\"Acr", b)) > 0 && length(regexall("(?m)^\\s*principal_id\\s*=\\s*azurerm_user_assigned_identity\\.(app|build|release)\\.principal_id\\s*$", b)) == 0]) == 0
+    error_message = "An AcrPull or AcrPush assignment's principal must be exactly azurerm_user_assigned_identity.app, .build or .release principal_id on its own line. A local, variable, index, function or interpolated principal could hide a registry grant to the app identity this test cannot see, so it fails."
   }
 
   assert {
-    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("role_definition_name\\s*=\\s*\"Acr", b)) > 0 && length(regexall("scope\\s*=\\s*azurerm_container_registry\\.acr\\.id", b)) == 0]) == 0
+    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("role_definition_name\\s*=\\s*\"Acr", b)) > 0 && length(regexall("(?m)^\\s*scope\\s*=\\s*azurerm_container_registry\\.acr\\.id\\s*$", b)) == 0]) == 0
     error_message = "Every AcrPull or AcrPush assignment must be scoped to azurerm_container_registry.acr.id; any registry grant on another scope fails."
   }
 }
