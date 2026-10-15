@@ -4,9 +4,9 @@ namespace AirlineDemo.Api.Tests;
 
 public sealed class ReleaseIdentityContractTests
 {
-    private static readonly Regex RoleAssignmentBlock = new(
-        @"^resource\s+""azurerm_role_assignment""\s+""(?<name>[^""]+)""\s*\{(?<body>.*?)^\}",
-        RegexOptions.Multiline | RegexOptions.Singleline);
+    private static readonly Regex RoleAssignmentHeader = new(
+        @"^resource\s+""azurerm_role_assignment""\s+""(?<name>[^""]+)""\s*\{",
+        RegexOptions.Multiline);
 
     private static readonly Regex ModuleBlock = new(@"^\s*module\s+""[^""]+""\s*\{", RegexOptions.Multiline);
 
@@ -62,10 +62,8 @@ public sealed class ReleaseIdentityContractTests
                 violations.Add($"{fileName}: module blocks are not allowed in infra/terraform.");
             }
 
-            foreach (Match block in RoleAssignmentBlock.Matches(text))
+            foreach (var (blockName, body) in RoleAssignmentBlocks(text))
             {
-                var blockName = block.Groups["name"].Value;
-                var body = block.Groups["body"].Value;
                 foreach (var attribute in new[] { "principal_id", "scope" })
                 {
                     var match = Regex.Match(body, $@"^\s*{attribute}\s*=\s*(?<expr>.+?)\s*$", RegexOptions.Multiline);
@@ -298,9 +296,8 @@ public sealed class ReleaseIdentityContractTests
     private static List<string> AppAcrGrantRoles(string terraform)
     {
         var roles = new List<string>();
-        foreach (Match block in RoleAssignmentBlock.Matches(terraform))
+        foreach (var (_, body) in RoleAssignmentBlocks(terraform))
         {
-            var body = block.Groups["body"].Value;
             if (!MayGrantToApp(terraform, body) || !MayScopeToAcr(terraform, body))
             {
                 continue;
@@ -311,6 +308,34 @@ public sealed class ReleaseIdentityContractTests
         }
 
         return roles;
+    }
+
+    // Reads each azurerm_role_assignment body by matching braces, so nested blocks cannot end it early.
+    // An unbalanced block runs to the end of the file, which keeps its attributes under the checks.
+    private static IEnumerable<(string Name, string Body)> RoleAssignmentBlocks(string text)
+    {
+        foreach (Match header in RoleAssignmentHeader.Matches(text))
+        {
+            var start = header.Index + header.Length;
+            var depth = 1;
+            var i = start;
+            while (i < text.Length && depth > 0)
+            {
+                if (text[i] == '{')
+                {
+                    depth++;
+                }
+                else if (text[i] == '}')
+                {
+                    depth--;
+                }
+
+                i++;
+            }
+
+            var end = depth == 0 ? i - 1 : text.Length;
+            yield return (header.Groups["name"].Value, text[start..end]);
+        }
     }
 
     // Counts a grant only when its principal is shown to reference the app identity, directly or through locals.
