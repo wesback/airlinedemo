@@ -67,9 +67,12 @@ public class ContainerHostingContractTests
         var ingress = Block(hosting, "ingress {");
         Assert.Matches(@"allow_insecure_connections\s*=\s*false", ingress);
         Assert.Matches(@"for_each\s*=\s*local\.presenter_reviewer_rules", ingress);
+        Assert.Matches(@"presenter_reviewer_rules\s*=\s*\{[^}]*var\.presenter_reviewer_cidrs", main);
         Assert.Matches(@"action\s*=\s*""Allow""", ingress);
-        // Empty presenter_reviewer_cidrs produces a Deny-all ingress restriction.
-        Assert.Matches(@"length\(var\.presenter_reviewer_cidrs\)\s*==\s*0", ingress);
+        // Each Allow rule is bound to one configured CIDR, so no other caller address is permitted.
+        Assert.Matches(@"ip_address_range\s*=\s*ip_security_restriction\.value", ingress);
+        // Empty presenter_reviewer_cidrs produces a Deny-all ingress restriction for every caller.
+        Assert.Matches(@"length\(var\.presenter_reviewer_cidrs\)\s*==\s*0\s*\?\s*toset\(\[""0\.0\.0\.0/0""\]\)\s*:\s*toset\(\[\]\)", ingress);
         Assert.Matches(@"action\s*=\s*""Deny""", ingress);
 
         var ingressDeny = Block(main, "resource \"azurerm_network_security_rule\" \"ingress_deny_all\"");
@@ -100,12 +103,16 @@ public class ContainerHostingContractTests
         var storage = Block(main, "resource \"azurerm_storage_account\" \"blob\"");
         Assert.Matches(@"min_tls_version\s*=\s*""TLS1_2""", storage);
         Assert.Matches(@"infrastructure_encryption_enabled\s*=\s*true", storage);
+        // Microsoft-managed encryption: no customer-managed key block on the Storage account.
+        Assert.DoesNotMatch(@"customer_managed_key", storage);
 
-        // The provider exposes no TLS argument for Cognitive Services accounts; the model account is
-        // therefore pinned to Microsoft-managed encryption, no customer key, and no local auth.
+        // The azurerm provider exposes no TLS-version argument for Cognitive Services accounts, so TLS 1.2
+        // cannot be set in configuration here. The model account is pinned to Microsoft-managed encryption
+        // (no customer-managed key), no local auth, and public access disabled.
         var model = Block(main, "resource \"azurerm_cognitive_account\" \"model\"");
         Assert.DoesNotMatch(@"customer_managed_key", model);
         Assert.Matches(@"local_auth_enabled\s*=\s*false", model);
+        Assert.Matches(@"public_network_access_enabled\s*=\s*false", model);
 
         Assert.Matches(@"secret\s*\{[^}]*key_vault_secret_id\s*=\s*var\.demo_passcode_secret_uri", hosting);
         Assert.Matches(@"secret_name\s*=\s*""demo-passcode""", hosting);
@@ -144,8 +151,19 @@ public class ContainerHostingContractTests
         Assert.DoesNotMatch(@"airline-api:", hosting);
 
         // Model traffic is limited to the approved egress destinations; everything else is denied.
-        Assert.Matches(@"destination_address_prefix\s*=\s*each\.value", main);
-        Assert.Matches(@"for_each\s*=\s*local\.egress_rules", main);
+        Assert.Matches(@"egress_rules\s*=\s*\{[^}]*var\.egress_allowed_destinations", main);
+        var egressAllowRule = Block(main, "resource \"azurerm_network_security_rule\" \"egress_allow\"");
+        Assert.Matches(@"for_each\s*=\s*local\.egress_rules", egressAllowRule);
+        Assert.Matches(@"destination_address_prefix\s*=\s*each\.value", egressAllowRule);
+        // No other Allow rule may reach a wildcard or any-IPv4 destination.
+        foreach (Match rule in Regex.Matches(main, @"resource\s+""azurerm_network_security_rule""\s+""\w+""\s*\{"))
+        {
+            var ruleBlock = Block(main, rule.Value);
+            if (Regex.IsMatch(ruleBlock, @"access\s*=\s*""Allow"""))
+            {
+                Assert.DoesNotMatch(@"destination_address_prefix\s*=\s*""(\*|0\.0\.0\.0/0)""", ruleBlock);
+            }
+        }
 
         Assert.Matches(@"sha256", Tf("variables.tf"));
     }
