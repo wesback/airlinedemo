@@ -196,6 +196,11 @@ run "registry_is_private_and_pull_scoped" {
     condition     = length(regexall("role_definition_name\\s*=\\s*.AcrPull.", join("\n", [for f in fileset(path.module, "*.tf") : file("${path.module}/${f}")]))) == 1
     error_message = "Exactly one AcrPull assignment may exist in the configuration; any extra or broader registry grant fails."
   }
+
+  assert {
+    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("azurerm_user_assigned_identity\\.app\\.principal_id", b)) > 0 && length(regexall("azurerm_container_registry\\.acr\\.id", b)) > 0]) == 1 && length(regexall("role_definition_name\\s*=\\s*\"AcrPull\"", join("", [for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("azurerm_user_assigned_identity\\.app\\.principal_id", b)) > 0 && length(regexall("azurerm_container_registry\\.acr\\.id", b)) > 0]))) == 1
+    error_message = "The app identity may hold exactly one role assignment on the ACR, and it must be AcrPull; any other ACR role assignment for the app identity (such as AcrPush) fails."
+  }
 }
 
 run "federation_is_limited_to_trusted_workflows" {
@@ -363,8 +368,8 @@ run "release_outputs_contain_no_secrets" {
   }
 
   assert {
-    condition     = !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.build_identity_client_id)) && !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.release_identity_client_id))
-    error_message = "Release output values must contain no secret material."
+    condition     = length(flatten([for f in fileset(path.module, "*.tf") : regexall("(?m)^output\\s+\"", file("${path.module}/${f}"))])) == 4 && !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", join("\n", [for o in [output.app_sql_grant_statements, output.model_endpoint, output.build_identity_client_id, output.release_identity_client_id] : jsonencode(o)])))
+    error_message = "Every Terraform output in the configuration (all *.tf files) must be one of the four known outputs, and none may contain secret material."
   }
 }
 
