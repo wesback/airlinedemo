@@ -1,0 +1,211 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 252,
+  "branch": "ai-sdlc/issue-252",
+  "commitSha": "2b6585bcac027c40f7873d70de75ec49059c3f92",
+  "round": 1,
+  "pipelineVersion": "dde1b91",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two changes verify the VNet link and required-input declarations. The model endpoint DNS zone assertion can still pass when that endpoint is mapped to the wrong zone.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+          "line": 155,
+          "message": "AC MODEL-INFRA-04 still does not verify that the model endpoint's DNS zone group references the model DNS zone. Assert the planned zone ID or directly verify the model endpoint mapping.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The assertion checks the model endpoint has one DNS zone ID, while its source-text checks match the generic zone-group expression and any endpoint mapping with zone = \"model\"; they do not tie that mapping to the model endpoint.",
+            "failureScenario": "If local.private_endpoints.model is changed to zone = \"sql\" while another endpoint still maps to zone = \"model\", the source checks still match and the model endpoint still has one DNS zone ID, so the test passes while the model endpoint registers in the SQL DNS zone."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The revised DNS assertions now tie the model zone and endpoint mapping to the planned resources and VNet link. The required-input test still passes for an inline default, leaving part of AC MODEL-INFRA-03 uncovered.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+          "line": 89,
+          "message": "AC MODEL-INFRA-03 remains insufficiently tested: the no-default check misses inline defaults, and the test supplies every input. Check omission behavior or reliably detect defaults regardless of formatting.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The required-input assertion searches each variable block for a default assignment only when it starts a line with whitespace. The test fixture also explicitly supplies all three inputs.",
+            "failureScenario": "If a default is added inline to a variable declaration, such as `variable \"model_name\" { default = \"gpt-demo-model\" }`, the regex does not match it and the fixture still supplies a value, so the test passes although model_name is no longer required."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The post-review changes only strengthen Terraform test assertions, and the provisioning diff keeps the model account private and keyless. I found no concrete security vulnerability in the change.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/retention.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
