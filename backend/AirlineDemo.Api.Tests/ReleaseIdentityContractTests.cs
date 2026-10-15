@@ -118,7 +118,7 @@ public sealed class ReleaseIdentityContractTests
     }
 
     [Fact]
-    public void Grant_through_module_and_variable_principals_is_not_counted()
+    public void Grant_through_module_and_variable_principals_is_counted()
     {
         const string terraform = """
             resource "azurerm_role_assignment" "worker_acr_push" {
@@ -130,6 +130,26 @@ public sealed class ReleaseIdentityContractTests
             resource "azurerm_role_assignment" "reader_acr_pull" {
               scope                = azurerm_container_registry.acr.id
               role_definition_name = "AcrPull"
+              principal_id         = var.reader_principal_id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush", "AcrPull" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void Module_and_variable_principals_on_non_acr_scope_are_not_counted()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "worker_kv" {
+              scope                = azurerm_key_vault.kv.id
+              role_definition_name = "Key Vault Secrets User"
+              principal_id         = module.worker.principal_id
+            }
+
+            resource "azurerm_role_assignment" "reader_kv" {
+              scope                = azurerm_key_vault.kv.id
+              role_definition_name = "Key Vault Secrets User"
               principal_id         = var.reader_principal_id
             }
             """;
@@ -270,9 +290,10 @@ public sealed class ReleaseIdentityContractTests
 
         foreach (Match reference in IndirectReference.Matches(expression))
         {
+            // Variables and module outputs are supplied outside these files, so they could be the app identity.
             if (reference.Groups[1].Value != "local")
             {
-                continue;
+                return true;
             }
 
             var definition = DefinitionText(terraform, reference.Groups[2].Value);
