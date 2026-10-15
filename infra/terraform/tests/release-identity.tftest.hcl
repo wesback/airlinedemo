@@ -201,6 +201,16 @@ run "registry_is_private_and_pull_scoped" {
     condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("azurerm_user_assigned_identity\\.app\\.principal_id", b)) > 0 && length(regexall("azurerm_container_registry\\.acr\\.id", b)) > 0]) == 1 && length(regexall("role_definition_name\\s*=\\s*\"AcrPull\"", join("", [for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("azurerm_user_assigned_identity\\.app\\.principal_id", b)) > 0 && length(regexall("azurerm_container_registry\\.acr\\.id", b)) > 0]))) == 1
     error_message = "The app identity may hold exactly one role assignment on the ACR, and it must be AcrPull; any other ACR role assignment for the app identity (such as AcrPush) fails."
   }
+
+  assert {
+    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("role_definition_name\\s*=\\s*\"Acr", b)) > 0 && length(regexall("(scope|principal_id)\\s*=\\s*(local|var)\\.", b)) > 0]) == 0
+    error_message = "An AcrPull or AcrPush assignment must name its scope and principal by resource address. One that takes either from a local or variable could grant the app identity or another principal registry access this test cannot see, so it fails."
+  }
+
+  assert {
+    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("role_definition_name\\s*=\\s*\"Acr", b)) > 0 && length(regexall("scope\\s*=\\s*azurerm_container_registry\\.acr\\.id", b)) == 0]) == 0
+    error_message = "Every AcrPull or AcrPush assignment must be scoped to azurerm_container_registry.acr.id; any registry grant on another scope fails."
+  }
 }
 
 run "federation_is_limited_to_trusted_workflows" {
