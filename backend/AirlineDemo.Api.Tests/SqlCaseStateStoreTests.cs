@@ -305,14 +305,35 @@ public sealed class SqlCaseStateStoreTests
         store.CreateWorkItem(other, 0, new WorkItemDraft("item-1", "cap-1", "open", "owner-b"), "presenter");
         Assert.Equal(auditBefore + 2, CountAuditEvents(options));
 
-        Assert.Throws<ArgumentException>(() => store.CreateWorkItem(scope, 1, new WorkItemDraft("item-2", " ", "open", "owner-a"), "presenter"));
+        // QW-01: each missing or blank required field is rejected, and nothing is written or audited.
+        var invalidDrafts = new[]
+        {
+            new WorkItemDraft("", "cap-1", "open", "owner-a"),
+            new WorkItemDraft(" ", "cap-1", "open", "owner-a"),
+            new WorkItemDraft("item-2", "", "open", "owner-a"),
+            new WorkItemDraft("item-2", " ", "open", "owner-a"),
+            new WorkItemDraft("item-2", "cap-1", "", "owner-a"),
+            new WorkItemDraft("item-2", "cap-1", " ", "owner-a"),
+            new WorkItemDraft("item-2", "cap-1", "open", ""),
+            new WorkItemDraft("item-2", "cap-1", "open", " "),
+        };
+        foreach (var invalid in invalidDrafts)
+        {
+            Assert.Throws<ArgumentException>(() => store.CreateWorkItem(scope, 1, invalid, "presenter"));
+        }
+        Assert.Single(store.ListWorkItems(scope));
+        Assert.Equal(auditBefore + 2, CountAuditEvents(options));
+
         Assert.Throws<InvalidOperationException>(() => store.CreateWorkItem(scope, 1, new WorkItemDraft("item-1", "cap-2", "open", "owner-a"), "presenter"));
         Assert.Equal(1, store.Read(scope).Revision);
+        Assert.Equal(auditBefore + 2, CountAuditEvents(options));
 
         var reloaded = new SqlCaseStateStore(options);
         var reloadedScope = reloaded.AuthorizeCase("case-a", "owner-a");
         var item = Assert.Single(reloaded.ListWorkItems(reloadedScope));
         Assert.Equal(("case-a", "item-1", "cap-1", "open", "owner-a"), (item.CaseId, item.ItemId, item.CapabilityId, item.State, item.Owner));
+        // The creation timestamp is server-assigned: the draft has no such property, and the stored value is the server's clock.
+        Assert.Null(typeof(WorkItemDraft).GetProperty("CreatedAt"));
         Assert.InRange(item.CreatedAt, before, DateTimeOffset.UtcNow);
         Assert.Equal("item-1", Assert.Single(reloaded.ListWorkItems(reloaded.AuthorizeCase("case-b", "owner-b"))).ItemId);
         Assert.Throws<CaseAccessDeniedException>(() => reloaded.AuthorizeCase("case-a", "owner-b"));
