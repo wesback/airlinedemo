@@ -37,7 +37,7 @@ public static class TechnicalReviewPolicy
     public const string DecisionAction = "technical-review.decided";
     public const int MaxReasonLength = 2000;
 
-    public static TechnicalReviewResult Decide(CaseStateStore store, IEnumerable<string> caseScopes, string role, string actorId,
+    public static TechnicalReviewResult Decide(ICaseStateStore store, IEnumerable<string> caseScopes, string role, string actorId,
         string caseId, TechnicalReviewCommand command, string traceId)
     {
         if (role != CaseEndpoints.ReviewerRole) return new(TechnicalReviewOutcome.Forbidden, "Role not permitted.");
@@ -88,7 +88,7 @@ public static class TechnicalReviewPolicy
     public static bool AuthorizesRequest(CaseState state) =>
         Decisions(state).LastOrDefault(d => d.Current) is { Decision: "accept" };
 
-    public static CaseScope? ScopeFor(CaseStateStore store, IEnumerable<string> caseScopes, string caseId)
+    public static CaseScope? ScopeFor(ICaseStateStore store, IEnumerable<string> caseScopes, string caseId)
     {
         if (!caseScopes.Contains(caseId)) return null;
         var owner = store.OwnerOf(caseId);
@@ -114,7 +114,7 @@ public static class TechnicalReviewEndpoints
         return app;
     }
 
-    private static IResult ListDecisions(string caseId, HttpContext http, DemoSessionStore sessions, CaseStateStore store, IConfiguration config, ILogger<DemoSessionStore> logger)
+    private static IResult ListDecisions(string caseId, HttpContext http, DemoSessionStore sessions, ICaseStateStore store, IConfiguration config, ILogger<DemoSessionStore> logger)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null) return DemoAuthEndpoints.Unauthenticated();
@@ -136,7 +136,7 @@ public static class TechnicalReviewEndpoints
         });
     }
 
-    private static IResult RecordDecision(string caseId, TechnicalReviewCommand body, HttpContext http, DemoSessionStore sessions, CaseStateStore store, IConfiguration config, ILogger<DemoSessionStore> logger)
+    private static IResult RecordDecision(string caseId, TechnicalReviewCommand body, HttpContext http, DemoSessionStore sessions, ICaseStateStore store, IConfiguration config, ILogger<DemoSessionStore> logger)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null)

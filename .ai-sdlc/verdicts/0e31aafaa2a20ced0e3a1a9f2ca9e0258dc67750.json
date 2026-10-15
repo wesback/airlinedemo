@@ -1,0 +1,216 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 235,
+  "branch": "ai-sdlc/issue-235",
+  "commitSha": "0e31aafaa2a20ced0e3a1a9f2ca9e0258dc67750",
+  "round": 0,
+  "pipelineVersion": "1692eaf",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adapter’s registration, persistence, and stale-revision paths are covered by the added tests. AC4’s required basis-read scope isolation is not tested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 166,
+          "message": "AC4’s test does not verify basis-read scope isolation. Add basis records for both cases and assert GetBasisVersion through each scope returns only its own record, including the negative case.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC4_scope_and_stale_revision_behavior creates two cases and checks Read for one case and ReadAudit for both, but never adds basis versions or calls GetBasisVersion.",
+            "failureScenario": "If GetBasisVersion ignores the supplied scope and returns a basis version from another case, this test still passes; the AC4 scope-isolation behavior for basis reads is unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adapter has tests for several required behaviors, but AC1 does not connect credential validation to registration, and AC4 leaves required scope-isolation paths untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 82,
+          "message": "AC1's test does not verify that registration rejects an invalid configured connection string. Exercise AddCaseStateStore with a forbidden credential and assert registration fails.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC1 resolves the store using a valid configured connection string, then calls ValidateManagedIdentityConnectionString directly for invalid strings; those direct calls do not exercise AddCaseStateStore's validation path.",
+            "failureScenario": "If AddCaseStateStore stops validating its configured connection string, configuring it with User ID=app still resolves a SqlCaseStateStore, and the test passes because its separate validator call still throws."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 181,
+          "message": "AC4 does not test the required state, basis, and audit isolation through each returned scope. Seed distinct basis records for both cases and assert state, GetBasisVersion, and ReadAudit return only the matching case's records for both scopes.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC4 seeds no basis records and checks only Read(scope1).Audit and ReadAudit(scope2); it never checks basis retrieval or state and audit isolation in both scopes.",
+            "failureScenario": "If basis loading ignores the case ID, AC4 still passes because it has no basis records. Likewise, cross-scope state or audit leakage in the unchecked scope directions is not detected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adapter’s changed code shows no concrete security vulnerability. AC4 has a required scope-isolation behavior for basis reads that its named test does not cover.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 178,
+          "message": "AC4’s scope-isolation behavior is not fully tested: it requires basis reads through each scope to return only that case’s records, but this test never creates or reads a basis version.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC4 creates cases and commits without basis versions; it never calls GetBasisVersion.",
+            "failureScenario": "If GetBasisVersion returned a basis version belonging to another case, AC4 would still pass because it never stores or reads any basis through either scope."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

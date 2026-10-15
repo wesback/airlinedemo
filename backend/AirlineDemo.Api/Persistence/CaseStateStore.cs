@@ -39,6 +39,18 @@ public sealed record AuditEvent(
     string Detail,
     DateTimeOffset At);
 
+/// <summary>A review work item. <see cref="CreatedAt"/> is assigned by the store, never by the caller.</summary>
+public sealed record WorkItem(
+    string CaseId,
+    string ItemId,
+    string CapabilityId,
+    string State,
+    string Owner,
+    DateTimeOffset CreatedAt);
+
+/// <summary>Caller-supplied work item fields; the creation timestamp is deliberately absent.</summary>
+public sealed record WorkItemDraft(string ItemId, string CapabilityId, string State, string Owner);
+
 public sealed record CaseState(
     string CaseId,
     string Owner,
@@ -46,7 +58,28 @@ public sealed record CaseState(
     IReadOnlyList<BasisVersion> Basis,
     IReadOnlyList<string> ReceiptIds,
     IReadOnlyList<AuditEvent> Audit,
-    IReadOnlyDictionary<string, string> ReceiptFingerprints);
+    IReadOnlyDictionary<string, string> ReceiptFingerprints,
+    IReadOnlyList<WorkItem>? WorkItems = null);
+
+/// <summary>Required-field rules shared by both case-state stores.</summary>
+internal static class WorkItemRules
+{
+    public static void RequireText(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"Work item {name} is required.", name);
+        }
+    }
+
+    public static void Validate(WorkItemDraft draft)
+    {
+        RequireText(draft.ItemId, nameof(draft.ItemId));
+        RequireText(draft.CapabilityId, nameof(draft.CapabilityId));
+        RequireText(draft.State, nameof(draft.State));
+        RequireText(draft.Owner, nameof(draft.Owner));
+    }
+}
 
 public sealed record CaseCommit(
     BasisVersion? NewBasis,
@@ -65,7 +98,7 @@ internal sealed record CaseStoreDocument(int SchemaVersion, List<CaseState> Case
 /// persists atomically: on any failure neither memory nor the file changes.
 /// The audit log is exposed read-only; there is no update or delete operation.
 /// </summary>
-public sealed class CaseStateStore
+public sealed class CaseStateStore : ICaseStateStore
 {
     private const int SchemaVersion = 1;
     private const int LockAttempts = 500;
@@ -170,6 +203,80 @@ public sealed class CaseStateStore
         lock (_gate)
         {
             return Current(scope).Audit;
+        }
+    }
+
+    public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
+    {
+        lock (_gate)
+        {
+            return Current(scope).WorkItems ?? Array.Empty<WorkItem>();
+        }
+    }
+
+    /// <summary>Creates a work item at the current revision; the store assigns the creation timestamp.</summary>
+    public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor)
+    {
+        WorkItemRules.Validate(draft);
+        return ApplyWorkItemChange(scope, expectedRevision, actor, "create-work-item", draft.ItemId, (items, now) =>
+        {
+            if (items.Any(i => string.Equals(i.ItemId, draft.ItemId, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("Work item already exists in this case.");
+            }
+
+            items.Add(new WorkItem(scope.CaseId, draft.ItemId, draft.CapabilityId, draft.State, draft.Owner, now));
+        });
+    }
+
+    public CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor)
+    {
+        WorkItemRules.RequireText(itemId, nameof(itemId));
+        WorkItemRules.RequireText(state, nameof(state));
+        return ApplyWorkItemChange(scope, expectedRevision, actor, "change-work-item-state", itemId + " -> " + state, (items, _) =>
+        {
+            var index = items.FindIndex(i => string.Equals(i.ItemId, itemId, StringComparison.Ordinal));
+            if (index < 0)
+            {
+                throw new KeyNotFoundException("Work item not found for this case.");
+            }
+
+            items[index] = items[index] with { State = state };
+        });
+    }
+
+    /// <summary>Checks scope and revision, applies one work-item change, and appends one audit event at the next revision.</summary>
+    private CommitResult ApplyWorkItemChange(
+        CaseScope scope,
+        long expectedRevision,
+        string actor,
+        string action,
+        string detail,
+        Action<List<WorkItem>, DateTimeOffset> change)
+    {
+        lock (_gate)
+        {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
+            var current = Current(scope);
+            if (expectedRevision != current.Revision)
+            {
+                throw new RevisionConflictException();
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var items = (current.WorkItems ?? Array.Empty<WorkItem>()).ToList();
+            change(items, now);
+
+            var revision = current.Revision + 1;
+            var audit = current.Audit.ToList();
+            audit.Add(new AuditEvent(audit.Count + 1, revision, actor, action, detail, now));
+
+            var updated = Freeze(current with { Revision = revision, Audit = audit, WorkItems = items });
+            var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
+            Persist(snapshot);
+            _cases = snapshot;
+            return new CommitResult(updated, Replayed: false);
         }
     }
 
@@ -343,6 +450,7 @@ public sealed class CaseStateStore
         Basis = Wrap(state.Basis),
         ReceiptIds = Wrap(state.ReceiptIds),
         Audit = Wrap(state.Audit),
+        WorkItems = Wrap(state.WorkItems ?? Array.Empty<WorkItem>()),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
@@ -400,6 +508,15 @@ public sealed class CaseStateStore
             || state.ReceiptIds.Any(id => !state.ReceiptFingerprints.ContainsKey(id)))
         {
             throw new InvalidDataException("Receipt fingerprints do not match receipts.");
+        }
+
+        var items = state.WorkItems ?? Array.Empty<WorkItem>();
+        if (items.Select(i => i.ItemId).Distinct(StringComparer.Ordinal).Count() != items.Count
+            || items.Any(i => i.CaseId != state.CaseId || string.IsNullOrWhiteSpace(i.ItemId)
+                || string.IsNullOrWhiteSpace(i.CapabilityId) || string.IsNullOrWhiteSpace(i.State)
+                || string.IsNullOrWhiteSpace(i.Owner)))
+        {
+            throw new InvalidDataException("Work items are invalid.");
         }
     }
 

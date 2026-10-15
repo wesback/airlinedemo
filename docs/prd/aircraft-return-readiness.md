@@ -2,11 +2,11 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.6.0"
+version: "0.7.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
-last_updated: "2026-10-12"
+last_updated: "2026-10-14"
 product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003", "GOAL-004"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.6.0 | Last Updated: 2026-10-12
+> **aircraft-return-readiness** | Status: Draft | Version: 0.7.0 | Last Updated: 2026-10-14
 
 ## Executive Summary
 
@@ -39,7 +39,7 @@ The product is a bounded reference demonstration, not an operational leasing pla
 
 In the fictional scenario, fragmented technical records and related lease information make it difficult to distinguish a genuine records gap from ambiguous, incomplete, or unprocessed evidence. The demonstrator makes the evidence basis, current status, responsible review role, and permitted next action visible without treating records readiness as financial approval, legal approval, contractual acceptance, airworthiness certification, or aircraft release.
 
-The demonstration is limited to one fictional aircraft, one engine, two components, and approximately 8–12 synthetic evidence documents. It supports a complete baseline, a clearly missing-history path, and an ambiguous-identity path. Results from synthetic fixtures are not evidence of real-world accuracy, safety, regulatory compliance, or commercial benefit.
+The core demonstration journey is limited to one fictional aircraft, one engine, two components, and approximately 8–12 synthetic evidence documents. A three-aircraft synthetic case pack supplements that journey and is governed by the [Aircraft Case Pack PRD](aircraft-case-pack.md); see the v0.7.0 addendum. It supports a complete baseline, a clearly missing-history path, and an ambiguous-identity path. Results from synthetic fixtures are not evidence of real-world accuracy, safety, regulatory compliance, or commercial benefit.
 
 The companion business context is the draft [Case 43 BRD v0.2.3](../brd/case-43-brd.md). That BRD describes the broader fictional programme; this PRD scopes only the demonstrator and does not adopt future operational targets or imply a governed BRD handoff.
 
@@ -135,7 +135,7 @@ All references in the final column are explicitly BRD-scoped; unprefixed require
 
 ### In scope
 
-- One fictional aircraft, one engine, two components, and approximately 8–12 synthetic evidence documents.
+- For the core journey: one fictional aircraft, one engine, two components, and approximately 8–12 synthetic evidence documents. The three-aircraft case pack is a supplement governed by the Aircraft Case Pack PRD (v0.7.0 addendum).
 - A versioned mock checklist, package inventory, and processing status.
 - Baseline, missing-history, ambiguous-identity, and blocked-processing paths.
 - Evidence-linked findings; deterministic policy; a mock partner inbox; response ingestion; basis-bound review; persistent history; duplicate suppression; restart and run-specific reset.
@@ -455,6 +455,17 @@ Draft planning artifact only. PRD quality review, approval, artifact digest, imp
 ## Disclaimer
 
 This document defines draft requirements for a fictional, synthetic demonstrator. It is not business sign-off, security approval, authorization to provision or spend, publication approval, implementation or runtime evidence, certification evidence, or production-readiness approval. No real-world airworthiness, legal, regulatory, operational, or commercial conclusion may be inferred from the synthetic scenario or future demo results.
+
+## Addendum v0.7.0 (2026-10-14): case-pack supplement
+
+This addendum changes no requirement, acceptance criterion, or identifier in this PRD.
+
+- The scope lines about one aircraft and 8–12 documents apply to the core journey. A three-aircraft synthetic case pack (24–36 documents) may supplement it. The planned [Aircraft Case Pack PRD](aircraft-case-pack.md) governs the case pack, its read-only case-list and scene-projection contracts, demo-user case scope, and a presenter-only Case C scenario reset. The planned [Aircraft Hangar 3D PRD](aircraft-hangar-3d.md) governs its 3D presentation. Each PRD uses canonical document-local IDs; `CP:FR-001` and `HG:FR-001` are cross-document citations, not new prefixes.
+- The case pack runs through this PRD's case workflow and authority boundaries. Its prerequisites are FR-001, FR-002, FR-003, FR-004, FR-005, FR-008, FR-010, FR-013, DD-014/DD-023 sign-in and scopes, DD-027 persistence/audit, and DD-028/DD-029 request protection and diagnostics.
+- The frozen 40-case evaluation suite (DD-033) stays separate and is never part of the case pack.
+- The content security policy in DD-028 may be extended only by the directives named in the Security Notes of the Aircraft Hangar 3D PRD (`img-src blob:` and `worker-src 'self'`), once that PRD is approved.
+- Delivery uses three staged PRD merges: this amendment first; CP only after its ARR prerequisites are implemented and tested on the default branch; HG only after the full CP behavior and fixture review are delivered. Drafts can be reviewed together but are not merged together, because each merged PRD independently starts automatic planning. A named person approves each PRD pull request and verifies prerequisite code/tests, not just closed issue numbers.
+- Replanning this amended ARR PRD reuses its existing core stories. This addendum creates no CP or HG implementation stories in the ARR plan; those requirements belong to their later PRD plans. The ARR pull request states that no new core behavior is requested by this scope clarification.
 
 ## Document Metadata
 
