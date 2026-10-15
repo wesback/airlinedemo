@@ -16,6 +16,7 @@ public class EvaluationCaseFixtureTests
 
     private static readonly Regex CaseIdPattern = new(@"^EVAL-V1-[0-9]{2}$");
     private static readonly Regex IdentifierPattern = new(@"^SYN-[A-Z0-9]{3,16}$");
+    private static readonly Regex RequirementIdPattern = new(@"^(FR|NFR|AC)-[0-9]{3}$");
     private static readonly Regex EmailPattern = new(@"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}");
     private static readonly Regex[] PhonePatterns =
     [
@@ -125,6 +126,11 @@ public class EvaluationCaseFixtureTests
                 break;
             case JsonValueKind.String:
                 var value = element.GetString()!;
+                if (name == "requirementId")
+                {
+                    Assert.Matches(RequirementIdPattern, value);
+                    return;
+                }
                 if (IsIdentifierField(name))
                 {
                     Assert.Matches(IdentifierPattern, value);
@@ -304,6 +310,7 @@ public class EvaluationCaseFixtureTests
         {
             using var doc = JsonDocument.Parse(line);
             CheckValue(doc.RootElement.GetProperty("inputs"), "", line);
+            CheckValue(doc.RootElement.GetProperty("annotations"), "", line);
         }
     }
 
