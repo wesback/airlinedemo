@@ -33,16 +33,12 @@ public sealed class TerraformWorkflowTests
 
         Assert.DoesNotContain("-backend-config", workflow);
         Assert.DoesNotContain("terraform apply", workflow);
-    }
 
-    [Theory]
-    [InlineData("identity-telemetry.tftest.hcl")]
-    [InlineData("network-boundaries.tftest.hcl")]
-    public void Terraform_test_files_use_mock_azurerm_provider(string fileName)
-    {
-        var path = Path.Combine(FindRepoRoot(), "infra", "terraform", "tests", fileName);
-
-        Assert.Contains("mock_provider \"azurerm\"", File.ReadAllText(path));
+        foreach (var fileName in new[] { "identity-telemetry.tftest.hcl", "network-boundaries.tftest.hcl" })
+        {
+            var path = Path.Combine(FindRepoRoot(), "infra", "terraform", "tests", fileName);
+            Assert.Contains("mock_provider \"azurerm\"", File.ReadAllText(path));
+        }
     }
 
     private static string ReadWorkflow() =>
