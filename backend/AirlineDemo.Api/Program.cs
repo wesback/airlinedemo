@@ -1,6 +1,7 @@
 using AirlineDemo.Api;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
@@ -19,6 +20,9 @@ builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddSingleton<CaseStore>();
 builder.Services.AddCaseStateStore(builder.Configuration);
 builder.Services.AddSingleton<DemoRunReset>();
+builder.Services.AddSingleton<EvidenceBasisStore>();
+builder.Services.AddSingleton<EvidencePackageStore>();
+builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 var app = builder.Build();
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
 app.UseTransportSecurityHeaders();
@@ -27,6 +31,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();
 app.MapCaseEndpoints();
 app.MapTechnicalReviewEndpoints();
+app.MapEvidenceEndpoints();
 app.MapDemoRunReset();
 app.MapStaticClient();
 

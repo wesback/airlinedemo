@@ -21,6 +21,12 @@ public sealed record EvidenceIntakeResult(
     string Reason,
     IReadOnlyList<EvidenceBasisVersion> Versions);
 
+/// <summary>Per-document outcome: <c>accepted</c>, <c>rejected-retryable</c> or <c>rejected-permanent</c>.</summary>
+public sealed record EvidenceDocumentResult(string FileName, string Status, string Reason, int? Version, string? Digest);
+
+/// <summary>Package outcome: <c>complete</c>, <c>partial</c> (some documents accepted) or <c>failed</c> (none accepted).</summary>
+public sealed record EvidencePackageOutcome(string State, IReadOnlyList<EvidenceDocumentResult> Documents);
+
 /// <summary>
 /// Append-only store of evidence basis content. Each commit creates a new version per key;
 /// prior versions are never overwritten.
@@ -102,33 +108,10 @@ public static class EvidenceIntake
         EvidenceBasisStore store,
         IsolatedPdfParserOptions? parserOptions = null)
     {
-        if (documents.Count > MaxDocuments)
+        var invalid = Validate(documents);
+        if (invalid is not null)
         {
-            return Permanent($"package has {documents.Count} documents; limit is {MaxDocuments}");
-        }
-
-        long total = 0;
-        foreach (var document in documents)
-        {
-            if (document.Content.LongLength > MaxDocumentBytes)
-            {
-                return Permanent($"{document.FileName} is {document.Content.LongLength} bytes; limit is {MaxDocumentBytes}");
-            }
-
-            total += document.Content.LongLength;
-        }
-
-        if (total > MaxPackageBytes)
-        {
-            return Permanent($"package is {total} bytes; limit is {MaxPackageBytes}");
-        }
-
-        foreach (var document in documents)
-        {
-            if (!string.Equals(Path.GetExtension(document.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
-            {
-                return Permanent($"{document.FileName}: unsupported type; only PDF is accepted");
-            }
+            return Permanent(invalid);
         }
 
         var extracted = new List<(string Key, string Text)>(documents.Count);
@@ -145,6 +128,80 @@ public static class EvidenceIntake
 
         var versions = store.CommitAll(extracted);
         return new EvidenceIntakeResult(EvidenceProcessingState.Complete, "accepted", versions);
+    }
+
+    /// <summary>Returns the reason a package is outside the limits or is not PDF by name, or null when it is valid.</summary>
+    public static string? Validate(IReadOnlyList<EvidenceDocument> documents)
+    {
+        if (documents.Count > MaxDocuments)
+        {
+            return $"package has {documents.Count} documents; limit is {MaxDocuments}";
+        }
+
+        long total = 0;
+        foreach (var document in documents)
+        {
+            if (document.Content.LongLength > MaxDocumentBytes)
+            {
+                return $"{document.FileName} is {document.Content.LongLength} bytes; limit is {MaxDocumentBytes}";
+            }
+
+            total += document.Content.LongLength;
+        }
+
+        if (total > MaxPackageBytes)
+        {
+            return $"package is {total} bytes; limit is {MaxPackageBytes}";
+        }
+
+        foreach (var document in documents)
+        {
+            if (!string.Equals(Path.GetExtension(document.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"{document.FileName}: unsupported type; only PDF is accepted";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Parses each document in isolation. Accepted documents are committed together as new basis versions keyed by
+    /// case and filename; rejected documents are not committed. The package is partial when only some are accepted.
+    /// </summary>
+    public static EvidencePackageOutcome ProcessPackage(
+        string caseId,
+        IReadOnlyList<EvidenceDocument> documents,
+        EvidenceBasisStore store,
+        IsolatedPdfParserOptions parserOptions)
+    {
+        var results = new EvidenceDocumentResult[documents.Count];
+        var accepted = new List<(int Index, string Key, string Text)>(documents.Count);
+        for (var i = 0; i < documents.Count; i++)
+        {
+            var document = documents[i];
+            var outcome = IsolatedPdfParser.Parse(document.Content, parserOptions);
+            if (outcome.State == EvidenceProcessingState.Complete)
+            {
+                accepted.Add((i, $"{caseId}/{document.FileName}", outcome.Text));
+                results[i] = new EvidenceDocumentResult(document.FileName, "accepted", "accepted", null, null);
+            }
+            else
+            {
+                var status = outcome.State == EvidenceProcessingState.RejectedRetryable ? "rejected-retryable" : "rejected-permanent";
+                results[i] = new EvidenceDocumentResult(document.FileName, status, outcome.Reason, null, null);
+            }
+        }
+
+        var versions = store.CommitAll(accepted.Select(a => (a.Key, a.Text)).ToList());
+        for (var j = 0; j < accepted.Count; j++)
+        {
+            var index = accepted[j].Index;
+            results[index] = results[index] with { Version = versions[j].Version, Digest = versions[j].Digest };
+        }
+
+        var state = accepted.Count == documents.Count ? "complete" : accepted.Count == 0 ? "failed" : "partial";
+        return new EvidencePackageOutcome(state, results);
     }
 
     /// <summary>
