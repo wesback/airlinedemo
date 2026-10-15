@@ -52,6 +52,28 @@ resource "azurerm_container_app" "app" {
     transport                  = "http"
     allow_insecure_connections = false
 
+    # Container Apps ingress is outside the app subnet NSG, so callers are limited here.
+    # One Allow per configured CIDR; with an empty list a single Deny-all rule denies every caller.
+    dynamic "ip_security_restriction" {
+      for_each = local.presenter_reviewer_rules
+      content {
+        name             = "presenter-reviewer-${ip_security_restriction.key}"
+        description      = "Allowed presenter or reviewer CIDR"
+        action           = "Allow"
+        ip_address_range = ip_security_restriction.value
+      }
+    }
+
+    dynamic "ip_security_restriction" {
+      for_each = length(var.presenter_reviewer_cidrs) == 0 ? toset(["0.0.0.0/0"]) : toset([])
+      content {
+        name             = "deny-all-empty-allowlist"
+        description      = "No presenter or reviewer CIDRs configured"
+        action           = "Deny"
+        ip_address_range = ip_security_restriction.value
+      }
+    }
+
     traffic_weight {
       latest_revision = true
       percentage      = 100

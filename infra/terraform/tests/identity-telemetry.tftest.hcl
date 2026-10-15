@@ -276,6 +276,7 @@ run "M-14_app_grants_bind_to_app_principal_not_migration" {
     target = azurerm_user_assigned_identity.app
     values = {
       principal_id = "55555555-5555-5555-5555-555555555555"
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app-mock"
     }
   }
 
