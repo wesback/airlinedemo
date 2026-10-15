@@ -42,9 +42,9 @@ public sealed record ApprovedModelManifest(
     private static readonly Regex ApiVersionPattern =
         new(@"^\d{4}-\d{2}-\d{2}(-preview)?\z", RegexOptions.Compiled);
 
-    // Region is a closed list of Azure region names, so free-text (for example a person's name) cannot be recorded.
+    // Region is fixed to the PRD's Sweden Central model boundary (DD-016, DD-025, DD-034); any other value is refused.
     private static readonly Regex RegionPattern =
-        new(@"^(eastus|eastus2|westus|westus2|westus3|centralus|northeurope|westeurope|uksouth|ukwest)\z", RegexOptions.Compiled);
+        new(@"^swedencentral\z", RegexOptions.Compiled);
 
     // Credential shapes and markers, including SAS query parameters, AWS/GitHub/Slack/JWT prefixes.
     private static readonly Regex CredentialHintPattern =
@@ -262,8 +262,8 @@ public static class ModelCallGate
             throw new ModelGateException("model request refused: evidence version is not a plain version identifier");
         }
 
-        // Region applies to every request.
-        if (!string.Equals(request.DataRegion, manifest.Region, StringComparison.OrdinalIgnoreCase))
+        // Region applies to every request and must match the approved region exactly.
+        if (!string.Equals(request.DataRegion, manifest.Region, StringComparison.Ordinal))
         {
             throw new ModelGateException("model request refused: content region is not the approved region");
         }
