@@ -78,6 +78,36 @@ variable "model_endpoint_subdomain" {
   type = string
 }
 
+variable "model_deployment_name" {
+  description = "Name of the Azure OpenAI deployment. Required; empty or whitespace is rejected."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.model_deployment_name)) > 0
+    error_message = "model_deployment_name must not be empty or whitespace."
+  }
+}
+
+variable "model_name" {
+  description = "Azure OpenAI model name for the deployment. Required; empty or whitespace is rejected."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.model_name)) > 0
+    error_message = "model_name must not be empty or whitespace."
+  }
+}
+
+variable "model_version" {
+  description = "Azure OpenAI model version for the deployment. Required; empty or whitespace is rejected."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.model_version)) > 0
+    error_message = "model_version must not be empty or whitespace."
+  }
+}
+
 variable "terraform_principal_object_id" {
   type = string
 }
