@@ -73,7 +73,8 @@ public sealed class ReleaseIdentityContractTests
 
             foreach (var (blockName, body) in RoleAssignmentBlocks(text))
             {
-                if (ExistingIndirectGrants.Contains((fileName, blockName)))
+                var relativePath = Path.GetRelativePath(Path.Combine(FindRepoRoot(), "infra", "terraform"), path).Replace('\\', '/');
+                if (ExistingIndirectGrants.Contains((relativePath, blockName)))
                 {
                     continue;
                 }

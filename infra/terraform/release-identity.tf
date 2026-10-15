@@ -11,7 +11,7 @@ variable "signing_key_name" {
 variable "signing_certificate_name" {
   description = "Name of the Key Vault certificate whose public part verifies image signatures."
   type        = string
-  default     = "release-image-signing"
+  default     = "release-image-signing-certificate"
   nullable    = false
 }
 
