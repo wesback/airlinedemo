@@ -1,0 +1,245 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 227,
+  "branch": "ai-sdlc/issue-227",
+  "commitSha": "85aab61f15014545b8a875bec6df90580855d1df",
+  "round": 1,
+  "pipelineVersion": "1aa5598",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added checks address extra federated credentials and workflow role assignments. The previously reported gaps for extra app ACR grants and secret-bearing outputs remain.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 196,
+          "message": "The AC RELEASE-ID-01 test still misses the previously reported extra ACR assignment case. Check all ACR assignments to the app identity, not only the number of AcrPull declarations.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new assertion counts only role definitions named AcrPull across the Terraform files; the existing assertion checks only the named app_acr_pull resource.",
+            "failureScenario": "If Terraform adds an AcrPush assignment for the app identity on the registry, the count remains one and the named AcrPull assertion still passes, leaving the app identity with an extra ACR grant."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 361,
+          "message": "The AC RELEASE-ID-04 test still does not inspect the complete Terraform output set. An additional secret-bearing output declared outside release-identity.tf is not detected.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "This assertion counts outputs and checks value expressions only in release-identity.tf; the runtime secret check reads only the two named client ID outputs.",
+            "failureScenario": "If another Terraform file in the module declares an output exposing a storage key or signing-key material, this assertion and the checks of the two client ID outputs still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added assertions address the extra federated credential and workflow role assignment cases. The app identity can still receive an AcrPush grant undetected, and the output checks still omit outputs declared outside release-identity.tf.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 196,
+          "message": "AC RELEASE-ID-01's negative case remains unenforced: the test does not fail for an additional AcrPush grant to the app identity.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The new assertion counts only occurrences of the role name AcrPull across Terraform files. It does not inspect other ACR role assignments to the app identity.",
+            "failureScenario": "If an AcrPush assignment for the app identity on the ACR is added, the count remains one and the test passes, despite the criterion requiring the app identity's ACR grant to remain pull-only."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 361,
+          "message": "AC RELEASE-ID-04's complete-output check remains incomplete because it excludes outputs declared in other Terraform files.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The output-count and value assertions read only release-identity.tf; the secret-pattern checks inspect only the two named client ID outputs.",
+            "failureScenario": "If a Terraform output exposing a storage key or signing key is added to main.tf or identity-and-telemetry.tf, these assertions still pass because that output is outside release-identity.tf and is not inspected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added checks address the prior findings for extra federated credentials and workflow role assignments. The AC RELEASE-ID-01 check still misses an additional ACR grant to the app identity.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 196,
+          "message": "The AC RELEASE-ID-01 test still permits an additional ACR grant to the app identity: counting AcrPull assignments does not detect a new AcrPush assignment. Assert that the app identity has no other ACR role assignments.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The added assertion counts only role assignments whose role name is AcrPull. It does not check all ACR assignments granted to the app identity.",
+            "failureScenario": "If Terraform adds an AcrPush assignment for the app identity on the ACR, this assertion still passes, leaving that identity able to push images despite the test’s stated requirement that its only ACR grant is AcrPull. This leaves the prior AC RELEASE-ID-01 finding unresolved (OWASP A01:2025 Broken Access Control)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
