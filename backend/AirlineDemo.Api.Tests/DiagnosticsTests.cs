@@ -308,8 +308,10 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain(FormattedCanary, output);
         Assert.DoesNotContain("   at ", output);
         Assert.DoesNotContain("System.InvalidOperationException", output);
+        // AC-05: the mapped error.type passes the allowlist and is preserved on records without properties or scopes.
+        Assert.All(captured, r => Assert.Contains(r.Attributes, a => a.Key == "error.type" && (string?)a.Value == "invalid-operation"));
 
-        // With structured data, the exception type is still not exported because it fails the error.type allowlist.
+        // With structured data, only the allowlisted error.type is exported for the exception.
         captured.Clear();
         logger.LogError(thrown, "Operation failed for {Case}", "case-42");
         Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
@@ -318,10 +320,37 @@ public sealed class DiagnosticsTests
             .Concat(captured.Select(r => r.FormattedMessage ?? string.Empty))
             .Concat(captured.Select(r => r.ExceptionText ?? string.Empty)));
         Assert.Contains("case-42", structured);
+        Assert.Contains("error.type=invalid-operation", structured);
         Assert.DoesNotContain(ExceptionCanary, structured);
         Assert.DoesNotContain(InnerCanary, structured);
         Assert.DoesNotContain("   at ", structured);
         Assert.DoesNotContain("System.InvalidOperationException", structured);
+
+        // Safe scope metadata with an exception: metadata stays and error.type is preserved.
+        captured.Clear();
+        using (logger.BeginScope(new List<KeyValuePair<string, object?>> { new("case.id", "case-42") }))
+        {
+            logger.LogError(thrown, $"Operation failed {FormattedCanary}");
+        }
+        var scoped = captured.Single();
+        Assert.Equal("diagnostic event", scoped.Message);
+        Assert.Contains(scoped.Attributes, a => a.Key == "case.id" && (string?)a.Value == "case-42");
+        Assert.Contains(scoped.Attributes, a => a.Key == "error.type" && (string?)a.Value == "invalid-operation");
+        Assert.DoesNotContain(FormattedCanary, string.Join("\n", scoped.Attributes.Select(a => $"{a.Key}={a.Value}")));
+
+        // An error.type value that fails the allowlist rule is omitted.
+        captured.Clear();
+        logger.Log(
+            LogLevel.Error,
+            default,
+            new List<KeyValuePair<string, object?>> { new("case.id", "case-42"), new("error.type", "CANARY-ERROR") },
+            null,
+            (_, _) => $"Operation failed {FormattedCanary}");
+        var rejected = captured.Single();
+        Assert.Equal("diagnostic event", rejected.Message);
+        Assert.Contains(rejected.Attributes, a => a.Key == "case.id" && (string?)a.Value == "case-42");
+        Assert.DoesNotContain(rejected.Attributes, a => a.Key == "error.type");
+        Assert.DoesNotContain("CANARY-ERROR", string.Join("\n", rejected.Attributes.Select(a => $"{a.Key}={a.Value}")));
     }
 
     [Fact]
