@@ -12,6 +12,9 @@ public sealed class ReleaseIdentityContractTests
 
     private static readonly Regex AppIdentityReference = new(@"azurerm_user_assigned_identity\.app\b");
 
+    private static readonly Regex BuildOrReleasePrincipal = new(
+        @"(?m)^\s*principal_id\s*=\s*azurerm_user_assigned_identity\.(build|release)\.principal_id\s*$");
+
     private static readonly Regex ScopeAttribute = new(@"^\s*scope\s*=\s*(?<expr>.+)$", RegexOptions.Multiline);
 
     private static readonly Regex ContainerRegistryReference = new(@"\bazurerm_container_registry\b");
@@ -21,6 +24,11 @@ public sealed class ReleaseIdentityContractTests
     private static readonly Regex ResourceOrDataReference = new(@"\bazurerm_\w+\.|\bdata\.");
 
     private static readonly Regex LiteralProvider = new(@"/providers/(?<ns>[A-Za-z0-9.]+)/", RegexOptions.IgnoreCase);
+
+    private static readonly Regex InterpolatedVariable = new(@"\$\{var\.\w+\}");
+
+    // A resource-group scope has no /providers/ segment, so it cannot be the registry (names never contain '/').
+    private static readonly Regex ResourceGroupOnlyScope = new(@"^\s*""/subscriptions/[^""/]*/resourceGroups/[^""/]*""\s*$");
 
     private const int MaxIndirectionDepth = 5;
 
@@ -110,13 +118,83 @@ public sealed class ReleaseIdentityContractTests
         Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
     }
 
+    [Fact]
+    public void App_grant_through_module_output_principal_is_counted()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "worker_acr_push" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPush"
+              principal_id         = module.worker.principal_id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void App_grant_through_local_principal_is_counted()
+    {
+        const string terraform = """
+            locals {
+              worker_principal = azurerm_user_assigned_identity.app.principal_id
+            }
+
+            resource "azurerm_role_assignment" "worker_acr_pull" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPull"
+              principal_id         = local.worker_principal
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPull" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void App_grant_on_resource_group_scope_is_not_counted()
+    {
+        const string terraform = """
+            locals {
+              rg_scope = "/subscriptions/${var.subscription_id}/resourceGroups/${var.resource_group_name}"
+            }
+
+            resource "azurerm_role_assignment" "app_rg_contributor" {
+              scope                = local.rg_scope
+              role_definition_name = "Contributor"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+            }
+            """;
+
+        Assert.Empty(AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void Build_and_release_acr_grants_are_not_counted_as_app_grants()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "build_acr_push" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.build.principal_id
+            }
+
+            resource "azurerm_role_assignment" "release_acr_push" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.release.principal_id
+            }
+            """;
+
+        Assert.Empty(AppAcrGrantRoles(terraform));
+    }
+
     private static List<string> AppAcrGrantRoles(string terraform)
     {
         var roles = new List<string>();
         foreach (Match block in RoleAssignmentBlock.Matches(terraform))
         {
             var body = block.Groups["body"].Value;
-            if (!AppIdentityReference.IsMatch(body) || !MayScopeToAcr(terraform, body))
+            if (!MayGrantToApp(body) || !MayScopeToAcr(terraform, body))
             {
                 continue;
             }
@@ -127,6 +205,11 @@ public sealed class ReleaseIdentityContractTests
 
         return roles;
     }
+
+    // Fails closed: a principal that is not literally the build or release identity (a module output, local, variable
+    // or the app identity itself) may be the app identity, so the grant is counted.
+    private static bool MayGrantToApp(string roleAssignmentBody) =>
+        AppIdentityReference.IsMatch(roleAssignmentBody) || !BuildOrReleasePrincipal.IsMatch(roleAssignmentBody);
 
     // Fails closed: a scope that cannot be shown to avoid the ACR is treated as an ACR grant.
     private static bool MayScopeToAcr(string terraform, string roleAssignmentBody)
@@ -140,6 +223,11 @@ public sealed class ReleaseIdentityContractTests
         if (ContainerRegistryReference.IsMatch(expression))
         {
             return true;
+        }
+
+        if (ResourceGroupOnlyScope.IsMatch(InterpolatedVariable.Replace(expression, "")))
+        {
+            return false;
         }
 
         var references = IndirectReference.Matches(expression);

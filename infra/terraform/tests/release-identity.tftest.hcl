@@ -346,17 +346,17 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
-    condition     = length(regexall("user_assigned_identity[.](build|release)[.]principal_id", join("\n", [for f in fileset(path.module, "*.tf") : file("${path.module}/${f}")]))) == 5
+    condition     = length(regexall("user_assigned_identity[.](build|release)[.]principal_id", join("\n", [for f in fileset(path.module, "**/*.tf") : file("${path.module}/${f}")]))) == 5
     error_message = "Only the five expected role assignments may reference the build or release identity; no other configuration may grant them roles."
   }
 
   assert {
-    condition     = length(regexall("user_assigned_identity[.](?:build|release)[.]", join("\n", [for f in fileset(path.module, "*.tf") : file("${path.module}/${f}")]))) == 9 && length(regexall("user_assigned_identity[.](?:build|release)[.]", file("${path.module}/release-identity.tf"))) == 9
+    condition     = length(regexall("user_assigned_identity[.](?:build|release)[.]", join("\n", [for f in fileset(path.module, "**/*.tf") : file("${path.module}/${f}")]))) == 9 && length(regexall("user_assigned_identity[.](?:build|release)[.]", file("${path.module}/release-identity.tf"))) == 9
     error_message = "The build and release identities may be referenced only by the nine known references in release-identity.tf (five role principals, two federated credentials, two outputs). Any extra reference, including one through a local, fails."
   }
 
   assert {
-    condition     = length(flatten([for f in fileset(path.module, "*.tf") : regexall("(?m)^resource\\s+\"azurerm_role_assignment\"", file("${path.module}/${f}"))])) == 12
+    condition     = length(flatten([for f in fileset(path.module, "**/*.tf") : regexall("(?m)^resource\\s+\"azurerm_role_assignment\"", file("${path.module}/${f}"))])) == 12
     error_message = "The configuration must declare exactly twelve role assignments (seven in other files, five in release-identity.tf). Any new grant fails, including one whose principal or scope comes through a var or local, until this count is deliberately updated."
   }
 
