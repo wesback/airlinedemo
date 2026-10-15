@@ -5,8 +5,13 @@ namespace AirlineDemo.Api.Tests;
 public sealed class ReleaseIdentityContractTests
 {
     private static readonly Regex RoleAssignmentBlock = new(
-        @"^resource\s+""azurerm_role_assignment""\s+""[^""]+""\s*\{(?<body>.*?)^\}",
+        @"^resource\s+""azurerm_role_assignment""\s+""(?<name>[^""]+)""\s*\{(?<body>.*?)^\}",
         RegexOptions.Multiline | RegexOptions.Singleline);
+
+    private static readonly Regex ModuleBlock = new(@"^\s*module\s+""[^""]+""\s*\{", RegexOptions.Multiline);
+
+    // A direct reference: azurerm_<type>.<name>.<attribute>, with nothing else in the expression.
+    private static readonly Regex DirectResourceReference = new(@"^azurerm_[a-z0-9_]+\.[A-Za-z0-9_\-]+\.[a-z_]+$");
 
     private static readonly Regex RoleDefinitionName = new(@"role_definition_name\s*=\s*""([^""]+)""");
 
@@ -38,6 +43,45 @@ public sealed class ReleaseIdentityContractTests
         var root = Path.Combine(FindRepoRoot(), "infra", "terraform");
         var terraform = string.Join("\n", Directory.EnumerateFiles(root, "*.tf", SearchOption.AllDirectories).Select(f => File.ReadAllText(f)));
 
+        Assert.Equal(new[] { "AcrPull" }, AppAcrGrantRoles(terraform));
+    }
+
+    // RELEASE-ID-06: role assignments resolve by direct references only, so no module, variable, local, data
+    // source or expression can hide a grant from the file-level checks.
+    [Fact]
+    public void Role_assignments_use_only_direct_resource_references()
+    {
+        var files = ReadTerraformFiles();
+        var violations = new List<string>();
+
+        foreach (var (path, text) in files)
+        {
+            var fileName = Path.GetFileName(path);
+            if (ModuleBlock.IsMatch(text))
+            {
+                violations.Add($"{fileName}: module blocks are not allowed in infra/terraform.");
+            }
+
+            foreach (Match block in RoleAssignmentBlock.Matches(text))
+            {
+                var blockName = block.Groups["name"].Value;
+                var body = block.Groups["body"].Value;
+                foreach (var attribute in new[] { "principal_id", "scope" })
+                {
+                    var match = Regex.Match(body, $@"^\s*{attribute}\s*=\s*(?<expr>.+?)\s*$", RegexOptions.Multiline);
+                    var expr = match.Success ? match.Groups["expr"].Value : string.Empty;
+                    if (!DirectResourceReference.IsMatch(expr))
+                    {
+                        violations.Add(
+                            $"{fileName}: azurerm_role_assignment \"{blockName}\" sets {attribute} to '{expr}', which is not a direct azurerm_<type>.<name>.<attribute> reference.");
+                    }
+                }
+            }
+        }
+
+        Assert.Empty(violations);
+
+        var terraform = string.Join("\n", files.Select(f => f.Text));
         Assert.Equal(new[] { "AcrPull" }, AppAcrGrantRoles(terraform));
     }
 
@@ -379,6 +423,14 @@ public sealed class ReleaseIdentityContractTests
         }
 
         return string.Join("\n", lines);
+    }
+
+    private static List<(string Path, string Text)> ReadTerraformFiles()
+    {
+        var root = Path.Combine(FindRepoRoot(), "infra", "terraform");
+        return Directory.EnumerateFiles(root, "*.tf", SearchOption.AllDirectories)
+            .Select(f => (Path: f, Text: File.ReadAllText(f)))
+            .ToList();
     }
 
     private static string FindRepoRoot()
