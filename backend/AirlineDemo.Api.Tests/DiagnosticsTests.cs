@@ -313,7 +313,8 @@ public sealed class DiagnosticsTests
 
         // With structured data, only the allowlisted error.type is exported for the exception.
         captured.Clear();
-        logger.LogError(thrown, "Operation failed for {Case}", "case-42");
+        // AC-05: the formatted message carries a canary alongside the safe structured property Case.
+        logger.LogError(thrown, $"Operation failed {FormattedCanary} for {{Case}}", "case-42");
         Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
         var structured = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}"))
             .Concat(captured.Select(r => r.Message))
@@ -321,6 +322,7 @@ public sealed class DiagnosticsTests
             .Concat(captured.Select(r => r.ExceptionText ?? string.Empty)));
         Assert.Contains("case-42", structured);
         Assert.Contains("error.type=invalid-operation", structured);
+        Assert.DoesNotContain(FormattedCanary, structured);
         Assert.DoesNotContain(ExceptionCanary, structured);
         Assert.DoesNotContain(InnerCanary, structured);
         Assert.DoesNotContain("   at ", structured);
