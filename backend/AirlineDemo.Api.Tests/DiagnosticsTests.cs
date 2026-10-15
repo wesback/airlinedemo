@@ -304,6 +304,12 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain(CookieValue, tags);
         Assert.DoesNotContain(BearerValue, tags);
         Assert.Contains("case.id=case-42", tags);
+        foreach (var name in new[] { "prompt", "document.text", "passcode", "cookie" })
+        {
+            Assert.DoesNotContain(activityRecord.TagObjects, t => t.Key == name);
+        }
+        Assert.DoesNotContain(activityRecord.TagObjects, t => t.Key == "__Host-session");
+        Assert.DoesNotContain(activityRecord.TagObjects, t => t.Key == ".AspNetCore.Cookies");
 
         var eventTags = string.Join("\n", activityRecord.Events.Single().Tags!.Select(t => $"{t.Key}={t.Value}"));
         Assert.DoesNotContain(PromptText, eventTags);
@@ -313,6 +319,11 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain(BearerValue, eventTags);
         Assert.DoesNotContain(Jwt, eventTags);
         Assert.Contains("case.id=case-42", eventTags);
+        var eventTagList = activityRecord.Events.Single().Tags!.ToList();
+        foreach (var name in new[] { "prompt", "document.text", "passcode", "cookie", ".AspNetCore.Cookies" })
+        {
+            Assert.DoesNotContain(eventTagList, t => t.Key == name);
+        }
     }
 
     [Fact]

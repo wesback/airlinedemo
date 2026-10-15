@@ -91,15 +91,21 @@ public static class DiagnosticsSetup
             }, source);
             ClearScopeProvider(data);
 
+            // Checked before exception metadata is added: an exception alone must not let formatted text through.
+            var hasStructuredData = source.Count > 0;
+
             // Exception messages and stack traces are free text that the filter cannot check, so only the type name is kept.
             if (data.Exception is { } exception)
             {
-                source.Add(new KeyValuePair<string, object?>("exception.type", exception.GetType().FullName));
+                if (hasStructuredData)
+                {
+                    source.Add(new KeyValuePair<string, object?>("exception.type", exception.GetType().FullName));
+                }
                 data.Exception = null;
             }
 
             // Without properties or scopes the rendered text could carry free text, so only the fixed body is kept.
-            if (source.Count == 0)
+            if (!hasStructuredData)
             {
                 data.FormattedMessage = null;
                 return;
@@ -118,9 +124,9 @@ public static class DiagnosticsSetup
         {
             foreach (var tag in data.TagObjects.ToList())
             {
-                if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
+                if (RedactionFilter.IsSensitiveKey(tag.Key) || !RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
                 {
-                    data.SetTag(tag.Key, null);
+                    RemoveActivityTag(data, tag.Key);
                 }
                 else if (!Equals(redacted, tag.Value))
                 {
@@ -139,9 +145,9 @@ public static class DiagnosticsSetup
 
                 foreach (var tag in eventTags.ToList())
                 {
-                    if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
+                    if (RedactionFilter.IsSensitiveKey(tag.Key) || !RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
                     {
-                        SetEventTag(eventTags, tag.Key, null);
+                        RemoveEventTag(eventTags, tag);
                     }
                     else if (!Equals(redacted, tag.Value))
                     {
@@ -149,6 +155,47 @@ public static class DiagnosticsSetup
                     }
                 }
             }
+        }
+
+        // Activity has no public remove for span tags, so the key is removed from the tag list Activity stores internally.
+        // The list is located by its Remove method; if none exists the export fails closed rather than keeping the key.
+        private static void RemoveActivityTag(Activity activity, string key)
+        {
+            const System.Reflection.BindingFlags Any =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+            foreach (var field in typeof(Activity).GetFields(Any))
+            {
+                if (field.GetValue(activity) is not { } store)
+                {
+                    continue;
+                }
+                var remove = store.GetType().GetMethods(Any)
+                    .FirstOrDefault(m => m.Name == "Remove" && m.GetParameters() is [{ ParameterType: var p }] && p == typeof(string));
+                if (remove is not null)
+                {
+                    remove.Invoke(store, [key]);
+                    return;
+                }
+            }
+            throw new InvalidOperationException("Activity tag storage has no Remove method; span tags cannot be redacted.");
+        }
+
+        // Activity stores event tags in an internal list (TagsLinkedList), not ActivityTagsCollection. The entry is
+        // removed through that list's Remove method, which must exist, so a sensitive key is never kept.
+        private static void RemoveEventTag(object eventTags, KeyValuePair<string, object?> tag)
+        {
+            var methods = eventTags.GetType()
+                .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+                .Where(m => m.Name == "Remove" && m.GetParameters().Length == 1)
+                .ToList();
+            if (methods.FirstOrDefault(m => m.GetParameters()[0].ParameterType == typeof(string)) is { } byKey)
+            {
+                byKey.Invoke(eventTags, [tag.Key]);
+                return;
+            }
+            var byPair = methods.FirstOrDefault(m => m.GetParameters()[0].ParameterType == typeof(KeyValuePair<string, object?>))
+                ?? throw new InvalidOperationException("Activity event tag list has no Remove method; sensitive event attributes cannot be removed.");
+            byPair.Invoke(eventTags, [tag]);
         }
 
         // Activity stores event tags in an internal list (TagsLinkedList), not ActivityTagsCollection, so the
