@@ -191,6 +191,11 @@ run "registry_is_private_and_pull_scoped" {
     condition     = azurerm_role_assignment.app_acr_pull.role_definition_name == "AcrPull" && azurerm_role_assignment.app_acr_pull.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest" && azurerm_role_assignment.app_acr_pull.principal_id == "55555555-5555-5555-5555-555555555555"
     error_message = "The app identity's only ACR grant must be AcrPull scoped to the ACR."
   }
+
+  assert {
+    condition     = length(regexall("role_definition_name\\s*=\\s*.AcrPull.", join("\n", [for f in fileset(path.module, "*.tf") : file("${path.module}/${f}")]))) == 1
+    error_message = "Exactly one AcrPull assignment may exist in the configuration; any extra or broader registry grant fails."
+  }
 }
 
 run "federation_is_limited_to_trusted_workflows" {
@@ -232,6 +237,11 @@ run "federation_is_limited_to_trusted_workflows" {
   assert {
     condition     = azurerm_federated_identity_credential.release.subject == "repo:wesback/airlinedemo:environment:production-release" && length(azurerm_federated_identity_credential.release.audience) == 1 && contains(azurerm_federated_identity_credential.release.audience, "api://AzureADTokenExchange") && azurerm_federated_identity_credential.release.issuer == "https://token.actions.githubusercontent.com"
     error_message = "Release federation must trust only wesback/airlinedemo in environment production-release with audience api://AzureADTokenExchange."
+  }
+
+  assert {
+    condition     = length(regexall("resource \"azurerm_federated_identity_credential\"", join("\n", [for f in fileset(path.module, "*.tf") : file("${path.module}/${f}")]))) == 2
+    error_message = "Only the build (main) and release (production-release) federated credentials may be declared; any other credential fails."
   }
 }
 
@@ -299,6 +309,26 @@ run "signing_rights_are_resource_scoped" {
     condition     = azurerm_role_assignment.release_container_app.role_definition_name == "Container Apps Contributor" && azurerm_role_assignment.release_container_app.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test" && azurerm_role_assignment.release_container_app.principal_id == azurerm_user_assigned_identity.release.principal_id
     error_message = "The release identity must hold Container Apps Contributor scoped to the application only."
   }
+
+  assert {
+    condition     = length(regexall("resource \"azurerm_role_assignment\"", file("${path.module}/release-identity.tf"))) == 5 && length(regexall("role_definition_name\\s*=", file("${path.module}/release-identity.tf"))) == 5 && length(regexall("scope\\s*=", file("${path.module}/release-identity.tf"))) == 5
+    error_message = "release-identity.tf must declare exactly the five expected role assignments; an extra or broader assignment fails."
+  }
+
+  assert {
+    condition     = length(regexall("scope\\s*=\\s*(azurerm_container_registry[.]acr[.]id|azurerm_container_app[.]app[.]id|\"[$][{]azurerm_key_vault[.]kv[.]id[}]/(keys|certificates)/)", file("${path.module}/release-identity.tf"))) == 5
+    error_message = "Every workflow role must be scoped to the ACR, the application, the signing key, or the signing certificate; never to a subscription, resource group, or vault."
+  }
+
+  assert {
+    condition     = length(regexall("user_assigned_identity[.](build|release)[.]principal_id", join("\n", [for f in fileset(path.module, "*.tf") : file("${path.module}/${f}")]))) == 5
+    error_message = "Only the five expected role assignments may reference the build or release identity; no other configuration may grant them roles."
+  }
+
+  assert {
+    condition     = !can(regex("client_secret|storage_key|access_key|access_policy|azuread_application_password|admin_password", file("${path.module}/release-identity.tf")))
+    error_message = "The workflow identities must not be given a client secret, storage key, or Key Vault access policy."
+  }
 }
 
 run "release_outputs_contain_no_secrets" {
@@ -325,6 +355,16 @@ run "release_outputs_contain_no_secrets" {
   assert {
     condition     = !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.build_identity_client_id)) && !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.release_identity_client_id))
     error_message = "Release workflow outputs must not contain any credential, connection string, client secret, private key, or signing-key material."
+  }
+
+  assert {
+    condition     = length(regexall("output \"", file("${path.module}/release-identity.tf"))) == 2 && length(regexall("(?m)^\\s*value\\s*=\\s*azurerm_user_assigned_identity[.](build|release)[.]client_id\\s*$", file("${path.module}/release-identity.tf"))) == 2
+    error_message = "The release outputs must be exactly the two workflow client IDs; any other output value fails."
+  }
+
+  assert {
+    condition     = !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.build_identity_client_id)) && !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.release_identity_client_id))
+    error_message = "Release output values must contain no secret material."
   }
 }
 
