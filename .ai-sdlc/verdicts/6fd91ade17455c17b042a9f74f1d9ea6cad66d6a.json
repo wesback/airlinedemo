@@ -1,0 +1,319 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "6fd91ade17455c17b042a9f74f1d9ea6cad66d6a",
+  "round": 0,
+  "pipelineVersion": "1f5e120",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The log processor can export a rendered message unchanged when a record has no properties or scopes, and the trace processor retains sensitive tag names. The AC-01 exporter checks and AC-05 regression test also do not meet the issue’s stated verification requirements.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 122,
+          "message": "Formatted messages can bypass redaction when a log record has no properties or scopes, contrary to AC-05.",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingLogProcessor.OnEnd returns without changing FormattedMessage when the record has no attributes or scopes.",
+            "failureScenario": "A caller logs interpolated request text with no structured properties or scopes. The early return leaves the rendered message unchanged, so a canary credential or personal value can reach the log exporter. OWASP A04:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 143,
+          "message": "Trace redaction retains sensitive tag names instead of removing them as AC-03 requires.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd replaces the value for a sensitive span tag but retains the tag under its original key; the event-tag loop does the same.",
+            "failureScenario": "A caller adds a span tag or ActivityEvent attribute named prompt. The exporter receives the prompt name with a [redacted] value, although AC-03 requires sensitive names to be absent from captured tags and event attributes. OWASP A04:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 35,
+          "message": "The AC-01 tests rely on a marker rather than independently proving that both exporters are registered when configured and absent when the setting is missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The configured-connection test asserts ExporterRegistration flags set by exporter configuration callbacks; the absent-connection test checks only that this marker service is missing.",
+            "failureScenario": "If either exporter registration is removed while the marker flags remain, the positive test still passes. If an exporter is registered without the marker, the negative test still passes. Neither test independently inspects exporter registrations as AC-01 requires."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "AC-05 has no test in this change for the required no-properties formatted-message and exception-details behavior.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff adds DiagnosticsTests.cs but does not define the AC-05 test named DiagnosticsTests.Logging_pipeline_omits_formatted_message_and_exception_details_when_no_properties_or_scopes.",
+            "failureScenario": "If the no-properties early return leaves a canary formatted message exportable, the changed tests still pass because none asserts that AC-05 behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The exporter tests do not independently verify registration as AC-01 requires. AC-05 also has a reachable formatted-message leak, and AC-02's pipeline test does not verify that sensitive entries are dropped by name.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 25,
+          "message": "AC-01 requires independent inspection of both exporter registrations, including their absence when the setting is missing. These tests rely on a shared marker instead, so they can pass without proving that neither exporter is registered.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The positive test asserts DiagnosticsSetup.ExporterRegistration flags, and the negative test checks only that this marker is absent from the service collection.",
+            "failureScenario": "If an exporter is registered without the configured connection string, the negative test still passes. The positive test also relies on the shared setup flag, which AC-01 explicitly says does not prove registration."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 119,
+          "message": "AC-05 is not enforced for records without properties or scopes: the early return leaves FormattedMessage available to the exporter. Omit the formatted message and add the required regression test.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingLogProcessor.OnEnd returns when the record has no attributes or scopes, before clearing or replacing FormattedMessage.",
+            "failureScenario": "A log record with an empty attribute list and a formatted message containing a prompt, document text, or credential reaches the exporter with that message intact. The required AC-05 test is also absent. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 108,
+          "message": "AC-02's pipeline test does not prove sensitive entries are dropped by name. Assert that the listed sensitive names are absent from captured properties and scopes; currently a regression that retains them with placeholder values would pass.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The pipeline test checks that sensitive sentinel values are absent from captured output, but does not assert that sensitive property and scope names are absent.",
+            "failureScenario": "If the pipeline retains a sensitive entry such as `passcode` with value `[redacted]`, the sentinel assertions still pass, although AC-02 requires the entry itself to be dropped."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The logging processor can export an unstructured formatted message unchanged, which can expose request-derived sensitive text. The exporter tests also do not meet AC-01’s requirement to inspect registrations independently.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 122,
+          "message": "Formatted messages bypass redaction when a log record has no properties or scopes, allowing sensitive text to reach the exporter.",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingLogProcessor.OnEnd returns when there are no attributes or scopes, without clearing or replacing data.FormattedMessage.",
+            "failureScenario": "A caller logs request-derived text through an interpolated message with no structured properties or scopes, such as an authorization value. The processor returns with the original formatted message intact, so the log exporter can send the value to Application Insights. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 40,
+          "message": "The AC-01 tests do not inspect service registrations to independently prove that both exporters are present or absent.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The positive test asserts a shared ExporterRegistration flag, and the absent-setting test only checks that this marker service is missing; neither inspects exporter registrations as AC-01 requires.",
+            "failureScenario": "If an exporter is registered without the marker service while the connection string is absent, the negative test still passes. The tests therefore do not independently prove both exporters are absent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
