@@ -139,7 +139,9 @@ public sealed class PersistenceWiringTests
         var store = new CaseStateStore(file);
         var scope = store.AuthorizeCase("case-001", "presenter");
         Assert.Equal(2L, store.Read(scope).Revision);
-        Assert.Contains(store.ReadAudit(scope), e => e.Revision == 2 && e.Actor == "reviewer");
+        var reviewAudit = Assert.Single(store.ReadAudit(scope), e => e.Revision == 2);
+        Assert.Equal("reviewer", reviewAudit.Actor);
+        Assert.Contains("\"accept\"", reviewAudit.Detail);
     }
 
     [Fact]
