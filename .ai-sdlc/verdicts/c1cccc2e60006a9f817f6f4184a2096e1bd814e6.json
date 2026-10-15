@@ -1,0 +1,215 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 184,
+  "branch": "ai-sdlc/issue-184",
+  "commitSha": "c1cccc2e60006a9f817f6f4184a2096e1bd814e6",
+  "round": 0,
+  "pipelineVersion": "7c4f802",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reserve route checks authentication and case scope, and the obligations route follows the same checks. The obligations handler has a TimeProvider dependency that the tests register but the production setup does not.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Finance/FinanceEndpoints.cs",
+          "line": 45,
+          "message": "Register TimeProvider in the application service collection; the test-only registration masks its absence from the production host.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The mapped obligations GET handler takes TimeProvider as a parameter. The test factory registers TimeProvider in ConfigureTestServices, while Program.cs does not register it for the production host.",
+            "failureScenario": "When the production host starts without the test-only registration, ASP.NET Core cannot resolve TimeProvider for this GET handler and may infer it as a body parameter, causing endpoint construction to fail or the route request to fail."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reserve test would detect removal of its scope check, but the obligations test's missing-input 404 masks that regression. The named test also does not verify this scope behavior for the obligations route.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/FinanceEndpointsTests.cs",
+          "line": 124,
+          "message": "The obligations test does not prove the case-scope check is enforced. Seed an obligation for an out-of-scope case so the request would return 200 if the scope check were removed.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The obligations test requests case-999, but only seeds FinanceInputStore for case-001. If the case-scope check is removed, GetObligations still returns 404 because no obligation exists for case-999.",
+            "failureScenario": "Remove the obligations route's case-scope check and seed an obligation for case-999; a signed-in presenter then receives 200 instead of 404, while the current out-of-scope assertion still passes without that check."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new routes check for a valid session and case scope before returning finance data. I found no security defect reachable through the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/FinanceEndpointsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 30,
+      "total": 30,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Finance/FinanceEndpoints.cs",
+          "covered": 28,
+          "total": 28,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
