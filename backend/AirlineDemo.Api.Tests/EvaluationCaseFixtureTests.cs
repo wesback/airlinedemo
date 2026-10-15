@@ -17,6 +17,7 @@ public class EvaluationCaseFixtureTests
 
     private static readonly Regex CaseIdPattern = new(@"^EVAL-V1-[0-9]{2}$");
     private static readonly Regex IdentifierPattern = new(@"^SYN-[A-Z0-9]{3,16}$");
+    private static readonly Regex EmbeddedIdentifierPattern = new(@"\b[A-Z][A-Z0-9]*-[A-Z0-9][A-Z0-9-]*\b");
     private static readonly Regex RequirementIdPattern = new(@"^(FR|NFR|AC)-[0-9]{3}$");
     private static readonly Regex EmailPattern = new(@"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}");
     private static readonly Regex[] PhonePatterns =
@@ -137,6 +138,8 @@ public class EvaluationCaseFixtureTests
                     Assert.Matches(IdentifierPattern, value);
                     return;
                 }
+                foreach (Match identifier in EmbeddedIdentifierPattern.Matches(value))
+                    Assert.Matches(IdentifierPattern, identifier.Value);
                 Assert.DoesNotMatch(EmailPattern, value);
                 foreach (var phone in PhonePatterns)
                     Assert.DoesNotMatch(phone, value);
@@ -355,6 +358,17 @@ public class EvaluationCaseFixtureTests
         var noCitations = JsonNode.Parse(line)!.AsObject();
         noCitations["annotations"]!.AsObject().Remove("claimCitations");
         Assert.ThrowsAny<Exception>(() => AssertStructuredV2(noCitations.ToJsonString()));
+    }
+
+    [Fact]
+    public void V2RejectsNonSyntheticIdentifierInSourceText()
+    {
+        var line = V2Lines()[0];
+        var node = JsonNode.Parse(line)!.AsObject();
+        var page = node["inputs"]!["documents"]![0]!.AsObject();
+        page["pageText"] = page["pageText"]!.GetValue<string>() + "\nSerial: ABC-98765";
+        using var doc = JsonDocument.Parse(node.ToJsonString());
+        Assert.ThrowsAny<Exception>(() => CheckValue(doc.RootElement.GetProperty("inputs"), "", node.ToJsonString()));
     }
 
     [Fact]
