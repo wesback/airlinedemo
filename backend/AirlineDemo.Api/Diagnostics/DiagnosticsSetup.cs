@@ -69,6 +69,25 @@ public static class DiagnosticsSetup
 
         private static readonly Action<LogRecord> ClearScopeProvider = ResolveScopeProviderClearer();
 
+        // Maps the exception type to an allowlist-shaped identifier: System.InvalidOperationException -> invalid-operation,
+        // airline.demo.boom stays as is. Names that still fail the rule are omitted by the caller.
+        private static string ErrorTypeName(Exception exception)
+        {
+            var name = exception.GetType().FullName ?? exception.GetType().Name;
+            if (name.StartsWith("System.", StringComparison.Ordinal))
+            {
+                name = name["System.".Length..];
+            }
+
+            if (name.EndsWith("Exception", StringComparison.Ordinal) && name.Length > "Exception".Length)
+            {
+                name = name[..^"Exception".Length];
+            }
+
+            return string.Concat(name.Select((c, i) =>
+                i > 0 && char.IsUpper(c) ? "-" + char.ToLowerInvariant(c) : char.ToLowerInvariant(c).ToString()));
+        }
+
         private static Action<LogRecord> ResolveScopeProviderClearer()
         {
             var field = typeof(LogRecord).GetField("ScopeStorage", AnyInstance)
@@ -94,26 +113,20 @@ public static class DiagnosticsSetup
             }, source);
             ClearScopeProvider(data);
 
-            // Checked before exception metadata is added: an exception alone must not let formatted text through.
-            var hasStructuredData = source.Count > 0;
-
-            // Exception messages and stack traces are free text that the filter cannot check, so only an allowlisted error.type is kept.
+            // Exception messages and stack traces are free text that the filter cannot check, so only the exception's type name
+            // (mapped to a lowercase identifier) is kept as error.type, and only when it passes the allowlist.
             if (data.Exception is { } exception)
             {
-                var errorType = TelemetryRedaction.Redact(
-                    [new KeyValuePair<string, object?>("error.type", exception.GetType().FullName)]);
-                if (hasStructuredData
-                    && errorType.TryGetValue("error.type", out var allowedErrorType)
-                    && allowedErrorType != RedactionFilter.Redacted)
+                var errorType = ErrorTypeName(exception);
+                if (TelemetryRedaction.IsAllowedErrorType(errorType))
                 {
-                    source.Add(new KeyValuePair<string, object?>("error.type", allowedErrorType));
+                    source.Add(new KeyValuePair<string, object?>("error.type", errorType));
                 }
                 data.Exception = null;
             }
 
             // Body and rendered message are always replaced by the fixed text, so no interpolated or formatted message is exported.
-            // Without log properties, no attributes are kept either unless the scopes produced safe metadata.
-            data.Attributes = hasStructuredData ? RedactionFilter.RedactAttributes(source) : null;
+            data.Attributes = source.Count > 0 ? RedactionFilter.RedactAttributes(source) : null;
             data.Body = FixedLogBody;
             data.FormattedMessage = FixedLogBody;
         }

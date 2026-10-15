@@ -111,6 +111,14 @@ public static partial class RedactionFilter
             return true;
         }
 
+        // error.type is an identifier, so it must pass the allowlist rule wherever it appears (properties, scopes, tags); otherwise it is omitted.
+        if (key == "error.type"
+            && !TelemetryRedaction.IsAllowedErrorType(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty))
+        {
+            redacted = null;
+            return false;
+        }
+
         switch (value)
         {
             case null:

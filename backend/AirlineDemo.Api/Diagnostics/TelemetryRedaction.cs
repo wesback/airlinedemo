@@ -92,6 +92,8 @@ public static partial class TelemetryRedaction
     private static readonly Regex EnvironmentRule = new(@"^[a-z][a-z0-9\-]{0,31}$", RegexOptions.CultureInvariant);
     private static readonly Regex ErrorTypeRule = new(@"^[a-z][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
 
+    public static bool IsAllowedErrorType(string value) => ErrorTypeRule.IsMatch(value);
+
     // Each allowlisted key has a rule that accepts only its enumerated or structured identifier form.
     // Free text, and identifier-shaped content such as canaries, fail the rule and are replaced with Redacted.
     private static readonly Dictionary<string, Func<string, bool>> ValueRules = new(StringComparer.Ordinal)
