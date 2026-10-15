@@ -60,6 +60,21 @@ Each rule comes from a story that stopped for a person because it was missing (D
 - **No wishlist or hedge words, even as ordinary words.** The Definition-of-Ready gate rejects `TBD`, `TODO`, `XXX`, `FIXME`,
   `???`, "not sure", "decide later", "to be determined", "to be decided", "up to the dev" and the word "placeholder"
   anywhere outside a fenced code block. Write "template field", "token" or "parameter" instead.
+- **A merge that is itself a decision says so.** When the merge of the pull request is a person's approval or freeze (a frozen
+  fixture, a sign-off, a real-world run), put the line `Merge: person` in the story. The pipeline then stops the finished pull
+  request for that person and never merges it.
+
+### Before you finish (the implementing and fixing agent)
+
+The reviewers fail a pull request on the same few things, so check them before you stop (D142):
+
+1. **Every acceptance criterion has a test that proves it.** Name the test for each criterion. A test that would still pass if the behaviour were removed proves nothing: check that it fails without the change.
+2. **Assert exact values.** Headers, identifiers, counts, states and error text are compared whole, not with "contains" or "any".
+3. **One negative case per criterion** unless it is purely presentational: invalid input, a denied role, missing data, an out-of-scope id.
+4. **Security criteria: try to get around them.** Ask what a caller can do without the check (another role, an indirect reference, an unlisted path) and test that it fails.
+5. **Stay on the Files line.** If the change needs another file, say so in your final message instead of editing it.
+6. **No wishlist words** (TBD, TODO, "placeholder") in anything you write.
+7. **Run the full test command** and make it pass before you finish.
 
 ### Story template
 
