@@ -91,6 +91,18 @@ mock_provider "azurerm" {
     }
   }
 
+  mock_resource "azurerm_key_vault_key" {
+    defaults = {
+      resource_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/keys/release-image-signing"
+    }
+  }
+
+  mock_resource "azurerm_key_vault_certificate" {
+    defaults = {
+      resource_manager_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-image-signing"
+    }
+  }
+
   mock_resource "azurerm_container_app_environment" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/managedEnvironments/cae-demo-test"

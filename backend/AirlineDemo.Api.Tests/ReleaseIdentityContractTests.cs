@@ -38,6 +38,13 @@ public sealed class ReleaseIdentityContractTests
 
     private const int MaxIndirectionDepth = 5;
 
+    // Pre-existing role assignments that resolve through variables or locals. Any other indirect grant fails.
+    private static readonly HashSet<(string File, string Block)> ExistingIndirectGrants = new()
+    {
+        ("main.tf", "terraform_contributor"),
+        ("identity-and-telemetry.tf", "telemetry_reader"),
+    };
+
     // RELEASE-ID-01: exactly one Terraform grant gives the app identity a role on the ACR, and it is AcrPull.
     [Fact]
     public void App_identity_has_exactly_one_acr_role_assignment()
@@ -66,6 +73,11 @@ public sealed class ReleaseIdentityContractTests
 
             foreach (var (blockName, body) in RoleAssignmentBlocks(text))
             {
+                if (ExistingIndirectGrants.Contains((fileName, blockName)))
+                {
+                    continue;
+                }
+
                 foreach (var attribute in new[] { "principal_id", "scope" })
                 {
                     var match = Regex.Match(body, $@"^\s*{attribute}\s*=\s*(?<expr>.+?)\s*$", RegexOptions.Multiline);
@@ -83,6 +95,52 @@ public sealed class ReleaseIdentityContractTests
 
         var terraform = string.Join("\n", files.Select(f => f.Text));
         Assert.Equal(new[] { "AcrPull" }, AppAcrGrantRoles(terraform));
+    }
+
+    // Behaviour test for the release identity contracts: identities, federation, grants and outputs in release-identity.tf.
+    [Fact]
+    public void Release_identity_contracts_are_complete()
+    {
+        var root = Path.Combine(FindRepoRoot(), "infra", "terraform");
+        var release = File.ReadAllText(Path.Combine(root, "release-identity.tf"));
+        var allTerraform = string.Join("\n", ReadTerraformFiles().Select(f => f.Text));
+
+        Assert.Equal(
+            new[] { "build", "release" },
+            Regex.Matches(release, @"^resource\s+""azurerm_user_assigned_identity""\s+""(?<n>[^""]+)""", RegexOptions.Multiline)
+                .Select(m => m.Groups["n"].Value).ToArray());
+
+        Assert.Equal(
+            new[] { "wesback/airlinedemo" },
+            Regex.Matches(release, @"github_repository\s*=\s*""([^""]+)""").Select(m => m.Groups[1].Value).ToArray());
+        Assert.Equal(
+            new[] { "api://AzureADTokenExchange" },
+            Regex.Matches(release, @"github_audience\s*=\s*""([^""]+)""").Select(m => m.Groups[1].Value).Distinct().ToArray());
+        Assert.Equal(
+            new[] { "repo:${local.github_repository}:ref:refs/heads/main", "repo:${local.github_repository}:environment:production-release" },
+            Regex.Matches(release, @"subject\s*=\s*""(repo:[^""]+)""").Select(m => m.Groups[1].Value).ToArray());
+        Assert.Equal(
+            new[] { "[local.github_audience]", "[local.github_audience]" },
+            Regex.Matches(release, @"audience\s*=\s*(\[[^\]]+\])").Select(m => m.Groups[1].Value).ToArray());
+
+        Assert.Equal(
+            new (string Name, string Role)[]
+            {
+                ("build_acr_push", "AcrPush"),
+                ("release_acr_push", "AcrPush"),
+                ("release_signing_key", "Key Vault Crypto User"),
+                ("release_signing_certificate", "Key Vault Certificate User"),
+                ("release_container_app", "Container Apps Contributor"),
+            },
+            RoleAssignmentBlocks(release)
+                .Select(b => (Name: b.Name, Role: RoleDefinitionName.Match(b.Body).Groups[1].Value))
+                .ToArray());
+
+        Assert.Equal(new[] { "AcrPull" }, AppAcrGrantRoles(allTerraform));
+
+        Assert.Equal(
+            new[] { "build_identity_client_id", "release_identity_client_id" },
+            Regex.Matches(release, @"^output\s+""([^""]+)""", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToArray());
     }
 
     [Fact]
@@ -335,6 +393,36 @@ public sealed class ReleaseIdentityContractTests
         const string terraform = """
             resource "azurerm_role_assignment" "app_acr_push_described" {
               description          = "grants push; see docs {v2}} and # not a comment"
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+              scope                = azurerm_container_registry.acr.id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void Brace_inside_line_comment_does_not_end_role_assignment_block()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "app_acr_push_line_comment" {
+              # closing brace } before the attributes
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+              scope                = azurerm_container_registry.acr.id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void Brace_inside_block_comment_does_not_end_role_assignment_block()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "app_acr_push_block_comment" {
+              /* closing brace } inside a block comment */
               role_definition_name = "AcrPush"
               principal_id         = azurerm_user_assigned_identity.app.principal_id
               scope                = azurerm_container_registry.acr.id

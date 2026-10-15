@@ -63,14 +63,50 @@ resource "azurerm_role_assignment" "release_acr_push" {
   principal_id         = azurerm_user_assigned_identity.release.principal_id
 }
 
+resource "azurerm_key_vault_key" "signing" {
+  name         = var.signing_key_name
+  key_vault_id = azurerm_key_vault.kv.id
+  key_type     = "RSA"
+  key_size     = 3072
+  key_opts     = ["sign", "verify"]
+}
+
+resource "azurerm_key_vault_certificate" "signing" {
+  name         = var.signing_certificate_name
+  key_vault_id = azurerm_key_vault.kv.id
+
+  certificate_policy {
+    issuer_parameters {
+      name = "Self"
+    }
+
+    key_properties {
+      exportable = false
+      key_size   = 3072
+      key_type   = "RSA"
+      reuse_key  = true
+    }
+
+    secret_properties {
+      content_type = "application/x-pkcs12"
+    }
+
+    x509_certificate_properties {
+      subject            = "CN=airline-demo-release-signing"
+      key_usage          = ["digitalSignature"]
+      validity_in_months = 12
+    }
+  }
+}
+
 resource "azurerm_role_assignment" "release_signing_key" {
-  scope                = "${azurerm_key_vault.kv.id}/keys/${var.signing_key_name}"
+  scope                = azurerm_key_vault_key.signing.resource_versionless_id
   role_definition_name = "Key Vault Crypto User"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
 }
 
 resource "azurerm_role_assignment" "release_signing_certificate" {
-  scope                = "${azurerm_key_vault.kv.id}/certificates/${var.signing_certificate_name}"
+  scope                = azurerm_key_vault_certificate.signing.resource_manager_id
   role_definition_name = "Key Vault Certificate User"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
 }
