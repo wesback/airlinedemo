@@ -68,12 +68,14 @@ public class ContainerHostingContractTests
         Assert.Matches(@"allow_insecure_connections\s*=\s*false", ingress);
         Assert.Matches(@"for_each\s*=\s*local\.presenter_reviewer_rules", ingress);
         Assert.Matches(@"presenter_reviewer_rules\s*=\s*\{[^}]*var\.presenter_reviewer_cidrs", main);
-        Assert.Matches(@"action\s*=\s*""Allow""", ingress);
-        // Each Allow rule is bound to one configured CIDR, so no other caller address is permitted.
-        Assert.Matches(@"ip_address_range\s*=\s*ip_security_restriction\.value", ingress);
-        // Empty presenter_reviewer_cidrs produces a Deny-all ingress restriction for every caller.
+        // Exactly one Allow and one Deny restriction, so no additional broad ingress rule can be added.
+        Assert.Single(Regex.Matches(ingress, @"action\s*=\s*""Allow"""));
+        Assert.Single(Regex.Matches(ingress, @"action\s*=\s*""Deny"""));
+        // The Allow restriction is bound to the configured CIDR for its own entry.
+        Assert.Matches(@"name\s*=\s*""presenter-reviewer-\$\{ip_security_restriction\.key\}""[\s\S]*?action\s*=\s*""Allow""[\s\S]*?ip_address_range\s*=\s*ip_security_restriction\.value", ingress);
+        // Empty presenter_reviewer_cidrs produces only a Deny-all restriction on 0.0.0.0/0 and no Allow entries.
         Assert.Matches(@"length\(var\.presenter_reviewer_cidrs\)\s*==\s*0\s*\?\s*toset\(\[""0\.0\.0\.0/0""\]\)\s*:\s*toset\(\[\]\)", ingress);
-        Assert.Matches(@"action\s*=\s*""Deny""", ingress);
+        Assert.Matches(@"name\s*=\s*""deny-all-empty-allowlist""[\s\S]*?action\s*=\s*""Deny""[\s\S]*?ip_address_range\s*=\s*ip_security_restriction\.value", ingress);
 
         var ingressDeny = Block(main, "resource \"azurerm_network_security_rule\" \"ingress_deny_all\"");
         Assert.Matches(@"access\s*=\s*""Deny""", ingressDeny);
@@ -106,10 +108,12 @@ public class ContainerHostingContractTests
         // Microsoft-managed encryption: no customer-managed key block on the Storage account.
         Assert.DoesNotMatch(@"customer_managed_key", storage);
 
-        // The azurerm provider exposes no TLS-version argument for Cognitive Services accounts, so TLS 1.2
-        // cannot be set in configuration here. The model account is pinned to Microsoft-managed encryption
-        // (no customer-managed key), no local auth, and public access disabled.
+        // The azurerm provider exposes no TLS-version argument for Cognitive Services accounts, so the TLS 1.2
+        // floor is the platform default and is verified by review, not by this test. This check only ensures
+        // the configuration sets no TLS override that could lower it. The model account is pinned to
+        // Microsoft-managed encryption (no customer-managed key), no local auth, and public access disabled.
         var model = Block(main, "resource \"azurerm_cognitive_account\" \"model\"");
+        Assert.DoesNotMatch(@"(?i)tls", model);
         Assert.DoesNotMatch(@"customer_managed_key", model);
         Assert.Matches(@"local_auth_enabled\s*=\s*false", model);
         Assert.Matches(@"public_network_access_enabled\s*=\s*false", model);
@@ -155,13 +159,15 @@ public class ContainerHostingContractTests
         var egressAllowRule = Block(main, "resource \"azurerm_network_security_rule\" \"egress_allow\"");
         Assert.Matches(@"for_each\s*=\s*local\.egress_rules", egressAllowRule);
         Assert.Matches(@"destination_address_prefix\s*=\s*each\.value", egressAllowRule);
-        // No other Allow rule may reach a wildcard or any-IPv4 destination.
+        // Every Allow rule must target only an approved destination: the private-endpoint subnet, the app subnet,
+        // or one configured egress destination. Service tags such as Internet or VirtualNetwork are rejected.
         foreach (Match rule in Regex.Matches(main, @"resource\s+""azurerm_network_security_rule""\s+""\w+""\s*\{"))
         {
             var ruleBlock = Block(main, rule.Value);
             if (Regex.IsMatch(ruleBlock, @"access\s*=\s*""Allow"""))
             {
-                Assert.DoesNotMatch(@"destination_address_prefix\s*=\s*""(\*|0\.0\.0\.0/0)""", ruleBlock);
+                Assert.DoesNotMatch(@"destination_address_prefixes\s*=", ruleBlock);
+                Assert.Matches(@"(?m)^\s*destination_address_prefix\s*=\s*(var\.app_subnet_cidr|var\.private_endpoint_subnet_cidr|each\.value)\s*$", ruleBlock);
             }
         }
 
