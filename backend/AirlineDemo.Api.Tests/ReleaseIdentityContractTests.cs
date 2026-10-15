@@ -12,8 +12,7 @@ public sealed class ReleaseIdentityContractTests
 
     private static readonly Regex AppIdentityReference = new(@"azurerm_user_assigned_identity\.app\b");
 
-    private static readonly Regex BuildOrReleasePrincipal = new(
-        @"(?m)^\s*principal_id\s*=\s*azurerm_user_assigned_identity\.(build|release)\.principal_id\s*$");
+    private static readonly Regex PrincipalAttribute = new(@"^\s*principal_id\s*=\s*(?<expr>.+)$", RegexOptions.Multiline);
 
     private static readonly Regex ScopeAttribute = new(@"^\s*scope\s*=\s*(?<expr>.+)$", RegexOptions.Multiline);
 
@@ -188,13 +187,51 @@ public sealed class ReleaseIdentityContractTests
         Assert.Empty(AppAcrGrantRoles(terraform));
     }
 
+    [Fact]
+    public void App_grant_to_unrelated_identity_is_not_counted()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "other_acr_push" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.other.principal_id
+            }
+
+            resource "azurerm_role_assignment" "other_storage_acr_push" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_storage_account.store.identity[0].principal_id
+            }
+            """;
+
+        Assert.Empty(AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void Grant_through_local_build_principal_is_not_counted()
+    {
+        const string terraform = """
+            locals {
+              build_principal = azurerm_user_assigned_identity.build.principal_id
+            }
+
+            resource "azurerm_role_assignment" "build_via_local" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPush"
+              principal_id         = local.build_principal
+            }
+            """;
+
+        Assert.Empty(AppAcrGrantRoles(terraform));
+    }
+
     private static List<string> AppAcrGrantRoles(string terraform)
     {
         var roles = new List<string>();
         foreach (Match block in RoleAssignmentBlock.Matches(terraform))
         {
             var body = block.Groups["body"].Value;
-            if (!MayGrantToApp(body) || !MayScopeToAcr(terraform, body))
+            if (!MayGrantToApp(terraform, body) || !MayScopeToAcr(terraform, body))
             {
                 continue;
             }
@@ -206,10 +243,48 @@ public sealed class ReleaseIdentityContractTests
         return roles;
     }
 
-    // Fails closed: a principal that is not literally the build or release identity (a module output, local, variable
-    // or the app identity itself) may be the app identity, so the grant is counted.
-    private static bool MayGrantToApp(string roleAssignmentBody) =>
-        AppIdentityReference.IsMatch(roleAssignmentBody) || !BuildOrReleasePrincipal.IsMatch(roleAssignmentBody);
+    // Fails closed: a principal that cannot be shown to be another resource (a literal, or a module or variable output)
+    // may be the app identity, so the grant is counted. Locals are followed to their definitions.
+    private static bool MayGrantToApp(string terraform, string roleAssignmentBody)
+    {
+        var principal = PrincipalAttribute.Match(roleAssignmentBody);
+        return !principal.Success || MayResolveToApp(terraform, principal.Groups["expr"].Value, MaxIndirectionDepth);
+    }
+
+    private static bool MayResolveToApp(string terraform, string expression, int depth)
+    {
+        if (AppIdentityReference.IsMatch(expression))
+        {
+            return true;
+        }
+
+        var references = IndirectReference.Matches(expression);
+        if (references.Count == 0)
+        {
+            return !ResourceOrDataReference.IsMatch(expression);
+        }
+
+        if (depth == 0)
+        {
+            return true;
+        }
+
+        foreach (Match reference in references)
+        {
+            if (reference.Groups[1].Value != "local")
+            {
+                return true;
+            }
+
+            var definition = DefinitionText(terraform, reference.Groups[2].Value);
+            if (definition is null || MayResolveToApp(terraform, definition, depth - 1))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // Fails closed: a scope that cannot be shown to avoid the ACR is treated as an ACR grant.
     private static bool MayScopeToAcr(string terraform, string roleAssignmentBody)
