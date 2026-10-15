@@ -370,11 +370,15 @@ public sealed class CaseStateStoreTests : IDisposable
         var created = store.CreateWorkItem(scope, 0, new WorkItemDraft("item-1", "cap-1", "open", Owner), "presenter");
         Assert.Equal(1, created.State.Revision);
         Assert.Equal(auditBefore + 1, store.ReadAudit(scope).Count);
+        var createdAudit = store.ReadAudit(scope)[auditBefore];
+        Assert.Equal(("presenter", "create-work-item", "item-1", 1L), (createdAudit.Actor, createdAudit.Action, createdAudit.Detail, createdAudit.Revision));
 
         var changed = store.ChangeWorkItemState(scope, 1, "item-1", "closed", "reviewer");
         Assert.Equal(2, changed.State.Revision);
         Assert.Equal("closed", Assert.Single(store.ListWorkItems(scope)).State);
         Assert.Equal(auditBefore + 2, store.ReadAudit(scope).Count);
+        var changeAudit = store.ReadAudit(scope)[auditBefore + 1];
+        Assert.Equal(("reviewer", "change-work-item-state", "item-1 -> closed", 2L), (changeAudit.Actor, changeAudit.Action, changeAudit.Detail, changeAudit.Revision));
 
         var auditAfter = store.ReadAudit(scope).Count;
         Assert.Throws<RevisionConflictException>(() => store.ChangeWorkItemState(scope, 1, "item-1", "reopened", "reviewer"));
