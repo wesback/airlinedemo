@@ -1,0 +1,258 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 239,
+  "branch": "ai-sdlc/issue-239",
+  "commitSha": "53f41c21586f8682b078e8ba238f68b04de23aea",
+  "round": 0,
+  "pipelineVersion": "dde1b91",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The configured provider registrations and case endpoint paths appear wired to the persistent stores, and the named CI job runs the .NET tests. The restart test leaves the decision persistence requirement unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 142,
+          "message": "The restart test does not assert that the recorded decision survives or is identified by the persisted audit event, as required by the acceptance criterion.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Case_endpoints_preserve_state_across_host_restart checks the post-restart revision and then checks only the audit event's revision and actor.",
+            "failureScenario": "If the store preserves revision 2 and an audit event for reviewer but drops the recorded decision and its details, these assertions still pass; the test does not verify that the decision or audit event identifies the decision persisted."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The persistence and endpoint tests cover the main wiring and restart behavior. The restart test does not verify that the persisted audit event records the accepted decision.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 145,
+          "message": "The restart test does not verify the decision in the persisted audit event. Assert that the audit entry identifies \"accept\".",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Case_endpoints_preserve_state_across_host_restart checks that the response contains \"accept\", then checks the persisted audit event only for revision and actor.",
+            "failureScenario": "If the response says \"accept\" but the persisted audit event records a different decision or omits the decision, the test still passes. The acceptance criterion requires the audit event to identify the recorded decision."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete exploitable security vulnerability in the changed code. The restart test leaves the decision-persistence behavior unverified, contrary to the acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+          "line": 125,
+          "message": "The restart test does not verify that the recorded decision persists; assert the decision in the post-restart case or audit data.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Case_endpoints_preserve_state_across_host_restart reads the case after recreating the host, then checks only its revision; its audit assertion checks revision and actor, not the decision.",
+            "failureScenario": "If the file store persists the revision and audit metadata but loses the recorded decision, this test still passes. The acceptance criterion requires verifying that the decision persists across the restart."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 4,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AuthBoundaryTests.cs",
+      "backend/AirlineDemo.Api.Tests/CaseSeed.cs",
+      "backend/AirlineDemo.Api.Tests/PersistenceWiringTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 50,
+      "total": 58,
+      "percent": 86.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CaseEndpoints.cs",
+          "covered": 25,
+          "total": 26,
+          "missed": [
+            92
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/EvidenceBlobStoreRegistration.cs",
+          "covered": 15,
+          "total": 17,
+          "missed": [
+            25,
+            26
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 9,
+          "total": 14,
+          "missed": [
+            383,
+            384,
+            385,
+            398,
+            399
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
