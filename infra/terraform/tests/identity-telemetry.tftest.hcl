@@ -150,6 +150,42 @@ variables {
   }
 }
 
+# This run must stay first: override_resource values apply only when a resource is created,
+# and Terraform 1.9 test runs share state, so it needs the freshly created identities.
+run "M-14_app_grants_bind_to_app_principal_not_migration" {
+  command = apply
+
+  override_resource {
+    target = azurerm_user_assigned_identity.app
+    values = {
+      principal_id = "55555555-5555-5555-5555-555555555555"
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app-mock"
+    }
+  }
+
+  override_resource {
+    target = azurerm_user_assigned_identity.migration
+    values = {
+      principal_id = "66666666-6666-6666-6666-666666666666"
+    }
+  }
+
+  assert {
+    condition     = azurerm_user_assigned_identity.app.principal_id != azurerm_user_assigned_identity.migration.principal_id
+    error_message = "App and migration identities must have distinct principals for the grant binding test to be meaningful."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.app_openai_user.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_evidence.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_telemetry.principal_id == azurerm_user_assigned_identity.app.principal_id
+    error_message = "Every app role assignment must be bound to the app workload identity principal."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.migration_sql.principal_id == azurerm_user_assigned_identity.migration.principal_id
+    error_message = "The migration identity grant must be bound to the migration identity principal."
+  }
+}
+
 run "M-14_app_identity_grants_are_exact" {
   command = apply
 
@@ -265,41 +301,6 @@ run "M-14_grants_bind_to_app_identity_as_service_principal" {
   assert {
     condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "SCHEMA::audit")]) == 0
     error_message = "No app SQL grant or deny may target the whole audit schema; only audit.case_events."
-  }
-}
-
-run "M-14_app_grants_bind_to_app_principal_not_migration" {
-  command   = apply
-  state_key = "m14-principal-binding"
-
-  override_resource {
-    target = azurerm_user_assigned_identity.app
-    values = {
-      principal_id = "55555555-5555-5555-5555-555555555555"
-      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app-mock"
-    }
-  }
-
-  override_resource {
-    target = azurerm_user_assigned_identity.migration
-    values = {
-      principal_id = "66666666-6666-6666-6666-666666666666"
-    }
-  }
-
-  assert {
-    condition     = azurerm_user_assigned_identity.app.principal_id != azurerm_user_assigned_identity.migration.principal_id
-    error_message = "App and migration identities must have distinct principals for the grant binding test to be meaningful."
-  }
-
-  assert {
-    condition     = azurerm_role_assignment.app_openai_user.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_evidence.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_telemetry.principal_id == azurerm_user_assigned_identity.app.principal_id
-    error_message = "Every app role assignment must be bound to the app workload identity principal."
-  }
-
-  assert {
-    condition     = azurerm_role_assignment.migration_sql.principal_id == azurerm_user_assigned_identity.migration.principal_id
-    error_message = "The migration identity grant must be bound to the migration identity principal."
   }
 }
 
