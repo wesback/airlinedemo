@@ -275,7 +275,7 @@ resource "azurerm_role_assignment" "terraform_contributor" {
   # Fails the plan if this existing Contributor grant would go to a workflow identity.
   lifecycle {
     precondition {
-      condition     = var.terraform_principal_object_id != azurerm_user_assigned_identity.build.principal_id && var.terraform_principal_object_id != azurerm_user_assigned_identity.release.principal_id
+      condition     = lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.build.principal_id) && lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.release.principal_id)
       error_message = "terraform_principal_object_id must not be the build or release workflow identity, or the Contributor grant would hand that workflow subscription-wide rights."
     }
   }
