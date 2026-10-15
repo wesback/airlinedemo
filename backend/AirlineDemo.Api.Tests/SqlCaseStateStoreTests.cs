@@ -19,6 +19,7 @@ public sealed class SqlCaseStateStoreTests
     private static readonly string[] InterfaceMethods =
     [
         "AuthorizeCase", "OwnerOf", "CreateCase", "Read", "GetBasisVersion", "ReadAudit", "Commit",
+        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState",
     ];
 
     // AC1: interface contract and file-backed registration; no database connection.
@@ -286,6 +287,45 @@ public sealed class SqlCaseStateStoreTests
         Assert.NotNull(type);
         Assert.Equal(schema, type.GetSchema());
         Assert.Equal(table, type.GetTableName());
+    }
+
+    // QW-01 to QW-03 over the EF/SQLite store: persistence, validation, scope, revision and audit.
+    [Fact]
+    public void QW01_to_QW03_work_items_persist_validate_scope_and_audit_in_sqlite()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var before = DateTimeOffset.UtcNow;
+        var scope = store.CreateCase("case-a", "owner-a");
+        var other = store.CreateCase("case-b", "owner-b");
+        var auditBefore = CountAuditEvents(options);
+
+        var created = store.CreateWorkItem(scope, 0, new WorkItemDraft("item-1", "cap-1", "open", "owner-a"), "presenter");
+        Assert.Equal(1, created.State.Revision);
+        store.CreateWorkItem(other, 0, new WorkItemDraft("item-1", "cap-1", "open", "owner-b"), "presenter");
+        Assert.Equal(auditBefore + 2, CountAuditEvents(options));
+
+        Assert.Throws<ArgumentException>(() => store.CreateWorkItem(scope, 1, new WorkItemDraft("item-2", " ", "open", "owner-a"), "presenter"));
+        Assert.Throws<InvalidOperationException>(() => store.CreateWorkItem(scope, 1, new WorkItemDraft("item-1", "cap-2", "open", "owner-a"), "presenter"));
+        Assert.Equal(1, store.Read(scope).Revision);
+
+        var reloaded = new SqlCaseStateStore(options);
+        var reloadedScope = reloaded.AuthorizeCase("case-a", "owner-a");
+        var item = Assert.Single(reloaded.ListWorkItems(reloadedScope));
+        Assert.Equal(("case-a", "item-1", "cap-1", "open", "owner-a"), (item.CaseId, item.ItemId, item.CapabilityId, item.State, item.Owner));
+        Assert.InRange(item.CreatedAt, before, DateTimeOffset.UtcNow);
+        Assert.Equal("item-1", Assert.Single(reloaded.ListWorkItems(reloaded.AuthorizeCase("case-b", "owner-b"))).ItemId);
+        Assert.Throws<CaseAccessDeniedException>(() => reloaded.AuthorizeCase("case-a", "owner-b"));
+
+        var auditAfterCreate = CountAuditEvents(options);
+        var changed = reloaded.ChangeWorkItemState(reloadedScope, 1, "item-1", "closed", "reviewer");
+        Assert.Equal(2, changed.State.Revision);
+        Assert.Equal(auditAfterCreate + 1, CountAuditEvents(options));
+
+        Assert.Throws<RevisionConflictException>(() => reloaded.ChangeWorkItemState(reloadedScope, 1, "item-1", "reopened", "reviewer"));
+        Assert.Equal("closed", Assert.Single(reloaded.ListWorkItems(reloadedScope)).State);
+        Assert.Equal(2, reloaded.Read(reloadedScope).Revision);
+        Assert.Equal(auditAfterCreate + 1, CountAuditEvents(options));
     }
 
     private static string SourceDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;

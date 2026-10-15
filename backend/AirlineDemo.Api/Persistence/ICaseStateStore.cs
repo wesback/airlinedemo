@@ -19,4 +19,10 @@ public interface ICaseStateStore
     IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope);
 
     CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit);
+
+    IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope);
+
+    CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor);
+
+    CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor);
 }
