@@ -168,6 +168,11 @@ public class ContainerHostingContractTests
             {
                 Assert.DoesNotMatch(@"destination_address_prefixes\s*=", ruleBlock);
                 Assert.Matches(@"(?m)^\s*destination_address_prefix\s*=\s*(var\.app_subnet_cidr|var\.private_endpoint_subnet_cidr|each\.value)\s*$", ruleBlock);
+                // each.value is only a safe destination when the rule iterates the configured egress allowlist.
+                if (Regex.IsMatch(ruleBlock, @"destination_address_prefix\s*=\s*each\.value"))
+                {
+                    Assert.Matches(@"(?m)^\s*for_each\s*=\s*local\.egress_rules\s*$", ruleBlock);
+                }
             }
         }
 
