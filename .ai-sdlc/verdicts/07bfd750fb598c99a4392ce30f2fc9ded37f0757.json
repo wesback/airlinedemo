@@ -1,0 +1,225 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 251,
+  "branch": "ai-sdlc/issue-251",
+  "commitSha": "07bfd750fb598c99a4392ce30f2fc9ded37f0757",
+  "round": 0,
+  "pipelineVersion": "dde1b91",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The manifest and request gate enforce an exact swedencentral match. The validation test leaves two formerly allowed regions uncovered, so it would not catch their accidental reintroduction.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs",
+          "line": 325,
+          "message": "The AC: MODEL-REGION-01 test omits the previously allowed regions westus and westus3; add both to the rejection cases.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Region_is_fixed_to_sweden_central supplies the rejected values to ApprovedModelManifest.Validate, but its list omits westus and westus3, which were in the previous RegionPattern allowlist.",
+            "failureScenario": "If the validation regex accidentally permits westus or westus3 again, this test still passes, so AC: MODEL-REGION-01's test does not verify rejection of every previously allowed region."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new tests cover the exact Sweden Central value, mismatched and missing request regions, and the shipped stub manifest. The region validation test omits two regions from the previous allowlist, leaving that part of AC: MODEL-REGION-01 unguarded.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs",
+          "line": 327,
+          "message": "Add westus and westus3 to the rejected-region cases so the test covers every previously allowed region required by AC: MODEL-REGION-01.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Region_is_fixed_to_sweden_central passes each listed value to ApprovedModelManifest.Validate, but the list omits westus and westus3, which were in the previous allowlist.",
+            "failureScenario": "If the region pattern later allows westus or westus3, this test still passes, so the regression that violates AC: MODEL-REGION-01 is not caught."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The manifest and request gate enforce the exact Sweden Central value. The region validation test omits two previously allowed regions, leaving that part of the boundary unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs",
+          "line": 327,
+          "message": "AC: MODEL-REGION-01 is missing negative cases for westus and westus3 in Region_is_fixed_to_sweden_central.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Region_is_fixed_to_sweden_central checks only the values listed in its region array; it omits westus and westus3, which the previous allowlist accepted.",
+            "failureScenario": "If the manifest allowlist regresses to accept westus or westus3, this named test still passes, so AC: MODEL-REGION-01's rejection of every previously allowed region is not verified."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ApprovedModelManifestTests.cs",
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationLimitsTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigatorInjectionTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 2,
+      "total": 2,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/ApprovedModelManifest.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
