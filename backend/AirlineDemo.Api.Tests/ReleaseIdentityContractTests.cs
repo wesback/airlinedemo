@@ -142,6 +142,19 @@ public sealed class ReleaseIdentityContractTests
         Assert.Equal(
             new[] { "build_identity_client_id", "release_identity_client_id" },
             Regex.Matches(release, @"^output\s+""([^""]+)""", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToArray());
+
+        // The existing terraform_principal_object_id grant (Contributor) must never resolve to a workflow identity.
+        var testFile = File.ReadAllText(Path.Combine(root, "tests", "release-identity.tftest.hcl"));
+        var inputPrincipal = Regex.Match(testFile, @"^\s*terraform_principal_object_id\s*=\s*""([^""]+)""", RegexOptions.Multiline).Groups[1].Value;
+        var workflowPrincipals = Regex.Matches(
+                testFile,
+                @"target\s*=\s*azurerm_user_assigned_identity\.(build|release)\s*values\s*=\s*\{[^}]*?principal_id\s*=\s*""([^""]+)""",
+                RegexOptions.Singleline)
+            .Select(m => m.Groups[2].Value)
+            .ToArray();
+        Assert.NotEmpty(workflowPrincipals);
+        Assert.NotEmpty(inputPrincipal);
+        Assert.All(workflowPrincipals, p => Assert.NotEqual(inputPrincipal, p));
     }
 
     [Fact]

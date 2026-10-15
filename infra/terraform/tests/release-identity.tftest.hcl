@@ -454,4 +454,9 @@ run "federated_identities_are_distinct_principals" {
     condition     = azurerm_user_assigned_identity.build.name != azurerm_user_assigned_identity.release.name && azurerm_federated_identity_credential.build.name != azurerm_federated_identity_credential.release.name
     error_message = "Build and release must be separate identities so a build cannot release."
   }
+
+  assert {
+    condition     = var.terraform_principal_object_id != azurerm_user_assigned_identity.build.principal_id && var.terraform_principal_object_id != azurerm_user_assigned_identity.release.principal_id
+    error_message = "The terraform_principal_object_id input must not resolve to the build or release workflow identity, or the existing Contributor grant would hand a workflow identity subscription-wide rights."
+  }
 }
