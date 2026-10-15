@@ -85,6 +85,21 @@ run "model_deployment_inputs_are_required" {
     condition     = azurerm_cognitive_deployment.model.model[0].name == var.model_name && azurerm_cognitive_deployment.model.model[0].version == var.model_version
     error_message = "The model deployment must use the model_name and model_version inputs."
   }
+
+  assert {
+    condition     = var.model_deployment_name != null && !can(regex("(?m)^\\s+default\\s*=", regex("(?ms)^variable \"model_deployment_name\" \\{.*?^\\}", file("variables.tf"))))
+    error_message = "model_deployment_name must be a required input with no default value."
+  }
+
+  assert {
+    condition     = var.model_name != null && !can(regex("(?m)^\\s+default\\s*=", regex("(?ms)^variable \"model_name\" \\{.*?^\\}", file("variables.tf"))))
+    error_message = "model_name must be a required input with no default value."
+  }
+
+  assert {
+    condition     = var.model_version != null && !can(regex("(?m)^\\s+default\\s*=", regex("(?ms)^variable \"model_version\" \\{.*?^\\}", file("variables.tf"))))
+    error_message = "model_version must be a required input with no default value."
+  }
 }
 
 run "rejects_empty_model_deployment_name" {
@@ -132,12 +147,12 @@ run "model_endpoint_remains_private_and_keyless" {
   }
 
   assert {
-    condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
+    condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*private_dns_zone_name\\s*=\\s*azurerm_private_dns_zone\\.demo\\[each\\.key\\]\\.name.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
     error_message = "The model privatelink.openai.azure.com zone must be linked to the demo VNet."
   }
 
   assert {
-    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && length(azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].private_dns_zone_ids) == 1
+    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && length(azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].private_dns_zone_ids) == 1 && can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-[^\"]*\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf"))) && can(regex("zone\\s*=\\s*\"model\"\\s*\\}", file("main.tf")))
     error_message = "The model private endpoint must register in its DNS zone group with exactly one private DNS zone."
   }
 }
