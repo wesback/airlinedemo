@@ -14,14 +14,6 @@ public static class DiagnosticsSetup
 {
     public const string ConnectionStringSetting = "APPLICATIONINSIGHTS_CONNECTION_STRING";
 
-    // Records which exporters were actually attached. Flags are set inside the exporter configuration
-    // callbacks, so they become true only when the logger/tracer providers are built.
-    public sealed class ExporterRegistration
-    {
-        public bool Logs { get; internal set; }
-        public bool Traces { get; internal set; }
-    }
-
     public static IServiceCollection AddAirlineDiagnostics(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration[ConnectionStringSetting];
@@ -30,16 +22,12 @@ public static class DiagnosticsSetup
             return services;
         }
 
-        var registration = new ExporterRegistration();
-        services.AddSingleton(registration);
-
         services.AddLogging(logging => logging.AddOpenTelemetry(logs =>
         {
             logs.AddRedaction();
             logs.AddAzureMonitorLogExporter(o =>
             {
                 o.ConnectionString = connectionString;
-                registration.Logs = true;
             });
         }));
 
@@ -51,7 +39,6 @@ public static class DiagnosticsSetup
             tracing.AddAzureMonitorTraceExporter(o =>
             {
                 o.ConnectionString = connectionString;
-                registration.Traces = true;
             });
         });
 
@@ -74,7 +61,7 @@ public static class DiagnosticsSetup
 
     private sealed class RedactingLogProcessor : BaseProcessor<LogRecord>
     {
-        // LogRecord keeps its scope provider internal; it is cleared after scopes are copied so exporters see no raw scopes.
+        // LogRecord keeps scopes in an internal ScopeStorage field; it is cleared after scopes are copied so exporters see no raw scopes.
         private const System.Reflection.BindingFlags AnyInstance =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
 
@@ -82,20 +69,9 @@ public static class DiagnosticsSetup
 
         private static Action<LogRecord> ResolveScopeProviderClearer()
         {
-            var property = typeof(LogRecord).GetProperty("ScopeProvider", AnyInstance);
-            if (property is not null && property.CanWrite)
-            {
-                return record => property.SetValue(record, null);
-            }
-
-            var field = typeof(LogRecord).GetField("scopeProvider", AnyInstance)
-                ?? typeof(LogRecord).GetField("_scopeProvider", AnyInstance);
-            if (field is not null)
-            {
-                return record => field.SetValue(record, null);
-            }
-
-            throw new InvalidOperationException("LogRecord exposes no scope provider to clear; scopes cannot be removed before export.");
+            var field = typeof(LogRecord).GetField("ScopeStorage", AnyInstance)
+                ?? throw new InvalidOperationException("LogRecord exposes no ScopeStorage field; scopes cannot be removed before export.");
+            return record => field.SetValue(record, null);
         }
 
         public override void OnEnd(LogRecord data)
@@ -122,8 +98,10 @@ public static class DiagnosticsSetup
                 data.Exception = null;
             }
 
+            // Without properties or scopes the rendered text could carry free text, so only the fixed body is kept.
             if (source.Count == 0)
             {
+                data.FormattedMessage = null;
                 return;
             }
 
@@ -142,7 +120,7 @@ public static class DiagnosticsSetup
             {
                 if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
                 {
-                    data.SetTag(tag.Key, RedactionFilter.Redacted);
+                    data.SetTag(tag.Key, null);
                 }
                 else if (!Equals(redacted, tag.Value))
                 {
@@ -163,7 +141,7 @@ public static class DiagnosticsSetup
                 {
                     if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
                     {
-                        SetEventTag(eventTags, tag.Key, RedactionFilter.Redacted);
+                        SetEventTag(eventTags, tag.Key, null);
                     }
                     else if (!Equals(redacted, tag.Value))
                     {

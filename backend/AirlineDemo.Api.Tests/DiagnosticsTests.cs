@@ -28,26 +28,118 @@ public sealed class DiagnosticsTests
     [Fact]
     public void ApplicationInsights_exporters_follow_connection_string_configuration()
     {
-        var services = new ServiceCollection();
-        services.AddAirlineDiagnostics(Config("InstrumentationKey=00000000-0000-0000-0000-000000000000"));
+        var previous = Environment.GetEnvironmentVariable(DiagnosticsSetup.ConnectionStringSetting);
+        try
+        {
+            Environment.SetEnvironmentVariable(DiagnosticsSetup.ConnectionStringSetting, "InstrumentationKey=00000000-0000-0000-0000-000000000000");
+            var services = new ServiceCollection();
+            services.AddAirlineDiagnostics(new ConfigurationBuilder().AddEnvironmentVariables().Build());
 
-        using var provider = services.BuildServiceProvider();
-        var registration = provider.GetRequiredService<DiagnosticsSetup.ExporterRegistration>();
-        // Exporter options run when the logger and tracer providers are built, so resolve both first.
-        _ = provider.GetRequiredService<ILoggerFactory>();
-        _ = provider.GetRequiredService<TracerProvider>();
+            using var provider = services.BuildServiceProvider();
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            var tracerProvider = provider.GetRequiredService<TracerProvider>();
 
-        Assert.True(registration.Logs, "Log exporter was not registered.");
-        Assert.True(registration.Traces, "Trace exporter was not registered.");
+            Assert.True(ContainsObjectOfType(loggerFactory, "AzureMonitorLogExporter"), "Log exporter was not registered.");
+            Assert.True(ContainsObjectOfType(tracerProvider, "AzureMonitorTraceExporter"), "Trace exporter was not registered.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(DiagnosticsSetup.ConnectionStringSetting, previous);
+        }
     }
 
     [Fact]
     public void Exporters_are_not_registered_when_connection_string_is_absent()
     {
-        var services = new ServiceCollection();
-        services.AddAirlineDiagnostics(Config(null));
+        var previous = Environment.GetEnvironmentVariable(DiagnosticsSetup.ConnectionStringSetting);
+        try
+        {
+            Environment.SetEnvironmentVariable(DiagnosticsSetup.ConnectionStringSetting, null);
+            var services = new ServiceCollection();
+            services.AddAirlineDiagnostics(new ConfigurationBuilder().AddEnvironmentVariables().Build());
 
-        Assert.DoesNotContain(services, d => d.ServiceType == typeof(DiagnosticsSetup.ExporterRegistration));
+            using var provider = services.BuildServiceProvider();
+            Assert.Empty(services);
+            Assert.Null(provider.GetService<ILoggerFactory>());
+            Assert.Null(provider.GetService<TracerProvider>());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(DiagnosticsSetup.ConnectionStringSetting, previous);
+        }
+    }
+
+    // Walks the object graph of a built provider and reports whether an object of the exporter type is reachable.
+    // The exporter is found through the processors that hold it, not through any flag set by the setup code.
+    private static bool ContainsObjectOfType(object root, string typeNameFragment)
+    {
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<(object Value, int Depth)>();
+        pending.Push((root, 0));
+        while (pending.Count > 0)
+        {
+            var (value, depth) = pending.Pop();
+            if (!visited.Add(value))
+            {
+                continue;
+            }
+
+            if ((value.GetType().FullName ?? string.Empty).Contains(typeNameFragment, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (depth >= 16)
+            {
+                continue;
+            }
+
+            if (value is Array array)
+            {
+                foreach (var item in array)
+                {
+                    if (item is not null && IsWalkable(item))
+                    {
+                        pending.Push((item, depth + 1));
+                    }
+                }
+                continue;
+            }
+
+            for (var type = value.GetType(); type is not null && type != typeof(object); type = type.BaseType)
+            {
+                foreach (var field in type.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
+                {
+                    if (field.FieldType.IsValueType)
+                    {
+                        continue;
+                    }
+
+                    var child = field.GetValue(value);
+                    if (child is not null && IsWalkable(child))
+                    {
+                        pending.Push((child, depth + 1));
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsWalkable(object value)
+    {
+        if (value is Array)
+        {
+            return true;
+        }
+
+        var name = value.GetType().FullName ?? string.Empty;
+        return name.StartsWith("OpenTelemetry", StringComparison.Ordinal)
+            || name.StartsWith("Azure.Monitor", StringComparison.Ordinal)
+            || name.StartsWith("Microsoft.Extensions.Logging", StringComparison.Ordinal)
+            || name.StartsWith("System.Collections", StringComparison.Ordinal)
+            || name.StartsWith("System.Diagnostics", StringComparison.Ordinal);
     }
 
     [Theory]
@@ -132,6 +224,43 @@ public sealed class DiagnosticsTests
         Assert.Contains("approved", attributes);
         Assert.Contains("case-42", messages);
         Assert.Contains("approved", messages);
+
+        // Sensitive entries must be dropped by name, not merely given placeholder values.
+        var keys = captured.SelectMany(r => r.Attributes.Select(a => a.Key).Concat(r.Scopes.Select(s => s.Key)))
+            .Select(k => k.ToLowerInvariant())
+            .ToList();
+        foreach (var name in new[] { "passcode", "cookie", "authorization", "token", "password", "email", "user.id", "prompt", "document" })
+        {
+            Assert.DoesNotContain(name, keys);
+        }
+    }
+
+    [Fact]
+    public void Logging_pipeline_omits_formatted_message_and_exception_details_when_no_properties_or_scopes()
+    {
+        const string ExceptionCanary = "SENTINEL-EXCEPTION-MESSAGE";
+        const string InnerCanary = "SENTINEL-INNER-EXCEPTION";
+
+        var captured = new List<CapturedLog>();
+        var services = new ServiceCollection();
+        services.AddLogging(logging => logging.AddOpenTelemetry(o =>
+        {
+            o.IncludeFormattedMessage = true;
+            o.IncludeScopes = true;
+            o.AddRedaction();
+            o.AddProcessor(new CaptureLogs(captured));
+        }));
+
+        using var provider = services.BuildServiceProvider();
+        var logger = provider.GetRequiredService<ILogger<DiagnosticsTests>>();
+
+        logger.LogError(new InvalidOperationException(ExceptionCanary, new IOException(InnerCanary)), "Operation failed");
+
+        var output = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")).Concat(captured.Select(r => r.Message)));
+        Assert.DoesNotContain(ExceptionCanary, output);
+        Assert.DoesNotContain(InnerCanary, output);
+        Assert.Contains("Operation failed", output);
+        Assert.Contains("System.InvalidOperationException", output);
     }
 
     [Fact]
