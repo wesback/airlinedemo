@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -309,10 +310,35 @@ public class EvaluationCaseFixtureTests
             else
                 Assert.Equal(0, blockedPages);
 
+            var componentSerials = documents
+                .SelectMany(d => Regex.Matches(d.GetProperty("pageText").GetString()!, @"Serial: (SYN-[A-Z0-9]+)")
+                    .Select(m => m.Groups[1].Value))
+                .Distinct()
+                .Count();
+            Assert.Equal(2, componentSerials);
+
             var labels = root.GetProperty("annotations").GetProperty("claimCitations").EnumerateArray()
                 .Select(c => c.GetProperty("supportLabel").GetString()).ToList();
             if (category == "baseline-complete")
                 Assert.True(labels.Count(l => l == "unsupported") >= 1, $"{root.GetProperty("caseId").GetString()} has no unsupported claim");
+        }
+    }
+
+    [Fact]
+    public void BaselineTraceEventsAreInChronologicalOrder()
+    {
+        foreach (var line in V2Lines())
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.GetProperty("category").GetString() != "baseline-complete") continue;
+            foreach (var d in doc.RootElement.GetProperty("inputs").GetProperty("documents").EnumerateArray())
+            {
+                if (d.GetProperty("documentType").GetString() != "llp-trace-sheet") continue;
+                var dates = Regex.Matches(d.GetProperty("pageText").GetString()!, @"\d{1,2} [A-Za-z]{3} \d{4}")
+                    .Select(m => DateTime.ParseExact(m.Value, "d MMM yyyy", CultureInfo.InvariantCulture))
+                    .ToList();
+                Assert.Equal(dates.OrderBy(x => x).ToList(), dates);
+            }
         }
     }
 
