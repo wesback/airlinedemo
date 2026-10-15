@@ -34,6 +34,8 @@ public sealed class ReleaseIdentityContractTests
     // A resource-group scope has no /providers/ segment, so it cannot be the registry (names never contain '/').
     private static readonly Regex ResourceGroupOnlyScope = new(@"^\s*""/subscriptions/[^""/]*/resourceGroups/[^""/]*""\s*$");
 
+    private static readonly Regex HeredocStart = new(@"<<-?(?<marker>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\r?\n");
+
     private const int MaxIndirectionDepth = 5;
 
     // RELEASE-ID-01: exactly one Terraform grant gives the app identity a role on the ACR, and it is AcrPull.
@@ -311,6 +313,23 @@ public sealed class ReleaseIdentityContractTests
     }
 
     [Fact]
+    public void Brace_inside_heredoc_does_not_end_role_assignment_block()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "app_acr_push_heredoc" {
+              description = <<-EOT
+                closing brace } and "unbalanced quote
+              EOT
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+              scope                = azurerm_container_registry.acr.id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
     public void Brace_inside_string_does_not_end_role_assignment_block()
     {
         const string terraform = """
@@ -367,6 +386,12 @@ public sealed class ReleaseIdentityContractTests
                 continue;
             }
 
+            if (text[i] == '<' && TryReadHeredoc(text, i) is { } heredocEnd)
+            {
+                i = heredocEnd;
+                continue;
+            }
+
             if (text[i] == '#' || text.AsSpan(i).StartsWith("//"))
             {
                 var newline = text.IndexOf('\n', i);
@@ -391,6 +416,33 @@ public sealed class ReleaseIdentityContractTests
             }
 
             i++;
+        }
+
+        return text.Length;
+    }
+
+    // Returns the index just past a heredoc (<<MARKER or <<-MARKER) that starts at `open`, or null when none starts there.
+    // The body ends at the first line that holds only the marker; an unterminated heredoc runs to the end of the file.
+    private static int? TryReadHeredoc(string text, int open)
+    {
+        var header = HeredocStart.Match(text, open);
+        if (!header.Success || header.Index != open)
+        {
+            return null;
+        }
+
+        var marker = header.Groups["marker"].Value;
+        var lineStart = header.Index + header.Length;
+        while (lineStart < text.Length)
+        {
+            var lineEnd = text.IndexOf('\n', lineStart);
+            var end = lineEnd < 0 ? text.Length : lineEnd;
+            if (text[lineStart..end].Trim() == marker)
+            {
+                return end;
+            }
+
+            lineStart = end + 1;
         }
 
         return text.Length;
