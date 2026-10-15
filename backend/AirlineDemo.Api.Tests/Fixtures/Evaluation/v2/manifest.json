@@ -1,0 +1,12 @@
+{
+  "fixtureVersion": 2,
+  "suite": "evaluation-v2",
+  "caseCount": 40,
+  "casesSha256": "7318583ee0bdc540fdeabd85833d288843c2a1bc429b1f85c9709eac8443a049",
+  "categoryCounts": {
+    "baseline-complete": 10,
+    "missing-required-history": 10,
+    "ambiguous-identity": 10,
+    "blocked-or-unprocessed-evidence": 10
+  }
+}
