@@ -17,6 +17,12 @@ public static class Generator
 
     public static int Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "evaluation")
+        {
+            EvaluationCaseGenerator.WriteFixture(args[1], int.Parse(args[2]));
+            return 0;
+        }
+
         if (args.Length != 1)
         {
             Console.Error.WriteLine("usage: DemoCaseGenerator <output-dir>");
