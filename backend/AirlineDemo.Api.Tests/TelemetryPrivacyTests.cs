@@ -126,7 +126,7 @@ public sealed class TelemetryPrivacyTests
     private sealed class PipelineLogSink(List<PipelineLogEntry> sink) : BaseProcessor<LogRecord>
     {
         public override void OnEnd(LogRecord data) =>
-            sink.Add(new PipelineLogEntry(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList()));
+            sink.Add(new PipelineLogEntry((data.FormattedMessage ?? string.Empty) + "\n" + (data.Body ?? string.Empty), (data.Attributes ?? []).ToList()));
     }
 
     private sealed class PipelineSpanSink(List<Activity> sink) : BaseProcessor<Activity>

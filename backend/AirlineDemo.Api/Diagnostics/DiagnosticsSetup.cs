@@ -112,6 +112,8 @@ public static class DiagnosticsSetup
             // Without properties or scopes the rendered text could carry free text, so only the fixed body is kept.
             if (!hasStructuredData)
             {
+                // Body holds the unrendered message (interpolated text lands there), so it is cleared with the rendered text.
+                data.Body = null;
                 data.FormattedMessage = null;
                 data.Attributes = null;
                 return;

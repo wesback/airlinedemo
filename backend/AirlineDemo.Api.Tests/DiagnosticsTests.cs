@@ -398,7 +398,7 @@ public sealed class DiagnosticsTests
         public override void OnEnd(LogRecord data)
         {
             // Scopes are folded into the redacted attributes and removed from the record, so the attributes carry them.
-            sink.Add(new CapturedLog(data.FormattedMessage ?? string.Empty, (data.Attributes ?? []).ToList(), []));
+            sink.Add(new CapturedLog((data.FormattedMessage ?? string.Empty) + "\n" + (data.Body ?? string.Empty), (data.Attributes ?? []).ToList(), []));
         }
     }
 
