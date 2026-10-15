@@ -72,6 +72,22 @@ jobs:
             exit 1
           fi
 
+      # Backend-free Terraform checks: no Azure login, no credentials, and no backend access (init -backend=false).
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Terraform mock plan checks
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate
+          terraform test
+
       - name: Restore and build .NET
         run: |
           dotnet restore AirlineDemo.sln
