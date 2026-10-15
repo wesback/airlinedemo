@@ -39,6 +39,16 @@ public sealed class CaseEventRow
     public DateTimeOffset At { get; set; }
 }
 
+public sealed class WorkItemRow
+{
+    public string CaseId { get; set; } = string.Empty;
+    public string ItemId { get; set; } = string.Empty;
+    public string CapabilityId { get; set; } = string.Empty;
+    public string State { get; set; } = string.Empty;
+    public string Owner { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 /// <summary>
 /// EF Core model for the provisioned Azure SQL case-state schema. Schema changes are applied only
 /// by the migration identity; the app identity holds data-plane grants only (see identity-and-telemetry.tf).
@@ -49,6 +59,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CaseDocumentRow> CaseDocuments => Set<CaseDocumentRow>();
     public DbSet<CaseDecisionRow> CaseDecisions => Set<CaseDecisionRow>();
     public DbSet<CaseEventRow> CaseEvents => Set<CaseEventRow>();
+    public DbSet<WorkItemRow> WorkItems => Set<WorkItemRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -79,6 +90,17 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.CaseId).HasMaxLength(128).IsRequired();
             e.Property(x => x.ReceiptId).HasMaxLength(128).IsRequired();
             e.Property(x => x.Fingerprint).HasMaxLength(128).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkItemRow>(e =>
+        {
+            e.ToTable("case_work_items", "dbo");
+            e.HasKey(x => new { x.CaseId, x.ItemId });
+            e.Property(x => x.CaseId).HasMaxLength(128);
+            e.Property(x => x.ItemId).HasMaxLength(128);
+            e.Property(x => x.CapabilityId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.State).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Owner).HasMaxLength(256).IsRequired();
         });
 
         modelBuilder.Entity<CaseEventRow>(e =>
