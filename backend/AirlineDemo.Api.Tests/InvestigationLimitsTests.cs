@@ -122,7 +122,7 @@ public class InvestigationLimitsTests
         var logger = new TraceLogger();
         using var limits = new InvestigationLimits(new InvestigationLimitOptions { MaxModelCalls = 0 });
         var investigator = new BoundedInvestigator(
-            "case-1", new EmptySource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "evidence-v1",
+            "case-1", new EmptySource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "swedencentral", "evidence-v1",
             new NoReplyClient(), limits, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
 
         var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() =>
@@ -242,7 +242,7 @@ public class InvestigationLimitsTests
         .Functions.Sum(f => System.Text.Encoding.UTF8.GetByteCount(f.Name + f.Description + f.JsonSchema.GetRawText()));
 
     private static BoundedInvestigator Investigator(IChatClient model, IInvestigationLimits limits, TraceLogger logger) => new(
-        "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "basis-v1",
+        "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "swedencentral", "basis-v1",
         model, limits, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
 
     private static Task<ChatResponse> Reply(string text, long? outputTokens = null) => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, text))
@@ -296,7 +296,7 @@ public class InvestigationLimitsTests
         var model = new ScriptedClient(_ => Reply(GoodReply, outputTokens: 5_000));
 
         var investigator = new BoundedInvestigator(
-            "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "basis-v1",
+            "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "swedencentral", "basis-v1",
             model, null, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
 
         var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => investigator.InvestigateAsync([Doc]));
@@ -312,7 +312,7 @@ public class InvestigationLimitsTests
         var model = new ScriptedClient(_ => Reply(GoodReply, outputTokens: 5_000));
 
         var investigator = new BoundedInvestigator(
-            "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "eastus2", "basis-v1",
+            "case-1", new CaseSource(), ApprovedManifest(), SyntheticContentRegistry.FromCommittedFixtures(), "swedencentral", "basis-v1",
             model, NoInvestigationLimits.Instance, new InvestigationTelemetry(logger, "synthetic-analyst-01", TestKey, "1.2.3", "demo"));
 
         var ex = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => investigator.InvestigateAsync([Doc]));
@@ -413,7 +413,7 @@ public class InvestigationLimitsTests
     }
 
     private static ApprovedModelManifest ApprovedManifest() => ApprovedModelManifest.Parse(
-        """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"eastus2","contentFilter":"enabled"}""");
+        """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""");
 
     private sealed class TraceLogger : Microsoft.Extensions.Logging.ILogger
     {
