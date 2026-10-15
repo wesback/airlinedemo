@@ -1,0 +1,215 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 181,
+  "branch": "ai-sdlc/issue-181",
+  "commitSha": "68a9e9e20a956d7cebe2e03195c4e6e056c368b3",
+  "round": 0,
+  "pipelineVersion": "1f5e120",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added test covers replay, stale revision, invalid basis digests, and receipt conflicts, but it does not assert the required decisions invariant.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 322,
+          "message": "AC2’s test does not verify that decisions remain unchanged. Compare the decisions before and after each replay or rejected commit.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC2_stale_invalid_basis_and_receipt_conflicts_leave_state_unchanged calls AssertStateUnchanged after replay and each conflict; that helper compares revision, basis digests, receipt IDs, and audit data, but not decisions.",
+            "failureScenario": "If a replay or rejected commit changes a decision while leaving those checked fields unchanged, AssertStateUnchanged passes even though AC2 requires decisions to remain unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new test covers the specified conflict cases and checks several persisted fields, but it omits the acceptance criterion’s explicit decision-state invariant.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 313,
+          "message": "The AC2 test does not assert that decisions remain unchanged after replays and rejected commits.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC2_stale_invalid_basis_and_receipt_conflicts_leave_state_unchanged calls AssertStateUnchanged after each replay or rejected commit; the helper compares revision, basis, receipt IDs, audit details, and audit event count, but not decisions.",
+            "failureScenario": "If a stale, invalid-basis, or conflicting-receipt commit adds or changes a decision while leaving those asserted fields unchanged, this test still passes despite violating the acceptance criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added SQLite test covers several state components, but omits the decisions explicitly required by the acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 323,
+          "message": "The unchanged-state assertion does not compare decisions, so the test does not verify that conflicts and exact receipt replays leave decisions unchanged.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The conflict and replay cases call AssertStateUnchanged, which compares revision, basis, receipt IDs, and audit data.",
+            "failureScenario": "If a rejected commit or exact replay accidentally changes the case decisions without changing those checked fields, this test still passes, despite the criterion requiring decisions to remain unchanged."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "tests-only change: no production file touched",
+    "redKind": "",
+    "greenExit": 0,
+    "redExit": 0,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
