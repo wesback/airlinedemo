@@ -2,7 +2,7 @@ mock_provider "azurerm" {
   mock_resource "azurerm_user_assigned_identity" {
     defaults = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-mock"
-      principal_id = "55555555-5555-5555-5555-555555555555"
+      principal_id = "aBcDeF01-2345-6789-abcd-EF0123456789"
       client_id    = "77777777-7777-7777-7777-777777777777"
     }
   }
@@ -177,7 +177,7 @@ run "registry_is_private_and_pull_scoped" {
     target = azurerm_user_assigned_identity.app
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-app"
-      principal_id = "55555555-5555-5555-5555-555555555555"
+      principal_id = "aBcDeF01-2345-6789-abcd-EF0123456789"
     }
   }
 
@@ -202,7 +202,7 @@ run "registry_is_private_and_pull_scoped" {
   }
 
   assert {
-    condition     = azurerm_role_assignment.app_acr_pull.role_definition_name == "AcrPull" && azurerm_role_assignment.app_acr_pull.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest" && azurerm_role_assignment.app_acr_pull.principal_id == "55555555-5555-5555-5555-555555555555"
+    condition     = azurerm_role_assignment.app_acr_pull.role_definition_name == "AcrPull" && azurerm_role_assignment.app_acr_pull.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest" && azurerm_role_assignment.app_acr_pull.principal_id == "aBcDeF01-2345-6789-abcd-EF0123456789"
     error_message = "The app identity's only ACR grant must be AcrPull scoped to the ACR."
   }
 
@@ -459,4 +459,19 @@ run "federated_identities_are_distinct_principals" {
     condition     = lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.build.principal_id) && lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.release.principal_id)
     error_message = "The terraform_principal_object_id input must not resolve to the build or release workflow identity, or the existing Contributor grant would hand a workflow identity subscription-wide rights."
   }
+}
+
+run "contributor_precondition_rejects_case_only_workflow_match" {
+  command = plan
+
+  # The mocked build and release principal IDs are aBcDeF01-2345-6789-abcd-EF0123456789.
+  # This input is the same GUID with different casing only. The case-insensitive
+  # precondition must reject it; a case-sensitive comparison would not fail here.
+  variables {
+    terraform_principal_object_id = "ABCDEF01-2345-6789-ABCD-EF0123456789"
+  }
+
+  expect_failures = [
+    azurerm_role_assignment.terraform_contributor,
+  ]
 }
