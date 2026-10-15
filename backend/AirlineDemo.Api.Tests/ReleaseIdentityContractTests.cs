@@ -293,6 +293,38 @@ public sealed class ReleaseIdentityContractTests
         Assert.Empty(AppAcrGrantRoles(terraform));
     }
 
+    [Fact]
+    public void App_grant_after_nested_block_is_counted()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "app_acr_push_nested" {
+              role_definition_name = "AcrPush"
+              condition {
+                version = "2.0"
+              }
+              principal_id = azurerm_user_assigned_identity.app.principal_id
+              scope        = azurerm_container_registry.acr.id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void Brace_inside_string_does_not_end_role_assignment_block()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "app_acr_push_described" {
+              description          = "grants push; see docs {v2}} and # not a comment"
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+              scope                = azurerm_container_registry.acr.id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
     private static List<string> AppAcrGrantRoles(string terraform)
     {
         var roles = new List<string>();
@@ -310,32 +342,81 @@ public sealed class ReleaseIdentityContractTests
         return roles;
     }
 
-    // Reads each azurerm_role_assignment body by matching braces, so nested blocks cannot end it early.
-    // An unbalanced block runs to the end of the file, which keeps its attributes under the checks.
+    // Reads each azurerm_role_assignment body up to its closing brace, so nested blocks cannot end it early.
     private static IEnumerable<(string Name, string Body)> RoleAssignmentBlocks(string text)
     {
         foreach (Match header in RoleAssignmentHeader.Matches(text))
         {
             var start = header.Index + header.Length;
-            var depth = 1;
-            var i = start;
-            while (i < text.Length && depth > 0)
-            {
-                if (text[i] == '{')
-                {
-                    depth++;
-                }
-                else if (text[i] == '}')
-                {
-                    depth--;
-                }
+            yield return (header.Groups["name"].Value, text[start..FindBlockEnd(text, start)]);
+        }
+    }
 
-                i++;
+    // Returns the index of the '}' that closes a block whose body starts at `start`.
+    // Braces inside quoted strings and comments are skipped. An unclosed block runs to the end of the file,
+    // which keeps its attributes under the checks.
+    private static int FindBlockEnd(string text, int start)
+    {
+        var depth = 1;
+        var i = start;
+        while (i < text.Length)
+        {
+            if (text[i] == '"')
+            {
+                i = SkipQuoted(text, i);
+                continue;
             }
 
-            var end = depth == 0 ? i - 1 : text.Length;
-            yield return (header.Groups["name"].Value, text[start..end]);
+            if (text[i] == '#' || text.AsSpan(i).StartsWith("//"))
+            {
+                var newline = text.IndexOf('\n', i);
+                i = newline < 0 ? text.Length : newline;
+                continue;
+            }
+
+            if (text.AsSpan(i).StartsWith("/*"))
+            {
+                var close = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = close < 0 ? text.Length : close + 2;
+                continue;
+            }
+
+            if (text[i] == '{')
+            {
+                depth++;
+            }
+            else if (text[i] == '}' && --depth == 0)
+            {
+                return i;
+            }
+
+            i++;
         }
+
+        return text.Length;
+    }
+
+    // Returns the index just past the closing quote of the string starting at `open`, honouring backslash escapes.
+    private static int SkipQuoted(string text, int open)
+    {
+        var i = open + 1;
+        while (i < text.Length && text[i] != '\n')
+        {
+            if (text[i] == '\\')
+            {
+                i += 2;
+                continue;
+            }
+
+            if (text[i] == '"')
+            {
+                return i + 1;
+            }
+
+            i++;
+        }
+
+        return Math.Min(i, text.Length);
     }
 
     // Counts a grant only when its principal is shown to reference the app identity, directly or through locals.
