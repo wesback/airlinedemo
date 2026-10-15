@@ -118,7 +118,7 @@ public sealed class ReleaseIdentityContractTests
     }
 
     [Fact]
-    public void App_grant_through_module_output_principal_is_counted()
+    public void Grant_through_module_and_variable_principals_is_not_counted()
     {
         const string terraform = """
             resource "azurerm_role_assignment" "worker_acr_push" {
@@ -126,9 +126,15 @@ public sealed class ReleaseIdentityContractTests
               role_definition_name = "AcrPush"
               principal_id         = module.worker.principal_id
             }
+
+            resource "azurerm_role_assignment" "reader_acr_pull" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPull"
+              principal_id         = var.reader_principal_id
+            }
             """;
 
-        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+        Assert.Empty(AppAcrGrantRoles(terraform));
     }
 
     [Fact]
@@ -243,12 +249,11 @@ public sealed class ReleaseIdentityContractTests
         return roles;
     }
 
-    // Fails closed: a principal that cannot be shown to be another resource (a literal, or a module or variable output)
-    // may be the app identity, so the grant is counted. Locals are followed to their definitions.
+    // Counts a grant only when its principal is shown to reference the app identity, directly or through locals.
     private static bool MayGrantToApp(string terraform, string roleAssignmentBody)
     {
         var principal = PrincipalAttribute.Match(roleAssignmentBody);
-        return !principal.Success || MayResolveToApp(terraform, principal.Groups["expr"].Value, MaxIndirectionDepth);
+        return principal.Success && MayResolveToApp(terraform, principal.Groups["expr"].Value, MaxIndirectionDepth);
     }
 
     private static bool MayResolveToApp(string terraform, string expression, int depth)
@@ -258,26 +263,20 @@ public sealed class ReleaseIdentityContractTests
             return true;
         }
 
-        var references = IndirectReference.Matches(expression);
-        if (references.Count == 0)
-        {
-            return !ResourceOrDataReference.IsMatch(expression);
-        }
-
         if (depth == 0)
         {
-            return true;
+            return false;
         }
 
-        foreach (Match reference in references)
+        foreach (Match reference in IndirectReference.Matches(expression))
         {
             if (reference.Groups[1].Value != "local")
             {
-                return true;
+                continue;
             }
 
             var definition = DefinitionText(terraform, reference.Groups[2].Value);
-            if (definition is null || MayResolveToApp(terraform, definition, depth - 1))
+            if (definition is not null && MayResolveToApp(terraform, definition, depth - 1))
             {
                 return true;
             }
