@@ -27,7 +27,7 @@ public class EvaluationCaseFixtureTests
     private static readonly Regex SeparatorsBetweenDigits = new(@"(?<=\d)[ .()\-]+(?=\d)");
     private static readonly Regex SevenDigits = new(@"\d{7,}");
 
-    private static readonly string[] V2PageStatuses = ["complete", "corrupt", "truncated", "unprocessed"];
+    private static readonly string[] V2PageStatuses = ["complete", "corrupt", "truncated", "unprocessed", "failed", "partial"];
     private static readonly Regex V2CaseIdPattern = new(@"^EVAL-V2-[0-9]{2}$");
 
     private static string FixtureDir(string version = "v1")
@@ -255,8 +255,9 @@ public class EvaluationCaseFixtureTests
             Assert.False(string.IsNullOrWhiteSpace(c.GetProperty("documentId").GetString()));
             Assert.True(c.GetProperty("pageNumber").GetInt32() >= 1);
             var support = c.GetProperty("supportLabel").GetString();
-            Assert.Contains(support, new[] { "supported", "unsupported" });
-            Assert.Equal(support == "supported" ? "accept" : "reject", c.GetProperty("expectedResult").GetString());
+            Assert.Contains(support, new[] { "supported", "unsupported", "contradicted", "not-evaluable" });
+            var expected = support switch { "supported" => "accept", "not-evaluable" => "hold", _ => "reject" };
+            Assert.Equal(expected, c.GetProperty("expectedResult").GetString());
         }
     }
 
@@ -266,6 +267,45 @@ public class EvaluationCaseFixtureTests
         foreach (var line in V2Lines())
         {
             AssertStructuredV2(line);
+        }
+    }
+
+    [Fact]
+    public void V2ContentMeetsTheCaseDesign()
+    {
+        var blockedStatuses = new[] { "failed", "unprocessed", "partial" };
+        foreach (var line in V2Lines())
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            var category = root.GetProperty("category").GetString()!;
+            var documents = root.GetProperty("inputs").GetProperty("documents").EnumerateArray().ToList();
+
+            var pagesPerDocument = documents.GroupBy(d => d.GetProperty("documentId").GetString()!)
+                .ToDictionary(g => g.Key, g => g.Count());
+            Assert.InRange(pagesPerDocument.Count, 8, 12);
+            foreach (var pages in pagesPerDocument.Values)
+                Assert.InRange(pages, 1, 4);
+
+            foreach (var d in documents)
+            {
+                Assert.True(d.GetProperty("pageText").GetString()!.Split('\n').Length >= 4);
+            }
+
+            var documentTypes = documents.Select(d => d.GetProperty("documentType").GetString()!).Distinct().Count();
+            Assert.True(documentTypes >= 5, $"{root.GetProperty("caseId").GetString()} has {documentTypes} document types");
+
+            var statuses = documents.Select(d => d.GetProperty("parseStatus").GetString()!).ToList();
+            var blockedPages = statuses.Count(s => blockedStatuses.Contains(s));
+            if (category == "blocked-or-unprocessed-evidence")
+                Assert.True(blockedPages >= 1, $"{root.GetProperty("caseId").GetString()} has no blocked page");
+            else
+                Assert.Equal(0, blockedPages);
+
+            var labels = root.GetProperty("annotations").GetProperty("claimCitations").EnumerateArray()
+                .Select(c => c.GetProperty("supportLabel").GetString()).ToList();
+            if (category == "baseline-complete")
+                Assert.True(labels.Count(l => l == "unsupported") >= 1, $"{root.GetProperty("caseId").GetString()} has no unsupported claim");
         }
     }
 

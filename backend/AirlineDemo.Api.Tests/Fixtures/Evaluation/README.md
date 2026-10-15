@@ -58,3 +58,46 @@ Annotations are draft until the product owner approves them in review.
 `EvaluationCaseFixtureTests.cs` checks: exact counts and seed-164 determinism (AC-01), input and annotation
 shape and versions (AC-02), identifier and contact-data rules (AC-03), and manifest version and hash, including
 rejection of a missing hash, a changed byte and version `2` (AC-04). The corpus content itself is verified by review (AC-03, AC-05).
+
+## v2 corpus (issue #165)
+
+`v2/cases.jsonl` holds 40 synthetic cases (10 per category) with source page text and structured scoring
+ground truth. `v2/manifest.json` declares `fixtureVersion` 2, `caseCount` 40 and the SHA-256 of the exact
+`cases.jsonl` bytes. v1 bytes and manifest are frozen and unchanged.
+
+Case design: one fictional aircraft, one engine and two components per case. Each case has 8 to 12 evidence
+documents in the core journey, each with 1 to 4 pages, and each page has at least 4 lines of form-like text
+(labelled fields, as after text extraction). Each category uses at least five document types.
+
+Document types: component status list, life-limited part trace sheet, release certificate (Form 1 or 8130-3
+style), airworthiness directive and service bulletin compliance report, engine shop visit report, technical
+log and deferred defect list, maintenance programme status, utilisation report, repair or modification
+record, lease return condition extract. A supplier statement that looks like a certificate is a decoy and
+is not release evidence.
+
+Categories:
+- `baseline-complete`: every required record is present, consistent and readable. Each case has at least one
+  `unsupported` claim (a plausible claim the pages do not state).
+- `missing-required-history`: one genuine gap (a missing release certificate, an LLP trace step, directive
+  compliance, shop visit report, or deferred defect closure). Some cases carry a decoy ("will follow").
+- `ambiguous-identity`: transposed or reformatted serials, two serials for one part number, overlapping
+  installs, duplicate documents with different dates, or a re-registered aircraft.
+- `blocked-or-unprocessed-evidence`: `failed`, `unprocessed` or `partial` pages (corrupt file, scan with no
+  text layer, unreadable page, empty extraction, password-protected file). Only this category has blocked pages.
+
+Annotations (`annotationVersion` 2): `expectedOutcomes` (`requirementId`, `expectedState`, `outcome`) with
+expected state `ready`, `request`, `review` or `blocked`. `claimCitations` (`claim`, `documentId`, `pageNumber`,
+`supportLabel`, `expectedResult`): `supportLabel` is `supported` (expected `accept`), `unsupported` (`reject`),
+`contradicted` (`reject`, citing both conflicting pages) or `not-evaluable` (`hold`, the cited page was unreadable).
+
+Sources (design reference only, no regulatory accuracy is claimed):
+- https://sofemaonline.com (end-of-lease technical records preparation)
+- https://www.mba.aero/technical-records-in-aircraft-leases/
+- https://www.acumen.aero/blogs/aircraft-lease-return-conditions-common-disputes-and-how-to-avoid-them
+- https://sassofia.com (records review findings: deferred defects, release certificates, statements versus certificates)
+- https://www.iba.aero/insight/best-practice-for-aircraft-redeliveries
+- `docs/brd` and `docs/prd/aircraft-return-readiness.md` in this repository
+
+Realism limits: narrow-body numbers (tens of thousands of hours, up to about 20,000 cycles, LLP limits in the
+tens of thousands of cycles), dates from about 2012 to 2026. All identifiers use `SYN-` shapes; no real
+operators, OEMs or people.
