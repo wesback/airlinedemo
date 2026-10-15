@@ -1,0 +1,217 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 252,
+  "branch": "ai-sdlc/issue-252",
+  "commitSha": "d1da4c7293930640a61e68751efadae992472e1b",
+  "round": 0,
+  "pipelineVersion": "dde1b91",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The account region, deployment SKU, required inputs, and private-access settings are covered by the added plan runs. The DNS link assertion can pass when the model zone itself is not linked to the VNet.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+          "line": 132,
+          "message": "The AC: MODEL-INFRA-04 test does not verify that the model private DNS zone is linked to the demo VNet. Assert the planned link targets the model zone.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The AC: MODEL-INFRA-04 plan run checks the model DNS zone name, then uses a regex to check that main.tf contains a private DNS zone VNet link referencing the demo VNet.",
+            "failureScenario": "If the VNet link points to a different private DNS zone, the regex still matches and the plan run can pass while the model zone is not linked to the demo VNet."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The region, deployment SKU, input validation, and private access settings are asserted, and the named build-and-gate job runs terraform validate and terraform test. The tests do not fully verify the model DNS zone relationships or that the three model inputs remain required without defaults.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+          "line": 135,
+          "message": "AC MODEL-INFRA-04 is not fully tested: assert that the model endpoint's private DNS zone group references azurerm_private_dns_zone.demo[\"model\"].id and that the model zone's VNet link targets the demo VNet.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The AC MODEL-INFRA-04 assertion checks that the model zone exists and that some private DNS zone virtual network link block mentions the demo VNet. The next assertion checks only that the endpoint has one zone ID.",
+            "failureScenario": "If the model private endpoint is changed to register in the SQL DNS zone, or the model zone link is changed to link another zone, these assertions can still pass although the model endpoint is not registered in the VNet-linked model zone."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+          "line": 76,
+          "message": "AC MODEL-INFRA-03's required-without-default behavior has no test: add a check that fails when each input is omitted.",
+          "confidence": 0.84,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "All Terraform test runs receive values for model_deployment_name, model_name, and model_version from the file-level variables block. The expected-failure runs replace values with empty strings or whitespace, but none omits an input.",
+            "failureScenario": "If a default is added to any of the three Terraform variables, the current tests still supply explicit values and pass, so they do not catch that the input is no longer required."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff provisions the required Global Standard deployment and preserves the existing private, keyless account settings. I found no concrete security defect reachable through the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/retention.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
