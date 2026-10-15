@@ -20,6 +20,8 @@ public sealed class ReleaseIdentityContractTests
 
     private static readonly Regex ResourceOrDataReference = new(@"\bazurerm_\w+\.|\bdata\.");
 
+    private static readonly Regex LiteralProvider = new(@"/providers/(?<ns>[A-Za-z0-9.]+)/", RegexOptions.IgnoreCase);
+
     private const int MaxIndirectionDepth = 5;
 
     // RELEASE-ID-01: exactly one Terraform grant gives the app identity a role on the ACR, and it is AcrPull.
@@ -88,6 +90,26 @@ public sealed class ReleaseIdentityContractTests
         Assert.Empty(AppAcrGrantRoles(terraform));
     }
 
+    [Fact]
+    public void App_grant_on_literal_non_acr_resource_id_is_not_counted()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "app_kv_read" {
+              scope                = "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv"
+              role_definition_name = "Key Vault Secrets User"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+            }
+
+            resource "azurerm_role_assignment" "app_acr_literal" {
+              scope                = "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.ContainerRegistry/registries/acr"
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
     private static List<string> AppAcrGrantRoles(string terraform)
     {
         var roles = new List<string>();
@@ -123,6 +145,12 @@ public sealed class ReleaseIdentityContractTests
         var references = IndirectReference.Matches(expression);
         if (references.Count == 0)
         {
+            var providers = LiteralProvider.Matches(expression);
+            if (providers.Count > 0)
+            {
+                return providers.Any(p => p.Groups["ns"].Value.Equals("Microsoft.ContainerRegistry", StringComparison.OrdinalIgnoreCase));
+            }
+
             return !ResourceOrDataReference.IsMatch(expression);
         }
 
