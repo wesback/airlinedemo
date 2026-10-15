@@ -26,16 +26,19 @@ public class EvaluationCaseFixtureTests
     private static readonly Regex SeparatorsBetweenDigits = new(@"(?<=\d)[ .()\-]+(?=\d)");
     private static readonly Regex SevenDigits = new(@"\d{7,}");
 
-    private static string FixtureDir()
+    private static readonly string[] V2PageStatuses = ["complete", "corrupt", "truncated", "unprocessed"];
+    private static readonly Regex V2CaseIdPattern = new(@"^EVAL-V2-[0-9]{2}$");
+
+    private static string FixtureDir(string version = "v1")
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null)
         {
-            var candidate = Path.Combine(dir.FullName, "Fixtures", "Evaluation", "v1");
+            var candidate = Path.Combine(dir.FullName, "Fixtures", "Evaluation", version);
             if (Directory.Exists(candidate)) return candidate;
             dir = dir.Parent;
         }
-        throw new DirectoryNotFoundException("Fixtures/Evaluation/v1 not found above " + AppContext.BaseDirectory);
+        throw new DirectoryNotFoundException($"Fixtures/Evaluation/{version} not found above " + AppContext.BaseDirectory);
     }
 
     private static string[] CommittedLines() =>
@@ -174,6 +177,148 @@ public class EvaluationCaseFixtureTests
         {
             if (Directory.Exists(temp)) Directory.Delete(temp, recursive: true);
         }
+    }
+
+    private static string[] V2Lines() =>
+        File.ReadAllText(Path.Combine(FixtureDir("v2"), "cases.jsonl"), new UTF8Encoding(false))
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+    [Fact]
+    public void FrozenV2HasRequiredCaseMix()
+    {
+        var lines = V2Lines();
+        Assert.Equal(40, lines.Length);
+        var ids = new HashSet<string>();
+        var counts = new Dictionary<string, int>();
+        foreach (var line in lines)
+        {
+            using var doc = JsonDocument.Parse(line);
+            Assert.True(ids.Add(doc.RootElement.GetProperty("caseId").GetString()!));
+            var category = doc.RootElement.GetProperty("category").GetString()!;
+            counts[category] = counts.GetValueOrDefault(category) + 1;
+        }
+        Assert.Equal(40, ids.Count);
+        foreach (var situation in Situations)
+        {
+            Assert.Equal(10, counts.GetValueOrDefault(situation));
+        }
+        Assert.Equal(40, counts.Values.Sum());
+    }
+
+    private static void AssertStructuredV2(string line)
+    {
+        using var doc = JsonDocument.Parse(line);
+        var root = doc.RootElement;
+        Assert.Equal(2, root.GetProperty("inputVersion").GetInt32());
+        Assert.Matches(V2CaseIdPattern, root.GetProperty("caseId").GetString()!);
+        Assert.Contains(root.GetProperty("category").GetString(), Situations);
+
+        var inputs = root.GetProperty("inputs");
+        foreach (var key in new[] { "packageId", "aircraftId", "componentId" })
+            Assert.False(string.IsNullOrWhiteSpace(inputs.GetProperty(key).GetString()));
+        Assert.NotEmpty(inputs.GetProperty("requiredHistory").EnumerateArray());
+
+        var documents = inputs.GetProperty("documents").EnumerateArray().ToList();
+        Assert.NotEmpty(documents);
+        foreach (var d in documents)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(d.GetProperty("documentId").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(d.GetProperty("documentType").GetString()));
+            Assert.True(d.TryGetProperty("subjectId", out _) || d.TryGetProperty("candidateSubjectIds", out _));
+            Assert.True(d.GetProperty("pageNumber").GetInt32() >= 1);
+            Assert.Contains(d.GetProperty("parseStatus").GetString(), V2PageStatuses);
+            Assert.False(string.IsNullOrWhiteSpace(d.GetProperty("pageText").GetString()));
+        }
+
+        var annotations = root.GetProperty("annotations");
+        Assert.Equal(2, annotations.GetProperty("annotationVersion").GetInt32());
+        var outcomes = annotations.GetProperty("expectedOutcomes").EnumerateArray().ToList();
+        Assert.NotEmpty(outcomes);
+        foreach (var o in outcomes)
+        {
+            Assert.Contains(o.GetProperty("requirementId").GetString(), SupportedRequirementIds);
+            Assert.False(string.IsNullOrWhiteSpace(o.GetProperty("expectedState").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(o.GetProperty("outcome").GetString()));
+        }
+
+        var citations = annotations.GetProperty("claimCitations").EnumerateArray().ToList();
+        Assert.NotEmpty(citations);
+        foreach (var c in citations)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(c.GetProperty("claim").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(c.GetProperty("documentId").GetString()));
+            Assert.True(c.GetProperty("pageNumber").GetInt32() >= 1);
+            var support = c.GetProperty("supportLabel").GetString();
+            Assert.Contains(support, new[] { "supported", "unsupported" });
+            Assert.Equal(support == "supported" ? "accept" : "reject", c.GetProperty("expectedResult").GetString());
+        }
+    }
+
+    [Fact]
+    public void EveryCaseHasStructuredScoringGroundTruth()
+    {
+        foreach (var line in V2Lines())
+        {
+            AssertStructuredV2(line);
+        }
+    }
+
+    [Fact]
+    public void V2ValidatorRejectsMissingSourceTextOrGroundTruth()
+    {
+        var line = V2Lines()[0];
+        AssertStructuredV2(line);
+
+        var noText = JsonNode.Parse(line)!.AsObject();
+        noText["inputs"]!["documents"]![0]!.AsObject().Remove("pageText");
+        Assert.ThrowsAny<Exception>(() => AssertStructuredV2(noText.ToJsonString()));
+
+        var noCitations = JsonNode.Parse(line)!.AsObject();
+        noCitations["annotations"]!.AsObject().Remove("claimCitations");
+        Assert.ThrowsAny<Exception>(() => AssertStructuredV2(noCitations.ToJsonString()));
+    }
+
+    [Fact]
+    public void V2ManifestHashMatchesFixtureBytes()
+    {
+        var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(FixtureDir("v2"), "manifest.json")))!.AsObject();
+        var bytes = File.ReadAllBytes(Path.Combine(FixtureDir("v2"), "cases.jsonl"));
+        Assert.Equal(2, manifest["fixtureVersion"]!.GetValue<int>());
+        Assert.Equal(40, manifest["caseCount"]!.GetValue<int>());
+        Assert.Equal(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(),
+            manifest["casesSha256"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void V2ContainsOnlySyntheticFixtureData()
+    {
+        var raw = File.ReadAllText(Path.Combine(FixtureDir("v2"), "cases.jsonl"), new UTF8Encoding(false));
+        Assert.DoesNotMatch(EmailPattern, raw);
+        foreach (var phone in PhonePatterns)
+        {
+            Assert.DoesNotMatch(phone, raw);
+        }
+
+        foreach (var line in V2Lines())
+        {
+            using var doc = JsonDocument.Parse(line);
+            CheckValue(doc.RootElement.GetProperty("inputs"), "", line);
+        }
+    }
+
+    [Fact]
+    public void V1FrozenFixtureIsUnchanged()
+    {
+        var dir = FixtureDir("v1");
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(Path.Combine(dir, "cases.jsonl"))))
+            .ToLowerInvariant();
+        Assert.Equal("280aa4f40d81eb85b9d3eca289b558ada94f2beebf46f3e796642182fe71b3a2", hash);
+
+        var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "manifest.json")))!.AsObject();
+        Assert.Equal(1, manifest["fixtureVersion"]!.GetValue<int>());
+        Assert.Equal(hash, manifest["casesSha256"]!.GetValue<string>());
     }
 
     private static void WriteCopy(string dir, string manifest, string cases)
