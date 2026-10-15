@@ -79,7 +79,8 @@ public static class DiagnosticsSetup
             var source = new List<KeyValuePair<string, object?>>();
             if (data.Attributes is { } attributes)
             {
-                source.AddRange(attributes);
+                // OpenTelemetry adds the raw message template as {OriginalFormat}; it is free text, so it is never kept.
+                source.AddRange(attributes.Where(a => a.Key != "{OriginalFormat}"));
             }
 
             data.ForEachScope(static (scope, pairs) =>
@@ -94,12 +95,16 @@ public static class DiagnosticsSetup
             // Checked before exception metadata is added: an exception alone must not let formatted text through.
             var hasStructuredData = source.Count > 0;
 
-            // Exception messages and stack traces are free text that the filter cannot check, so only the type name is kept.
+            // Exception messages and stack traces are free text that the filter cannot check, so only an allowlisted error.type is kept.
             if (data.Exception is { } exception)
             {
-                if (hasStructuredData)
+                var errorType = TelemetryRedaction.Redact(
+                    [new KeyValuePair<string, object?>("error.type", exception.GetType().FullName)]);
+                if (hasStructuredData
+                    && errorType.TryGetValue("error.type", out var allowedErrorType)
+                    && allowedErrorType != RedactionFilter.Redacted)
                 {
-                    source.Add(new KeyValuePair<string, object?>("exception.type", exception.GetType().FullName));
+                    source.Add(new KeyValuePair<string, object?>("error.type", allowedErrorType));
                 }
                 data.Exception = null;
             }
@@ -108,6 +113,7 @@ public static class DiagnosticsSetup
             if (!hasStructuredData)
             {
                 data.FormattedMessage = null;
+                data.Attributes = null;
                 return;
             }
 

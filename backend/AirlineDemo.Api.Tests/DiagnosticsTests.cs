@@ -18,6 +18,14 @@ public sealed class DiagnosticsTests
     private const string PromptText = "SENTINEL-PROMPT-TEXT";
     private const string DocumentText = "SENTINEL-DOCUMENT-TEXT";
 
+    private static readonly string[] SensitiveEntryNames =
+    [
+        "prompt", "gen_ai.prompt", "gen_ai.content.prompt", "document", "document.text", "document.content",
+        "evidence.text", "passcode", "cookie", "set-cookie", "authorization", "token", "access_token",
+        "refresh_token", "password", "secret", "email", "user.email", "user.name", "phone", "address",
+        "http.request.header.cookie", "http.request.header.authorization", "enduser.id", "user.id",
+    ];
+
     private static IConfiguration Config(string? connectionString) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(connectionString is null
@@ -208,6 +216,21 @@ public sealed class DiagnosticsTests
             logger.LogInformation("Scoped event {State}", "approved");
         }
 
+        const string NamedValue = "SENTINEL-NAMED-VALUE";
+        var namedEntries = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["case.id"] = "named-case-9",
+        };
+        foreach (var name in SensitiveEntryNames)
+        {
+            namedEntries[name] = NamedValue;
+        }
+
+        using (logger.BeginScope(namedEntries))
+        {
+            logger.LogInformation("Named entries {State}", "approved");
+        }
+
         var attributes = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")));
         var scopes = string.Join("\n", captured.SelectMany(r => r.Scopes.Select(a => $"{a.Key}={a.Value}")));
         var messages = string.Join("\n", captured.Select(r => r.Message));
@@ -219,6 +242,8 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain("xyzabc12", output);
         Assert.DoesNotContain(PromptText, output);
         Assert.DoesNotContain(DocumentText, output);
+        Assert.DoesNotContain(NamedValue, output);
+        Assert.Contains("named-case-9", attributes);
         Assert.Contains("case-42", attributes);
         Assert.Contains("case.id=scope-case-5521", attributes);
         Assert.Contains("approved", attributes);
@@ -229,7 +254,7 @@ public sealed class DiagnosticsTests
         var keys = captured.SelectMany(r => r.Attributes.Select(a => a.Key).Concat(r.Scopes.Select(s => s.Key)))
             .Select(k => k.ToLowerInvariant())
             .ToList();
-        foreach (var name in new[] { "passcode", "cookie", "authorization", "token", "password", "email", "user.id", "prompt", "document" })
+        foreach (var name in SensitiveEntryNames)
         {
             Assert.DoesNotContain(name, keys);
         }
@@ -254,13 +279,36 @@ public sealed class DiagnosticsTests
         using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILogger<DiagnosticsTests>>();
 
-        logger.LogError(new InvalidOperationException(ExceptionCanary, new IOException(InnerCanary)), "Operation failed");
+        const string FormattedCanary = "SENTINEL-FORMATTED-MESSAGE";
+        Exception thrown;
+        try
+        {
+            throw new InvalidOperationException(ExceptionCanary, new IOException(InnerCanary));
+        }
+        catch (Exception ex)
+        {
+            thrown = ex;
+        }
+        Assert.NotNull(thrown.StackTrace);
+
+        // No template arguments: the canary exists only in the rendered text.
+        logger.LogError(thrown, $"Operation failed {FormattedCanary}");
+        logger.LogError(thrown, "Operation failed");
 
         var output = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")).Concat(captured.Select(r => r.Message)));
         Assert.DoesNotContain(ExceptionCanary, output);
         Assert.DoesNotContain(InnerCanary, output);
-        Assert.Contains("Operation failed", output);
-        Assert.Contains("System.InvalidOperationException", output);
+        Assert.DoesNotContain(FormattedCanary, output);
+        Assert.DoesNotContain("   at ", output);
+        Assert.DoesNotContain("System.InvalidOperationException", output);
+
+        // With structured data, the exception type is still not exported because it fails the error.type allowlist.
+        captured.Clear();
+        logger.LogError(thrown, "Operation failed for {Case}", "case-42");
+        var structured = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")).Concat(captured.Select(r => r.Message)));
+        Assert.Contains("case-42", structured);
+        Assert.DoesNotContain(ExceptionCanary, structured);
+        Assert.DoesNotContain("System.InvalidOperationException", structured);
     }
 
     [Fact]
