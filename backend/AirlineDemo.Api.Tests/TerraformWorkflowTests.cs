@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace AirlineDemo.Api.Tests;
 
 public sealed class TerraformWorkflowTests
@@ -10,8 +12,9 @@ public sealed class TerraformWorkflowTests
     public void Terraform_workflow_runs_mock_plan_checks()
     {
         var workflow = ReadWorkflow();
-        var setup = StepBody(workflow, SetupStepName);
-        var checks = StepBody(workflow, StepName);
+        var job = JobBody(workflow, "build-and-gate");
+        var setup = StepBody(job, SetupStepName);
+        var checks = StepBody(job, StepName);
 
         Assert.Contains("hashicorp/setup-terraform@", setup);
         Assert.Contains("terraform_version: 1.9.8", setup);
@@ -44,14 +47,24 @@ public sealed class TerraformWorkflowTests
     private static string ReadWorkflow() =>
         File.ReadAllText(Path.Combine(FindRepoRoot(), ".github", "workflows", "build.yml"));
 
-    private static string StepBody(string workflow, string stepName)
+    private static string JobBody(string workflow, string jobName)
+    {
+        var header = $"\n  {jobName}:";
+        var start = workflow.IndexOf(header, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Workflow job '{jobName}' is missing.");
+
+        var next = Regex.Match(workflow[(start + header.Length)..], @"\n  [A-Za-z0-9_-]+:\s*\n");
+        return next.Success ? workflow[start..(start + header.Length + next.Index)] : workflow[start..];
+    }
+
+    private static string StepBody(string job, string stepName)
     {
         var header = $"- name: {stepName}";
-        var start = workflow.IndexOf(header, StringComparison.Ordinal);
-        Assert.True(start >= 0, $"Workflow step '{stepName}' is missing.");
+        var start = job.IndexOf(header, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Workflow step '{stepName}' is missing from the job.");
 
-        var next = workflow.IndexOf("\n      - ", start + header.Length, StringComparison.Ordinal);
-        return next < 0 ? workflow[start..] : workflow[start..next];
+        var next = job.IndexOf("\n      - ", start + header.Length, StringComparison.Ordinal);
+        return next < 0 ? job[start..] : job[start..next];
     }
 
     private static string FindRepoRoot()
