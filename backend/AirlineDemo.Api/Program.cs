@@ -23,7 +23,7 @@ builder.Services.AddCaseStateStore(builder.Configuration);
 builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
-builder.Services.AddSingleton<FinanceInputStore>();
+builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 var app = builder.Build();
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);

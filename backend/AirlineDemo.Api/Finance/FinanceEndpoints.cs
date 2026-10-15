@@ -20,6 +20,29 @@ public sealed class FinanceInputStore
     public FinanceInputs? Find(string caseId) => _inputs.TryGetValue(caseId, out var inputs) ? inputs : null;
 }
 
+/// <summary>Deterministic demo finance inputs, seeded into the production store for each demo case.</summary>
+public static class FinanceDemoData
+{
+    public static FinanceInputStore CreateStore()
+    {
+        var store = new FinanceInputStore();
+        var inputs = new FinanceInputs(
+            new UsageReport("USE-2026-09", "2026-09", [new UsageEntry("FH-A", 100m), new UsageEntry("CYC-B", 4m)]),
+            new RateReport("RATE-2026-09", "2026-09", [new RateEntry("FH-A", "2026-09", 0.10m), new RateEntry("CYC-B", "2026-09", 12.345m)]),
+            new Obligation(
+                "OBL-1",
+                2,
+                new DateOnly(2026, 10, 10),
+                new DateOnly(2026, 10, 14),
+                new DateTimeOffset(2026, 10, 20, 0, 0, 0, TimeSpan.Zero),
+                [new LinkedRequirement("REQ-1", RequirementEvidence.Satisfied, 2)],
+                new TechnicalReview("reviewer-1", true, 2)),
+            []);
+        foreach (var caseId in new[] { "case-001", "case-002", "case-003" }) store.Set(caseId, inputs);
+        return store;
+    }
+}
+
 public static class FinanceEndpoints
 {
     public const string ReservePeriod = "2026-09";
