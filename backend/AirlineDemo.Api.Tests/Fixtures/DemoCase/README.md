@@ -8,10 +8,17 @@ Every name, serial number, registration, approval number, work order and date he
 
 | Item | Identifier | Notes |
 |------|------------|-------|
-| Aircraft | DEMO-AC-01 (registration SYN-001) | Fictional narrowbody |
-| Engine | EN-SYN-7781 (model DEMO-ENG-A) | Installed on DEMO-AC-01, position 1 |
+| Aircraft | Displayed as MOCK-AC-001; stored as SYN-AC-001 (registration SYN-001) | Fictional narrowbody |
+| Engine | EN-SYN-7781 (model DEMO-ENG-A) | Installed on MOCK-AC-001, position 1 |
+| Engine LLP | Engine disk, S/N SYN-LLP-0001 | Installed in EN-SYN-7781; back-to-birth history missing; later contradictory record |
 | Component A | Fuel pump, S/N CMP-A-0001 | Complete history |
-| Component B | Hydraulic actuator, S/N CMP-B-0002 | Missing history, later contradictory record |
+
+## Scenario
+
+- Scenario clock: `scenarioNow` 2025-01-10. Return date: `returnDate` 2025-10-10, nine months later.
+- Story: nine months before return, one engine LLP history gap (DOC-04 has no back-to-birth history for SYN-LLP-0001), one routine request (DOC-09 partner acknowledgement links back to DOC-03), and one ambiguous engine serial (DOC-05 reads EN-SYN-7718 for the engine EN-SYN-7781).
+- The stored aircraft and engine identifiers keep their `SYN-` shapes (SYN-AC-001, EN-SYN-7781); only the display label is MOCK-AC-001.
+- All case data and documents are synthetic.
 
 ## Documents
 
@@ -20,11 +27,11 @@ Every name, serial number, registration, approval number, work order and date he
 | DOC-01 | DOC-01-release-aircraft-baseline.pdf | Certificate of release to service (aircraft) | baseline-complete | Complete aircraft release with every required field |
 | DOC-02 | DOC-02-shop-visit-engine-baseline.pdf | Engine shop-visit report | baseline-complete | Complete engine record with time and cycle history |
 | DOC-03 | DOC-03-release-component-a-baseline.pdf | Component release certificate | baseline-complete | Complete component release with back-to-birth history attached |
-| DOC-04 | DOC-04-release-component-b-missing-history.pdf | Component release certificate | missing-required-history | Component release that lacks the required back-to-birth history |
+| DOC-04 | DOC-04-release-llp-missing-history.pdf | Engine life-limited part release certificate | missing-required-history | Engine LLP release certificate that lacks the required back-to-birth history |
 | DOC-05 | DOC-05-shop-visit-engine-ambiguous-id.pdf | Engine shop-visit report | ambiguous-identity | ESN one digit away from DOC-02's engine, with identical hours and cycles |
 | DOC-06 | DOC-06-corrupt-release-aircraft.pdf | Certificate of release to service (aircraft) | corrupt-file | Copy of DOC-01 with a damaged header and seeded byte flips |
 | DOC-07 | DOC-07-truncated-release-aircraft.pdf | Certificate of release to service (aircraft) | truncated-file | Copy of DOC-01 cut off at 60 percent, so the end-of-file marker is missing |
-| DOC-08 | DOC-08-contradictory-component-b-overhaul.pdf | Component overhaul record | contradictory-later-document | Later record whose time since new is lower than DOC-04's |
+| DOC-08 | DOC-08-contradictory-llp-disk-overhaul.pdf | Life-limited part overhaul record | contradictory-later-document | Later record for the same disk whose cycles since new are lower than DOC-04's |
 | DOC-09 | DOC-09-partner-ack-component-a.pdf | Partner acknowledgement (mock partner) | partner-linked-response | Mock partner reply that links back to DOC-03 by serial number |
 
 ## Expected outcomes
