@@ -298,7 +298,11 @@ public sealed class DiagnosticsTests
         Assert.Equal(2, captured.Count);
         Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
 
-        var output = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")).Concat(captured.Select(r => r.Message)));
+        var output = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}"))
+            .Concat(captured.Select(r => r.Message))
+            .Concat(captured.Select(r => r.FormattedMessage ?? string.Empty))
+            .Concat(captured.Select(r => r.ExceptionText ?? string.Empty)));
+        Assert.DoesNotContain(FormattedCanary, output);
         Assert.DoesNotContain(ExceptionCanary, output);
         Assert.DoesNotContain(InnerCanary, output);
         Assert.DoesNotContain(FormattedCanary, output);
@@ -309,9 +313,14 @@ public sealed class DiagnosticsTests
         captured.Clear();
         logger.LogError(thrown, "Operation failed for {Case}", "case-42");
         Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
-        var structured = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}")).Concat(captured.Select(r => r.Message)));
+        var structured = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}"))
+            .Concat(captured.Select(r => r.Message))
+            .Concat(captured.Select(r => r.FormattedMessage ?? string.Empty))
+            .Concat(captured.Select(r => r.ExceptionText ?? string.Empty)));
         Assert.Contains("case-42", structured);
         Assert.DoesNotContain(ExceptionCanary, structured);
+        Assert.DoesNotContain(InnerCanary, structured);
+        Assert.DoesNotContain("   at ", structured);
         Assert.DoesNotContain("System.InvalidOperationException", structured);
     }
 
@@ -426,14 +435,22 @@ public sealed class DiagnosticsTests
     private sealed record CapturedLog(
         string Message,
         List<KeyValuePair<string, object?>> Attributes,
-        List<KeyValuePair<string, object?>> Scopes);
+        List<KeyValuePair<string, object?>> Scopes,
+        string? FormattedMessage = null,
+        string? ExceptionText = null);
 
     private sealed class CaptureLogs(List<CapturedLog> sink) : BaseProcessor<LogRecord>
     {
         public override void OnEnd(LogRecord data)
         {
             // Scopes are folded into the redacted attributes and removed from the record, so the attributes carry them.
-            sink.Add(new CapturedLog(data.Body ?? string.Empty, (data.Attributes ?? []).ToList(), []));
+            // FormattedMessage and the exception (with inner exceptions and stack trace) are captured so leaks through them are caught.
+            sink.Add(new CapturedLog(
+                data.Body ?? string.Empty,
+                (data.Attributes ?? []).ToList(),
+                [],
+                data.FormattedMessage,
+                data.Exception?.ToString()));
         }
     }
 
