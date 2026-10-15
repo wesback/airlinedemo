@@ -338,15 +338,20 @@ public sealed class SqlCaseStateStoreTests
         Assert.Equal("item-1", Assert.Single(reloaded.ListWorkItems(reloaded.AuthorizeCase("case-b", "owner-b"))).ItemId);
         Assert.Throws<CaseAccessDeniedException>(() => reloaded.AuthorizeCase("case-a", "owner-b"));
 
-        var auditAfterCreate = CountAuditEvents(options);
+        var createdAudit = Assert.Single(reloaded.ReadAudit(reloadedScope));
+        Assert.Equal(("presenter", "create-work-item", "item-1", 1L), (createdAudit.Actor, createdAudit.Action, createdAudit.Detail, createdAudit.Revision));
+
         var changed = reloaded.ChangeWorkItemState(reloadedScope, 1, "item-1", "closed", "reviewer");
         Assert.Equal(2, changed.State.Revision);
-        Assert.Equal(auditAfterCreate + 1, CountAuditEvents(options));
+        var auditAfterChange = reloaded.ReadAudit(reloadedScope);
+        Assert.Equal(2, auditAfterChange.Count);
+        var changeAudit = auditAfterChange[1];
+        Assert.Equal(("reviewer", "change-work-item-state", "item-1 -> closed", 2L), (changeAudit.Actor, changeAudit.Action, changeAudit.Detail, changeAudit.Revision));
 
         Assert.Throws<RevisionConflictException>(() => reloaded.ChangeWorkItemState(reloadedScope, 1, "item-1", "reopened", "reviewer"));
         Assert.Equal("closed", Assert.Single(reloaded.ListWorkItems(reloadedScope)).State);
         Assert.Equal(2, reloaded.Read(reloadedScope).Revision);
-        Assert.Equal(auditAfterCreate + 1, CountAuditEvents(options));
+        Assert.Equal(auditAfterChange, reloaded.ReadAudit(reloadedScope));
     }
 
     private static string SourceDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;
