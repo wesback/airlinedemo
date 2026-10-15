@@ -281,11 +281,14 @@ public class EvaluationCaseFixtureTests
             var category = root.GetProperty("category").GetString()!;
             var documents = root.GetProperty("inputs").GetProperty("documents").EnumerateArray().ToList();
 
-            var pagesPerDocument = documents.GroupBy(d => d.GetProperty("documentId").GetString()!)
-                .ToDictionary(g => g.Key, g => g.Count());
-            Assert.InRange(pagesPerDocument.Count, 8, 12);
-            foreach (var pages in pagesPerDocument.Values)
-                Assert.InRange(pages, 1, 4);
+            var pageNumbersPerDocument = documents.GroupBy(d => d.GetProperty("documentId").GetString()!)
+                .ToDictionary(g => g.Key, g => g.Select(d => d.GetProperty("pageNumber").GetInt32()).ToList());
+            Assert.InRange(pageNumbersPerDocument.Count, 8, 12);
+            foreach (var (documentId, pageNumbers) in pageNumbersPerDocument)
+            {
+                Assert.Equal(pageNumbers.Count, pageNumbers.Distinct().Count());
+                Assert.InRange(pageNumbers.Distinct().Count(), 1, 4);
+            }
 
             foreach (var d in documents)
             {
