@@ -211,6 +211,16 @@ run "registry_is_private_and_pull_scoped" {
     condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("role_definition_name\\s*=\\s*\"Acr", b)) > 0 && length(regexall("(?m)^\\s*scope\\s*=\\s*azurerm_container_registry\\.acr\\.id\\s*$", b)) == 0]) == 0
     error_message = "Every AcrPull or AcrPush assignment must be scoped to azurerm_container_registry.acr.id; any registry grant on another scope fails."
   }
+
+  assert {
+    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && (length(regexall("(?m)^\\s*role_definition_name\\s*=\\s*\"[^\"]+\"\\s*$", b)) != 1 || length(regexall("role_definition_id", b)) > 0)]) == 0
+    error_message = "Every role assignment must name its role with one literal role_definition_name and must not use role_definition_id. A computed or local role could hide an ACR grant to the app identity, so it fails."
+  }
+
+  assert {
+    condition     = length([for b in flatten([for f in fileset(path.module, "*.tf") : split("resource \"", file("${path.module}/${f}"))]) : b if length(regexall("^azurerm_role_assignment\"", b)) > 0 && length(regexall("azurerm_container_registry\\.acr\\.id", b)) > 0 && length(regexall("(?m)^\\s*principal_id\\s*=\\s*azurerm_user_assigned_identity\\.(app|build|release)\\.principal_id\\s*$", b)) == 0]) == 0
+    error_message = "Any role assignment that references the ACR must name the app, build or release identity's principal_id directly. Any other ACR grant fails."
+  }
 }
 
 run "federation_is_limited_to_trusted_workflows" {
