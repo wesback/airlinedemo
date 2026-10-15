@@ -96,6 +96,20 @@ run "audit_grants_remain_append_only" {
   }
 
   assert {
+    condition = output.migration_sql_grant_statements == [
+      "IF DATABASE_PRINCIPAL_ID('id-airline-migration') IS NULL CREATE USER [id-airline-migration] FROM EXTERNAL PROVIDER;",
+      "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];",
+      "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];",
+    ]
+    error_message = "The migration grant statements must be exactly the expected set: no schema-change grant may target any other identity."
+  }
+
+  assert {
+    condition     = length([for s in output.migration_sql_grant_statements : s if (strcontains(s, "ALTER") || strcontains(s, "CONTROL")) && !strcontains(s, "[id-airline-migration]")]) == 0
+    error_message = "Every schema-change grant in the migration statements must target the migration identity."
+  }
+
+  assert {
     condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && (strcontains(s, "ALTER") || strcontains(s, "CONTROL"))]) == 0
     error_message = "The app identity must receive no schema-change permission."
   }
