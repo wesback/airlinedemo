@@ -85,6 +85,25 @@ mock_provider "azurerm" {
     }
   }
 
+  mock_resource "azurerm_container_registry" {
+    defaults = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest"
+      login_server = "acrdemotest.azurecr.io"
+    }
+  }
+
+  mock_resource "azurerm_container_app_environment" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/managedEnvironments/cae-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_container_app" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-api"
+    }
+  }
+
   mock_resource "azurerm_key_vault" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
@@ -102,6 +121,12 @@ variables {
   private_endpoint_subnet_cidr  = "10.60.2.0/24"
   presenter_reviewer_cidrs      = ["203.0.113.0/24"]
   egress_allowed_destinations   = ["198.51.100.0/24"]
+  sql_database_name               = "airlinedemo"
+  acr_name                        = "acrdemotest"
+  container_apps_environment_name = "cae-demo-test"
+  container_app_name              = "ca-airline-api"
+  image_digest                    = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  demo_passcode_secret_uri        = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
   sql_server_name               = "sql-demo-test"
   sql_admin_group_name          = "grp-demo-sql-admins"
   sql_admin_group_object_id     = "22222222-2222-2222-2222-222222222222"

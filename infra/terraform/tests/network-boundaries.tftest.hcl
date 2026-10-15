@@ -17,6 +17,33 @@ mock_provider "azurerm" {
     }
   }
 
+  mock_resource "azurerm_user_assigned_identity" {
+    defaults = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-app"
+      principal_id = "55555555-5555-5555-5555-555555555555"
+      client_id    = "66666666-6666-6666-6666-666666666666"
+    }
+  }
+
+  mock_resource "azurerm_container_registry" {
+    defaults = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest"
+      login_server = "acrdemotest.azurecr.io"
+    }
+  }
+
+  mock_resource "azurerm_container_app_environment" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/managedEnvironments/cae-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_container_app" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-api"
+    }
+  }
+
   mock_resource "azurerm_key_vault" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
@@ -52,6 +79,12 @@ variables {
   private_endpoint_subnet_cidr  = "10.60.2.0/24"
   presenter_reviewer_cidrs      = ["203.0.113.0/24"]
   egress_allowed_destinations   = ["198.51.100.0/24"]
+  sql_database_name               = "airlinedemo"
+  acr_name                        = "acrdemotest"
+  container_apps_environment_name = "cae-demo-test"
+  container_app_name              = "ca-airline-api"
+  image_digest                    = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  demo_passcode_secret_uri        = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
   sql_server_name               = "sql-demo-test"
   sql_admin_group_name          = "grp-demo-sql-admins"
   sql_admin_group_object_id     = "22222222-2222-2222-2222-222222222222"
@@ -175,7 +208,7 @@ run "M-13_data_endpoints_are_private" {
     error_message = "Model private endpoint must connect through the account subresource."
   }
   assert {
-    condition     = azurerm_subnet.private_endpoints.address_prefixes[0] == "10.60.2.0/24" && length(azurerm_private_endpoint.demo) == 4
+    condition     = azurerm_subnet.private_endpoints.address_prefixes[0] == "10.60.2.0/24" && length(azurerm_private_endpoint.demo) == 5
     error_message = "Private endpoints must be created for SQL, Blob, model and Key Vault in the configured private endpoint subnet."
   }
   assert {
@@ -199,7 +232,7 @@ run "M-13_data_endpoints_are_private" {
     error_message = "The model private endpoint must use the account subresource and the privatelink.openai.azure.com zone, in the private endpoint subnet."
   }
   assert {
-    condition     = length(local.private_endpoints) == 4 && can(regex("(?s)private_endpoints = \\{.*sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id.*blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id.*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf")))
+    condition     = length(local.private_endpoints) == 5 && can(regex("(?s)private_endpoints = \\{.*sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id.*blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id.*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf")))
     error_message = "SQL, Blob and model private endpoints must target their own resources (SQL server, storage account, cognitive account)."
   }
   assert {

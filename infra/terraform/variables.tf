@@ -47,8 +47,38 @@ variable "egress_allowed_destinations" {
 }
 
 variable "sql_database_name" {
-  type    = string
-  default = "airlinedemo"
+  type = string
+}
+
+variable "acr_name" {
+  description = "Name of the deployment-owned Azure Container Registry."
+  type        = string
+}
+
+variable "container_apps_environment_name" {
+  type = string
+}
+
+variable "container_app_name" {
+  type = string
+}
+
+variable "image_digest" {
+  description = "Image digest to deploy: sha256: followed by exactly 64 lowercase hexadecimal characters. Tags are refused."
+  type        = string
+  validation {
+    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
+    error_message = "image_digest must be sha256: followed by exactly 64 lowercase hexadecimal characters."
+  }
+}
+
+variable "demo_passcode_secret_uri" {
+  description = "Key Vault secret URI holding the demo passcode. The app reads it as a Container Apps secret."
+  type        = string
+  validation {
+    condition     = can(regex("^https://[a-zA-Z0-9-]+\\.vault\\.azure\\.net/secrets/[a-zA-Z0-9-]+(/[0-9a-f]{32})?$", var.demo_passcode_secret_uri))
+    error_message = "demo_passcode_secret_uri must be a Key Vault secret URI: https://<vault>.vault.azure.net/secrets/<name>[/<version>]."
+  }
 }
 
 variable "sql_server_name" {
