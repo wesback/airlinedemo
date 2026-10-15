@@ -1,0 +1,230 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 226,
+  "branch": "ai-sdlc/issue-226",
+  "commitSha": "3125aadceb56af8ebfdfe3971d2cad1a0bb0feac",
+  "round": 0,
+  "pipelineVersion": "10776a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The hosting configuration enables public external ingress without enforcing the required caller allowlist. The subnet NSG rules do not restrict traffic arriving through the Container Apps environment's public ingress.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/container-hosting.tf",
+          "line": 45,
+          "message": "External ingress does not enforce presenter_reviewer_cidrs. Add Container Apps ingress IP restrictions so non-allowlisted callers are denied, including when the allowlist is empty.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The Container App enables external ingress. The presenter/reviewer allowlist is configured through the app-subnet NSG, but external Container Apps ingress routes through the environment's public IP rather than through that subnet.",
+            "failureScenario": "A request from a public IP outside presenter_reviewer_cidrs can reach the app because the ingress block has no IP restrictions. This violates the allowlist requirement and is an OWASP A01:2025 Broken Access Control risk."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named contract tests cover some hosting configuration, but their broad text matches do not prove several explicit security and deny-by-default requirements. The tests can pass with public access or ingress and egress rules that violate the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 31,
+          "message": "M-13 does not test that ingress is limited to presenter_reviewer_cidrs or that an empty list denies inbound traffic. Bind the allow rule to the configured CIDRs and test the empty-list deny case.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M13 checks that an allow rule uses local.presenter_reviewer_rules and that an inbound deny rule exists, but it does not check the allow rule's source, port, or whether another broader allow rule exists.",
+            "failureScenario": "If an inbound allow rule for 0.0.0.0/0 is added alongside the checked rules, the test still passes and traffic from unlisted sources is allowed, including when presenter_reviewer_cidrs is empty."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 52,
+          "message": "M-14 does not verify the required model TLS and encryption settings or Storage's Microsoft-managed encryption. Assert these settings against their specific resource blocks.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M14 checks for TLS settings somewhere in main.tf but does not associate minimum_tls_version with the model account, or assert Microsoft-managed encryption for Storage and the model account.",
+            "failureScenario": "If the model account is configured with TLS 1.0 while the matched TLS 1.2 setting belongs to Storage, the test passes. It also passes if either Storage or the model account stops using Microsoft-managed encryption."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 85,
+          "message": "M-18 does not verify public access is disabled on each required resource or that model traffic is restricted to approved destinations. Assert those settings against the relevant resource blocks and egress rules.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M18 verifies private-endpoint resource references, then matches public_network_access_enabled = false anywhere in main.tf without tying it to SQL, Blob, and model resources.",
+            "failureScenario": "If SQL, Blob, or the model account has public network access enabled while ACR remains disabled, the test still passes. The test also does not assert that model egress is limited to the configured destinations."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The external app endpoint is reachable without enforcing presenter_reviewer_cidrs. The configured subnet NSG does not restrict traffic routed through the external Container Apps endpoint.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/container-hosting.tf",
+          "line": 47,
+          "message": "External ingress bypasses the intended source IP allowlist because no app-level IP restrictions are configured (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The app enables external ingress, but the diff does not configure Container Apps IP security restrictions. The NSG allow rules do not enforce the CIDR allowlist for requests entering through the external Container Apps endpoint.",
+            "failureScenario": "A client from an IP outside presenter_reviewer_cidrs can reach the app's public endpoint; with an empty allowlist, the endpoint remains externally reachable instead of denying all inbound app traffic."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 15,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
