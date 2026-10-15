@@ -356,6 +356,11 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
+    condition     = length(flatten([for f in fileset(path.module, "*.tf") : regexall("(?m)^resource\\s+\"azurerm_role_assignment\"", file("${path.module}/${f}"))])) == 12
+    error_message = "The configuration must declare exactly twelve role assignments (seven in other files, five in release-identity.tf). Any new grant fails, including one whose principal or scope comes through a var or local, until this count is deliberately updated."
+  }
+
+  assert {
     condition     = !can(regex("client_secret|storage_key|access_key|access_policy|azuread_application_password|admin_password", file("${path.module}/release-identity.tf")))
     error_message = "The workflow identities must not be given a client secret, storage key, or Key Vault access policy."
   }

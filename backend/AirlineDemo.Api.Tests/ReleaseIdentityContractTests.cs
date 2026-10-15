@@ -12,29 +12,55 @@ public sealed class ReleaseIdentityContractTests
 
     private static readonly Regex AppIdentityReference = new(@"azurerm_user_assigned_identity\.app\b");
 
+    private static readonly Regex IndirectScope = new(@"scope\s*=\s*(local|var)\.");
+
     // RELEASE-ID-01: exactly one Terraform grant gives the app identity a role on the ACR, and it is AcrPull.
     [Fact]
     public void App_identity_has_exactly_one_acr_role_assignment()
     {
         var root = Path.Combine(FindRepoRoot(), "infra", "terraform");
-        var appAcrGrantRoles = new List<string>();
+        var terraform = string.Join("\n", Directory.EnumerateFiles(root, "*.tf", SearchOption.AllDirectories).Select(f => File.ReadAllText(f)));
 
-        foreach (var file in Directory.EnumerateFiles(root, "*.tf", SearchOption.AllDirectories))
-        {
-            foreach (Match block in RoleAssignmentBlock.Matches(File.ReadAllText(file)))
-            {
-                var body = block.Groups["body"].Value;
-                if (!AppIdentityReference.IsMatch(body) || !body.Contains("azurerm_container_registry", StringComparison.Ordinal))
-                {
-                    continue;
-                }
+        Assert.Equal(new[] { "AcrPull" }, AppAcrGrantRoles(terraform));
+    }
 
-                var role = RoleDefinitionName.Match(body);
-                appAcrGrantRoles.Add(role.Success ? role.Groups[1].Value : string.Empty);
+    [Fact]
+    public void App_grant_with_indirect_acr_scope_is_counted()
+    {
+        const string terraform = """
+            resource "azurerm_role_assignment" "app_acr_pull" {
+              scope                = azurerm_container_registry.acr.id
+              role_definition_name = "AcrPull"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
             }
+
+            resource "azurerm_role_assignment" "app_acr_push_via_local" {
+              scope                = local.acr_scope
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPull", "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
+    private static List<string> AppAcrGrantRoles(string terraform)
+    {
+        var roles = new List<string>();
+        foreach (Match block in RoleAssignmentBlock.Matches(terraform))
+        {
+            var body = block.Groups["body"].Value;
+            if (!AppIdentityReference.IsMatch(body)
+                || (!body.Contains("azurerm_container_registry", StringComparison.Ordinal) && !IndirectScope.IsMatch(body)))
+            {
+                continue;
+            }
+
+            var role = RoleDefinitionName.Match(body);
+            roles.Add(role.Success ? role.Groups[1].Value : string.Empty);
         }
 
-        Assert.Equal(new[] { "AcrPull" }, appAcrGrantRoles);
+        return roles;
     }
 
     private static string FindRepoRoot()
