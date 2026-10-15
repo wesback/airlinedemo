@@ -324,8 +324,8 @@ public class ApprovedModelManifestTests
 
         foreach (var region in new[]
         {
-            "eastus2", "northeurope", "westeurope", "southcentralus", "eastus", "westus2", "centralus",
-            "uksouth", "ukwest", "", " ", "SwedenCentral", "swedencentral ", "unknown-region-1"
+            "eastus2", "northeurope", "westeurope", "southcentralus", "eastus", "westus", "westus2", "westus3",
+            "centralus", "uksouth", "ukwest", "", " ", "SwedenCentral", "swedencentral ", "unknown-region-1"
         })
         {
             Assert.NotEmpty(Approved("region", region).Validate());
