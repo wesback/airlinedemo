@@ -12,7 +12,15 @@ public sealed class ReleaseIdentityContractTests
 
     private static readonly Regex AppIdentityReference = new(@"azurerm_user_assigned_identity\.app\b");
 
-    private static readonly Regex IndirectScope = new(@"scope\s*=\s*(local|var)\.");
+    private static readonly Regex ScopeAttribute = new(@"^\s*scope\s*=\s*(?<expr>.+)$", RegexOptions.Multiline);
+
+    private static readonly Regex ContainerRegistryReference = new(@"\bazurerm_container_registry\b");
+
+    private static readonly Regex IndirectReference = new(@"\b(local|var|module)\.(\w+)");
+
+    private static readonly Regex ResourceOrDataReference = new(@"\bazurerm_\w+\.|\bdata\.");
+
+    private const int MaxIndirectionDepth = 5;
 
     // RELEASE-ID-01: exactly one Terraform grant gives the app identity a role on the ACR, and it is AcrPull.
     [Fact]
@@ -44,14 +52,49 @@ public sealed class ReleaseIdentityContractTests
         Assert.Equal(new[] { "AcrPull", "AcrPush" }, AppAcrGrantRoles(terraform));
     }
 
+    [Fact]
+    public void App_grant_with_function_wrapped_acr_scope_is_counted()
+    {
+        const string terraform = """
+            locals {
+              acr_scope = azurerm_container_registry.acr.id
+            }
+
+            resource "azurerm_role_assignment" "app_acr_push_via_function" {
+              scope                = try(local.acr_scope, null)
+              role_definition_name = "AcrPush"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+            }
+            """;
+
+        Assert.Equal(new[] { "AcrPush" }, AppAcrGrantRoles(terraform));
+    }
+
+    [Fact]
+    public void App_grant_on_non_acr_resource_is_not_counted()
+    {
+        const string terraform = """
+            locals {
+              kv_scope = azurerm_key_vault.kv.id
+            }
+
+            resource "azurerm_role_assignment" "app_kv_read" {
+              scope                = local.kv_scope
+              role_definition_name = "Key Vault Secrets User"
+              principal_id         = azurerm_user_assigned_identity.app.principal_id
+            }
+            """;
+
+        Assert.Empty(AppAcrGrantRoles(terraform));
+    }
+
     private static List<string> AppAcrGrantRoles(string terraform)
     {
         var roles = new List<string>();
         foreach (Match block in RoleAssignmentBlock.Matches(terraform))
         {
             var body = block.Groups["body"].Value;
-            if (!AppIdentityReference.IsMatch(body)
-                || (!body.Contains("azurerm_container_registry", StringComparison.Ordinal) && !IndirectScope.IsMatch(body)))
+            if (!AppIdentityReference.IsMatch(body) || !MayScopeToAcr(terraform, body))
             {
                 continue;
             }
@@ -61,6 +104,70 @@ public sealed class ReleaseIdentityContractTests
         }
 
         return roles;
+    }
+
+    // Fails closed: a scope that cannot be shown to avoid the ACR is treated as an ACR grant.
+    private static bool MayScopeToAcr(string terraform, string roleAssignmentBody)
+    {
+        var scope = ScopeAttribute.Match(roleAssignmentBody);
+        return !scope.Success || MayReferenceAcr(terraform, scope.Groups["expr"].Value, MaxIndirectionDepth);
+    }
+
+    private static bool MayReferenceAcr(string terraform, string expression, int depth)
+    {
+        if (ContainerRegistryReference.IsMatch(expression))
+        {
+            return true;
+        }
+
+        var references = IndirectReference.Matches(expression);
+        if (references.Count == 0)
+        {
+            return !ResourceOrDataReference.IsMatch(expression);
+        }
+
+        if (depth == 0)
+        {
+            return true;
+        }
+
+        foreach (Match reference in references)
+        {
+            var definition = DefinitionText(terraform, reference.Groups[2].Value);
+            if (definition is null || MayReferenceAcr(terraform, definition, depth - 1))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Returns the right-hand side of `name = ...`, including indented continuation lines.
+    private static string? DefinitionText(string terraform, string name)
+    {
+        var match = Regex.Match(
+            terraform,
+            $@"^(?<indent>[ \t]*){Regex.Escape(name)}[ \t]*=(?<def>.*)$",
+            RegexOptions.Multiline);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var indent = match.Groups["indent"].Length;
+        var lines = new List<string> { match.Groups["def"].Value };
+        foreach (var line in terraform[(match.Index + match.Length)..].Split('\n').Skip(1))
+        {
+            if (line.Trim().Length == 0 || line.TakeWhile(c => c == ' ' || c == '\t').Count() <= indent)
+            {
+                break;
+            }
+
+            lines.Add(line);
+        }
+
+        return string.Join("\n", lines);
     }
 
     private static string FindRepoRoot()
