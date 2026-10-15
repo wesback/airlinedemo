@@ -2,11 +2,11 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.8.0"
+version: "0.9.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
-last_updated: "2026-10-14"
+last_updated: "2026-10-15"
 product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003", "GOAL-004"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.8.0 | Last Updated: 2026-10-14
+> **aircraft-return-readiness** | Status: Draft | Version: 0.9.0 | Last Updated: 2026-10-15
 
 ## Executive Summary
 
@@ -100,6 +100,10 @@ These source design positions are carried forward as draft product decisions, no
 | DD-037 | No formal security review applies to this synthetic demonstrator. The threat model is advisory: its mitigations are built and tested as acceptance criteria, but no review sign-off gates release or deployment stories. |
 | DD-038 | The rehearsal story builds the checklist, the timing and trace-capture scripts and the evidence template for AC-012 and AC-019. The product owner performs the rehearsal once the environment exists and commits the real evidence (run identifiers, timings, trace, decision, recorded fallback) in a pull request. The story is complete only with that evidence attached; no evidence is ever generated or fabricated. |
 | DD-039 | The frozen 40-case evaluation suite contains exactly 10 cases in each of four categories: complete baseline, missing history, ambiguous identity, and blocked or unprocessed evidence. |
+| DD-040 | The headline case tells the presentation's story. The seeded case is shown as aircraft `MOCK-AC-001` (a display label; stored identifiers keep their `SYN-` shapes). Its scenario clock stands nine months before the contractual return date, both fixed in the fixture; scenario time never follows the server clock. The headline missing-history path is an engine life-limited part (LLP): an engine LLP release certificate without its back-to-birth history. The ambiguous-identity path is the engine whose serial number is one digit from another's. The other seeded paths (a component contradiction, corrupt and truncated files, a linked partner reply) stay. |
+| DD-041 | The case opens on a readiness summary computed by the server from case state, in one sentence of counts and the scenario countdown, for example "Return in 9 months. 1 records gap found, 1 routine request sent, 1 item held for internal review, 2 documents not processed." The counts come from the same projections as the queues and never include an ambiguous or unprocessed item as a gap. |
+| DD-042 | The dashboard shows a completed investigation's real correlated trace as an ordered list of steps: each tool the investigator called, each citation check with its outcome (and any correction it made), and the point where deterministic policy took over. It reads the stored trace; it shows no prompt, response or document text (DD-029). The recorded 30-second trace in the demonstration is a capture of this view from a real run. |
+| DD-043 | The evaluation and cost documentation supports the presentation's numbers and labels every one. Per arm: gap-detection precision and recall, citation validity rate, forbidden-action rate, latency p50 and p95 per package, cost per page processed and per case. The cost disclosure also shows the value of a recovered day (the case's EUR250,000 per idle aircraft-month, about EUR8,200 per day) and the number of recovered days that pay for the platform per transition prepared. Each figure carries one label: case-study stipulation, external evidence, scenario assumption, architectural decision, synthetic demonstration result, or unvalidated target. A figure that has not been measured is shown as "not measured", never as an estimate. |
 | DD-040 | Arm D is the single-call comparator for Arm B and uses the same approved model deployment configuration as Arm B, without iterative tool use or agent citation reflection. |
 
 ## Product Goals
@@ -132,6 +136,7 @@ All references in the final column are explicitly BRD-scoped; unprefixed require
 | FR-011 | Reproduce the application from a repository revision; provision every deployment-owned Azure resource from the repository's Terraform configuration; deploy and seed through documented steps. | Delivery owner works from an approved environment and prerequisites. | AC-018, AC-019 | GOAL-004 | BRD:FR-011 / BRD:AC-011 |
 | FR-012 | Provide the demonstration outcomes, a real investigation trace, a consequential simulated decision, and a recorded fallback with limitations. | Presenter rehearses or presents the case. | AC-006, AC-012, AC-019 | GOAL-001, GOAL-004 | BRD:FR-013 / BRD:AC-013 |
 | FR-013 | Provide a case dashboard that shows queues and activity, exposes evidence, presents backend-supplied capability labels, and offers only decisions allowed to the signed-in role. | Presenter or reviewer opens the case dashboard. | AC-006, AC-012, AC-020, AC-021 | GOAL-001, GOAL-002 | BRD:FR-009, BRD:FR-010, BRD:FR-014, BRD:FR-015 / BRD:AC-014, BRD:AC-015, BRD:AC-016 |
+| FR-014 | Let a presenter tell the story of the case from the first screen: a readiness summary with the scenario countdown, the case-study and demo autonomy of every capability, and the investigation trace, with every figure shown labelled by kind. | Presenter opens the seeded case for the executive demonstration. | AC-022, AC-023, AC-024, AC-025 | GOAL-001, GOAL-002 | No direct BRD FR mapping; supports the executive presentation (BRD:AC-013). |
 
 ## Scope Boundaries
 
@@ -289,8 +294,12 @@ The following are required future verification outcomes. Their inclusion is not 
 | AC-019 | Given the readiness package, the README covers purpose, business story, architecture, setup, prerequisites, safe configuration, run/reset/removal, and limitations; evaluation results, real traces, simulated human decisions, and fallback are linked. No secrets or real customer data are committed. | FR-011, FR-012 |
 | AC-020 | Given the seeded case, the dashboard: (a) shows each capability, queue item, and activity with exactly one backend-supplied label; (b) labels only records-investigation events as AI agent and links them to real traces; (c) shows design-only cards with purpose, intended autonomy, human authority, and “Not implemented in this demo,” with no items, counts, or actions; (d) lists only decisions allowed for the signed-in role, links evidence, and offers only backend-permitted actions, including a negative check for a role with no allowed decision; (e) updates queue/timeline from backend state after a decision; and (f) shows missing or unrecognized labels as Unknown and never upgrades a label after a client-side override attempt. | FR-013 |
 | AC-021 | Given the seeded case, (a) each work-queue item shows state, owner, and age matching its QueueItem projection; (b) each working capability card shows open-item count and next decision owner matching its server projection; (c) timeline events, including human decisions, appear in recorded sequence with actor, label, basis version, and outcome matching the ActivityEvent projection; and (d) no fleet, portfolio, or currency totals are shown. | FR-013 |
+| AC-022 | Given the seeded case, every capability card shows two text lines supplied by the server, `Case study: <level>` and `Demo: <level>`, from one table: records investigation L4 and L3, utilisation and reserves L3 and L2, contract compliance L3 and L2, transition planning L2 and design-only, credit and sanctions L2 and design-only, portfolio supervisor not in the table and design-only. The client never computes or edits either value; a missing value shows Unknown. | FR-014 |
+| AC-023 | Given the seeded case, the first view shows the readiness summary of DD-041: the scenario countdown to the return date and the counts of gaps found, requests sent, items held for review and documents not processed, matching the queue and capability projections. The headline case holds one engine LLP gap, one routine request sent to the mock inbox and one ambiguous engine serial held for internal review, and the summary appears within the 20-second outcome time of AC-012. An ambiguous or unprocessed item is never counted as a gap. | FR-014, FR-012 |
+| AC-024 | Given a completed investigation, the dashboard lists its real trace as ordered steps (tool, citation-check outcome, any correction, policy handover) with no prompt, response or document text, and an investigation with no trace shows "no trace recorded" instead of a reconstructed one. | FR-014, FR-012 |
+| AC-025 | Given the evaluation and cost documentation, every figure of DD-043 is present per arm or per transition with exactly one label, a figure not yet measured reads "not measured", the value of a recovered day and the break-even days per transition are shown as stipulation and derived, and no figure is presented as validated customer savings. | FR-014, FR-009 |
 
-Status for AC-001 through AC-021: **Not assessed**. This PRD records acceptance intent, not implementation or runtime status.
+Status for AC-001 through AC-025: **Not assessed**. This PRD records acceptance intent, not implementation or runtime status.
 
 ## Traceability Matrix
 
@@ -311,8 +320,9 @@ Status for AC-001 through AC-021: **Not assessed**. This PRD records acceptance 
 | FR-011 | AC-018, AC-019 |
 | FR-012 | AC-006, AC-012, AC-019 |
 | FR-013 | AC-006, AC-012, AC-020, AC-021 |
+| FR-014 | AC-022, AC-023, AC-024, AC-025 |
 
-Coverage: 13/13 FRs have one or more AC links (100%; target 100%). This is structural coverage, not executed test coverage.
+Coverage: 14/14 FRs have one or more AC links (100%; target 100%). This is structural coverage, not executed test coverage.
 
 ### FR-to-GOAL Alignment
 
@@ -331,8 +341,9 @@ Coverage: 13/13 FRs have one or more AC links (100%; target 100%). This is struc
 | FR-011 | GOAL-004 |
 | FR-012 | GOAL-001, GOAL-004 |
 | FR-013 | GOAL-001, GOAL-002 |
+| FR-014 | GOAL-001, GOAL-002 |
 
-Coverage: 13/13 FRs have one or more GOAL links (100%; target 100%). This is documented alignment, not evidence of goal attainment.
+Coverage: 14/14 FRs have one or more GOAL links (100%; target 100%). This is documented alignment, not evidence of goal attainment.
 
 ### NFR and source alignment
 
@@ -355,7 +366,7 @@ BRD references use the companion [Case 43 BRD v0.2.3](../brd/case-43-brd.md). Pr
 
 ### Demonstrator MVP
 
-The initial demonstrator includes FR-001 through FR-013 and their linked acceptance criteria: the bounded synthetic records journey, simulated review and mock response loop, deterministic reserves/contract consumers, truthful dashboard, four-arm evaluation, reset/recovery, reproducible deployment documentation, and live/recorded demonstration. No requirement is evidence of completion until its acceptance outcome is independently demonstrated.
+The initial demonstrator includes FR-001 through FR-014 and their linked acceptance criteria: the bounded synthetic records journey, simulated review and mock response loop, deterministic reserves/contract consumers, truthful dashboard, four-arm evaluation, reset/recovery, reproducible deployment documentation, and live/recorded demonstration. No requirement is evidence of completion until its acceptance outcome is independently demonstrated.
 
 ### Deferred
 
