@@ -288,6 +288,10 @@ public class EvaluationCaseFixtureTests
             {
                 Assert.Equal(pageNumbers.Count, pageNumbers.Distinct().Count());
                 Assert.InRange(pageNumbers.Distinct().Count(), 1, 4);
+                foreach (var pageNumber in pageNumbers)
+                {
+                    Assert.InRange(pageNumber, 1, 4);
+                }
             }
 
             foreach (var d in documents)
