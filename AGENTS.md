@@ -57,6 +57,9 @@ Each rule comes from a story that stopped for a person because it was missing (D
   mock provider, a fixture), the story says which.
 - **Small enough.** Well under 500 changed lines including tests; a story that needs more is two stories, the second
   depending on the first.
+- **No wishlist or hedge words, even as ordinary words.** The Definition-of-Ready gate rejects `TBD`, `TODO`, `XXX`, `FIXME`,
+  `???`, "not sure", "decide later", "to be determined", "to be decided", "up to the dev" and the word "placeholder"
+  anywhere outside a fenced code block. Write "template field", "token" or "parameter" instead.
 
 ### Story template
 
