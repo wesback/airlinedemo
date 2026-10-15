@@ -71,6 +71,21 @@ output "app_sql_grant_statements" {
   value       = local.app_sql_grant_statements
 }
 
+# Migration identity runs the schema-change grants. It is the only identity granted schema ALTER.
+locals {
+  migration_sql_user = azurerm_user_assigned_identity.migration.name
+  migration_sql_grant_statements = [
+    "IF DATABASE_PRINCIPAL_ID('${local.migration_sql_user}') IS NULL CREATE USER [${local.migration_sql_user}] FROM EXTERNAL PROVIDER;",
+    "GRANT ALTER ON SCHEMA::dbo TO [${local.migration_sql_user}];",
+    "GRANT ALTER ON SCHEMA::audit TO [${local.migration_sql_user}];",
+  ]
+}
+
+output "migration_sql_grant_statements" {
+  description = "T-SQL the migration identity runs to hold schema-change rights; no other identity receives them."
+  value       = local.migration_sql_grant_statements
+}
+
 # Migration identity: management-plane SQL scope only.
 resource "azurerm_role_assignment" "migration_sql" {
   scope                = azurerm_mssql_server.sql.id

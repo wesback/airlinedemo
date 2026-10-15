@@ -199,6 +199,19 @@ resource "azurerm_storage_account" "blob" {
   shared_access_key_enabled         = false
   default_to_oauth_authentication   = true
   infrastructure_encryption_enabled = true
+
+  # Evidence versioning and 14-day recovery of deleted blobs and containers (RETENTION-01).
+  blob_properties {
+    versioning_enabled = true
+
+    delete_retention_policy {
+      days = 14
+    }
+
+    container_delete_retention_policy {
+      days = 14
+    }
+  }
 }
 
 resource "azurerm_key_vault" "kv" {
