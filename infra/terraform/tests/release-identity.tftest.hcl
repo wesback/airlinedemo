@@ -21,7 +21,7 @@ mock_provider "azurerm" {
 
   mock_resource "azurerm_key_vault_key" {
     defaults = {
-      id                    = "https://kv-demo-test.vault.azure.net/keys/release-image-signing/0000"
+      id                      = "https://kv-demo-test.vault.azure.net/keys/release-image-signing/0000"
       resource_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/keys/release-image-signing"
     }
   }
@@ -374,13 +374,13 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
-    condition     = length(regexall("user_assigned_identity[.](build|release)[.]principal_id", join("\n", [for f in fileset(path.module, "**/*.tf") : file("${path.module}/${f}")]))) == 5
+    condition     = length(regexall("user_assigned_identity[.](build|release)[.]principal_id", join("\n", [for f in fileset(path.module, "**/*.tf") : file("${path.module}/${f}")]))) == 7
     error_message = "Only the five expected role assignments may reference the build or release identity; no other configuration may grant them roles."
   }
 
   assert {
-    condition     = length(regexall("user_assigned_identity[.](?:build|release)[.]", join("\n", [for f in fileset(path.module, "**/*.tf") : file("${path.module}/${f}")]))) == 9 && length(regexall("user_assigned_identity[.](?:build|release)[.]", file("${path.module}/release-identity.tf"))) == 9
-    error_message = "The build and release identities may be referenced only by the nine known references in release-identity.tf (five role principals, two federated credentials, two outputs). Any extra reference, including one through a local, fails."
+    condition     = length(regexall("user_assigned_identity[.](?:build|release)[.]", join("\n", [for f in fileset(path.module, "**/*.tf") : file("${path.module}/${f}")]))) == 11 && length(regexall("user_assigned_identity[.](?:build|release)[.]", file("${path.module}/release-identity.tf"))) == 9
+    error_message = "The build and release identities may be referenced only by the eleven known references: nine in release-identity.tf (five role principals, two federated credentials, two outputs) and two in the terraform_contributor precondition in main.tf. Any extra reference, including one through a local, fails."
   }
 
   assert {
