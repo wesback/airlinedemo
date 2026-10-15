@@ -25,7 +25,11 @@ public sealed class FinanceEndpointsTests
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode }));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = Passcode,
+                    ["CaseState:Path"] = Path.Combine(Path.GetTempPath(), $"finance-endpoints-{Guid.NewGuid():N}.json"),
+                }));
             if (fixedTime)
                 builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(new FixedTimeProvider(AsOf)));
         });
