@@ -1,0 +1,202 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 232,
+  "branch": "ai-sdlc/issue-232",
+  "commitSha": "9bb6b39e84d79b3e53ec5ec6c86c76881005c574",
+  "round": 0,
+  "pipelineVersion": "dde1b91",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The retention settings and current migration grants match the acceptance criteria. The RETENTION-03 test does not fail if a different identity is also granted schema-change permission.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/retention.tftest.hcl",
+          "line": 94,
+          "message": "The RETENTION-03 test does not verify exclusivity: assert that every schema-change grant targets the migration identity, so an added grant to another identity fails the test.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The audit_grants_remain_append_only test checks that the migration identity gets both ALTER grants, that the app has no ALTER or CONTROL grant, and that migration statements do not mention the app. It never checks that the migration grant output contains no grant to a different identity.",
+            "failureScenario": "If a statement granting ALTER on dbo or audit to a third identity is added to migration_sql_grant_statements, all assertions in this test still pass, despite AC: RETENTION-03 requiring only the migration identity to receive schema-change permission."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The retention settings and named mock-plan tests are present, and the build-and-gate workflow runs terraform test. The RETENTION-03 test does not reject schema-change grants to identities other than the app.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/retention.tftest.hcl",
+          "line": 104,
+          "message": "AC: RETENTION-03 lacks an effective test for the requirement that only the migration identity receives schema-change permission. Assert that every generated ALTER grant targets the migration identity, or that the generated statements exactly match the expected set.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The migration step executes output.migration_sql_grant_statements. The test checks for the expected migration grants and only rejects statements containing \"app\".",
+            "failureScenario": "If a GRANT ALTER statement targeting an unrelated identity is added to migration_sql_grant_statements, audit_grants_remain_append_only still passes, so the test does not catch a violation of AC: RETENTION-03."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security defect is evident in the supplied diff. The migration grants are scoped to the migration identity, and the retention settings match the stated criteria.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/retention.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
