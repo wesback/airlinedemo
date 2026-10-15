@@ -1,0 +1,247 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 165,
+  "branch": "ai-sdlc/issue-165",
+  "commitSha": "401b4f486f69caef2c7f6560befb2a8545686e1d",
+  "round": 0,
+  "pipelineVersion": "a8c1f65",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover the listed structural checks, but the corpus includes at least one baseline case with impossible chronology. That case can produce misleading evidence-based quality metrics.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/Fixtures/Evaluation/v2/cases.jsonl",
+          "line": 2,
+          "message": "EVAL-V2-02 is labeled baseline-complete and ready despite contradictory component chronology; the baseline corpus does not satisfy the stated consistency requirement.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The four-arm runner consumes this case as baseline-complete, and its expected outcome is ready.",
+            "failureScenario": "Case EVAL-V2-02 says the part was manufactured on 14 Apr 2019, installed on 17 May 2024, removed on 20 Jun 2014, and installed again on 23 Jul 2019. A runner using this supposedly complete and consistent baseline receives impossible chronology labeled ready, undermining evidence-based scoring."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The corpus tests cover the stated structural checks, but EVAL-V2-02 contains impossible chronology while labeled ready. The cases also model only one component, and the case-design test does not check the required two-component structure.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/Fixtures/Evaluation/v2/cases.jsonl",
+          "line": 2,
+          "message": "EVAL-V2-02 is not a consistent baseline-complete case: its trace and release certificate predate manufacture.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "EVAL-V2-02 is categorized as baseline-complete with expected state ready. Its trace and release certificate give dates that contradict the recorded manufacture date.",
+            "failureScenario": "The trace says the part was manufactured on 14 Apr 2019, but installed on 17 May 2024 and removed on 20 Jun 2014; its release certificate is also dated 20 Jun 2014. The case is labeled ready despite impossible chronology, so a runner using it as a complete baseline receives contradictory evidence."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvaluationCaseFixtureTests.cs",
+          "line": 230,
+          "message": "AC-07's two-component case design is absent and unverified: each case supplies records for only one component.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "V2ContentMeetsTheCaseDesign checks document counts and types but does not check the number of components or that records cover two components. The fixture cases provide one componentId and source records for one component.",
+            "failureScenario": "When the runner uses a case to evaluate a two-component investigation, the fixture supplies only one component's records. The corpus therefore cannot exercise the specified two-component case design, and the named design test passes without detecting the omission."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed tests and synthetic evaluation fixtures introduce no reachable security vulnerability. Pipeline attestation and verdict files are excluded from review.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "tests-only change: no production file touched",
+    "redKind": "",
+    "greenExit": 0,
+    "redExit": 0,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvaluationCaseFixtureTests.cs",
+      "backend/AirlineDemo.Api.Tests/Fixtures/Evaluation/README.md",
+      "backend/AirlineDemo.Api.Tests/Fixtures/Evaluation/v2/cases.jsonl",
+      "backend/AirlineDemo.Api.Tests/Fixtures/Evaluation/v2/manifest.json"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
