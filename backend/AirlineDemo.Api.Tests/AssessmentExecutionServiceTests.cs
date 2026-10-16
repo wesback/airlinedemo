@@ -29,6 +29,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         _store = new CaseStateStore(_path);
         _scope = _store.CreateCase("case-1", "presenter");
         _service = new AssessmentExecutionService(_store, _inbox, _assessments);
+        _assessments.SetCurrentBasis("case-1", CurrentBasis());
     }
 
     public void Dispose()
@@ -47,8 +48,9 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
     private static AssessmentBasis CurrentBasis(
         ProcessingCoverage? coverage = null,
         bool ambiguous = false,
-        IReadOnlyDictionary<string, BasisDocument>? documents = null) =>
-        new(BasisId, BasisVersion, ScenarioTime, coverage ?? Complete, ambiguous, documents ?? Documents());
+        IReadOnlyDictionary<string, BasisDocument>? documents = null,
+        int version = BasisVersion) =>
+        new(BasisId, version, ScenarioTime, coverage ?? Complete, ambiguous, documents ?? Documents());
 
     private static AssessmentClaim Missing(string quote = Quote, string docId = "return-status", string value = Value) =>
         new(ClaimKind.MissingRequirement, value, "Engine", "ENG-123", [new DocumentWitness(docId, 1, quote)]);
@@ -65,6 +67,12 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         var request = Assert.Single(_inbox.Requests);
         Assert.Equal(record.RequestId, request.RequestId);
         Assert.Equal("case-1", request.CaseId);
+        Assert.Equal(BasisId, request.BasisId);
+        Assert.Equal(BasisVersion, request.BasisVersion);
+        Assert.Equal("assessment-3", request.ReportId);
+        var expected = new DeliveryEnvelope(
+            "case-1:basis-7:3:assessment", "case-1", "assessment-3", BasisId, BasisVersion, ScenarioTime, "Engine", "ENG-123", Value);
+        Assert.Equal(MockRequestTemplate.Render(expected, record.RequestId!), request.Body);
         Assert.Empty(_store.ListWorkItems(_scope));
     }
 
@@ -109,6 +117,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
             (CurrentBasis(), [conflict]),
             (CurrentBasis(coverage: new ProcessingCoverage(2, 1, 0, 0)), [Missing()]),
             (CurrentBasis(), [Missing(docId: "history")]),
+            (CurrentBasis(version: BasisVersion - 1), [Missing()]),
         };
 
         foreach (var (basis, claims) in scenarios)

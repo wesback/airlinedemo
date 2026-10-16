@@ -5,6 +5,25 @@ public sealed class AssessmentStore
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, List<AssessmentRecord>> _byCase = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AssessmentBasis> _currentByCase = new(StringComparer.Ordinal);
+
+    /// <summary>Records the case's current accepted evidence basis. An assessment against any other basis is not current.</summary>
+    public void SetCurrentBasis(string caseId, AssessmentBasis basis)
+    {
+        ArgumentNullException.ThrowIfNull(basis);
+        lock (_gate)
+        {
+            _currentByCase[caseId] = basis;
+        }
+    }
+
+    public AssessmentBasis? CurrentBasis(string caseId)
+    {
+        lock (_gate)
+        {
+            return _currentByCase.TryGetValue(caseId, out var basis) ? basis : null;
+        }
+    }
 
     public void Append(AssessmentRecord record)
     {

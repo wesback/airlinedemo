@@ -72,7 +72,11 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
                 (claim.Witnesses ?? []).Where(w => w is not null).Select(w => new AssessedWitness(w.DocumentId, w.Page)).ToArray()))
             .ToArray();
 
-        var (outcome, reason) = Route(basis, validated);
+        var current = assessments.CurrentBasis(scope.CaseId);
+        var isCurrent = current is not null && current.BasisId == basis.BasisId && current.BasisVersion == basis.BasisVersion;
+        var (outcome, reason) = isCurrent
+            ? Route(basis, validated)
+            : (Review, "supplied basis is not the current accepted basis");
         string? requestId = null;
         string? workItemId = null;
 
