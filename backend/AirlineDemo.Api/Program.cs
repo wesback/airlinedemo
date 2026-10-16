@@ -8,6 +8,7 @@ using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 using AirlineDemo.Api.Reviews;
+using Microsoft.Extensions.AI;
 
 if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Switch)
 {
@@ -32,10 +33,20 @@ if (!string.IsNullOrEmpty(approvedModelManifestPath))
 {
     builder.Services.AddSingleton(ApprovedModelManifest.Load(approvedModelManifestPath));
 }
-// No model client is configured in this host, so an investigation fails closed
-// instead of sending evidence anywhere. Hosts that configure a model replace this registration.
-builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(_ =>
-    throw new InvalidOperationException("No investigation model is configured; accepted evidence is not sent to a model."));
+// Resolved lazily: constructing the client makes no network request and fetches no token.
+// The model gate still refuses any request while the manifest is unapproved.
+builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
+{
+    var endpoint = builder.Configuration["AzureOpenAI:Endpoint"]
+        ?? throw new InvalidOperationException("AzureOpenAI:Endpoint is not configured; accepted evidence cannot be investigated.");
+    var manifest = sp.GetService<ApprovedModelManifest>()
+        ?? throw new InvalidOperationException("No approved model manifest is configured; accepted evidence cannot be investigated.");
+    var deployment = manifest.DeploymentName
+        ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
+    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), new Azure.Identity.DefaultAzureCredential())
+        .GetChatClient(deployment)
+        .AsIChatClient();
+});
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();

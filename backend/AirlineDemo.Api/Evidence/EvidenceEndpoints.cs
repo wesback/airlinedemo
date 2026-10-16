@@ -136,8 +136,9 @@ public static class EvidenceEndpoints
 
         var manifest = services.GetRequiredService<ApprovedModelManifest>();
         var registry = services.GetRequiredService<SyntheticContentRegistry>();
-        var scope = caseStore.OwnerOf(caseId) is { } owner
-            ? caseStore.AuthorizeCase(caseId, owner)
+        // Authorize with the authenticated actor: a non-owner must be refused, not granted the owner's scope.
+        var scope = caseStore.OwnerOf(caseId) is not null
+            ? caseStore.AuthorizeCase(caseId, actorId)
             : caseStore.CreateCase(caseId, actorId);
 
         var runId = record.PackageId;
