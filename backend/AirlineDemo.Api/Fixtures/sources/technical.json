@@ -1,0 +1,50 @@
+{
+  "sourceId": "technical",
+  "records": [
+    {
+      "recordId": "tech-airworthiness-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "airworthiness_status",
+      "synthetic": true,
+      "payload": { "status": "airworthy", "directive": "SYN-AD-2026-014", "directiveStatus": "complied" }
+    },
+    {
+      "recordId": "tech-component-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "component_identity",
+      "synthetic": true,
+      "payload": { "partNumber": "SYN-ENG-7000-A", "serialNumber": "SYN-SN-88412", "position": "engine_1" }
+    },
+    {
+      "recordId": "tech-utilization-2026-08",
+      "recordVersion": 1,
+      "asOf": "2026-08-31",
+      "caseId": "case-001",
+      "kind": "utilization",
+      "synthetic": true,
+      "payload": { "periodStart": "2026-08-01", "periodEnd": "2026-08-31", "hours": "198.0", "cycles": "151" }
+    },
+    {
+      "recordId": "tech-utilization-2026-09",
+      "recordVersion": 1,
+      "asOf": "2026-09-30",
+      "caseId": "case-001",
+      "kind": "utilization",
+      "synthetic": true,
+      "payload": { "periodStart": "2026-09-01", "periodEnd": "2026-09-30", "hours": "212.5", "cycles": "164" }
+    },
+    {
+      "recordId": "tech-applicability-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "applicability",
+      "synthetic": true,
+      "payload": { "requirement": "SYN-AD-2026-014", "regime": "EASA", "responsibleParty": "lessee-operator" }
+    }
+  ]
+}
