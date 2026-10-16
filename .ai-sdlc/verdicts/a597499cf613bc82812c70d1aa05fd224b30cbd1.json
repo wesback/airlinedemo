@@ -1,0 +1,321 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "a597499cf613bc82812c70d1aa05fd224b30cbd1",
+  "round": 0,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds trace storage and an execution service, but does not connect accepted evidence to that service in production. The tests exercise the service and recorder directly, so they do not catch the missing evidence-workflow integration.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 24,
+          "message": "AC TRACE-PRODUCER-01 is unmet: registering the execution service does not start an investigation when the API accepts case evidence.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Program registers InvestigationExecutionService, but the diff adds no production call from EvidenceEndpoints or another evidence-acceptance path. The service is only invoked by tests.",
+            "failureScenario": "A user submits accepted case evidence through the API; no production path loads the case-scoped documents and invokes the execution service, so the investigation runs without appending its trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 112,
+          "message": "The named tests do not verify the evidence workflow required by AC TRACE-PRODUCER-01 and AC TRACE-PRODUCER-04; they can pass while accepted evidence never starts a traceable investigation.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "PersistsActualOrderedToolAndCitationOutcomes calls InvestigationExecutionService directly with documents and an investigator; it does not exercise evidence acceptance or the case-scoped production source. RecordsOnlyStartedInvestigationsAndTheirActualOutcome calls recorder methods directly rather than testing the workflow with fake case data and a fake chat client.",
+            "failureScenario": "If evidence acceptance never invokes the execution service, these tests still pass because they bypass the evidence workflow and manually create the recorder for the start-boundary assertions."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff adds trace storage, recording, and direct execution-service tests, but does not connect the service to production evidence acceptance. The tests also bypass the evidence workflow for the start and pre-start rejection behaviors.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 24,
+          "message": "AC TRACE-PRODUCER-01 is unmet: registering InvestigationExecutionService does not start an investigation when production evidence is accepted or persist that investigation’s trace.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Program registers InvestigationExecutionService, but the diff adds no production caller from the evidence acceptance workflow. The new test invokes the service directly.",
+            "failureScenario": "When case evidence is accepted through the production workflow, no code invokes InvestigationExecutionService, so the investigator does not run and no trace of that investigation is appended."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 93,
+          "message": "The AC TRACE-PRODUCER-01 behavior test does not exercise the required evidence workflow, so it cannot detect that accepting evidence fails to start an investigation.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "PersistsActualOrderedToolAndCitationOutcomes constructs documents and an investigator, then calls InvestigationExecutionService.ExecuteAsync directly; it does not exercise the evidence acceptance workflow.",
+            "failureScenario": "If evidence acceptance stops invoking the execution service, this test still passes because it bypasses the production evidence path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 193,
+          "message": "The AC TRACE-PRODUCER-04 test does not use fake case data and a fake chat client through the evidence workflow, so it does not verify that pre-start evidence rejection writes no trace.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "RecordsOnlyStartedInvestigationsAndTheirActualOutcome directly constructs and calls InvestigationTraceRecorder; the pre-start case only checks that a different run ID has no stored trace.",
+            "failureScenario": "If the evidence workflow creates a recorder and writes a trace for evidence rejected before investigation starts, this test still passes because it never sends rejected evidence through that workflow."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable through the changed code. Trace persistence uses EF Core queries, and I found no demonstrated injection, credential exposure, or authorization bypass in the diff.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 164,
+      "total": 165,
+      "percent": 99.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationExecutionService.cs",
+          "covered": 19,
+          "total": 19,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationTraceRecorder.cs",
+          "covered": 40,
+          "total": 40,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 16,
+          "total": 16,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 1,
+          "total": 2,
+          "missed": [
+            155
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261016000000_AddCaseTraces.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 37,
+          "total": 37,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
