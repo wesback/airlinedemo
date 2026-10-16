@@ -256,6 +256,20 @@ jobs:
           mkdir -p artifacts/image
           printf '%s\n' "$DIGEST" > artifacts/image/digest.txt
 
+      - name: Download supply-chain evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: artifacts/
+
+      - name: Add digest to supply-chain evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: artifacts/
+          retention-days: 90
+          overwrite: true
+
       - name: Upload image digest
         uses: actions/upload-artifact@v4
         with:

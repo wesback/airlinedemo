@@ -215,10 +215,22 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("name: image-digest", upload);
         Assert.Contains("path: artifacts/image/digest.txt", upload);
         Assert.Contains("retention-days: 90", upload);
+        var download = StepBody(workflow, "Download supply-chain evidence");
+        var evidence = StepBody(workflow, "Add digest to supply-chain evidence");
+        Assert.Contains("name: supply-chain-evidence", download);
+        Assert.Contains("path: artifacts/", download);
+        Assert.Contains("name: supply-chain-evidence", evidence);
+        Assert.Contains("path: artifacts/", evidence);
+        Assert.Contains("overwrite: true", evidence);
+        Assert.Contains("retention-days: 90", evidence);
         Assert.True(job.IndexOf("name: Build and push image", StringComparison.Ordinal) < job.IndexOf("name: Record image digest", StringComparison.Ordinal),
             "The digest must be recorded after the push.");
-        Assert.True(job.IndexOf("name: Record image digest", StringComparison.Ordinal) < job.IndexOf("name: Upload image digest", StringComparison.Ordinal),
-            "The digest artifact must be uploaded after it is recorded.");
+        Assert.True(job.IndexOf("name: Record image digest", StringComparison.Ordinal) < job.IndexOf("name: Download supply-chain evidence", StringComparison.Ordinal),
+            "The digest must be recorded before the evidence artifact is updated.");
+        Assert.True(job.IndexOf("name: Download supply-chain evidence", StringComparison.Ordinal) < job.IndexOf("name: Add digest to supply-chain evidence", StringComparison.Ordinal),
+            "The evidence artifact must be downloaded before it is re-uploaded with the digest.");
+        Assert.True(job.IndexOf("name: Add digest to supply-chain evidence", StringComparison.Ordinal) < job.IndexOf("name: Upload image digest", StringComparison.Ordinal),
+            "The evidence artifact must carry the digest before the separate digest artifact is uploaded.");
     }
 
     // M-12: publication depends on the gate, and the SBOM and severity gate steps run before it.
