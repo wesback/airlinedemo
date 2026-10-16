@@ -104,13 +104,3 @@ resource "azurerm_role_assignment" "release_container_app" {
   role_definition_name = "Container Apps Contributor"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
 }
-
-output "build_identity_client_id" {
-  description = "Client ID of the build workflow identity (public; authentication is by OIDC federation)."
-  value       = azurerm_user_assigned_identity.build.client_id
-}
-
-output "release_identity_client_id" {
-  description = "Client ID of the release workflow identity (public; authentication is by OIDC federation)."
-  value       = azurerm_user_assigned_identity.release.client_id
-}

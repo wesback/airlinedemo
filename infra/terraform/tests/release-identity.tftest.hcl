@@ -329,6 +329,11 @@ run "signing_rights_are_resource_scoped" {
     error_message = "The release identity must hold Container Apps Contributor scoped to the application only."
   }
 
+  assert {
+    condition     = azurerm_role_assignment.terraform_contributor.role_definition_name == "Contributor" && azurerm_role_assignment.terraform_contributor.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test" && azurerm_role_assignment.terraform_contributor.principal_id == "33333333-3333-3333-3333-333333333333"
+    error_message = "The existing Contributor grant must stay on the resource group for the Terraform principal only."
+  }
+
 
 
 
@@ -359,12 +364,44 @@ run "release_outputs_contain_no_secrets" {
   }
 
   assert {
-    condition     = output.build_identity_client_id == azurerm_user_assigned_identity.build.client_id && output.release_identity_client_id == azurerm_user_assigned_identity.release.client_id
-    error_message = "Release workflow outputs must be exactly the workflow identities' client IDs; any other value, including an opaque credential, fails."
+    condition     = output.model_endpoint == "https://aoai-demo-test.openai.azure.com/"
+    error_message = "model_endpoint must equal the exact private model endpoint for the mocked subdomain."
   }
 
   assert {
-    condition     = !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", join("\n", [for o in [output.app_sql_grant_statements, output.migration_sql_grant_statements, output.model_endpoint, output.build_identity_client_id, output.release_identity_client_id] : jsonencode(o)])))
+    condition = output.app_sql_grant_statements == [
+      "IF DATABASE_PRINCIPAL_ID('id-airline-app') IS NULL CREATE USER [id-airline-app] FROM EXTERNAL PROVIDER;",
+      "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON SCHEMA::dbo TO [id-airline-app];",
+    ]
+    error_message = "app_sql_grant_statements must equal the exact ordered app grant statements."
+  }
+
+  assert {
+    condition = output.migration_sql_grant_statements == [
+      "IF DATABASE_PRINCIPAL_ID('id-airline-migration') IS NULL CREATE USER [id-airline-migration] FROM EXTERNAL PROVIDER;",
+      "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];",
+      "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];",
+    ]
+    error_message = "migration_sql_grant_statements must equal the exact ordered migration grant statements."
+  }
+
+  assert {
+    condition     = !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", join("\n", [for o in [output.app_sql_grant_statements, output.migration_sql_grant_statements, output.model_endpoint] : jsonencode(o)])))
     error_message = "No Terraform output may contain secret material in its evaluated value."
   }
 

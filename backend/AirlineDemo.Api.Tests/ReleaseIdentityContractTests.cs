@@ -46,7 +46,7 @@ public sealed class ReleaseIdentityContractTests
     }
 
     // RELEASE-ID-04: the set of outputs cannot grow unnoticed. The Terraform test release_outputs_contain_no_secrets asserts the
-    // evaluated values of the two workflow client-ID outputs.
+    // evaluated values of these three outputs.
     [Fact]
     public void Outputs_are_held_to_a_baseline()
     {
@@ -59,10 +59,8 @@ public sealed class ReleaseIdentityContractTests
             new[]
             {
                 "app_sql_grant_statements",
-                "build_identity_client_id",
                 "migration_sql_grant_statements",
                 "model_endpoint",
-                "release_identity_client_id",
             },
             names);
     }
@@ -83,9 +81,15 @@ public sealed class ReleaseIdentityContractTests
         Assert.Equal(
             new[] { "build_acr_push", "release_acr_push", "release_signing_key", "release_signing_certificate", "release_container_app" },
             RoleAssignmentName.Matches(release).Select(m => m.Groups[1].Value).ToArray());
+        Assert.Empty(OutputName.Matches(release));
+
+        // RELEASE-ID-02: exactly one federated credential per workflow identity across all Terraform files.
         Assert.Equal(
-            new[] { "build_identity_client_id", "release_identity_client_id" },
-            OutputName.Matches(release).Select(m => m.Groups[1].Value).ToArray());
+            new[] { "build", "release" },
+            ReadTerraformFiles()
+                .SelectMany(f => Regex.Matches(f.Text, @"(?m)^resource\s+""azurerm_federated_identity_credential""\s+""(\w+)""").Select(m => m.Groups[1].Value))
+                .OrderBy(n => n, StringComparer.Ordinal)
+                .ToArray());
 
         // RELEASE-ID-07: the signing key is the key Key Vault creates for the certificate; no separate key resource.
         Assert.DoesNotContain("azurerm_key_vault_key", release);
