@@ -7,6 +7,7 @@ using AirlineDemo.Api.Security;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 using AirlineDemo.Api.Reviews;
+using AirlineDemo.Api.SourceSystems;
 
 if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Switch)
 {
@@ -25,6 +26,10 @@ builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
+builder.Services.AddSingleton(new SourceFixtureLoader(
+    SourceFixtureTrust.PinnedReleasePublicKeyPem,
+    SourceFixtureContract.ScenarioDate));
+builder.Services.AddSingleton<SourcePublicationStore>();
 DemoFixture.LoadEmbedded();
 var app = builder.Build();
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
