@@ -110,6 +110,7 @@ public sealed class SourceModeCommandTests
             using var detail = JsonDocument.Parse(newEvent.Detail);
             Assert.Equal(new[] { "commandId", "caseId", "sourceId", "priorMode", "newMode", "priorRevision", "newRevision" }, Names(detail.RootElement));
             Assert.Equal("cmd-1", detail.RootElement.GetProperty("commandId").GetString());
+            Assert.Equal(Case, detail.RootElement.GetProperty("caseId").GetString());
             Assert.Equal("technical", detail.RootElement.GetProperty("sourceId").GetString());
             Assert.Equal("available", detail.RootElement.GetProperty("priorMode").GetString());
             Assert.Equal("unavailable", detail.RootElement.GetProperty("newMode").GetString());
@@ -261,6 +262,41 @@ public sealed class SourceModeCommandTests
             var priorAfterReset = cases.Read(scope);
             Assert.Equal(snapshotRevision, priorAfterReset.Revision);
             Assert.Equal(snapshotAudit, priorAfterReset.Audit.Count);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Command_id_over_64_characters_is_rejected_and_64_is_accepted()
+    {
+        var path = TempStatePath();
+        try
+        {
+            await using var factory = CreateFactory(path);
+            var cases = Cases(factory);
+            var scope = Ensure(cases);
+            var before = cases.Read(scope);
+            var session = Session(factory, Presenter);
+            using var client = factory.CreateClient();
+
+            using (var tooLong = await PostModeAsync(client, session, "technical",
+                new { commandId = new string('c', 65), expectedRevision = before.Revision, mode = "unavailable" }, session.CsrfToken))
+            {
+                Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+                var error = await tooLong.Content.ReadFromJsonAsync<JsonElement>();
+                Assert.Equal("invalid_request", error.GetProperty("error").GetProperty("code").GetString());
+            }
+
+            var unchanged = cases.Read(scope);
+            Assert.Equal(before.Revision, unchanged.Revision);
+            Assert.Equal(before.Audit.Count, unchanged.Audit.Count);
+
+            using var ok = await PostModeAsync(client, session, "technical",
+                new { commandId = new string('c', 64), expectedRevision = before.Revision, mode = "unavailable" }, session.CsrfToken);
+            Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         }
         finally
         {

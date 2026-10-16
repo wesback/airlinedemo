@@ -9,6 +9,7 @@ public sealed record SourceModeRequest(string? CommandId, long? ExpectedRevision
 public static class SourceModeEndpoints
 {
     public const string PresenterRole = "presenter";
+    public const int MaxCommandIdLength = 64;
 
     public static IEndpointRouteBuilder MapSourceModeEndpoints(this IEndpointRouteBuilder app)
     {
@@ -35,6 +36,11 @@ public static class SourceModeEndpoints
         if (body is null || string.IsNullOrWhiteSpace(body.CommandId) || body.ExpectedRevision is null || body.Mode is null)
         {
             return Error(StatusCodes.Status400BadRequest, "invalid_request", "commandId, expectedRevision and mode are required.");
+        }
+
+        if (body.CommandId.Length > MaxCommandIdLength)
+        {
+            return Error(StatusCodes.Status400BadRequest, "invalid_request", $"commandId must be at most {MaxCommandIdLength} characters.");
         }
 
         var result = modes.Set(scope, session.User.Id, body.CommandId, body.ExpectedRevision.Value, sourceId, body.Mode);
