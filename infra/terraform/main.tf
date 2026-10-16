@@ -299,6 +299,14 @@ resource "azurerm_role_assignment" "terraform_contributor" {
   scope                = local.rg_scope
   role_definition_name = "Contributor"
   principal_id         = var.terraform_principal_object_id
+
+  # Fails the plan if this existing Contributor grant would go to a workflow identity.
+  lifecycle {
+    precondition {
+      condition     = lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.build.principal_id) && lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.release.principal_id)
+      error_message = "terraform_principal_object_id must not be the build or release workflow identity, or the Contributor grant would hand that workflow subscription-wide rights."
+    }
+  }
 }
 
 resource "azurerm_consumption_budget_resource_group" "demo" {
@@ -320,6 +328,6 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
 }
 
 output "model_endpoint" {
-  description = "HTTPS model endpoint, reachable only through the private endpoint."
-  value       = "https://${var.model_endpoint_subdomain}.openai.azure.com/"
+  description = "Model endpoint host and path, reachable only through the private endpoint."
+  value       = "${var.model_endpoint_subdomain}.openai.azure.com/"
 }
