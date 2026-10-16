@@ -1,0 +1,299 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "26a9c02a169979f7a9eb65bef9f8055c06b01707",
+  "round": 1,
+  "pipelineVersion": "e867b8e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-2 SQL contract test and SQLite migration adjustment do not address the previously reported producer gaps. Investigation recording, correction capture, append-failure propagation, and start-boundary behavior remain unimplemented or untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 266,
+          "message": "AC TRACE-PRODUCER-01 remains unmet: the store API is not wired to investigation execution, so actual ordered tool and citation outcomes are not recorded.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AppendTrace persists a trace supplied by a caller, but no investigation execution path calls it and no InvestigationTraceRecorderTests.PersistsActualOrderedToolAndCitationOutcomes test exists.",
+            "failureScenario": "An investigation completes after making tool calls and citation checks; it returns without appending those events, so the trace store contains no record of that execution."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 266,
+          "message": "AC TRACE-PRODUCER-02 remains unmet: downgraded validation outcomes are not recorded as corrections, and the required recorder test is missing.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed code only persists a supplied trace; no recorder handles ClaimStatus.Downgraded results, and InvestigationTraceRecorderTests.RecordsDowngradeWithoutUntrustedContent is absent.",
+            "failureScenario": "Validation downgrades a claim during an investigation, but the execution path never appends a correction step, leaving the stored trace without that outcome."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 266,
+          "message": "AC TRACE-PRODUCER-03 remains unverified: the required failure-propagation test and recorder call path are absent.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AppendTrace can throw, but no investigation caller invokes it and InvestigationTraceRecorderTests.StoreFailureDoesNotReturnSuccessfulInvestigation is absent.",
+            "failureScenario": "Trace persistence fails during an investigation; because the required recorder path and test are missing, this change does not establish that the failure reaches the caller instead of a successful result."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 266,
+          "message": "AC TRACE-PRODUCER-04 remains unmet: the started-versus-rejected recording boundary is not implemented or covered by the required test.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The store accepts explicitly supplied traces, but no investigation-start boundary records completed empty investigations or excludes pre-execution rejections; the required recorder test is absent.",
+            "failureScenario": "A started investigation completes with no tool activity and receives no trace, or a rejected-before-start investigation is recorded by a caller constructing a trace without the required boundary logic."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The SQL trace store contract and migration now have tests, but the investigation path still does not append actual execution events. The required recorder behavior tests for AC TRACE-PRODUCER-02 through AC TRACE-PRODUCER-04 are also absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 266,
+          "message": "AC TRACE-PRODUCER-01 remains unmet: the store methods are not wired to actual investigation events, so completed investigations do not persist their ordered tool, citation, and handover steps.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The changed code adds AppendTrace as a persistence method, but no investigation execution path calls it; there is also no InvestigationTraceRecorder or InvestigationExecutionService in the repository.",
+            "failureScenario": "An investigation makes tool calls, checks citations, and completes, but its caller returns without appending a trace, so the stored trace does not reflect the investigation."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 22,
+          "message": "AC TRACE-PRODUCER-02 remains unverified: the required test for downgrade corrections, supported claims, and excluded sensitive values is missing.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed tests cover SQL append and lookup, but the required InvestigationTraceRecorderTests.RecordsDowngradeWithoutUntrustedContent test is absent.",
+            "failureScenario": "A downgraded claim could be omitted from the trace or untrusted content could be stored without a test detecting either behavior."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 22,
+          "message": "AC TRACE-PRODUCER-03 remains unverified: the required test that proves append failures reach the investigation caller is missing.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed tests verify SQL append and lookup, but the required InvestigationTraceRecorderTests.StoreFailureDoesNotReturnSuccessfulInvestigation test is absent.",
+            "failureScenario": "If an investigation caller swallows an append exception and returns success, no required test catches that result."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 22,
+          "message": "AC TRACE-PRODUCER-04 remains unverified: the required test for started investigations with no activity and rejected-before-start requests is missing.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed tests cover SQL persistence, but the required InvestigationTraceRecorderTests.RecordsOnlyStartedInvestigationsAndTheirActualOutcome test is absent.",
+            "failureScenario": "An investigation that starts without tool activity could fail to record its outcome, or a request rejected before execution could write a trace, without a required test detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two changes add SQL store tests and provider-specific migration metadata. I found no concrete security vulnerability reachable through them.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 78,
+      "total": 78,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 16,
+          "total": 16,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261016000000_AddCaseTraces.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 37,
+          "total": 37,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
