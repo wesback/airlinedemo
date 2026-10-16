@@ -25,6 +25,7 @@ builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
+DemoFixture.LoadEmbedded();
 var app = builder.Build();
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
 app.UseTransportSecurityHeaders();
