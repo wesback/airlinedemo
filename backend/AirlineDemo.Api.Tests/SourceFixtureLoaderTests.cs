@@ -194,6 +194,17 @@ public sealed class SourceFixtureLoaderTests
         AssertRefused(dir.Path, key);
     }
 
+    // AC-004: a signed fixture set whose sourceFixtureVersion is unknown (non-empty) is refused, even though its signature verifies.
+    [Fact]
+    public void UnknownNonEmptySourceFixtureVersionIsRefused()
+    {
+        using var key = RSA.Create(2048);
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path, key, sourceFixtureVersion: "2026.09.9");
+
+        AssertRefused(dir.Path, key);
+    }
+
     private static void AssertRefused(string directory, RSA trustKey) =>
         Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(directory, trustKey.ExportSubjectPublicKeyInfo()));
 
