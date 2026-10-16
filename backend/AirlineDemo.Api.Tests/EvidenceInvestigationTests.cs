@@ -181,7 +181,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
 
         // A retry of the same package must not succeed while its trace is absent.
         using var retry = await PostPackageAsync(client, presenter, "valid-text.pdf", pdf);
-        Assert.NotEqual(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(HttpStatusCode.InternalServerError, retry.StatusCode);
         Assert.Equal(2, model.Calls);
         Assert.Null(store.FindTrace(ScopeFor(store), Case, runId, "inv-" + runId));
 

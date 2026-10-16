@@ -127,7 +127,7 @@ public static class EvidenceEndpoints
         InvestigationExecutionService investigations,
         CancellationToken ct)
     {
-        var accepted = record.Documents.Where(d => d.Status == "accepted").Select(d => d.FileName).ToList();
+        var accepted = record.Documents.Where(d => d.Status == "accepted").Select(d => d.FileName).Distinct(StringComparer.Ordinal).ToList();
         if (accepted.Count == 0) return;
 
         // Accepted evidence must not succeed without its investigation trace, so a missing model is a failure, not a skip.
@@ -145,9 +145,11 @@ public static class EvidenceEndpoints
         if (caseStore.FindTrace(scope, caseId, runId, investigationId) is not null) return;
 
         // Pin each document to the version this package accepted, so a retry investigates the same evidence.
+        // Duplicate accepted filenames pin to the newest accepted version of that name, so the lookup cannot throw.
         var pinned = record.Documents
             .Where(d => d.Status == "accepted" && d.Version is not null)
-            .ToDictionary(d => d.FileName, d => d.Version!.Value, StringComparer.Ordinal);
+            .GroupBy(d => d.FileName, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Max(d => d.Version!.Value), StringComparer.Ordinal);
         var documents = new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
         foreach (var name in accepted)
         {
