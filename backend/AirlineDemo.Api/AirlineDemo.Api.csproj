@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="Fixtures/sources/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="Investigation/SyntheticFixtures/*.txt" />
     <EmbeddedResource Include="Auth/Fixtures/demo-users-v1.json" LogicalName="AirlineDemo.Api.Auth.Fixtures.demo-users-v1.json" />
     <EmbeddedResource Include="Fixtures/sources/technical.json" LogicalName="AirlineDemo.Api.Fixtures.sources.technical.json" />
