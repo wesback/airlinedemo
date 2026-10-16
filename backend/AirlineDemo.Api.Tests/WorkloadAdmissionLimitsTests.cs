@@ -110,6 +110,13 @@ public sealed class WorkloadAdmissionLimitsTests
 
     // A one-page text PDF with a valid cross-reference table, so the endpoint accepts it and starts an investigation.
     // Extra comment bytes make each document distinct, so each submission creates its own package.
+    // The page text must be registered synthetic content, or the model gate refuses the investigation before the model is called.
+    private static string RegisteredEvidenceText([System.Runtime.CompilerServices.CallerFilePath] string testFile = "")
+    {
+        var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(testFile)!, "..", "AirlineDemo.Api", "Investigation", "SyntheticFixtures", "return-status.txt"));
+        return System.IO.File.ReadAllText(path).Trim();
+    }
+
     private static byte[] TextPdf(int extraBytes)
     {
         var sb = new StringBuilder("%PDF-1.4\n");
@@ -121,7 +128,7 @@ public sealed class WorkloadAdmissionLimitsTests
             sb.Append(offsets.Count).Append(" 0 obj ").Append(body).Append('\n');
         }
 
-        const string content = "BT /F1 12 Tf 72 720 Td (synthetic page 1) Tj ET";
+        var content = $"BT /F1 12 Tf 72 720 Td ({RegisteredEvidenceText()}) Tj ET";
         Add("<< /Type /Catalog /Pages 2 0 R >> endobj");
         Add("<< /Type /Pages /Count 1 /Kids [3 0 R] >> endobj");
         Add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj");
@@ -277,7 +284,8 @@ public sealed class WorkloadAdmissionLimitsTests
         var faulted = PostPackageAsync(client, presenter, bytes: TextPdf(5));
         await WaitUntilAsync(() => chat.Entered == 4);
         chat.Gate.SetException(new InvalidOperationException("boom"));
-        await Assert.ThrowsAnyAsync<Exception>(() => faulted);
+        using var failed = await faulted;
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
         await WaitUntilAsync(() => TwoSlotsFree(limits));
 
         // After every release the endpoint is admitted again.
@@ -318,6 +326,7 @@ public sealed class WorkloadAdmissionLimitsTests
         Assert.Equal("investigation concurrency limit exceeded", investigationBody.GetProperty("error").GetString());
         Assert.False(investigationBody.TryGetProperty("packageId", out _));
         AssertNoPackage(factory, 3072);
+        AssertNoInvestigationResult(factory, FakePdf(3072));
         Assert.Equal(0, BasisCount(factory));
 
         Assert.Equal(
