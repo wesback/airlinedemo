@@ -71,10 +71,10 @@ public sealed class WorkloadAdmissionLimitsTests
         return bytes;
     }
 
-    private static Task<HttpResponseMessage> PostPackageAsync(HttpClient client, Session session, string? forgedUserId = null)
+    private static Task<HttpResponseMessage> PostPackageAsync(HttpClient client, Session session, string? forgedUserId = null, int size = 1024)
     {
         var form = new MultipartFormDataContent();
-        var part = new ByteArrayContent(FakePdf(1024));
+        var part = new ByteArrayContent(FakePdf(size));
         part.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(part, EvidenceEndpoints.FormFieldName, "statement.pdf");
         if (forgedUserId is not null) form.Add(new StringContent(forgedUserId), "userId");
@@ -84,6 +84,14 @@ public sealed class WorkloadAdmissionLimitsTests
         request.Headers.Add("X-CSRF-Token", session.Csrf);
         return client.SendAsync(request);
     }
+
+    // Reads the same stores the endpoint writes to: a rejected submission must leave none of this state behind.
+    private static void AssertNoPackage(WebApplicationFactory<Program> factory, int size) =>
+        Assert.Null(factory.Services.GetRequiredService<EvidencePackageStore>()
+            .Find(Case, EvidenceEndpoints.PackageIdFor(Case, [new EvidenceDocument("statement.pdf", FakePdf(size))])));
+
+    private static int BasisCount(WebApplicationFactory<Program> factory) =>
+        factory.Services.GetRequiredService<EvidenceBasisStore>().History($"{Case}/statement.pdf").Count;
 
     private static void AssertBothInvestigationSlotsAvailable(WorkloadAdmissionLimits limits)
     {
@@ -107,11 +115,12 @@ public sealed class WorkloadAdmissionLimitsTests
         // The forged multipart userId names the other session; it must not change this caller's quota.
         for (var i = 0; i < WorkloadAdmissionLimits.PackageAttemptsPerWindow; i++)
         {
-            using var admitted = await PostPackageAsync(client, presenter, forgedUserId: "presenter-2");
+            using var admitted = await PostPackageAsync(client, presenter, forgedUserId: "presenter-2", size: 1024 + i);
             Assert.NotEqual(HttpStatusCode.TooManyRequests, admitted.StatusCode);
         }
 
-        using var rejected = await PostPackageAsync(client, presenter, forgedUserId: "presenter-2");
+        var basisBefore = BasisCount(factory);
+        using var rejected = await PostPackageAsync(client, presenter, forgedUserId: "presenter-2", size: 2048);
         Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
         var error = await rejected.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("package submission limit exceeded", error.GetProperty("error").GetString());
@@ -119,13 +128,15 @@ public sealed class WorkloadAdmissionLimitsTests
         var refusal = Assert.Single(limits.Events);
         Assert.Equal(WorkloadAdmissionLimits.PackageKind, refusal.Kind);
         Assert.Equal("presenter", refusal.Subject);
+        Assert.Equal(basisBefore, BasisCount(factory));
+        AssertNoPackage(factory, 2048);
 
         // The other session has its own quota and is still admitted.
-        using var independent = await PostPackageAsync(client, second);
+        using var independent = await PostPackageAsync(client, second, size: 3000);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, independent.StatusCode);
 
         clock.Advance(WorkloadAdmissionLimits.PackageWindow);
-        using var afterWindow = await PostPackageAsync(client, presenter);
+        using var afterWindow = await PostPackageAsync(client, presenter, size: 4000);
         Assert.NotEqual(HttpStatusCode.TooManyRequests, afterWindow.StatusCode);
     }
 
@@ -133,6 +144,9 @@ public sealed class WorkloadAdmissionLimitsTests
     public async Task Concurrent_investigations_are_bounded_and_release_slots()
     {
         var limits = new WorkloadAdmissionLimits(TimeProvider.System);
+        using var factory = CreateFactory(limits);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
         var admitted = new CountdownEvent(WorkloadAdmissionLimits.MaxConcurrentInvestigations);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var holders = Enumerable.Range(0, WorkloadAdmissionLimits.MaxConcurrentInvestigations).Select(_ => Task.Run(async () =>
@@ -147,6 +161,15 @@ public sealed class WorkloadAdmissionLimitsTests
         var refusal = Assert.Single(limits.Events);
         Assert.Equal(WorkloadAdmissionLimits.InvestigationKind, refusal.Kind);
         Assert.Equal(WorkloadAdmissionLimits.InvestigationLimitError, refusal.Error);
+
+        // The endpoint shares this limiter: a submission while both slots are busy is refused before any case, package or result exists.
+        using var refused = await PostPackageAsync(client, presenter);
+        Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+        var refusedBody = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(WorkloadAdmissionLimits.InvestigationLimitError, refusedBody.GetProperty("error").GetString());
+        Assert.Equal(2, limits.Events.Count);
+        AssertNoPackage(factory, 1024);
+        Assert.Equal(0, BasisCount(factory));
 
         // Success: both admitted investigations complete and release their slots.
         release.SetResult();
@@ -172,6 +195,10 @@ public sealed class WorkloadAdmissionLimitsTests
         });
         await Assert.ThrowsAsync<InvalidOperationException>(() => faulted);
         AssertBothInvestigationSlotsAvailable(limits);
+
+        // After every release the endpoint is admitted again.
+        using var admittedAgain = await PostPackageAsync(client, presenter, size: 2048);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, admittedAgain.StatusCode);
     }
 
     [Fact]
@@ -188,22 +215,26 @@ public sealed class WorkloadAdmissionLimitsTests
             Assert.True(limits.TryAdmitPackage("presenter"));
         }
 
-        using var rateRejected = await PostPackageAsync(client, presenter);
+        using var rateRejected = await PostPackageAsync(client, presenter, size: 2048);
         Assert.Equal(HttpStatusCode.TooManyRequests, rateRejected.StatusCode);
         var rateBody = await rateRejected.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("package submission limit exceeded", rateBody.GetProperty("error").GetString());
         Assert.False(rateBody.TryGetProperty("packageId", out _));
+        AssertNoPackage(factory, 2048);
+        Assert.Equal(0, BasisCount(factory));
 
         // Hold both investigation slots, then submit from a fresh session: rejected with no investigation result.
         var second = AddPresenterSession(factory, "presenter-2");
         var held = new[] { limits.TryAdmitInvestigation(), limits.TryAdmitInvestigation() };
         Assert.All(held, slot => Assert.NotNull(slot));
 
-        using var investigationRejected = await PostPackageAsync(client, second);
+        using var investigationRejected = await PostPackageAsync(client, second, size: 3072);
         Assert.Equal(HttpStatusCode.TooManyRequests, investigationRejected.StatusCode);
         var investigationBody = await investigationRejected.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("investigation concurrency limit exceeded", investigationBody.GetProperty("error").GetString());
         Assert.False(investigationBody.TryGetProperty("packageId", out _));
+        AssertNoPackage(factory, 3072);
+        Assert.Equal(0, BasisCount(factory));
 
         Assert.Equal(
             new[] { WorkloadAdmissionLimits.PackageKind, WorkloadAdmissionLimits.InvestigationKind },
@@ -213,6 +244,10 @@ public sealed class WorkloadAdmissionLimitsTests
             limits.Events.Select(e => e.Error).ToArray());
 
         foreach (var slot in held) slot?.Dispose();
+
+        // Once the held slots are released, the same submission is admitted.
+        using var retried = await PostPackageAsync(client, second, size: 3072);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, retried.StatusCode);
     }
 
     [Fact]
