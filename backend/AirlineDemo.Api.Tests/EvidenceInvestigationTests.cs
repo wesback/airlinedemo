@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
+using System.Text;
 using System.Reflection;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -68,7 +70,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
         }
     }
 
-    private WebApplicationFactory<Program> CreateFactory(IChatClient client, ICaseStateStore? store = null, RecordingSourceFactory? sources = null) =>
+    private WebApplicationFactory<Program> CreateFactory(IChatClient client, ICaseStateStore? store = null, AirlineDemo.Api.Evidence.EvidenceCaseReadSourceFactory? sources = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
@@ -310,6 +312,142 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.NotNull(completedTrace);
         Assert.Equal("approved", completedTrace.Outcome);
         Assert.Equal(InvestigationTraceRecorder.DeterministicPolicy, completedTrace.Steps[^1].PolicyHandover);
+    }
+
+    // AC: TRACE-PRODUCER-09
+    [Fact]
+    public async Task AcceptedEvidenceRunsScriptedToolCallsAndPersistsOrderedEvents()
+    {
+        const string fileName = "return-status.pdf";
+        const string statusText = "SYNTHETIC EVIDENCE: Return readiness is pending reserve approval.";
+        // The gate only sends synthetic-marked content, so the fixture sentence doubles as the document id the inventory lists.
+        var claim = """[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"SYNTHETIC EVIDENCE: Return readiness is pending reserve approval.","page":1,"quote":"SYNTHETIC EVIDENCE: Return readiness is pending reserve approval."}]}]""";
+        var model = new ScriptedReplyClient(
+            ToolCall("c1", CaseReadTools.InventoryTool, null),
+            ToolCall("c2", CaseReadTools.SourcePageTool, new Dictionary<string, object?> { ["documentId"] = statusText, ["page"] = 1 }),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, claim)));
+        var sources = new FixtureSourceFactory(new AirlineDemo.Api.Evidence.EvidenceBasisStore(), statusText, statusText);
+        using var factory = CreateFactory(model, sources: sources);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        using var response = await PostPackageAsync(client, presenter, fileName, SyntheticPdf(statusText));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        var store = new CaseStateStore(_statePath);
+        var trace = store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId);
+        Assert.Equal(3, model.Calls);
+        Assert.NotNull(trace);
+        Assert.Equal("approved", trace.Outcome);
+        Assert.Equal(
+            new[] { CaseReadTools.InventoryTool, CaseReadTools.SourcePageTool, "citation-check", "claim-validation", "policy-handover" },
+            trace.Steps.Select(s => s.ToolName).ToArray());
+        Assert.Equal("deterministic-policy", trace.Steps[^1].PolicyHandover);
+    }
+
+    // AC: TRACE-PRODUCER-11
+    [Fact]
+    public async Task HostRegistersAzureOpenAIChatClientWithoutCallingIt()
+    {
+        // Any connection to the configured endpoint lands on this listener; resolving the client must not connect.
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureAppConfiguration((_, config) =>
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Demo:Passcode"] = Passcode,
+                        ["CaseState:Path"] = _statePath,
+                        ["AzureOpenAI:Endpoint"] = $"http://127.0.0.1:{port}/",
+                    }));
+                builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
+            });
+
+            var chatClient = factory.Services.GetRequiredService<IChatClient>();
+
+            Assert.NotNull(chatClient);
+            Assert.False(listener.Pending());
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    private static ChatResponse ToolCall(string callId, string name, IDictionary<string, object?>? args) =>
+        new(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(callId, name, args)]));
+
+    // Builds a one-page PDF whose page text is exactly the given line.
+    private static byte[] SyntheticPdf(string text)
+    {
+        var stream = $"BT /F1 12 Tf 72 720 Td ({text}) Tj ET";
+        var objects = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            $"<< /Length {stream.Length} >>\nstream\n{stream}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        };
+        var pdf = new StringBuilder("%PDF-1.4\n");
+        var offsets = new List<int>();
+        for (var i = 0; i < objects.Length; i++)
+        {
+            offsets.Add(pdf.Length);
+            pdf.Append($"{i + 1} 0 obj\n{objects[i]}\nendobj\n");
+        }
+
+        var xref = pdf.Length;
+        pdf.Append($"xref\n0 {objects.Length + 1}\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            pdf.Append($"{offset:D10} 00000 n \n");
+        }
+
+        pdf.Append($"trailer\n<< /Size {objects.Length + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(pdf.ToString());
+    }
+
+    private sealed class FixtureCaseSource(string documentId, string text) : ICaseReadSource
+    {
+        public IReadOnlyList<string> GetInventory(string caseId) => [documentId];
+
+        public string? GetApprovedRequirements(string caseId) => null;
+
+        public string? GetSourcePage(string caseId, string requestedDocumentId, int page) =>
+            requestedDocumentId == documentId && page == 1 ? text : null;
+
+        public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) => [];
+
+        public string? GetProcessingStatus(string caseId) => null;
+    }
+
+    private sealed class FixtureSourceFactory(AirlineDemo.Api.Evidence.EvidenceBasisStore basis, string documentId, string text) : AirlineDemo.Api.Evidence.EvidenceCaseReadSourceFactory(basis)
+    {
+        public override ICaseReadSource Create(string caseId, IReadOnlyList<string> acceptedFileNames, IReadOnlyDictionary<string, int> pinnedVersions) =>
+            new FixtureCaseSource(documentId, text);
+    }
+
+    /// <summary>Model stub that returns the scripted replies in order and counts its calls. Makes no network request.</summary>
+    private sealed class ScriptedReplyClient(params ChatResponse[] replies) : IChatClient
+    {
+        public int Calls { get; private set; }
+
+        public ChatClientMetadata Metadata { get; } = new("scripted");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(replies[Calls++]);
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
     }
 
     [Fact]
