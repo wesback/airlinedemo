@@ -49,6 +49,35 @@ public sealed class WorkItemRow
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class InvestigationTraceRow
+{
+    public string CaseId { get; set; } = string.Empty;
+    public string RunId { get; set; } = string.Empty;
+    public string InvestigationId { get; set; } = string.Empty;
+    public int BasisVersion { get; set; }
+    public string ModelDeploymentName { get; set; } = string.Empty;
+    public string ApiVersion { get; set; } = string.Empty;
+    public string Region { get; set; } = string.Empty;
+    public string ContentFilterSetting { get; set; } = string.Empty;
+    public string Decision { get; set; } = string.Empty;
+    public string ActorToken { get; set; } = string.Empty;
+    public string Outcome { get; set; } = string.Empty;
+}
+
+public sealed class InvestigationTraceStepRow
+{
+    public string CaseId { get; set; } = string.Empty;
+    public string RunId { get; set; } = string.Empty;
+    public string InvestigationId { get; set; } = string.Empty;
+    public int Sequence { get; set; }
+    public string ToolName { get; set; } = string.Empty;
+    public string DocumentId { get; set; } = string.Empty;
+    public int PageNumber { get; set; }
+    public string CitationCheckOutcome { get; set; } = string.Empty;
+    public string CorrectionCode { get; set; } = string.Empty;
+    public string PolicyHandover { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// EF Core model for the provisioned Azure SQL case-state schema. Schema changes are applied only
 /// by the migration identity; the app identity holds data-plane grants only (see identity-and-telemetry.tf).
@@ -60,9 +89,41 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CaseDecisionRow> CaseDecisions => Set<CaseDecisionRow>();
     public DbSet<CaseEventRow> CaseEvents => Set<CaseEventRow>();
     public DbSet<WorkItemRow> WorkItems => Set<WorkItemRow>();
+    public DbSet<InvestigationTraceRow> InvestigationTraces => Set<InvestigationTraceRow>();
+    public DbSet<InvestigationTraceStepRow> InvestigationTraceSteps => Set<InvestigationTraceStepRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<InvestigationTraceRow>(e =>
+        {
+            e.ToTable("investigation_traces", "dbo");
+            e.HasKey(x => new { x.CaseId, x.RunId, x.InvestigationId });
+            e.Property(x => x.CaseId).HasMaxLength(128);
+            e.Property(x => x.RunId).HasMaxLength(128);
+            e.Property(x => x.InvestigationId).HasMaxLength(128);
+            e.Property(x => x.ModelDeploymentName).HasMaxLength(256).IsRequired();
+            e.Property(x => x.ApiVersion).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Region).HasMaxLength(64).IsRequired();
+            e.Property(x => x.ContentFilterSetting).HasMaxLength(128).IsRequired();
+            e.Property(x => x.Decision).HasMaxLength(128).IsRequired();
+            e.Property(x => x.ActorToken).HasMaxLength(256).IsRequired();
+            e.Property(x => x.Outcome).HasMaxLength(128).IsRequired();
+        });
+
+        modelBuilder.Entity<InvestigationTraceStepRow>(e =>
+        {
+            e.ToTable("investigation_trace_steps", "dbo");
+            e.HasKey(x => new { x.CaseId, x.RunId, x.InvestigationId, x.Sequence });
+            e.Property(x => x.CaseId).HasMaxLength(128);
+            e.Property(x => x.RunId).HasMaxLength(128);
+            e.Property(x => x.InvestigationId).HasMaxLength(128);
+            e.Property(x => x.ToolName).HasMaxLength(128).IsRequired();
+            e.Property(x => x.DocumentId).HasMaxLength(256).IsRequired();
+            e.Property(x => x.CitationCheckOutcome).HasMaxLength(64).IsRequired();
+            e.Property(x => x.CorrectionCode).HasMaxLength(128).IsRequired();
+            e.Property(x => x.PolicyHandover).HasMaxLength(128).IsRequired();
+        });
+
         modelBuilder.Entity<CaseRow>(e =>
         {
             e.ToTable("cases", "dbo");

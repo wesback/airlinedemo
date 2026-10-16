@@ -257,6 +257,119 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         return new CommitResult(Load(db, row.CaseId), Replayed: false);
     }
 
+    /// <summary>Appends a trace. Traces are never updated or deleted; a duplicate (case, run, investigation) fails and keeps the first record.</summary>
+    public void AppendTrace(CaseScope scope, InvestigationTrace trace)
+    {
+        InvestigationTraceRules.Validate(trace);
+        if (trace.CaseId != scope.CaseId)
+        {
+            throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
+        }
+
+        using var db = NewContext();
+        using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
+        if (FindTraceRow(db, trace.CaseId, trace.RunId, trace.InvestigationId) is not null)
+        {
+            throw new TraceConflictException();
+        }
+
+        db.InvestigationTraces.Add(new InvestigationTraceRow
+        {
+            CaseId = trace.CaseId,
+            RunId = trace.RunId,
+            InvestigationId = trace.InvestigationId,
+            BasisVersion = trace.BasisVersion,
+            ModelDeploymentName = trace.ModelDeploymentName,
+            ApiVersion = trace.ApiVersion,
+            Region = trace.Region,
+            ContentFilterSetting = trace.ContentFilterSetting,
+            Decision = trace.Decision,
+            ActorToken = trace.ActorToken,
+            Outcome = trace.Outcome,
+        });
+        db.InvestigationTraceSteps.AddRange(trace.Steps.Select(s => new InvestigationTraceStepRow
+        {
+            CaseId = trace.CaseId,
+            RunId = trace.RunId,
+            InvestigationId = trace.InvestigationId,
+            Sequence = s.Sequence,
+            ToolName = s.ToolName,
+            DocumentId = s.DocumentId,
+            PageNumber = s.PageNumber,
+            CitationCheckOutcome = s.CitationCheckOutcome,
+            CorrectionCode = s.CorrectionCode,
+            PolicyHandover = s.PolicyHandover,
+        }));
+
+        try
+        {
+            db.SaveChanges();
+        }
+        catch (DbUpdateException)
+        {
+            throw new TraceConflictException();
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>Returns the trace only when the case, run and investigation ids all match exactly; otherwise null.</summary>
+    public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId)
+    {
+        if (!Same(caseId, scope.CaseId))
+        {
+            return null;
+        }
+
+        using var db = NewContext();
+        var row = FindTraceRow(db, caseId, runId, investigationId);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var steps = db.InvestigationTraceSteps
+            .Where(s => s.CaseId == caseId && s.RunId == runId && s.InvestigationId == investigationId)
+            .OrderBy(s => s.Sequence)
+            .ToList()
+            .Where(s => Same(s.CaseId, caseId) && Same(s.RunId, runId) && Same(s.InvestigationId, investigationId))
+            .Select(s => new InvestigationTraceStep(
+                s.Sequence,
+                s.ToolName,
+                s.DocumentId,
+                s.PageNumber,
+                s.CitationCheckOutcome,
+                s.CorrectionCode,
+                s.PolicyHandover))
+            .ToList();
+
+        return new InvestigationTrace(
+            row.CaseId,
+            row.RunId,
+            row.InvestigationId,
+            row.BasisVersion,
+            row.ModelDeploymentName,
+            row.ApiVersion,
+            row.Region,
+            row.ContentFilterSetting,
+            row.Decision,
+            row.ActorToken,
+            row.Outcome,
+            steps);
+    }
+
+    /// <summary>Finds a trace by key, then applies an ordinal check so the database collation cannot widen a match.</summary>
+    private static InvestigationTraceRow? FindTraceRow(CaseStateDbContext db, string caseId, string runId, string investigationId)
+    {
+        if (string.IsNullOrEmpty(caseId) || string.IsNullOrEmpty(runId) || string.IsNullOrEmpty(investigationId))
+        {
+            return null;
+        }
+
+        var row = db.InvestigationTraces.FirstOrDefault(t => t.CaseId == caseId && t.RunId == runId && t.InvestigationId == investigationId);
+        return row is not null && Same(row.CaseId, caseId) && Same(row.RunId, runId) && Same(row.InvestigationId, investigationId) ? row : null;
+    }
+
     private static WorkItemRow? FindWorkItem(CaseStateDbContext db, string caseId, string itemId) =>
         db.WorkItems
             .Where(w => w.CaseId == caseId && w.ItemId == itemId)
