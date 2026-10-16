@@ -28,9 +28,7 @@ public sealed class AssessmentStore
         ArgumentNullException.ThrowIfNull(action);
         lock (_gate)
         {
-            if (!_currentByCase.TryGetValue(caseId, out var latest)
-                || latest.BasisId != expected.BasisId
-                || latest.BasisVersion != expected.BasisVersion)
+            if (!_currentByCase.TryGetValue(caseId, out var latest) || !ReferenceEquals(latest, expected))
             {
                 return false;
             }
