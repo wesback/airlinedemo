@@ -56,7 +56,19 @@ public sealed class EvidenceInvestigationTests : IDisposable
         }
     }
 
-    private WebApplicationFactory<Program> CreateFactory(IChatClient client, ICaseStateStore? store = null) =>
+    // Records the case and accepted documents the endpoint asks the case-scoped source for, then returns the real source.
+    private sealed class RecordingSourceFactory(AirlineDemo.Api.Evidence.EvidenceBasisStore basis) : AirlineDemo.Api.Evidence.EvidenceCaseReadSourceFactory(basis)
+    {
+        public List<(string CaseId, string[] Accepted, Dictionary<string, int> Pinned)> Requests { get; } = [];
+
+        public override ICaseReadSource Create(string caseId, IReadOnlyList<string> acceptedFileNames, IReadOnlyDictionary<string, int> pinnedVersions)
+        {
+            Requests.Add((caseId, [.. acceptedFileNames], new Dictionary<string, int>(pinnedVersions)));
+            return base.Create(caseId, acceptedFileNames, pinnedVersions);
+        }
+    }
+
+    private WebApplicationFactory<Program> CreateFactory(IChatClient client, ICaseStateStore? store = null, RecordingSourceFactory? sources = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
@@ -70,6 +82,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
                 services.AddSingleton(client);
                 services.AddSingleton(FakeApprovedManifest.Approved());
                 if (store is not null) services.AddSingleton(store);
+                if (sources is not null) services.AddSingleton<AirlineDemo.Api.Evidence.EvidenceCaseReadSourceFactory>(sources);
                 // The test host runs as root on Linux, so the default parser cannot isolate its worker; point it at this test assembly.
                 services.AddSingleton(new AirlineDemo.Api.Evidence.IsolatedPdfParserOptions
                 {
@@ -143,7 +156,8 @@ public sealed class EvidenceInvestigationTests : IDisposable
     public async Task AcceptedEvidenceRunsInvestigationAndPersistsTrace()
     {
         var model = new CountingChatClient();
-        using var factory = CreateFactory(model);
+        var sources = new RecordingSourceFactory(new AirlineDemo.Api.Evidence.EvidenceBasisStore());
+        using var factory = CreateFactory(model, sources: sources);
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
 
@@ -152,6 +166,10 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
 
         Assert.Equal(1, model.Calls);
+        var request = Assert.Single(sources.Requests);
+        Assert.Equal(Case, request.CaseId);
+        Assert.Equal(["synthetic-evidence-a.pdf"], request.Accepted);
+        Assert.Equal(1, request.Pinned["synthetic-evidence-a.pdf"]);
         var store = new CaseStateStore(_statePath);
         var trace = store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId);
         Assert.NotNull(trace);

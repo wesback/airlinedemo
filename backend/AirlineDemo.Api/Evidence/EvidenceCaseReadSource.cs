@@ -3,10 +3,10 @@ using AirlineDemo.Api.Investigation;
 namespace AirlineDemo.Api.Evidence;
 
 /// <summary>Creates read sources that expose only the documents accepted into one package.</summary>
-public sealed class EvidenceCaseReadSourceFactory(EvidenceBasisStore basis)
+public class EvidenceCaseReadSourceFactory(EvidenceBasisStore basis)
 {
     /// <param name="pinnedVersions">The accepted version of each document in the package, so retries read the same evidence.</param>
-    public ICaseReadSource Create(string caseId, IReadOnlyList<string> acceptedFileNames, IReadOnlyDictionary<string, int> pinnedVersions) =>
+    public virtual ICaseReadSource Create(string caseId, IReadOnlyList<string> acceptedFileNames, IReadOnlyDictionary<string, int> pinnedVersions) =>
         new AcceptedEvidenceReadSource(caseId, acceptedFileNames, pinnedVersions, basis);
 }
 
