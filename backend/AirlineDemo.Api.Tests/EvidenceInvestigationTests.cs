@@ -421,6 +421,28 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.Equal(1, Volatile.Read(ref created));
     }
 
+    // A credential built directly (not through the lazy factory) would be constructed while the client is resolved, and no runtime
+    // event shows that, so the source is checked: the investigation and evidence code never names DefaultAzureCredential, and Program.cs names it only inside the registered credential factory.
+    [Fact]
+    public void DefaultAzureCredentialIsNamedOnlyInsideTheLazyCredentialFactory()
+    {
+        var apiDir = ApiSourceDirectory();
+        var namingFiles = new[] { "Investigation", "Evidence" }
+            .SelectMany(dir => Directory.EnumerateFiles(Path.Combine(apiDir, dir), "*.cs", SearchOption.AllDirectories))
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(p => File.ReadAllText(p).Contains("DefaultAzureCredential", StringComparison.Ordinal))
+            .Select(p => Path.GetFileName(p))
+            .ToArray();
+        Assert.Empty(namingFiles);
+
+        var lines = File.ReadAllLines(Path.Combine(apiDir, "Program.cs")).Where(l => l.Contains("DefaultAzureCredential", StringComparison.Ordinal) && !l.TrimStart().StartsWith("//", StringComparison.Ordinal)).ToArray();
+        var line = Assert.Single(lines);
+        Assert.Contains("AddSingleton<Func<Azure.Core.TokenCredential>>", line);
+    }
+
+    private static string ApiSourceDirectory([CallerFilePath] string testFile = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFile)!, "..", "AirlineDemo.Api"));
+
     // Reads the committed synthetic fixture that the endpoint-flow test is built on.
     private static string ReturnStatusFixture([CallerFilePath] string testFile = "")
     {
