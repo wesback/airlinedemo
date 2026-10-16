@@ -2,7 +2,7 @@
 prd_id: "aircraft-source-systems"
 title: "Synthetic Source-System Stubs and Read-Only Source Port"
 status: "draft"
-version: "0.4.0"
+version: "0.5.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-16"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Synthetic Source-System Stubs and Read-Only Source Port
 
-> **aircraft-source-systems** | Status: Draft | Version: 0.4.0 | Last Updated: 2026-10-16
+> **aircraft-source-systems** | Status: Draft | Version: 0.5.0 | Last Updated: 2026-10-16
 
 ## Executive Summary
 
@@ -35,7 +35,7 @@ This PRD defines five synthetic source-system stubs and one read-only server por
 
 The stubs let the demonstration show the intended shape of the product: a coordinator (the application-owned case state machine, ARR:DD-009) gathers facts from several systems, a bounded investigator reads them through case-scoped read-only tools, and humans decide. The port is the seam where a real system adapter would later replace a stub. Every datum read through it carries provenance (system, record, version, as-of date), and the stubs can simulate an unavailable, stale or conflicting source so the presenter can show how the workflow reacts.
 
-Version 0.4.0 withdraws the notice-validity checklist, which is outside the capstone areas. Version 0.3.0 added Cape Town interest evidence records, per-regime sanctions flags, an IFRS 16 flag topic and a personal-data marker, so each regulatory area in the capstone brief has a defined route to its owner. Version 0.2.0 added the controls an auditor or specialist panel will ask about: an exportable decision dossier, regime and responsibility tags on requirements, separate finance record kinds for rent, reserves and deposits, and specialist-review flags that can never read as clearance. They show that the controls work; they do not show regulatory compliance.
+Version 0.5.0 adds a read-only dossier panel on the case page. Version 0.4.0 withdrew the notice-validity checklist, which is outside the capstone areas. Version 0.3.0 added Cape Town interest evidence records, per-regime sanctions flags, an IFRS 16 flag topic and a personal-data marker, so each regulatory area in the capstone brief has a defined route to its owner. Version 0.2.0 added the controls an auditor or specialist panel will ask about: an exportable decision dossier, regime and responsibility tags on requirements, separate finance record kinds for rent, reserves and deposits, and specialist-review flags that can never read as clearance. They show that the controls work; they do not show regulatory compliance.
 
 This PRD adds no workflow state, role, agent or external action. ARR stays authoritative for case workflow, authority boundaries and the evidence basis. Acceptance criteria describe future verification and are not evidence of delivery.
 
@@ -115,6 +115,7 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 | FR-014 | Keep rent, maintenance reserve, security deposit and reserve reimbursement as separate `finance` record kinds, and keep the reserve draft's lines separate and free of profit or cash claims. | Reserve draft built. | ARR:FR-006, ARR:AC-014. | AC-030 | GOAL-003 |
 | FR-015 | Carry `specialist_flag` records (topics and per-regime sanctions rule in DD-020) and `cape_town_interest` evidence records (DD-021) in `contracts`; flags route the related finding to internal review and can never state clearance. | Finding depends on a flagged topic. | ARR:FR-003. | AC-031, AC-032, AC-033, AC-034, AC-035 | GOAL-003 |
 | FR-016 | Mark each `records` entry with `containsPersonalData` and keep personal-data fields out of summaries, dossiers and diagnostics (DD-022). | Records are loaded or exported. | ARR:NFR-002, ARR:DD-029. | AC-036, AC-037 | GOAL-003 |
+| FR-017 | Show the decision dossier in a read-only panel on the ARR case page: only what FR-011 returns, the limitations note always visible, an export action, and no decision control. | Authorized user opens a recorded decision. | ARR:FR-013, ARR:NFR-009, FR-011. | AC-038, AC-039, AC-040, AC-041 | GOAL-003 |
 
 ## Scope Boundaries
 
@@ -286,6 +287,10 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | AC-035 | Given a `cape_town_interest` record, when read, then it is returned as evidence with no outcome; a fixture adding a priority, remedy or recoverability field is refused; and a finding relying on it without a `cape_town` flag fails fixture validation. | FR-015 | Automated |
 | AC-036 | Given a `records` entry without `containsPersonalData`, when fixtures load, then loading is refused; given an entry marked true, then it is listed with identifiers only. | FR-016 | Automated |
 | AC-037 | Given a seeded synthetic name and licence number in a marked document, when the summary, a dossier and diagnostics are inspected, then none contains them. | FR-016 | Automated |
+| AC-038 | Given an in-scope user and a recorded decision, when the case page opens its dossier panel, then it shows exactly the fields the dossier API returns (documents, source pins, requirement with regime and responsible party, rule version, actor, role, time, reason, hash) and nothing computed or inferred by the client. | FR-017 | Automated |
+| AC-039 | Given any dossier, then the `limitations` note is visible without interaction, the panel offers no approve, accept, release or send control, and a dossier API error (422 `dossier_incomplete`, 404) shows the error state with no partial data. | FR-017 | Automated |
+| AC-040 | Given a user whose role or scope excludes the decision, then the panel is absent or shows the same not-found state as a nonexistent decision, and no dossier data reaches the client. | FR-017 | Automated |
+| AC-041 | Given keyboard-only use, then the panel opens, closes and exports without a pointer, headings and the hash have accessible names, and the ARR:NFR-009 bounded checks pass for it. | FR-017 | Automated |
 | AC-023 | Given a rehearsal, when the presenter walks one case through an outage and a conflict, then the product owner confirms the audience can see which source, which record version and what the workflow did. | FR-007, FR-008, FR-009 | Manual |
 | AC-024 | Given a recorded decision, when the dossier is exported twice, then both exports contain the DD-016 contents, have identical `contentHash` and bytes apart from `exportedAt`, and a missing audit event, pin or requirement version makes the export fail with 422 `dossier_incomplete` rather than a partial dossier. | FR-011 | Automated |
 | AC-025 | Given a role or case scope that excludes the decision, when the dossier is requested, then the response equals that of a nonexistent decision; given an in-scope response, no document text, prompt, model output, cookie or token appears. | FR-011 | Automated |
@@ -316,8 +321,9 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | FR-014 | AC-030 |
 | FR-015 | AC-031, AC-032, AC-033, AC-034, AC-035 |
 | FR-016 | AC-036, AC-037 |
+| FR-017 | AC-038, AC-039, AC-040, AC-041 |
 
-Coverage: 15 of 15 FRs have at least one criterion (100%).
+Coverage: 16 of 16 FRs have at least one criterion (100%).
 
 ### FR-to-GOAL Alignment
 
@@ -325,11 +331,11 @@ Coverage: 15 of 15 FRs have at least one criterion (100%).
 |---|---|
 | FR-001 to FR-006, FR-009, FR-010 | GOAL-001 |
 | FR-007, FR-008 | GOAL-002 |
-| FR-011 to FR-016 | GOAL-003 |
+| FR-011 to FR-017 | GOAL-003 |
 
 ## MVP and Release Framing
 
-The release contains FR-001 through FR-016, except the withdrawn FR-013. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-005, ARR:FR-006, ARR:FR-007, ARR:FR-008, ARR:FR-010 and ARR:DD-014, and CP:FR-001, CP:FR-002 and CP:FR-009. If CP is not yet delivered, stories for the Cases A to C fixtures wait for it and the ARR core case fixtures can proceed alone.
+The release contains FR-001 through FR-017, except the withdrawn FR-013. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-005, ARR:FR-006, ARR:FR-007, ARR:FR-008, ARR:FR-010 and ARR:DD-014, and CP:FR-001, CP:FR-002 and CP:FR-009. If CP is not yet delivered, stories for the Cases A to C fixtures wait for it and the ARR core case fixtures can proceed alone.
 
 Suggested story order (each story changes under 500 lines, names its test file, and leaves the tests failing on `main`):
 
@@ -350,6 +356,7 @@ Suggested story order (each story changes under 500 lines, names its test file, 
 15. Specialist flags (including per-regime sanctions and `ifrs16`) and `cape_town_interest` records, with fixture validation (FR-015).
 16. Personal-data marker and exclusion from summaries, dossiers and diagnostics (FR-016).
 17. Decision dossier export (FR-011); needs stories 5, 6 and 9 and the ARR decision records.
+18. Read-only dossier panel on the case page (FR-017; `area:frontend`); needs story 17 and the ARR case dashboard.
 
 Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under `backend/AirlineDemo.Api/SourceSystems/`; behavior tests under `backend/AirlineDemo.Api.Tests/`; contract documentation under `docs/`.
 
@@ -357,7 +364,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 
 - Product owner confirms AC-023 after a rehearsal.
 - Product owner reviews the source fixtures for synthetic-only content and fictional identifiers.
-- Product owner confirms a sample dossier is readable by someone outside the team and states its limitations.
+- Product owner confirms the dossier panel and a sample export are readable by someone outside the team and states its limitations.
 - Product owner confirms that no slide or screen wording claims compliance, clearance or validity (see FR-015).
 
 ## Success Metrics
@@ -366,7 +373,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 |---|---|---|---|---|
 | GOAL-001 | Automated criteria passing (AC-001 to AC-013, AC-019 to AC-022: 18); records without provenance; cross-case records returned | 0 of 18; not built | 18 of 18; 0; 0 | Test results at each release-candidate revision |
 | GOAL-002 | Mode-command criteria (AC-014 to AC-018) passing; audit record per accepted mode change; automatic requests or acceptances caused by a source problem | 0 of 5; none; not built | 5 of 5; 1 per accepted change and none per replay or rejection; 0 | Test results and audit history |
-| GOAL-003 | Dossier, applicability, finance and specialist-flag criteria passing (AC-024 to AC-037 except the withdrawn AC-028 and AC-029: 12); screens or exports stating compliance, clearance, validity or profit | 0 of 12; not built | 12 of 12; 0 | Test results and manual wording check |
+| GOAL-003 | Dossier, applicability, finance and specialist-flag criteria passing (AC-024 to AC-041 except the withdrawn AC-028 and AC-029: 16); screens or exports stating compliance, clearance, validity or profit | 0 of 16; not built | 16 of 16; 0 | Test results and manual wording check |
 
 ## Risks and Assumptions
 
@@ -377,7 +384,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 | AS-001 | Five stubs with a few records per case are enough to show the multi-system story. | Defined for this PRD. | Add record kinds in a later addendum; the port is unchanged. |
 | AS-002 | Pinning source records in the basis fits ARR's basis model without a new workflow state. | ARR basis is a versioned inventory (ARR glossary). | A small ARR amendment would be needed before story 6. |
 | AS-003 | The investigator's existing budgets absorb two more read tools. | Budgets are frozen configuration (ARR:AS-004). | Re-freeze budgets before scored evaluation. |
-| AS-004 | The ARR decision records hold enough (actor, reason, basis, trace) to assemble a dossier without a new store. | ARR:DD-027 audit and basis records. | A small ARR amendment would be needed before story 17. |
+| AS-004 | The ARR decision records hold enough (actor, reason, basis, trace) to assemble a dossier without a new store. | ARR:DD-027 audit and basis records. | A small ARR amendment would be needed before story 17 and the panel. |
 
 ### Risk Register
 
