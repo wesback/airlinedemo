@@ -97,6 +97,9 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
         {
             e.ToTable("investigation_traces", "dbo");
             e.HasKey(x => x.KeyHash);
+            e.HasIndex(x => new { x.CaseId, x.RunId, x.InvestigationId })
+                .IsUnique()
+                .HasDatabaseName("UX_investigation_traces_case_run_investigation");
             e.Property(x => x.KeyHash).HasMaxLength(32).IsFixedLength();
             e.Property(x => x.CaseId).HasMaxLength(128);
             e.Property(x => x.RunId).HasMaxLength(128);

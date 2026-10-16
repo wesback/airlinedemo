@@ -266,6 +266,12 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
         }
 
+        // Lone surrogates cannot round-trip through SQL text, so they are not valid identifiers.
+        if (!IsWellFormedUtf16(trace.CaseId) || !IsWellFormedUtf16(trace.RunId) || !IsWellFormedUtf16(trace.InvestigationId))
+        {
+            throw new ArgumentException("Trace identifiers must be well-formed UTF-16.", nameof(trace));
+        }
+
         using var db = NewContext();
         using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
         var keyHash = TraceKey(trace.CaseId, trace.RunId, trace.InvestigationId);
@@ -371,10 +377,48 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         return row is not null && Same(row.CaseId, caseId) && Same(row.RunId, runId) && Same(row.InvestigationId, investigationId) ? row : null;
     }
 
-    // Hashes the exact, length-prefixed (case, run, investigation) triple, so SQL padding or collation cannot merge distinct ids.
-    private static byte[] TraceKey(string caseId, string runId, string investigationId) =>
-        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
-            $"{caseId.Length}:{caseId}|{runId.Length}:{runId}|{investigationId.Length}:{investigationId}"));
+    // Hashes the exact, length-prefixed (case, run, investigation) triple. Each UTF-16 code unit is written as-is,
+    // so lone surrogates and U+FFFD stay distinct; SQL padding or collation cannot merge distinct ids.
+    private static byte[] TraceKey(string caseId, string runId, string investigationId)
+    {
+        using var stream = new System.IO.MemoryStream();
+        foreach (var part in new[] { caseId, runId, investigationId })
+        {
+            WriteUInt32(stream, part.Length);
+            foreach (var unit in part)
+            {
+                stream.WriteByte((byte)(unit >> 8));
+                stream.WriteByte((byte)unit);
+            }
+        }
+
+        return SHA256.HashData(stream.ToArray());
+    }
+
+    private static bool IsWellFormedUtf16(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsHighSurrogate(value[i]) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(value[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void WriteUInt32(System.IO.Stream stream, int value)
+    {
+        stream.WriteByte((byte)(value >> 24));
+        stream.WriteByte((byte)(value >> 16));
+        stream.WriteByte((byte)(value >> 8));
+        stream.WriteByte((byte)value);
+    }
 
     private static WorkItemRow? FindWorkItem(CaseStateDbContext db, string caseId, string itemId) =>
         db.WorkItems

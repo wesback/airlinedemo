@@ -582,6 +582,45 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1")));
     }
 
+    // AC: M-03 — lone surrogates are not well-formed identifiers: appends are rejected, nothing is stored, and U+FFFD stays a distinct valid id.
+    [Fact]
+    public void TraceRejectsMalformedUtf16Identifiers()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        const string HighSurrogate = "run-\uD800";
+        const string LowSurrogate = "run-\uDC00";
+        const string Replacement = "run-\uFFFD";
+
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1")));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", LowSurrogate, "inv-1")));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1", "\uDC00inv")));
+        Assert.Equal(0, CountTraceRows(options));
+
+        store.AppendTrace(scope, NewTrace("case-1", Replacement, "inv-1"));
+        Assert.Equal(Replacement, store.FindTrace(scope, "case-1", Replacement, "inv-1")!.RunId);
+        Assert.Null(store.FindTrace(scope, "case-1", HighSurrogate, "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", LowSurrogate, "inv-1"));
+    }
+
+    // AC: M-03 — the database itself rejects a second (case, run, investigation) row, even with a different key hash.
+    [Fact]
+    public void TraceIdentifierTupleIsUniqueInDatabase()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "INSERT INTO investigation_traces (KeyHash, CaseId, RunId, InvestigationId, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) " +
+            "VALUES (randomblob(32), 'case-1', 'run-1', 'inv-1', 1, 'm', 'v', 'r', 'c', 'd', 'a', 'o')";
+        Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+        Assert.Equal(1, CountTraceRows(options));
+    }
+
     [Fact]
     public void TracePersistenceRoundTripsAllFields()
     {
@@ -645,6 +684,12 @@ public sealed class SqlCaseStateStoreTests
     {
         Assert.Equal(expected with { Steps = null! }, actual with { Steps = null! });
         Assert.Equal(expected.Steps, actual.Steps);
+    }
+
+    private static int CountTraceRows(DbContextOptions<CaseStateDbContext> options)
+    {
+        using var db = new CaseStateDbContext(options);
+        return db.InvestigationTraces.Count();
     }
 
     private static SqliteConnection OpenMigratedSqlite(out DbContextOptions<CaseStateDbContext> options)

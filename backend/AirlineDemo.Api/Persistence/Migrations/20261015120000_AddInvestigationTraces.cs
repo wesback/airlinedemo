@@ -41,6 +41,13 @@ public class AddInvestigationTraces : Migration
                 table.PrimaryKey("PK_investigation_traces", x => x.KeyHash);
             });
 
+        migrationBuilder.CreateIndex(
+            name: "UX_investigation_traces_case_run_investigation",
+            schema: "dbo",
+            table: "investigation_traces",
+            columns: new[] { "CaseId", "RunId", "InvestigationId" },
+            unique: true);
+
         migrationBuilder.CreateTable(
             name: "investigation_trace_steps",
             schema: "dbo",
