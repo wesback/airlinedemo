@@ -400,25 +400,29 @@ public sealed class EvidenceInvestigationTests : IDisposable
     [Fact]
     public void HostConstructsCredentialOnlyThroughRegisteredFactory()
     {
-        // The factory test above cannot see a credential built inline in the client registration, so this scans the host and
-        // investigation sources (the chat client path) for every credential construction. The blob store is a separate path and is not scanned.
+        // The factory test above cannot see a credential built inline in the client registration or in a helper, so this scans
+        // every host source file for any `new <...>Credential(` construction, whatever its type or namespace. The only allowed
+        // sites are the lazy factory in Program.cs (the chat client path) and the blob store's own credential (a separate path).
         var root = FindRepositoryRoot();
         var apiDir = Path.Combine(root, "backend", "AirlineDemo.Api");
-        var pattern = new System.Text.RegularExpressions.Regex(
-            @"new\s+(Azure\.Identity\.)?(DefaultAzureCredential|ManagedIdentityCredential|AzureCliCredential|AzureDeveloperCliCredential|ChainedTokenCredential|EnvironmentCredential|WorkloadIdentityCredential|VisualStudioCredential)\s*\(");
+        var pattern = new System.Text.RegularExpressions.Regex(@"new\s+(?!LazyTokenCredential\b)[\w.]*Credential\s*\(");
 
-        var sources = new[] { Path.Combine(apiDir, "Program.cs") }
-            .Concat(Directory.EnumerateFiles(Path.Combine(apiDir, "Investigation"), "*.cs", SearchOption.AllDirectories));
-        var matches = sources
+        var matchedFiles = Directory.EnumerateFiles(apiDir, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
             .SelectMany(path => File.ReadAllLines(path)
-                .Select((line, index) => (path, line, index))
-                .Where(entry => pattern.IsMatch(entry.line))
-                .Select(entry => $"{Path.GetRelativePath(root, entry.path).Replace('\\', '/')}:{entry.index + 1}"))
-            .ToList();
+                .Where(line => pattern.IsMatch(line))
+                .Select(_ => Path.GetRelativePath(root, path).Replace('\\', '/')))
+            .Order()
+            .ToArray();
 
-        // Exactly one construction, the factory in Program.cs that runs on the first token request.
-        var match = Assert.Single(matches);
-        Assert.StartsWith("backend/AirlineDemo.Api/Program.cs:", match);
+        Assert.Equal(
+            new[]
+            {
+                "backend/AirlineDemo.Api/Persistence/AzureEvidenceBlobStore.cs",
+                "backend/AirlineDemo.Api/Program.cs",
+            },
+            matchedFiles);
     }
 
     private static string FindRepositoryRoot()
