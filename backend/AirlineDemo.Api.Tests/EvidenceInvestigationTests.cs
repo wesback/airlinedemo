@@ -1,5 +1,8 @@
 using System.Net;
+using System.Collections.Concurrent;
+using System.Diagnostics.Tracing;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Net.Sockets;
 using System.Text;
 using System.Reflection;
@@ -319,9 +322,9 @@ public sealed class EvidenceInvestigationTests : IDisposable
     public async Task AcceptedEvidenceRunsScriptedToolCallsAndPersistsOrderedEvents()
     {
         const string fileName = "return-status.pdf";
-        const string statusText = "SYNTHETIC EVIDENCE: Return readiness is pending reserve approval.";
+        var statusText = ReturnStatusFixture();
         // The gate only sends synthetic-marked content, so the fixture sentence doubles as the document id the inventory lists.
-        var claim = """[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"SYNTHETIC EVIDENCE: Return readiness is pending reserve approval.","page":1,"quote":"SYNTHETIC EVIDENCE: Return readiness is pending reserve approval."}]}]""";
+        var claim = $$"""[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"{{statusText}}","page":1,"quote":"{{statusText}}"}]}]""";
         var model = new ScriptedReplyClient(
             ToolCall("c1", CaseReadTools.InventoryTool, null),
             ToolCall("c2", CaseReadTools.SourcePageTool, new Dictionary<string, object?> { ["documentId"] = statusText, ["page"] = 1 }),
@@ -367,15 +370,44 @@ public sealed class EvidenceInvestigationTests : IDisposable
                 builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
             });
 
-            var chatClient = factory.Services.GetRequiredService<IChatClient>();
+            var services = factory.Services;
+            using var azureEvents = new AzureIdentityEventRecorder();
+            var eventsBefore = azureEvents.Events.Count;
+
+            var chatClient = services.GetRequiredService<IChatClient>();
 
             Assert.NotNull(chatClient);
             Assert.False(listener.Pending());
+            Assert.Empty(azureEvents.Events.Skip(eventsBefore));
         }
         finally
         {
             listener.Stop();
         }
+    }
+
+    // Reads the committed synthetic fixture that the endpoint-flow test is built on.
+    private static string ReturnStatusFixture([CallerFilePath] string testFile = "")
+    {
+        var path = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFile)!, "..", "AirlineDemo.Api", "Investigation", "SyntheticFixtures", "return-status.txt"));
+        return File.ReadAllText(path).Trim();
+    }
+
+    // Records Azure.Identity diagnostics; a token request or credential use made while resolving the client shows up here.
+    private sealed class AzureIdentityEventRecorder : EventListener
+    {
+        public ConcurrentQueue<string> Events { get; } = new();
+
+        protected override void OnEventSourceCreated(EventSource eventSource)
+        {
+            if (eventSource.Name == "Azure-Identity")
+            {
+                EnableEvents(eventSource, EventLevel.Verbose, EventKeywords.All);
+            }
+        }
+
+        protected override void OnEventWritten(EventWrittenEventArgs eventData) =>
+            Events.Enqueue(eventData.EventSource.Name + "/" + eventData.EventName);
     }
 
     private static ChatResponse ToolCall(string callId, string name, IDictionary<string, object?>? args) =>
