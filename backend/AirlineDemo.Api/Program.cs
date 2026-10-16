@@ -25,6 +25,13 @@ builder.Services.AddSingleton<InvestigationExecutionService>();
 builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
+builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
+builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
+var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
+if (!string.IsNullOrEmpty(approvedModelManifestPath))
+{
+    builder.Services.AddSingleton(ApprovedModelManifest.Load(approvedModelManifestPath));
+}
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();

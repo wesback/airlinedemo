@@ -1,7 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AirlineDemo.Api.Evidence;
 
@@ -61,6 +65,10 @@ public static class EvidenceEndpoints
         EvidenceBasisStore basis,
         EvidencePackageStore packages,
         IsolatedPdfParserOptions parserOptions,
+        ICaseStateStore caseStore,
+        EvidenceCaseReadSourceFactory caseSources,
+        InvestigationExecutionService investigations,
+        IServiceProvider services,
         CancellationToken ct)
     {
         var session = DemoAuthEndpoints.CurrentSession(request.HttpContext, sessions);
@@ -103,7 +111,54 @@ public static class EvidenceEndpoints
         var packageId = PackageIdFor(caseId, documents);
         var (record, created) = packages.Submit(packageId, caseId,
             () => EvidenceIntake.ProcessPackage(caseId, documents, basis, parserOptions));
+        // Runs on every submission until the trace exists, so a retry after a failed append re-runs only the investigation.
+        await RunInvestigationAsync(record, caseId, session.User.Id, caseStore, caseSources, basis, services, investigations, ct);
         return created ? Results.Created($"/api/cases/{caseId}/packages/{packageId}", record) : Results.Ok(record);
+    }
+
+    private static async Task RunInvestigationAsync(
+        EvidencePackageRecord record,
+        string caseId,
+        string actorId,
+        ICaseStateStore caseStore,
+        EvidenceCaseReadSourceFactory caseSources,
+        EvidenceBasisStore basis,
+        IServiceProvider services,
+        InvestigationExecutionService investigations,
+        CancellationToken ct)
+    {
+        var accepted = record.Documents.Where(d => d.Status == "accepted").Select(d => d.FileName).ToList();
+        if (accepted.Count == 0) return;
+
+        // No model is configured in this host: nothing is sent to a model and no trace is written.
+        var chat = services.GetService<IChatClient>();
+        if (chat is null) return;
+
+        var manifest = services.GetRequiredService<ApprovedModelManifest>();
+        var registry = services.GetRequiredService<SyntheticContentRegistry>();
+        var scope = caseStore.OwnerOf(caseId) is { } owner
+            ? caseStore.AuthorizeCase(caseId, owner)
+            : caseStore.CreateCase(caseId, actorId);
+
+        var runId = record.PackageId;
+        var investigationId = "inv-" + runId;
+        if (caseStore.FindTrace(scope, caseId, runId, investigationId) is not null) return;
+
+        var documents = new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
+        foreach (var name in accepted)
+        {
+            documents[name] = BasisDocument.Create(name, [basis.Latest($"{caseId}/{name}")!.Text]);
+        }
+
+        var basisVersion = accepted.Max(name => basis.Latest($"{caseId}/{name}")!.Version);
+        var actorToken = "actor-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(actorId)))[..16].ToLowerInvariant();
+        var context = new InvestigationTraceContext(runId, investigationId, basisVersion,
+            manifest.DeploymentName ?? string.Empty, manifest.ApiVersion ?? string.Empty, manifest.Region ?? string.Empty,
+            manifest.ContentFilter ?? string.Empty, "escalate", actorToken);
+        var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted), manifest, registry,
+            manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat);
+
+        await investigations.ExecuteAsync(scope, context, investigator, accepted, ClaimKind.Baseline, documents, string.Empty, ct);
     }
 
     private static IResult GetPackage(string caseId, string packageId, HttpContext http, DemoSessionStore sessions, EvidencePackageStore packages)
