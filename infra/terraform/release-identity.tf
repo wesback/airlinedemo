@@ -13,7 +13,7 @@ locals {
   github_audience    = "api://AzureADTokenExchange"
   github_repository  = "wesback/airlinedemo"
   # Key Vault creates the key that backs a certificate under the certificate's name, so this is the signing key.
-  signing_key_id    = "${azurerm_key_vault.kv.id}/keys/${var.signing_certificate_name}"
+  signing_key_id = "${azurerm_key_vault.kv.id}/keys/${var.signing_certificate_name}"
 }
 
 resource "azurerm_user_assigned_identity" "build" {
