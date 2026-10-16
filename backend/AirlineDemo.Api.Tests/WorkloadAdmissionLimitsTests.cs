@@ -20,6 +20,7 @@ public sealed class WorkloadAdmissionLimitsTests
 {
     private const string Passcode = "test-passcode";
     private const string Case = "case-001";
+    private const string OtherCase = "case-002";
     private const string SessionCookieName = "__Host-demo-session";
 
     private sealed record Session(string Cookie, string Csrf);
@@ -146,7 +147,7 @@ public sealed class WorkloadAdmissionLimitsTests
         return Encoding.ASCII.GetBytes(sb.ToString());
     }
 
-    private static Task<HttpResponseMessage> PostPackageAsync(HttpClient client, Session session, string? forgedUserId = null, int size = 1024, byte[]? bytes = null, CancellationToken ct = default)
+    private static Task<HttpResponseMessage> PostPackageAsync(HttpClient client, Session session, string? forgedUserId = null, int size = 1024, byte[]? bytes = null, CancellationToken ct = default, string caseId = Case)
     {
         var form = new MultipartFormDataContent();
         var part = new ByteArrayContent(bytes ?? FakePdf(size));
@@ -154,7 +155,7 @@ public sealed class WorkloadAdmissionLimitsTests
         form.Add(part, EvidenceEndpoints.FormFieldName, "statement.pdf");
         if (forgedUserId is not null) form.Add(new StringContent(forgedUserId), "userId");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{Case}/packages") { Content = form };
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{caseId}/packages") { Content = form };
         request.Headers.Add("Cookie", session.Cookie);
         request.Headers.Add("X-CSRF-Token", session.Csrf);
         return client.SendAsync(request, ct);
@@ -195,12 +196,14 @@ public sealed class WorkloadAdmissionLimitsTests
         using var factory = CreateFactory(limits);
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
+        factory.Services.GetRequiredService<DemoSessionStore>().GrantScope(presenter.Cookie.Split('=')[1], OtherCase);
         var second = AddPresenterSession(factory, "presenter-2");
 
         // The forged multipart userId names the other session; it must not change this caller's quota.
         for (var i = 0; i < WorkloadAdmissionLimits.PackageAttemptsPerWindow; i++)
         {
-            using var admitted = await PostPackageAsync(client, presenter, forgedUserId: "presenter-2", size: 1024 + i);
+            var caseId = i % 2 == 0 ? Case : OtherCase;
+            using var admitted = await PostPackageAsync(client, presenter, forgedUserId: "presenter-2", size: 1024 + i, caseId: caseId);
             Assert.NotEqual(HttpStatusCode.TooManyRequests, admitted.StatusCode);
         }
 
@@ -248,7 +251,8 @@ public sealed class WorkloadAdmissionLimitsTests
         await WaitUntilAsync(() => chat.Entered == 2);
 
         // A third submission is refused before any case, package, basis entry or investigation result is written.
-        using var refused = await PostPackageAsync(client, presenter, bytes: TextPdf(3));
+        var otherPresenter = AddPresenterSession(factory, "presenter-2");
+        using var refused = await PostPackageAsync(client, otherPresenter, bytes: TextPdf(3));
         Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
         var refusedBody = await refused.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(WorkloadAdmissionLimits.InvestigationLimitError, refusedBody.GetProperty("error").GetString());

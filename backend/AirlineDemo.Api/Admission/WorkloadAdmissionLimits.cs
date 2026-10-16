@@ -41,15 +41,11 @@ public sealed class WorkloadAdmissionLimits(TimeProvider time)
         lock (_gate)
         {
             var now = time.GetUtcNow();
+            RemoveExpiredPackageAttempts(now);
             if (!_admittedPackages.TryGetValue(userId, out var admitted))
             {
                 admitted = new Queue<DateTimeOffset>();
                 _admittedPackages[userId] = admitted;
-            }
-
-            while (admitted.Count > 0 && admitted.Peek() <= now - PackageWindow)
-            {
-                admitted.Dequeue();
             }
 
             if (admitted.Count >= PackageAttemptsPerWindow)
@@ -60,6 +56,29 @@ public sealed class WorkloadAdmissionLimits(TimeProvider time)
 
             admitted.Enqueue(now);
             return true;
+        }
+    }
+
+    private void RemoveExpiredPackageAttempts(DateTimeOffset now)
+    {
+        List<string>? expiredUsers = null;
+        foreach (var (userId, admitted) in _admittedPackages)
+        {
+            while (admitted.Count > 0 && admitted.Peek() <= now - PackageWindow)
+            {
+                admitted.Dequeue();
+            }
+
+            if (admitted.Count == 0)
+            {
+                (expiredUsers ??= []).Add(userId);
+            }
+        }
+
+        if (expiredUsers is null) return;
+        foreach (var userId in expiredUsers)
+        {
+            _admittedPackages.Remove(userId);
         }
     }
 
