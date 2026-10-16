@@ -79,19 +79,7 @@ public sealed class BoundedInvestigator(
 
     public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default, InvestigationTraceRecorder? traceRecorder = null)
     {
-        ArgumentNullException.ThrowIfNull(documents);
-        if (documents.Count == 0)
-        {
-            throw new ArgumentException("at least one document is required", nameof(documents));
-        }
-
-        foreach (var text in documents)
-        {
-            if (text is null || text.Contains(UntrustedBegin, StringComparison.Ordinal) || text.Contains(UntrustedEnd, StringComparison.Ordinal))
-            {
-                throw new ArgumentException("document text is missing or contains an untrusted-data delimiter", nameof(documents));
-            }
-        }
+        ValidateDocuments(documents);
 
         // Every document text that reaches the model, including tool results, is added here before the next call is gated.
         var limits = _suppliedLimits ?? new InvestigationLimits();
@@ -131,6 +119,24 @@ public sealed class BoundedInvestigator(
         {
             EmitTrace(traceId, gate.ToolsUsed, result, outcome, limits);
             (limits as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>Refuses an investigation before it starts: no documents, a missing text, or a text that carries a delimiter.</summary>
+    internal static void ValidateDocuments(IReadOnlyList<string> documents)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        if (documents.Count == 0)
+        {
+            throw new ArgumentException("at least one document is required", nameof(documents));
+        }
+
+        foreach (var text in documents)
+        {
+            if (text is null || text.Contains(UntrustedBegin, StringComparison.Ordinal) || text.Contains(UntrustedEnd, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("document text is missing or contains an untrusted-data delimiter", nameof(documents));
+            }
         }
     }
 

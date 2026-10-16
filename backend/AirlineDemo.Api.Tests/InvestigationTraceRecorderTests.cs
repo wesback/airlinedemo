@@ -29,12 +29,12 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
     private const string ApprovedJson = """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""";
 
     private const string ClaimsJson =
-        """[{"text":"Reserve approval","witnesses":[{"documentId":"doc-1","page":1,"quote":"Reserve approval granted on page one"}]}]""";
+        """[{"text":"reserve approval","witnesses":[{"documentId":"doc-1","page":1,"quote":"SYNTHETIC EVIDENCE: Return readiness is pending reserve approval."}]}]""";
 
     private const string BadQuoteClaimsJson =
-        """[{"text":"Reserve approval","witnesses":[{"documentId":"doc-1","page":1,"quote":"Reserve approval missing"}]}]""";
+        """[{"text":"reserve approval","witnesses":[{"documentId":"doc-1","page":1,"quote":"Reserve approval missing"}]}]""";
 
-    private static readonly string[] Documents = ["Reserve approval granted on page one"];
+    private static readonly string[] Documents = ["SYNTHETIC EVIDENCE: Return readiness is pending reserve approval."];
 
     private static ApprovedModelManifest Approved() => ApprovedModelManifest.Parse(ApprovedJson);
 
@@ -55,7 +55,7 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
         public string? GetApprovedRequirements(string caseId) => null;
 
         public string? GetSourcePage(string caseId, string documentId, int page) =>
-            page == 1 ? "Reserve approval granted on page one" : null;
+            page == 1 ? "SYNTHETIC EVIDENCE: Return readiness is pending reserve approval." : null;
 
         public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) => [];
 
@@ -78,37 +78,73 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
         public void Dispose() { }
     }
 
+    /// <summary>Model stub that returns the scripted replies in order, one per model call.</summary>
+    private sealed class ScriptedClient(params ChatResponse[] replies) : IChatClient
+    {
+        private int _next;
+
+        public ChatClientMetadata Metadata { get; } = new("scripted");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(replies[_next++]);
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
+    }
+
     [Fact]
-    public void PersistsActualOrderedToolAndCitationOutcomes()
+    public async Task PersistsActualOrderedToolAndCitationOutcomes()
     {
         var store = new CaseStateStore(_path);
         var scope = store.CreateCase("case-1", "owner-1");
-        var recorder = new InvestigationTraceRecorder(store, scope, Context());
+        // The same source-page tool is called twice, then the cited claims are returned.
+        var model = new ScriptedClient(
+            Call("c1", CaseReadTools.SourcePageTool, Page(1)),
+            Call("c2", CaseReadTools.SourcePageTool, Page(1)),
+            Text(ClaimsJson));
+        var service = new InvestigationExecutionService(store);
 
-        recorder.RecordToolCall(CaseReadTools.InventoryTool);
-        recorder.RecordToolCall(CaseReadTools.SourcePageTool);
-        recorder.RecordToolCall(CaseReadTools.SourcePageTool);
-        recorder.RecordCitationCheck("doc-1", 1, InvestigationTraceRecorder.CitationVerified);
-        recorder.RecordCitationCheck("doc-1", 2, InvestigationTraceRecorder.CitationQuoteNotOnPage);
-        recorder.Complete("approved");
+        var result = await service.ExecuteAsync(scope, Context(), Investigator(model), Documents, ClaimKind.MissingRequirement, Basis(), "Reserve approval");
 
+        Assert.Single(result.Claims);
         var trace = store.FindTrace(scope, "case-1", "run-1", "inv-1");
 
         Assert.NotNull(trace);
         Assert.Equal("approved", trace.Outcome);
-        Assert.Equal(6, trace.Steps.Count);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, trace.Steps.Select(s => s.Sequence).ToArray());
         Assert.Equal(
-            new[] { 1, 2, 3, 4, 5, 6 },
-            trace.Steps.Select(s => s.Sequence).ToArray());
-        Assert.Equal(
-            new[] { CaseReadTools.InventoryTool, CaseReadTools.SourcePageTool, CaseReadTools.SourcePageTool, "citation-check", "citation-check", "policy-handover" },
+            new[] { CaseReadTools.SourcePageTool, CaseReadTools.SourcePageTool, "citation-check", "claim-validation", "policy-handover" },
             trace.Steps.Select(s => s.ToolName).ToArray());
         Assert.Equal(
-            new[] { "requested", "requested", "requested", "verified", "quote-not-on-page", "None" },
+            new[] { "requested", "requested", "verified", "None", "None" },
             trace.Steps.Select(s => s.CitationCheckOutcome).ToArray());
-        Assert.Equal(new[] { "None", "None", "None", "doc-1", "doc-1", "None" }, trace.Steps.Select(s => s.DocumentId).ToArray());
-        Assert.Equal(new[] { 0, 0, 0, 1, 2, 0 }, trace.Steps.Select(s => s.PageNumber).ToArray());
+        Assert.Equal(new[] { "None", "None", "doc-1", "None", "None" }, trace.Steps.Select(s => s.DocumentId).ToArray());
+        Assert.Equal(new[] { 0, 0, 1, 0, 0 }, trace.Steps.Select(s => s.PageNumber).ToArray());
+        Assert.Equal(new[] { "None", "None", "None", "Downgraded", "None" }, trace.Steps.Select(s => s.CorrectionCode).ToArray());
         Assert.Equal("deterministic-policy", trace.Steps[^1].PolicyHandover);
+    }
+
+    [Fact]
+    public async Task RecordsRejectedInvestigationWithoutHandover()
+    {
+        var store = new CaseStateStore(_path);
+        var scope = store.CreateCase("case-1", "owner-1");
+        var model = new ScriptedClient(Call("c1", CaseReadTools.SourcePageTool, Page(1)), Text(BadQuoteClaimsJson));
+        var service = new InvestigationExecutionService(store);
+
+        await Assert.ThrowsAsync<InvestigationOutputException>(() =>
+            service.ExecuteAsync(scope, Context(), Investigator(model), Documents, ClaimKind.MissingRequirement, Basis(), "Reserve approval"));
+
+        var trace = store.FindTrace(scope, "case-1", "run-1", "inv-1");
+        Assert.NotNull(trace);
+        Assert.Equal("rejected", trace.Outcome);
+        Assert.Equal(new[] { CaseReadTools.SourcePageTool, "citation-check" }, trace.Steps.Select(s => s.ToolName).ToArray());
+        Assert.Equal("quote-not-on-page", trace.Steps[1].CitationCheckOutcome);
+        Assert.DoesNotContain(trace.Steps, s => s.PolicyHandover != "None");
     }
 
     [Fact]

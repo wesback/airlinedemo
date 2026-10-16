@@ -6,6 +6,7 @@ namespace AirlineDemo.Api.Investigation;
 /// Runs one investigation and appends its actual trace. The investigator records tool calls and citation checks,
 /// this service records validation corrections, then the trace ends with a handover (approved) or a rejection.
 /// Append failures propagate to the caller, so a failed append never looks like a successful investigation.
+/// Input refused before execution starts is thrown without writing a trace.
 /// </summary>
 public sealed class InvestigationExecutionService(ICaseStateStore store)
 {
@@ -20,6 +21,7 @@ public sealed class InvestigationExecutionService(ICaseStateStore store)
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(investigator);
+        BoundedInvestigator.ValidateDocuments(documents);
         var recorder = new InvestigationTraceRecorder(store, scope, context);
 
         InvestigationResult result;
