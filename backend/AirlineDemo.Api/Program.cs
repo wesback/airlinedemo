@@ -25,6 +25,8 @@ builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
+builder.Services.AddSingleton(SourceFixtureLoader.PublishVerified(
+    Path.Combine(builder.Environment.ContentRootPath, "Fixtures", "sources")));
 builder.Services.AddSingleton<ISourceSystem<TechnicalPayload>, TechnicalSource>();
 builder.Services.AddSingleton<ISourceSystem<FinancePayload>, FinanceSource>();
 builder.Services.AddSingleton<ISourceSystem<MaintenancePayload>, MaintenanceSource>();

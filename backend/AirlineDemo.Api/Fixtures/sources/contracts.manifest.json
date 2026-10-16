@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1",
+  "sourceFixtureVersion": "2026.10.1",
+  "scenarioDate": "2026-10-01",
+  "sha256": "2010ebf2580c49a8b5e35ed3513b1a17027681cd8124682359b2238db94df150",
+  "recordCounts": {
+    "technical": 0,
+    "maintenance": 0,
+    "finance": 0,
+    "records": 0,
+    "contracts": 1
+  }
+}
