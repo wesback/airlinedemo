@@ -1,0 +1,14 @@
+{
+  "sourceId": "contracts",
+  "records": [
+    {
+      "recordId": "con-clause-return-notice-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "obligation_clause",
+      "synthetic": true,
+      "payload": { "clauseId": "SYN-CL-RET-07", "obligation": "return_condition_report", "noticeWindowStart": "2026-10-01", "noticeWindowEnd": "2026-10-31", "noticeWindowDays": "30" }
+    }
+  ]
+}

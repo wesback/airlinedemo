@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -146,7 +147,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
 
-        using var response = await PostPackageAsync(client, presenter, "valid-text.pdf", ReadFixture("valid-text.pdf"));
+        using var response = await PostPackageAsync(client, presenter, "synthetic-evidence-a.pdf", ReadFixture("synthetic-evidence-a.pdf"));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
 
@@ -154,7 +155,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var store = new CaseStateStore(_statePath);
         var trace = store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId);
         Assert.NotNull(trace);
-        Assert.Equal("approved", trace.Outcome);
+        Assert.Equal("rejected", trace.Outcome);
         Assert.Empty(trace.Steps);
     }
 
@@ -169,10 +170,10 @@ public sealed class EvidenceInvestigationTests : IDisposable
         using var factory = CreateFactory(model, proxy);
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
-        var pdf = ReadFixture("valid-text.pdf");
+        var pdf = ReadFixture("synthetic-evidence-a.pdf");
 
         // The failure reaches the caller: the submission is not reported as successful.
-        using var first = await PostPackageAsync(client, presenter, "valid-text.pdf", pdf);
+        using var first = await PostPackageAsync(client, presenter, "synthetic-evidence-a.pdf", pdf);
         Assert.NotEqual(HttpStatusCode.Created, first.StatusCode);
         Assert.NotEqual(HttpStatusCode.OK, first.StatusCode);
         var runId = failing.AttemptedRunId!;
@@ -180,14 +181,14 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.Null(store.FindTrace(ScopeFor(store), Case, runId, "inv-" + runId));
 
         // A retry of the same package must not succeed while its trace is absent.
-        using var retry = await PostPackageAsync(client, presenter, "valid-text.pdf", pdf);
+        using var retry = await PostPackageAsync(client, presenter, "synthetic-evidence-a.pdf", pdf);
         Assert.Equal(HttpStatusCode.InternalServerError, retry.StatusCode);
         Assert.Equal(2, model.Calls);
         Assert.Null(store.FindTrace(ScopeFor(store), Case, runId, "inv-" + runId));
 
         // Once the append succeeds, the retry completes and the trace exists.
         failing.FailAppends = false;
-        using var recovered = await PostPackageAsync(client, presenter, "valid-text.pdf", pdf);
+        using var recovered = await PostPackageAsync(client, presenter, "synthetic-evidence-a.pdf", pdf);
         Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
         var recoveredStore = new CaseStateStore(_statePath);
         Assert.NotNull(recoveredStore.FindTrace(ScopeFor(recoveredStore), Case, runId, "inv-" + runId));
@@ -227,10 +228,10 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var presenter = await SignInAsync(client, "presenter");
 
         var form = new MultipartFormDataContent();
-        var first = new ByteArrayContent(ReadFixture("valid-text.pdf"));
+        var first = new ByteArrayContent(ReadFixture("synthetic-evidence-a.pdf"));
         first.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(first, "files", "same.pdf");
-        var second = new ByteArrayContent(ReadFixture("annotated.pdf"));
+        var second = new ByteArrayContent(ReadFixture("synthetic-evidence-b.pdf"));
         second.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(second, "files", "same.pdf");
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{Case}/packages") { Content = form };
@@ -267,15 +268,29 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var store = new CaseStateStore(_statePath);
         Assert.Null(store.FindTrace(ScopeFor(store), Case, rejectedId, "inv-" + rejectedId));
 
-        // Started, with no tool or citation activity: the outcome is still recorded, with no steps.
-        using var accepted = await PostPackageAsync(client, presenter, "valid-text.pdf", ReadFixture("valid-text.pdf"));
+        // Started, with no tool or citation activity: the outcome is still recorded, with no steps and no handover.
+        using var accepted = await PostPackageAsync(client, presenter, "synthetic-evidence-a.pdf", ReadFixture("synthetic-evidence-a.pdf"));
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
         var acceptedId = (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
         Assert.Equal(1, model.Calls);
         var started = new CaseStateStore(_statePath);
         var trace = started.FindTrace(ScopeFor(started), Case, acceptedId, "inv-" + acceptedId);
         Assert.NotNull(trace);
-        Assert.Equal("approved", trace.Outcome);
+        Assert.Equal("rejected", trace.Outcome);
         Assert.Empty(trace.Steps);
+
+        // A completed investigation records its outcome and the deterministic-policy handover.
+        var claim = """[{"text":"Synthetic evidence B.","witnesses":[{"documentId":"synthetic-evidence-b.pdf","page":1,"quote":"Synthetic evidence B."}]}]""";
+        using var completingFactory = CreateFactory(new CountingChatClient(claim));
+        using var completingClient = completingFactory.CreateClient();
+        var completingPresenter = await SignInAsync(completingClient, "presenter");
+        using var completed = await PostPackageAsync(completingClient, completingPresenter, "synthetic-evidence-b.pdf", ReadFixture("synthetic-evidence-b.pdf"));
+        Assert.Equal(HttpStatusCode.Created, completed.StatusCode);
+        var completedId = (await completed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        var completedStore = new CaseStateStore(_statePath);
+        var completedTrace = completedStore.FindTrace(ScopeFor(completedStore), Case, completedId, "inv-" + completedId);
+        Assert.NotNull(completedTrace);
+        Assert.Equal("approved", completedTrace.Outcome);
+        Assert.Equal(InvestigationTraceRecorder.DeterministicPolicy, completedTrace.Steps[^1].PolicyHandover);
     }
 }

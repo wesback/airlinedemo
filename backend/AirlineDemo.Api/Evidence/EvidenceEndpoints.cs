@@ -179,13 +179,14 @@ public static class EvidenceEndpoints
         var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted, pinned), manifest, registry,
             manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat);
 
-        // A gate refusal (evidence not in the synthetic registry) is an escalated outcome: the trace is already appended
-        // with that outcome. Any append failure is a different exception and still reaches the caller.
+        // A gate refusal (evidence not in the synthetic registry) or model output that breaks the claim contract is a recorded
+        // outcome (escalated, rejected): the trace is already appended with it. Any append failure is a different exception
+        // and still reaches the caller.
         try
         {
             await investigations.ExecuteAsync(scope, context, investigator, evidenceTexts, ClaimKind.Baseline, documents, string.Empty, ct);
         }
-        catch (ModelGateException)
+        catch (Exception ex) when (ex is ModelGateException or InvestigationOutputException)
         {
         }
     }

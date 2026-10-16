@@ -1,0 +1,287 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 227,
+  "branch": "ai-sdlc/issue-227",
+  "commitSha": "280297bc42ae52c9dd4d4ca284544458acc35f87",
+  "round": 0,
+  "pipelineVersion": "1aa5598",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform defines the expected registry settings, federated credentials, and scoped role assignments. However, the named tests do not enforce several explicit negative cases in AC RELEASE-ID-01 through AC RELEASE-ID-04, so unsafe additional credentials, grants, or outputs could pass the CI test step.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 223,
+          "message": "AC RELEASE-ID-02 requires the test to fail when any other federated credential is declared. Add an assertion that catches extra credentials.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The federation run asserts the attributes of the named build and release credentials, but does not assert that those are the only credentials attached to either identity.",
+            "failureScenario": "If a third federated credential is added for the build identity with a feature-branch subject, the test still passes, though that branch can obtain the build identity."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 279,
+          "message": "AC RELEASE-ID-03 requires the test to fail on extra or broader grants, including subscription- or resource-group-scoped roles and vault-scoped Key Vault roles. The current assertions only verify the five expected assignments.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The rights run checks five named role assignments, but does not check for additional assignments to either workflow identity or for assignments at broader scopes.",
+            "failureScenario": "If a subscription-scoped Contributor assignment is added to the release identity, all five existing assertions still pass, leaving the release workflow with broader access than AC RELEASE-ID-03 permits."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 191,
+          "message": "AC RELEASE-ID-01 requires the test to fail if the app identity has a broader or additional ACR assignment; it currently checks only the named AcrPull assignment.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The registry run checks the attributes of azurerm_role_assignment.app_acr_pull, but does not check for additional ACR role assignments to the app identity.",
+            "failureScenario": "If another app identity assignment grants AcrPush on the registry, the test still passes even though the app identity's only ACR pull assignment is no longer AcrPull."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 326,
+          "message": "AC RELEASE-ID-04 requires the test to check complete output values for secrets. The assertion checks only the two client ID outputs.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The output assertion scans only build_identity_client_id and release_identity_client_id, not the complete set of Terraform outputs.",
+            "failureScenario": "If a new output exposes a storage key or signing-key material, this test still passes because neither checked client ID contains that value."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named test runs cover the expected resources and values, but several acceptance criteria explicitly require negative checks for extra credentials, grants, or outputs. Those regressions can be introduced while the current assertions still pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 193,
+          "message": "The AC RELEASE-ID-01 test does not fail when an extra ACR assignment is granted to the app identity.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The registry_is_private_and_pull_scoped run checks the named app_acr_pull assignment but does not check for other assignments to the app identity.",
+            "failureScenario": "If Terraform adds an AcrPush assignment for the app identity on the ACR, the test still passes, although AC RELEASE-ID-01 requires AcrPull to be the only ACR pull assignment."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 235,
+          "message": "The AC RELEASE-ID-02 test does not detect additional federated credentials for either workflow identity.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The federation_is_limited_to_trusted_workflows run checks the named build and release credentials, but does not check for additional federated credentials attached to either identity.",
+            "failureScenario": "If Terraform adds another federated credential for the build identity with a subject for an untrusted branch, the test still passes, despite AC RELEASE-ID-02 requiring no other credential for either identity."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 300,
+          "message": "The AC RELEASE-ID-03 test checks expected grants but does not detect extra or broader grants.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The signing_rights_are_resource_scoped run checks the five expected role assignments but does not check for other role assignments or credential resources.",
+            "failureScenario": "If Terraform adds a resource-group-scoped role assignment to the release identity, all five existing assertions can still pass, although AC RELEASE-ID-03 requires any extra or broader assignment to fail the test."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 345,
+          "message": "The AC RELEASE-ID-04 test does not inspect all Terraform outputs for credential or signing-key material.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The release_outputs_contain_no_secrets run applies a regex only to the two named client ID outputs.",
+            "failureScenario": "If Terraform adds another output containing a storage key or signing-key material, the assertion still passes because that output is not inspected, despite AC RELEASE-ID-04 requiring the complete output values to contain no such material."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The declared identities and grants appear scoped as intended, but the tests do not fail if additional credentials or broader grants are introduced. That leaves explicit least-privilege acceptance criteria unenforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 242,
+          "message": "The tests do not enforce the negative security cases required by AC: RELEASE-ID-02 and AC: RELEASE-ID-03: no additional federated credentials, broader role assignments, or Key Vault vault-scope grants. This leaves authorization regressions undetected (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The federation test checks the expected credentials' values, and the signing-rights test checks the expected assignments, but neither asserts that no additional credentials or grants exist.",
+            "failureScenario": "If Terraform adds a federated credential for an untrusted repository or a broader role assignment to a workflow identity, these tests can still pass. The untrusted workflow could then obtain the identity, or the identity could gain broader access."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

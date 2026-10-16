@@ -6,8 +6,8 @@ using Microsoft.Extensions.AI;
 
 namespace AirlineDemo.Api.Tests;
 
-// A model stand-in that answers with no claims and counts how often the investigator called it.
-public sealed class CountingChatClient : IChatClient
+// A model stand-in that answers with no claims unless given a reply and counts how often the investigator called it.
+public sealed class CountingChatClient(string reply = "[]") : IChatClient
 {
     public int Calls { get; private set; }
 
@@ -16,7 +16,7 @@ public sealed class CountingChatClient : IChatClient
     public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         Calls++;
-        return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "[]")));
+        return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, reply)));
     }
 
     public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>

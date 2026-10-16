@@ -26,7 +26,7 @@ public interface ICaseStateStore
 
     CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor);
 
-    /// <summary>Appends an investigation trace. Traces are never updated or deleted; a duplicate (case, run, investigation) throws <see cref="TraceConflictException"/>.</summary>
+    /// <summary>Appends a trace; traces are never updated or deleted. A duplicate (case, run, investigation) throws <see cref="TraceConflictException"/>.</summary>
     void AppendTrace(CaseScope scope, InvestigationTrace trace);
 
     /// <summary>Returns the trace only when the case, run and investigation ids all match exactly; otherwise null.</summary>

@@ -135,6 +135,14 @@ jobs:
           run-id: ${{ inputs.build_run_id }}
           github-token: ${{ github.token }}
 
+      - name: Download image digest
+        uses: actions/download-artifact@v4
+        with:
+          name: image-digest
+          path: evidence/image
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+
       - name: Verify build evidence present
         run: |
           set -euo pipefail
@@ -142,10 +150,14 @@ jobs:
           test -s evidence/sbom/npm-sbom.cdx.json
           test -s evidence/audit/dotnet-vulnerable.txt
           test -s evidence/audit/npm-audit.json
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::IMAGE_DIGEST must be sha256:<64 lowercase hex> before it is compared with the image-digest artifact"
+            exit 1
+          fi
           test -s evidence/image/digest.txt
           built="$(tr -d '[:space:]' < evidence/image/digest.txt)"
           if [[ "$built" != "$IMAGE_DIGEST" ]]; then
-            echo "::error::image digest $IMAGE_DIGEST was not produced by build run $BUILD_RUN_ID (build recorded $built)"
+            echo "::error::image digest $IMAGE_DIGEST was not produced by build run $BUILD_RUN_ID (image-digest artifact recorded $built)"
             exit 1
           fi
 

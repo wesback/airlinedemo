@@ -1,0 +1,269 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 227,
+  "branch": "ai-sdlc/issue-227",
+  "commitSha": "df0a1ef0de268d1015699942e977221d38917988",
+  "round": 0,
+  "pipelineVersion": "a0078d1",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The required recursive C# contract test is absent, and the signing-rights checks can miss a broader grant expressed through a local. Both gaps allow explicit negative cases in the issue to pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs",
+          "line": 1,
+          "message": "AC RELEASE-ID-01 is missing the required C# contract test, leaving app ACR grants in nested Terraform files unchecked.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC RELEASE-ID-01 explicitly requires App_identity_has_exactly_one_acr_role_assignment to scan every Terraform file under infra/terraform. That test file and test are absent from the diff; the HCL checks use fileset(path.module, \"*.tf\"), which scans only the module root.",
+            "failureScenario": "If an included nested Terraform module adds a second app identity assignment on the ACR, such as AcrPush, the root-only HCL scans do not inspect that file and the required recursive C# contract test is not present to fail."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 343,
+          "message": "The AC RELEASE-ID-03 checks can miss an extra or broader workflow identity grant when its principal is expressed through a Terraform local.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The signing-rights run counts workflow identity principal references by searching for direct azurerm_user_assigned_identity.build/release.principal_id text. Its exact-five assignment count is limited to release-identity.tf.",
+            "failureScenario": "If another root Terraform file adds a broader role assignment for the release identity using principal_id = local.release_principal, the count misses it and the signing assertions still pass, despite AC RELEASE-ID-03 requiring extra or broader assignments to fail."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform tests cover the named expected values, but the required C# contract test is missing and the signing-rights checks can miss an extra broad grant expressed through a local principal.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs",
+          "line": 1,
+          "message": "AC RELEASE-ID-01 requires `ReleaseIdentityContractTests.App_identity_has_exactly_one_acr_role_assignment`, but `backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs` is not added. Add the named test so extra app ACR grants in any Terraform file fail.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC RELEASE-ID-01 explicitly requires the named C# contract test to read every infra/terraform/*.tf file and count assignments granting the app identity a role on the ACR. That test file is absent from the diff.",
+            "failureScenario": "If a second app identity assignment on the ACR is added in another Terraform file, the Terraform test's source-text checks do not provide the required cross-file contract test, so this acceptance criterion is unmet."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 359,
+          "message": "AC RELEASE-ID-03 requires the test to fail for any extra or broader workflow identity grant. The assignment count can miss a valid grant whose principal is supplied through a local; cover evaluated assignments or reject indirect principal references.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The signing rights assertions count workflow principal references only when the source text directly contains `azurerm_user_assigned_identity.build.principal_id` or `azurerm_user_assigned_identity.release.principal_id`. They do not evaluate indirect principal references.",
+            "failureScenario": "If an extra role assignment uses `principal_id = local.release_principal`, where the local resolves to the release identity, and grants Contributor at the resource group scope, the direct-reference count remains five and the exact-five assignment check in release-identity.tf remains unchanged. The test can pass despite the extra broader grant, contrary to AC RELEASE-ID-03."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The declared grants are scoped as intended, but the tests can miss an additional broad role assignment to a workflow identity when its principal is referenced through a local.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/release-identity.tftest.hcl",
+          "line": 342,
+          "message": "The AC RELEASE-ID-03 test can miss an extra broad grant when its principal is referenced through a Terraform local. Reject indirect principal references or otherwise assert that no additional grants reach either workflow identity (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The signing-rights test counts five direct references to the build or release identity in role assignments, but does not reject assignments that refer to either identity through a local.",
+            "failureScenario": "If an extra assignment in another Terraform file grants the release identity Contributor at resource-group scope using principal_id = local.release_principal, the direct-reference count remains five and the test can pass. The release identity then has broader access than AC RELEASE-ID-03 permits."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

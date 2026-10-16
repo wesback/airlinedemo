@@ -196,3 +196,83 @@ jobs:
           name: supply-chain-evidence
           path: artifacts/
           retention-days: 90
+
+  publish-image:
+    needs: build-and-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, private-acr]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+      IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify ACR resolves to a private address
+        run: |
+          python3 - <<'EOF'
+          import ipaddress, os, socket, sys
+          host = os.environ["ACR_LOGIN_SERVER"]
+          addrs = {ipaddress.ip_address(info[4][0]) for info in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)}
+          if not addrs or any(not a.is_private for a in addrs):
+              sys.exit(f"::error::{host} does not resolve only to private addresses: {sorted(map(str, addrs))}")
+          print(f"{host} resolves only to private addresses")
+          EOF
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+
+      - name: Record image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::registry returned no valid image digest: '$DIGEST'"
+            exit 1
+          fi
+          mkdir -p artifacts/image
+          printf '%s\n' "$DIGEST" > artifacts/image/digest.txt
+
+      - name: Download supply-chain evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: artifacts/
+
+      - name: Add digest to supply-chain evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: artifacts/
+          retention-days: 90
+          overwrite: true
+
+      - name: Upload image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest
+          path: artifacts/image/digest.txt
+          retention-days: 90
