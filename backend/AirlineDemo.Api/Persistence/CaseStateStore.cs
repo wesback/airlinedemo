@@ -197,14 +197,12 @@ public sealed class CaseStateStore : ICaseStateStore
     };
 
     private readonly string _path;
-    private readonly Action? _beforePersist;
     private readonly object _gate = new();
     private Dictionary<string, CaseState> _cases;
 
-    public CaseStateStore(string path, Action? beforePersist = null)
+    public CaseStateStore(string path)
     {
         _path = path;
-        _beforePersist = beforePersist;
         _cases = Load(path);
     }
 
@@ -527,7 +525,6 @@ public sealed class CaseStateStore : ICaseStateStore
 
     private void Persist(Dictionary<string, CaseState> snapshot)
     {
-        _beforePersist?.Invoke();
         var document = new CaseStoreDocument(
             SchemaVersion,
             snapshot.Values.OrderBy(c => c.CaseId, StringComparer.Ordinal).ToList());
