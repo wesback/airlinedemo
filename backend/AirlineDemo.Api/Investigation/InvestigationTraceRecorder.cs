@@ -36,14 +36,12 @@ public sealed class InvestigationTraceRecorder(ICaseStateStore store, CaseScope 
     public void RecordCitationCheck(string documentId, int page, string outcome) =>
         Add("citation-check", documentId, page, outcome, NoValue, NoValue);
 
-    // Only a downgrade is a correction; a supported claim leaves no step.
+    // A downgrade is recorded as a correction; a supported claim is recorded with no correction.
     public void RecordValidation(ValidatedClaim validated)
     {
         ArgumentNullException.ThrowIfNull(validated);
-        if (validated.Status == ClaimStatus.Downgraded)
-        {
-            Add("claim-validation", NoValue, 0, NoValue, DowngradedCorrection, NoValue);
-        }
+        var correction = validated.Status == ClaimStatus.Downgraded ? DowngradedCorrection : NoValue;
+        Add("claim-validation", NoValue, 0, NoValue, correction, NoValue);
     }
 
     public void Complete(string outcome)
