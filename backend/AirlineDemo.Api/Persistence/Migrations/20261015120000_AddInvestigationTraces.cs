@@ -12,14 +12,19 @@ public class AddInvestigationTraces : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        // Identifiers are compared exactly, so the key columns must not collapse case on case-insensitive databases.
+        var keyCollation = migrationBuilder.ActiveProvider == "Microsoft.EntityFrameworkCore.SqlServer"
+            ? "Latin1_General_100_CS_AS"
+            : null;
+
         migrationBuilder.CreateTable(
             name: "investigation_traces",
             schema: "dbo",
             columns: table => new
             {
-                CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                RunId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                InvestigationId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
+                CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
+                RunId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
+                InvestigationId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
                 BasisVersion = table.Column<int>(type: "int", nullable: false),
                 ModelDeploymentName = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
                 ApiVersion = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
@@ -36,9 +41,9 @@ public class AddInvestigationTraces : Migration
             schema: "dbo",
             columns: table => new
             {
-                CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                RunId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
-                InvestigationId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
+                CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
+                RunId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
+                InvestigationId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
                 Sequence = table.Column<int>(type: "int", nullable: false),
                 ToolName = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 DocumentId = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
