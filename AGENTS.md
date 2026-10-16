@@ -49,6 +49,21 @@ Each rule comes from a story that stopped for a person because it was missing (D
   process. One test may still start the real process to prove the wiring.
 - **Unit tests use only what CI installs.** No unit test runs `npm`, `dotnet publish`, a browser, Docker or a cloud
   service; such a check is `Verified by CI` or `Verified by review`.
+- **A criterion that something does not happen is checked at runtime.** "Resolving the client creates no credential", "no
+  network request is made" is proved by a counting fake, a spy or a fake HTTP handler that the test asserts on (0 calls
+  before the action, the expected count after). A scan of source files for constructors or patterns cannot prove it
+  (any scan has a gap, and reviewers keep finding the next one); the story does not ask for one. What no fake can observe
+  is `Verified by review`.
+- **A property that must hold under concurrent or repeated use states its invariants and the operation that gives them.**
+  Where a criterion says a value stays current, a submission is atomic, a stored object cannot change, or a request is
+  accepted once, the story names each invariant (atomic with the check, immutable after storing, exact identity: ID,
+  version and content) and the existing operation that provides it (a store's expected-revision commit, a lock, a
+  read-only copy). Without that, reviewers raise one weaker layer per round: a recheck, then identity, then mutation.
+  Each invariant gets its own test, and a test for a race uses a fake that changes the state between the read and the write.
+- **A test of a contract lists its cases.** A criterion that a guard, parser, filter or schema test covers "the contract"
+  has a table of the inputs and the expected result of each (every property name, selector form, token set or value
+  the test must accept or reject), and says that other inputs are out of scope. A reviewer's next input variant is then a
+  new story, not a failing round.
 - **Security filters work on names and exact shapes.** A redaction or validation rule lists the property names and the
   exact patterns it acts on (for example `Bearer <token>`, three base64url segments of 8+ characters separated by dots).
   It never judges free text by keywords or wording; what a filter cannot decide structurally goes to a person (an
@@ -61,8 +76,11 @@ Each rule comes from a story that stopped for a person because it was missing (D
   `???`, "not sure", "decide later", "to be determined", "to be decided", "up to the dev" and the word "placeholder"
   anywhere outside a fenced code block. Write "template field", "token" or "parameter" instead.
 - **A merge that is itself a decision says so.** When the merge of the pull request is a person's approval or freeze (a frozen
-  fixture, a sign-off, a real-world run), put the line `Merge: person` in the story. The pipeline then stops the finished pull
+  fixture, a sign-off, a real-world run), put the line `Merge: person (<why a person decides>)` in the story, with the reason in the brackets: the reason is shown to the person on the pull request and the dashboard. The pipeline then stops the finished pull
   request for that person and never merges it.
+- **No automated pixel or contrast measurement in a browser.** A criterion never asks for a Chromium test that samples rendered
+  pixels or measures contrast ratios (butlercompass removed that suite on 2026-10-16: slow, fragile, a personal application).
+  State the requirement as a CSS or markup contract a unit test can read (a token, a rule, an attribute), or as `Verified by review`.
 
 ### Before you finish (the implementing and fixing agent)
 
