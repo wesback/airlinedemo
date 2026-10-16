@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
@@ -68,6 +69,7 @@ public static class EvidenceEndpoints
         ICaseStateStore caseStore,
         EvidenceCaseReadSourceFactory caseSources,
         InvestigationExecutionService investigations,
+        WorkloadAdmissionLimits admission,
         IServiceProvider services,
         CancellationToken ct)
     {
@@ -76,6 +78,10 @@ public static class EvidenceEndpoints
         if (!DemoAuthEndpoints.HasValidAntiForgery(request.HttpContext, session)) return DemoAuthEndpoints.AntiForgeryFailed();
         if (session.User.Role != PresenterRole) return Results.Json(new { error = "Role not permitted." }, statusCode: StatusCodes.Status403Forbidden);
         if (!session.User.CaseScopes.Contains(caseId)) return Results.NotFound();
+
+        // Keyed by the server session identity only; a multipart userId field is never read.
+        if (!admission.TryAdmitPackage(session.User.Id))
+            return Results.Json(new { error = WorkloadAdmissionLimits.PackageLimitError }, statusCode: StatusCodes.Status429TooManyRequests);
 
         // Raise Kestrel's default 30 MB body cap so a valid 50 MiB package reaches EvidenceIntake's own limits.
         var bodySize = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -107,6 +113,11 @@ public static class EvidenceEndpoints
 
         var invalid = EvidenceIntake.Validate(documents);
         if (invalid is not null) return Results.BadRequest(new { error = invalid });
+
+        // Refused before the case is created or any package, basis entry or investigation result is written; held until the investigation finishes.
+        using var investigationSlot = admission.TryAdmitInvestigation();
+        if (investigationSlot is null)
+            return Results.Json(new { error = WorkloadAdmissionLimits.InvestigationLimitError }, statusCode: StatusCodes.Status429TooManyRequests);
 
         // Authorize before anything is saved: a non-owner must not write evidence into another user's case.
         CaseScope scope;

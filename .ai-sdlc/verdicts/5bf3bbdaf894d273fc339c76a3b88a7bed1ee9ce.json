@@ -1,0 +1,321 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 231,
+  "branch": "ai-sdlc/issue-231",
+  "commitSha": "5bf3bbdaf894d273fc339c76a3b88a7bed1ee9ce",
+  "round": 0,
+  "pipelineVersion": "5711d2b",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint places admission checks before package processing and holds investigation slots through the request, but the rejection event list grows without bound. The new tests also do not prove the endpoint-level behaviors required by LIMIT-01 through LIMIT-03.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Admission/WorkloadAdmissionLimits.cs",
+          "line": 55,
+          "message": "Rejected requests are recorded in an unbounded in-memory list. Repeated rate-limited requests can exhaust application memory.",
+          "confidence": 0.9,
+          "category": "performance",
+          "evidence": {
+            "codePathTraced": "Every rejected package attempt appends an AdmissionEvent to the singleton's _events list; investigation rejections append to the same list at line 71.",
+            "failureScenario": "An authenticated presenter repeatedly submits requests after reaching the package limit. Each request returns 429 but permanently grows _events, allowing memory use to grow until the application becomes unresponsive or exits."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 8,
+          "message": "AC: LIMIT-01 is not proven by this test: it does not exercise two authenticated sessions, a forged multipart userId, or the endpoint’s rejection and state behavior.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Package_rate_limit_uses_authenticated_session_and_rolling_window calls TryAdmitPackage directly with hard-coded IDs; it does not send requests through SubmitPackage.",
+            "failureScenario": "If SubmitPackage keys quotas from a multipart userId field instead of session.User.Id, or omits its quota check, this test still passes. The test also does not verify the required HTTP 429 response or absence of package and basis state."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 31,
+          "message": "AC: LIMIT-02 is not fully tested: the named test does not exercise concurrent investigations, endpoint admission, cancellation release, or rejection without a result.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Concurrent_investigations_are_bounded_and_release_slots acquires and disposes limiter slots directly; it does not run investigations through the endpoint or use the specified asynchronous barrier.",
+            "failureScenario": "If the endpoint stops acquiring a slot, or fails to release it when its request is canceled, these direct slot tests still pass. The test also does not verify an HTTP 429 or absence of an investigation result for a rejected request."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 5,
+          "message": "AC: LIMIT-03 lacks its named test, WorkloadAdmissionLimitsTests.Limit_failures_are_recorded_without_partial_admission_state, to verify recorded events and absence of partial state.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test file contains no Limit_failures_are_recorded_without_partial_admission_state test and no endpoint assertions for rejected package or investigation state.",
+            "failureScenario": "If a rejected request writes a package, basis entry, or investigation result before returning 429, the current tests can still pass because they test only the admission helper."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The limiter unit tests cover basic rate counting and slot bookkeeping, but they do not verify the endpoint behaviors and rejection side effects required by LIMIT-01 through LIMIT-03. No finding is raised for LIMIT-04, whose named existing cap tests are explicitly not to be edited.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 8,
+          "message": "AC: LIMIT-01 is not fully tested. Add the specified endpoint test with two authenticated sessions, a forged multipart userId, and assertions for the exact 429 response and unchanged package and basis state.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Package_rate_limit_uses_authenticated_session_and_rolling_window calls TryAdmitPackage directly with string IDs; it does not call EvidenceEndpoints or submit multipart requests.",
+            "failureScenario": "If the endpoint keys admission from a forged multipart userId, or fails to return HTTP 429 with the required JSON error, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 30,
+          "message": "AC: LIMIT-02 lacks the required integration coverage for concurrent investigations and slot release after success, cancellation, and exception.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Concurrent_investigations_are_bounded_and_release_slots tests the admission object directly; it does not run investigations blocked on an asynchronous barrier or exercise endpoint cancellation and completion.",
+            "failureScenario": "If the endpoint omits slot admission or releases a slot while an investigation is still running, these direct slot tests can pass while a third investigation executes concurrently."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 1,
+          "message": "AC: LIMIT-03 has no test proving exact rejection responses, recorded events, and absence of partial package, basis, or investigation-result state.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test file contains no Limit_failures_are_recorded_without_partial_admission_state test; its existing tests inspect limiter events but never assert package, basis, or investigation-result state after endpoint rejection.",
+            "failureScenario": "If a rate-limited request writes a package or basis entry before returning 429, or a concurrency-limited request creates a result, the current tests still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The limiter helper has tests for basic rate and slot behavior, but the required acceptance-criterion tests are missing or incomplete. In particular, the tests do not exercise endpoint authentication, HTTP responses, or state after rejected requests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 8,
+          "message": "AC: LIMIT-01 is not covered by the required endpoint behavior test. Add the specified test using two authenticated sessions, a forged multipart userId, and assertions for the rejected HTTP response and absence of writes.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test calls WorkloadAdmissionLimits.TryAdmitPackage directly; it does not send multipart requests through the endpoint or use authenticated test sessions.",
+            "failureScenario": "If the endpoint keys quotas from a multipart userId field, or writes a package or basis entry before enforcing the quota, this test still passes. AC: LIMIT-01's required authenticated-session, forged-field, HTTP 429, and no-write behaviors are untested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 27,
+          "message": "AC: LIMIT-02 lacks the specified barrier-based investigation test and does not verify slot release after success and cancellation or that a rejected attempt produces no result.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The concurrency test acquires slots directly and disposes one manually; the separate exception test checks exception disposal. Neither runs two investigations behind an asynchronous barrier or exercises success and cancellation through the endpoint.",
+            "failureScenario": "If an investigation slot is released too early on success, retained on cancellation, or a rejected endpoint attempt creates a result, these tests can still pass. AC: LIMIT-02's required lifecycle and endpoint behaviors are not proved."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 8,
+          "message": "AC: LIMIT-03 is not covered: `Limit_failures_are_recorded_without_partial_admission_state` is missing, so the required exact response, event, and no-partial-state assertions are absent.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added tests inspect limiter return values and event records, but none asserts endpoint HTTP responses or package, basis, and investigation-result state after rejection.",
+            "failureScenario": "If a rate-limited request writes package or basis state, or a concurrency-limited request creates an investigation result, the added tests still pass. AC: LIMIT-03's named test and its required state assertions are absent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 58,
+      "total": 60,
+      "percent": 96.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/WorkloadAdmissionLimits.cs",
+          "covered": 54,
+          "total": 54,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "covered": 3,
+          "total": 5,
+          "missed": [
+            84,
+            133
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
