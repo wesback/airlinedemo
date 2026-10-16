@@ -10,6 +10,7 @@ using AirlineDemo.Api.SourceSystems;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 using AirlineDemo.Api.Reviews;
+using AirlineDemo.Api.Requests;
 using Microsoft.Extensions.AI;
 
 if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Switch)
@@ -24,6 +25,10 @@ builder.Services.AddSingleton<DemoSessionStore>();
 builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddCaseStateStore(builder.Configuration);
 builder.Services.AddSingleton<InvestigationExecutionService>();
+builder.Services.AddSingleton<AssessmentStore>();
+builder.Services.AddSingleton<AssessmentApiRecordStore>();
+builder.Services.AddSingleton<MockRequestInbox>();
+builder.Services.AddSingleton<AssessmentExecutionService>();
 builder.Services.AddEvidenceBlobStore(builder.Configuration);
 builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<SourceModeStore>();
@@ -82,6 +87,7 @@ app.MapDemoAuth();
 app.MapCaseEndpoints();
 app.MapTechnicalReviewEndpoints();
 app.MapEvidenceEndpoints();
+app.MapAssessmentEndpoints();
 app.MapFinanceEndpoints();
 app.MapDemoRunReset();
 app.MapSourceModeEndpoints();
