@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AirlineDemo.Api.Persistence;
@@ -26,27 +27,35 @@ public sealed class EvidenceInvestigationTests : IDisposable
         }
     }
 
-    private sealed class CountingClient : IChatClient
+    // Fails AppendTrace on demand and forwards every other call to the real file-backed store.
+    public class AppendFailingStore : DispatchProxy
     {
-        public int Calls { get; private set; }
+        public ICaseStateStore Inner { get; set; } = null!;
 
-        public ChatClientMetadata Metadata { get; } = new("counting");
+        public bool FailAppends { get; set; } = true;
 
-        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        public string? AttemptedRunId { get; private set; }
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
-            Calls++;
-            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "[]")));
+            if (method?.Name == nameof(ICaseStateStore.AppendTrace))
+            {
+                AttemptedRunId = ((InvestigationTrace)args![1]!).RunId;
+                if (FailAppends) throw new IOException("trace append failed");
+            }
+
+            try
+            {
+                return method!.Invoke(Inner, args);
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException is not null)
+            {
+                throw ex.InnerException;
+            }
         }
-
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose() { }
     }
 
-    private WebApplicationFactory<Program> CreateFactory(IChatClient client) =>
+    private WebApplicationFactory<Program> CreateFactory(IChatClient client, ICaseStateStore? store = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
@@ -55,8 +64,30 @@ public sealed class EvidenceInvestigationTests : IDisposable
                     ["Demo:Passcode"] = Passcode,
                     ["CaseState:Path"] = _statePath,
                 }));
-            builder.ConfigureTestServices(services => services.AddSingleton(client));
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton(client);
+                services.AddSingleton(FakeApprovedManifest.Approved());
+                if (store is not null) services.AddSingleton(store);
+                // The test host runs as root on Linux, so the default parser cannot isolate its worker; point it at this test assembly.
+                services.AddSingleton(new AirlineDemo.Api.Evidence.IsolatedPdfParserOptions
+                {
+                    WorkerFileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
+                    WorkerArguments = new[] { typeof(AirlineDemo.Api.Evidence.IsolatedPdfParser).Assembly.Location, AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Switch },
+                });
+            });
         });
+
+    private static byte[] ReadFixture(string name)
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null && !Directory.Exists(Path.Combine(dir, "Fixtures", "PdfCorpus")))
+        {
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        return File.ReadAllBytes(Path.Combine(dir!, "Fixtures", "PdfCorpus", name));
+    }
 
     private static async Task<(string Cookie, string Csrf)> SignInAsync(HttpClient client, string userId)
     {
@@ -86,7 +117,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
     [Fact]
     public async Task PackageWithoutAcceptedDocumentsDoesNotInvokeModelOrWriteTrace()
     {
-        var model = new CountingClient();
+        var model = new CountingChatClient();
         using var factory = CreateFactory(model);
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
@@ -104,5 +135,90 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var packageId = package.GetProperty("packageId").GetString()!;
         var store = new CaseStateStore(_statePath);
         Assert.Null(store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId));
+    }
+
+    // AC: TRACE-PRODUCER-01
+    [Fact]
+    public async Task AcceptedEvidenceRunsInvestigationAndPersistsTrace()
+    {
+        var model = new CountingChatClient();
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        using var response = await PostPackageAsync(client, presenter, "valid-text.pdf", ReadFixture("valid-text.pdf"));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+
+        Assert.Equal(1, model.Calls);
+        var store = new CaseStateStore(_statePath);
+        var trace = store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId);
+        Assert.NotNull(trace);
+        Assert.Equal("approved", trace.Outcome);
+        Assert.Empty(trace.Steps);
+    }
+
+    // AC: TRACE-PRODUCER-03
+    [Fact]
+    public async Task TraceAppendFailureCannotReturnSuccessfulSubmission()
+    {
+        var proxy = DispatchProxy.Create<ICaseStateStore, AppendFailingStore>();
+        var failing = (AppendFailingStore)(object)proxy;
+        failing.Inner = new CaseStateStore(_statePath);
+        var model = new CountingChatClient();
+        using var factory = CreateFactory(model, proxy);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+        var pdf = ReadFixture("valid-text.pdf");
+
+        // The failure reaches the caller: the submission is not reported as successful.
+        using var first = await PostPackageAsync(client, presenter, "valid-text.pdf", pdf);
+        Assert.NotEqual(HttpStatusCode.Created, first.StatusCode);
+        Assert.NotEqual(HttpStatusCode.OK, first.StatusCode);
+        var runId = failing.AttemptedRunId!;
+        var store = new CaseStateStore(_statePath);
+        Assert.Null(store.FindTrace(ScopeFor(store), Case, runId, "inv-" + runId));
+
+        // A retry of the same package must not succeed while its trace is absent.
+        using var retry = await PostPackageAsync(client, presenter, "valid-text.pdf", pdf);
+        Assert.NotEqual(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(2, model.Calls);
+        Assert.Null(store.FindTrace(ScopeFor(store), Case, runId, "inv-" + runId));
+
+        // Once the append succeeds, the retry completes and the trace exists.
+        failing.FailAppends = false;
+        using var recovered = await PostPackageAsync(client, presenter, "valid-text.pdf", pdf);
+        Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
+        var recoveredStore = new CaseStateStore(_statePath);
+        Assert.NotNull(recoveredStore.FindTrace(ScopeFor(recoveredStore), Case, runId, "inv-" + runId));
+    }
+
+    // AC: TRACE-PRODUCER-04
+    [Fact]
+    public async Task RecordsStartedOutcomeAndSkipsPreStartRejection()
+    {
+        var model = new CountingChatClient();
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        // Rejected before the investigation starts: no model call and no trace.
+        using var rejected = await PostPackageAsync(client, presenter, "broken.pdf", new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D });
+        Assert.Equal(HttpStatusCode.Created, rejected.StatusCode);
+        var rejectedId = (await rejected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        Assert.Equal(0, model.Calls);
+        var store = new CaseStateStore(_statePath);
+        Assert.Null(store.FindTrace(ScopeFor(store), Case, rejectedId, "inv-" + rejectedId));
+
+        // Started, with no tool or citation activity: the outcome is still recorded, with no steps.
+        using var accepted = await PostPackageAsync(client, presenter, "valid-text.pdf", ReadFixture("valid-text.pdf"));
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        var acceptedId = (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        Assert.Equal(1, model.Calls);
+        var started = new CaseStateStore(_statePath);
+        var trace = started.FindTrace(ScopeFor(started), Case, acceptedId, "inv-" + acceptedId);
+        Assert.NotNull(trace);
+        Assert.Equal("approved", trace.Outcome);
+        Assert.Empty(trace.Steps);
     }
 }

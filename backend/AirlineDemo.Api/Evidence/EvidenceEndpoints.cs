@@ -130,9 +130,9 @@ public static class EvidenceEndpoints
         var accepted = record.Documents.Where(d => d.Status == "accepted").Select(d => d.FileName).ToList();
         if (accepted.Count == 0) return;
 
-        // No model is configured in this host: nothing is sent to a model and no trace is written.
-        var chat = services.GetService<IChatClient>();
-        if (chat is null) return;
+        // Accepted evidence must not succeed without its investigation trace, so a missing model is a failure, not a skip.
+        var chat = services.GetService<IChatClient>()
+            ?? throw new InvalidOperationException("No investigation model is configured; accepted evidence cannot be investigated.");
 
         var manifest = services.GetRequiredService<ApprovedModelManifest>();
         var registry = services.GetRequiredService<SyntheticContentRegistry>();
@@ -144,18 +144,23 @@ public static class EvidenceEndpoints
         var investigationId = "inv-" + runId;
         if (caseStore.FindTrace(scope, caseId, runId, investigationId) is not null) return;
 
+        // Pin each document to the version this package accepted, so a retry investigates the same evidence.
+        var pinned = record.Documents
+            .Where(d => d.Status == "accepted" && d.Version is not null)
+            .ToDictionary(d => d.FileName, d => d.Version!.Value, StringComparer.Ordinal);
         var documents = new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
         foreach (var name in accepted)
         {
-            documents[name] = BasisDocument.Create(name, [basis.Latest($"{caseId}/{name}")!.Text]);
+            var text = basis.History($"{caseId}/{name}").First(v => v.Version == pinned[name]).Text;
+            documents[name] = BasisDocument.Create(name, [text]);
         }
 
-        var basisVersion = accepted.Max(name => basis.Latest($"{caseId}/{name}")!.Version);
+        var basisVersion = accepted.Max(name => pinned[name]);
         var actorToken = "actor-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(actorId)))[..16].ToLowerInvariant();
         var context = new InvestigationTraceContext(runId, investigationId, basisVersion,
             manifest.DeploymentName ?? string.Empty, manifest.ApiVersion ?? string.Empty, manifest.Region ?? string.Empty,
             manifest.ContentFilter ?? string.Empty, "escalate", actorToken);
-        var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted), manifest, registry,
+        var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted, pinned), manifest, registry,
             manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat);
 
         await investigations.ExecuteAsync(scope, context, investigator, accepted, ClaimKind.Baseline, documents, string.Empty, ct);
