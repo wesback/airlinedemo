@@ -1,0 +1,265 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 283,
+  "branch": "ai-sdlc/issue-283",
+  "commitSha": "22342b3fd03077d9b889d69c6ac6cb143ed168a6",
+  "round": 3,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The hash key preserves exact identifier distinctions for normal AppendTrace calls, including surrounding whitespace. However, the migration does not enforce the required tuple uniqueness at the database level.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 41,
+          "message": "The primary key enforces uniqueness of KeyHash, not of (CaseId, RunId, InvestigationId). Add a database constraint that enforces uniqueness of the identifier tuple.",
+          "confidence": 0.82,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The migration makes KeyHash the only primary key. AppendTrace derives that hash in application code, but the database has no constraint tying it to CaseId, RunId, and InvestigationId.",
+            "failureScenario": "A SQL insert with the same CaseId, RunId, and InvestigationId as an existing row but a different KeyHash succeeds. The database then contains duplicate identifier tuples, contrary to the acceptance criterion that it enforce their uniqueness."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix now preserves identifiers that differ by surrounding spaces. The new UTF-8 hash encoding still collides for distinct identifiers containing unpaired surrogates and U+FFFD.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 376,
+          "message": "The key encoding maps distinct identifiers containing malformed UTF-16 to the same hash, so SQL cannot persist every distinct exact identifier tuple allowed by the contract.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "TraceKey encodes the identifier tuple with the default UTF-8 encoder before hashing. That encoder replaces unpaired UTF-16 surrogates with U+FFFD, so distinct strings can produce the same hash. FindTraceRow then misses the ordinal match, and AppendTrace hits the duplicate primary key.",
+            "failureScenario": "Append a trace with RunId containing a lone high surrogate, then append one with RunId U+FFFD and the same case and investigation IDs. Validation accepts both, but the second append throws TraceConflictException instead of persisting the distinct exact identifier."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round 4 change fixes trailing-space key collisions, but the new hash encoding can still collapse distinct identifiers containing unpaired surrogates.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 376,
+          "message": "The UTF-8 key encoding maps distinct malformed UTF-16 identifiers to the same hash, so SQL persistence does not preserve every distinct exact identifier tuple.",
+          "confidence": 0.83,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AppendTrace and FindTrace derive the database key from Encoding.UTF8.GetBytes. The default UTF-8 encoder replaces unpaired UTF-16 surrogates with the same replacement character, while trace identifier validation permits them.",
+            "failureScenario": "Append a trace whose RunId contains an isolated high surrogate U+D800, then append one with the same other identifiers and RunId U+D801. Both distinct RunIds hash to the same key, so the second append throws TraceConflictException instead of storing the distinct exact identifier."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 176,
+      "total": 187,
+      "percent": 94.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 46,
+          "total": 46,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "covered": 45,
+          "total": 49,
+          "missed": [
+            65,
+            66,
+            67,
+            68
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 85,
+          "total": 92,
+          "missed": [
+            265,
+            266,
+            308,
+            309,
+            310,
+            365,
+            366
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
