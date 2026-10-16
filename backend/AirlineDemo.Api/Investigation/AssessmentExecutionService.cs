@@ -88,38 +88,36 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
         if (outcome == Request)
         {
             var active = current!;
-            // The basis may have been superseded while the claims were validated; only the still-current basis may submit.
-            var latest = assessments.CurrentBasis(scope.CaseId);
-            if (latest is null || latest.BasisId != active.BasisId || latest.BasisVersion != active.BasisVersion)
+            var claim = claims[0];
+            var finding = new DeliveryFinding(active.Coverage, validated, active.IdentityAmbiguous, active.BasisId, active.BasisVersion);
+            var envelope = new DeliveryEnvelope(
+                $"{scope.CaseId}:{active.BasisId}:{active.BasisVersion}:assessment",
+                scope.CaseId,
+                $"assessment-{active.BasisVersion}",
+                active.BasisId,
+                active.BasisVersion,
+                active.ScenarioTime,
+                claim.Component,
+                claim.SerialNumber,
+                claim.Value);
+            DeliveryResult? delivery = null;
+            // The basis check and the submission share one lock, so a superseding basis cannot land between them.
+            var submitted = assessments.RunIfCurrent(scope.CaseId, active, () =>
+                delivery = inbox.Submit(envelope, finding, active.ScenarioTime));
+            if (!submitted)
             {
                 outcome = Review;
                 reason = "basis superseded during assessment";
             }
+            else if (delivery!.Outcome == DeliveryOutcome.Delivered && delivery.Receipt is not null)
+            {
+                requestId = delivery.Receipt.RequestId;
+            }
             else
             {
-                var claim = claims[0];
-                var finding = new DeliveryFinding(active.Coverage, validated, active.IdentityAmbiguous, active.BasisId, active.BasisVersion);
-                var envelope = new DeliveryEnvelope(
-                    $"{scope.CaseId}:{active.BasisId}:{active.BasisVersion}:assessment",
-                    scope.CaseId,
-                    $"assessment-{active.BasisVersion}",
-                    active.BasisId,
-                    active.BasisVersion,
-                    active.ScenarioTime,
-                    claim.Component,
-                    claim.SerialNumber,
-                    claim.Value);
-                var delivery = inbox.Submit(envelope, finding, active.ScenarioTime);
-                if (delivery.Outcome == DeliveryOutcome.Delivered && delivery.Receipt is not null)
-                {
-                    requestId = delivery.Receipt.RequestId;
-                }
-                else
-                {
-                    // The inbox applies the same policy, so this is a safety net: anything it will not deliver goes to review.
-                    outcome = Review;
-                    reason = $"inbox declined: {delivery.Reason}";
-                }
+                // The inbox applies the same policy, so this is a safety net: anything it will not deliver goes to review.
+                outcome = Review;
+                reason = $"inbox declined: {delivery!.Reason}";
             }
         }
 

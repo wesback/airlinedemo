@@ -17,6 +17,29 @@ public sealed class AssessmentStore
         }
     }
 
+    /// <summary>
+    /// Runs <paramref name="action"/> only while <paramref name="expected"/> is still the case's current basis.
+    /// The check and the action run under the same lock that guards <see cref="SetCurrentBasis"/>, so a basis
+    /// cannot be superseded between them. Returns false, without running the action, when the basis is stale.
+    /// </summary>
+    public bool RunIfCurrent(string caseId, AssessmentBasis expected, Action action)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(action);
+        lock (_gate)
+        {
+            if (!_currentByCase.TryGetValue(caseId, out var latest)
+                || latest.BasisId != expected.BasisId
+                || latest.BasisVersion != expected.BasisVersion)
+            {
+                return false;
+            }
+
+            action();
+            return true;
+        }
+    }
+
     public AssessmentBasis? CurrentBasis(string caseId)
     {
         lock (_gate)
