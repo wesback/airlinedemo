@@ -391,6 +391,8 @@ public sealed class SqlCaseStateStoreTests
         var replay = store.Commit(scope, before.Revision, new CaseCommit(basis, "receipt-p", "owner-p", "open", "first"));
         Assert.True(replay.Replayed);
         Assert.Equal(new[] { "receipt-p" }, replay.State.ReceiptIds);
+        Assert.Equal(first.State.ReceiptFingerprints["receipt-p"], replay.State.ReceiptFingerprints["receipt-p"]);
+        Assert.Equal(decisionsBefore[0].Fingerprint, replay.State.ReceiptFingerprints["receipt-p"]);
         Assert.Equal(before.Revision, replay.State.Revision);
         AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
 
