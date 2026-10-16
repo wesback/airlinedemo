@@ -222,6 +222,18 @@ public sealed class MockResponseReassessmentTests : IDisposable
         using var client = factory.CreateClient();
         var seeded = Seed(factory.Services);
         var session = await SignInAsync(client);
+        var cases = factory.Services.GetRequiredService<ICaseStateStore>();
+        var inbox = factory.Services.GetRequiredService<MockRequestInbox>();
+        var assessments = factory.Services.GetRequiredService<AssessmentStore>();
+        // Everything a response could change: the case revision, bases, receipts and audit, the review work items, the requests and the assessments.
+        (long, int, int, int, int, int, int) Snapshot()
+        {
+            var scope = cases.AuthorizeCase(CaseId, "presenter");
+            var current = cases.Read(scope);
+            return (current.Revision, current.Basis.Count, current.ReceiptIds.Count, cases.ReadAudit(scope).Count,
+                cases.ListWorkItems(scope).Count, inbox.Requests.Count, assessments.List(CaseId).Count);
+        }
+        var before = Snapshot();
 
         using var unauthenticated = await PostResponseAsync(client, null, CaseId, Response(seeded, "event-unauth", "report-unauth"));
         Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
@@ -239,10 +251,11 @@ public sealed class MockResponseReassessmentTests : IDisposable
         using var timeMismatch = await PostResponseAsync(client, session, CaseId,
             Response(seeded, "event-date", "report-date") with { ScenarioTime = "2026-01-01T00:00:00Z" });
         Assert.Equal(HttpStatusCode.BadRequest, timeMismatch.StatusCode);
+        // None of the unauthenticated, forged-case, forged-request, forged-basis and wrong-time attempts changed any state.
+        Assert.Equal(before, Snapshot());
 
         using var accepted = await PostResponseAsync(client, session, CaseId, Response(seeded, "event-valid", "report-valid"));
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
-        var cases = factory.Services.GetRequiredService<ICaseStateStore>();
         var state = cases.Read(cases.AuthorizeCase(CaseId, "presenter"));
         Assert.Equal((2, 3, 1), (state.Basis.Count, state.Revision, state.ReceiptIds.Count));
     }
