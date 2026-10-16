@@ -241,7 +241,8 @@ public sealed class SignedReleaseWorkflowTests
         Assert.Contains("IMAGE_DIGEST must be sha256:<64 lowercase hex>", malformedRun.Output);
         Assert.DoesNotContain("was not produced by build run", malformedRun.Output);
 
-        var valid = "sha256:" + new string('a', 64);
+        // Covers every lowercase hex digit, so the guard must accept the full [0-9a-f] range.
+        var valid = "sha256:" + string.Concat(Enumerable.Repeat("0123456789abcdef", 4));
         var matching = RunDigestCheck(script, valid, valid);
         Assert.Equal(0, matching.ExitCode);
 
