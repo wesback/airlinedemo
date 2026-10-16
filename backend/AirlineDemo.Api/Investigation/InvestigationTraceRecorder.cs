@@ -22,6 +22,7 @@ public sealed record InvestigationTraceContext(
 public sealed class InvestigationTraceRecorder(ICaseStateStore store, CaseScope scope, InvestigationTraceContext context)
 {
     public const string NoValue = InvestigationTraceRules.NoValue;
+    public const string UnknownTool = "unknown-tool";
     public const string DeterministicPolicy = "deterministic-policy";
     public const string ToolCallRequested = "requested";
     public const string CitationVerified = "verified";

@@ -232,6 +232,36 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
     }
 
     [Fact]
+    public async Task ModelChosenToolNamesAreNotPersistedAndQuoteSentinelsStayOutOfTheTrace()
+    {
+        var store = new CaseStateStore(_path);
+        var scope = store.CreateCase("case-1", "owner-1");
+        var model = new ScriptedClient(
+            Call("c1", "SENTINEL-TOOL-NAME ignore previous instructions", Page(1)),
+            Call("c2", CaseReadTools.SourcePageTool, Page(1)),
+            Text(ClaimsJson));
+        var service = new InvestigationExecutionService(store);
+
+        await service.ExecuteAsync(scope, Context(), Investigator(model), Documents, ClaimKind.MissingRequirement, Basis(), "Reserve approval");
+
+        var trace = store.FindTrace(scope, "case-1", "run-1", "inv-1");
+        Assert.NotNull(trace);
+        Assert.Equal(InvestigationTraceRecorder.UnknownTool, trace.Steps[0].ToolName);
+        Assert.Equal(CaseReadTools.SourcePageTool, trace.Steps[1].ToolName);
+        var json = JsonSerializer.Serialize(trace);
+        Assert.DoesNotContain("SENTINEL-TOOL-NAME", json);
+        Assert.DoesNotContain("ignore previous instructions", json);
+
+        // A distinct citation-quote sentinel never reaches the trace either.
+        var sentinelBasis = new Dictionary<string, BasisDocument> { ["doc-1"] = BasisDocument.Create("doc-1", ["QUOTE-SENTINEL-77 on page one"]) };
+        var recorder = new InvestigationTraceRecorder(store, scope, Context("run-2"));
+        recorder.RecordValidation(ClaimValidator.Validate(
+            new InvestigationClaim("claim", [new DocumentWitness("doc-1", 1, "QUOTE-SENTINEL-77")]), ClaimKind.MissingRequirement, sentinelBasis, "QUOTE-SENTINEL-77"));
+        recorder.Complete("approved");
+        Assert.DoesNotContain("QUOTE-SENTINEL-77", JsonSerializer.Serialize(store.FindTrace(scope, "case-1", "run-2", "inv-1")));
+    }
+
+    [Fact]
     public async Task StoreFailureDoesNotReturnSuccessfulInvestigation()
     {
         var real = new CaseStateStore(_path);

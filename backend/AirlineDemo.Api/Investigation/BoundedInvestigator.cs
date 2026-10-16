@@ -85,9 +85,13 @@ public sealed class BoundedInvestigator(
         var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var evidence = new List<string>(documents);
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits, name => traceRecorder?.RecordToolCall(name));
+        // The model chooses tool names, so only the declared tools are recorded by name; anything else is one fixed label.
+        var knownTools = new HashSet<string>(StringComparer.Ordinal);
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits,
+            name => traceRecorder?.RecordToolCall(knownTools.Contains(name) ? name : InvestigationTraceRecorder.UnknownTool));
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
         var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
+        foreach (var function in tools.Functions) knownTools.Add(function.Name);
         var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
 
         InvestigationResult? result = null;
