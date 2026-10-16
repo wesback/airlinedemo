@@ -42,6 +42,9 @@ public sealed class SourceFixtureStore(PublishedFixtureState initial)
 {
     private PublishedFixtureState state = initial;
 
+    // Serializes read-stage-commit so concurrent publications cannot build from the same snapshot and lose each other's version.
+    internal object PublishLock { get; } = new();
+
     public PublishedFixtureState State => state;
 
     // A single reference swap: readers observe either the previous complete state or the next one.
@@ -111,23 +114,27 @@ public static class SourceFixtureLoader
 
         var version = versions[0];
         var digest = PackDigest(verified);
-        var current = store.State;
 
-        var stored = current.Packs.FirstOrDefault(pack => string.Equals(pack.Version, version, StringComparison.Ordinal));
-        if (stored is not null)
+        lock (store.PublishLock)
         {
-            if (string.Equals(stored.Digest, digest, StringComparison.Ordinal))
+            var current = store.State;
+
+            var stored = current.Packs.FirstOrDefault(pack => string.Equals(pack.Version, version, StringComparison.Ordinal));
+            if (stored is not null)
             {
-                return SourceFixturePublication.AlreadyPublished;
+                if (string.Equals(stored.Digest, digest, StringComparison.Ordinal))
+                {
+                    return SourceFixturePublication.AlreadyPublished;
+                }
+
+                throw new SourceFixtureRefusedException($"Source fixture version '{version}' is already stored with different content; publication is refused.");
             }
 
-            throw new SourceFixtureRefusedException($"Source fixture version '{version}' is already stored with different content; publication is refused.");
+            var next = Stage(current, verified, version, digest);
+            beforeCommit?.Invoke(next);
+            store.Commit(next);
+            return SourceFixturePublication.Published;
         }
-
-        var next = Stage(current, verified, version, digest);
-        beforeCommit?.Invoke(next);
-        store.Commit(next);
-        return SourceFixturePublication.Published;
     }
 
     private static string PackDigest(IReadOnlyDictionary<string, VerifiedSourceFixture> verified)
