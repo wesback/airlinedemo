@@ -21,7 +21,7 @@ public sealed class SqlCaseStateStoreTests
     private static readonly string[] InterfaceMethods =
     [
         "AuthorizeCase", "OwnerOf", "CreateCase", "Read", "GetBasisVersion", "ReadAudit", "Commit",
-        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState",
+        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState", "AppendTrace", "FindTrace",
     ];
 
     // AC1: interface contract and file-backed registration; no database connection.
@@ -509,6 +509,235 @@ public sealed class SqlCaseStateStoreTests
             .OrderBy(d => d.Id)
             .Select(d => new ValueTuple<string, string>(d.ReceiptId, d.Fingerprint))
             .ToList();
+    }
+
+    // AC: M-03 — trace records are append-only: a duplicate fails, the original is untouched, and trace commands are SELECT/INSERT only.
+    [Fact]
+    public void TraceWritesAreAppendOnly()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var recorder = new CommandRecorder();
+        var recordingOptions = new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(recorder)
+            .Options;
+        var store = new SqlCaseStateStore(recordingOptions);
+        var scope = store.CreateCase("case-1", "owner-a");
+        var original = NewTrace("case-1", "run-1", "inv-1");
+        recorder.Commands.Clear();
+
+        store.AppendTrace(scope, original);
+        var duplicate = NewTrace("case-1", "run-1", "inv-1", actor: "tok-other") with
+        {
+            Steps = [new InvestigationTraceStep(1, "other-tool", "doc-x", 9, "unverified", "None", "None")],
+        };
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, duplicate));
+
+        var reloaded = new SqlCaseStateStore(options);
+        var reloadedScope = reloaded.AuthorizeCase("case-1", "owner-a");
+        AssertSameTrace(original, reloaded.FindTrace(reloadedScope, "case-1", "run-1", "inv-1")!);
+
+        var traceCommands = recorder.Commands.Where(c => c.Contains("investigation_trace", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Contains(traceCommands, c => LeadingKeyword(c) == "INSERT");
+        Assert.All(traceCommands, c => Assert.Contains(LeadingKeyword(c), new[] { "SELECT", "INSERT" }));
+        Assert.DoesNotContain(recorder.Commands, c =>
+            c.Contains("investigation_trace", StringComparison.OrdinalIgnoreCase)
+            && (LeadingKeyword(c) is "UPDATE" or "DELETE" or "REPLACE" or "UPSERT"));
+    }
+
+    // AC: TRACE-STORE-03 — FindTrace requires the exact case, run and investigation ids; each mismatch independently returns null.
+    [Fact]
+    public void TraceLookupRequiresExactCaseRunAndInvestigation()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        var trace = NewTrace("case-1", "run-1", "inv-1");
+        store.AppendTrace(scope, trace);
+
+        Assert.Null(store.FindTrace(scope, "case-2", "run-1", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-2", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1", "inv-2"));
+        Assert.Null(store.FindTrace(scope, "CASE-1", "run-1", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "RUN-1", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1", "INV-1"));
+        AssertSameTrace(trace, store.FindTrace(scope, "case-1", "run-1", "inv-1")!);
+    }
+
+    // AC: all InvestigationTrace and step fields persist, steps reload in Sequence order, and (CaseId, RunId, InvestigationId) is unique in the database.
+    // AC: M-03 — identifiers differing only by surrounding spaces are distinct exact keys; SQL Server would otherwise pad them into one key.
+    [Fact]
+    public void TraceKeysKeepSurroundingWhitespaceDistinct()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", " run-1", "inv-1"));
+
+        Assert.Equal("run-1 ", store.FindTrace(scope, "case-1", "run-1 ", "inv-1")!.RunId);
+        Assert.Equal(" run-1", store.FindTrace(scope, "case-1", " run-1", "inv-1")!.RunId);
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1 ", "inv-2"));
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1")));
+    }
+
+    // AC: M-03 — lone surrogates are exact identifiers: they persist and reload unchanged, and stay distinct from U+FFFD.
+    [Fact]
+    public void TraceKeepsLoneSurrogateIdentifiersExact()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        const string HighSurrogate = "run-\uD800";
+        const string LowSurrogate = "run-\uDC00";
+        const string Replacement = "run-\uFFFD";
+
+        store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", LowSurrogate, "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "\uDC00inv"));
+        store.AppendTrace(scope, NewTrace("case-1", Replacement, "inv-1"));
+        Assert.Equal(4, CountTraceRows(options));
+
+        Assert.Equal(HighSurrogate, store.FindTrace(scope, "case-1", HighSurrogate, "inv-1")!.RunId);
+        Assert.Equal(LowSurrogate, store.FindTrace(scope, "case-1", LowSurrogate, "inv-1")!.RunId);
+        Assert.Equal("\uDC00inv", store.FindTrace(scope, "case-1", "run-1", "\uDC00inv")!.InvestigationId);
+        Assert.Equal(Replacement, store.FindTrace(scope, "case-1", Replacement, "inv-1")!.RunId);
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1")));
+    }
+
+    // AC: M-03 — the database itself rejects a second (case, run, investigation) row, even with a different key hash.
+    [Fact]
+    public void TraceIdentifierTupleIsUniqueInDatabase()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "INSERT INTO investigation_traces (KeyHash, CaseId, RunId, InvestigationId, CaseIdUtf16, CaseIdLength, RunIdUtf16, RunIdLength, InvestigationIdUtf16, InvestigationIdLength, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) " +
+            "VALUES (randomblob(32), 'case-1', 'run-1', 'inv-1', @c, 6, @r, 5, @i, 5, 1, 'm', 'v', 'r', 'c', 'd', 'a', 'o')";
+        command.Parameters.AddWithValue("@c", System.Text.Encoding.Unicode.GetBytes("case-1"));
+        command.Parameters.AddWithValue("@r", System.Text.Encoding.Unicode.GetBytes("run-1"));
+        command.Parameters.AddWithValue("@i", System.Text.Encoding.Unicode.GetBytes("inv-1"));
+        Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+        Assert.Equal(1, CountTraceRows(options));
+    }
+
+    [Fact]
+    public void TraceIdentifierLengthIsLimited()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+
+        // 64 surrogate pairs is exactly 128 UTF-16 code units and is accepted.
+        var atLimit = string.Concat(Enumerable.Repeat("\uD83D\uDE00", 64));
+        store.AppendTrace(scope, NewTrace("case-1", atLimit, "inv-1"));
+        Assert.Equal(1, CountTraceRows(options));
+
+        // One code unit over the limit is rejected, including when the extra unit is half a surrogate pair.
+        var overByOneSurrogate = atLimit + "\uD83D";
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", overByOneSurrogate, "inv-1")));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-2", new string('a', 129))));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-3", atLimit + "bc")));
+        Assert.Equal(1, CountTraceRows(options));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-2", new string('a', 129)));
+
+        // CaseId is limited too: a scope for the overlong case id reaches the length check and is rejected by name.
+        var longCaseId = new string('c', 129);
+        var longScope = store.CreateCase(longCaseId, "owner-a");
+        var caseIdError = Assert.Throws<ArgumentException>(() => store.AppendTrace(longScope, NewTrace(longCaseId, "run-4", "inv-1")));
+        Assert.Equal("CaseId", caseIdError.ParamName);
+        Assert.Equal(1, CountTraceRows(options));
+    }
+
+    [Fact]
+    public void TraceIdentifiersDifferingByTrailingNulAreDistinct()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1\0", "inv-1"));
+
+        Assert.Equal(2, CountTraceRows(options));
+        Assert.Equal("run-1", store.FindTrace(scope, "case-1", "run-1", "inv-1")!.RunId);
+        Assert.Equal("run-1\0", store.FindTrace(scope, "case-1", "run-1\0", "inv-1")!.RunId);
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1\0\0", "inv-1"));
+    }
+
+    [Fact]
+    public void TracePersistenceRoundTripsAllFields()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        var trace = NewTrace("case-1", "run-1", "inv-1");
+        store.AppendTrace(scope, trace);
+
+        var reloaded = new SqlCaseStateStore(options);
+        var reloadedScope = reloaded.AuthorizeCase("case-1", "owner-a");
+        var stored = reloaded.FindTrace(reloadedScope, "case-1", "run-1", "inv-1")!;
+        AssertSameTrace(trace, stored);
+        Assert.Equal(new[] { 1, 2 }, stored.Steps.Select(s => s.Sequence));
+
+        byte[] storedKey;
+        using (var read = new CaseStateDbContext(options))
+        {
+            storedKey = read.InvestigationTraces.Single().KeyHash;
+        }
+
+        using var db = new CaseStateDbContext(options);
+        db.InvestigationTraces.Add(new InvestigationTraceRow
+        {
+            KeyHash = storedKey,
+            CaseId = "case-1",
+            RunId = "run-1",
+            InvestigationId = "inv-1",
+            BasisVersion = 3,
+            ModelDeploymentName = "model-deploy-x",
+            ApiVersion = "2025-01-01",
+            Region = "eastus",
+            ContentFilterSetting = "enabled",
+            Decision = "approve",
+            ActorToken = "tok-7f3a",
+            Outcome = "ready",
+        });
+        Assert.ThrowsAny<DbUpdateException>(() => db.SaveChanges());
+    }
+
+    private static InvestigationTrace NewTrace(string caseId, string runId, string investigationId, string actor = "tok-7f3a") =>
+        new(
+            caseId,
+            runId,
+            investigationId,
+            BasisVersion: 3,
+            ModelDeploymentName: "model-deploy-x",
+            ApiVersion: "2025-01-01",
+            Region: "westeurope",
+            ContentFilterSetting: "strict-filter",
+            Decision: "return-to-service",
+            ActorToken: actor,
+            Outcome: "escalated",
+            Steps:
+            [
+                new InvestigationTraceStep(1, "search-manual", "doc-ata-32", 14, "verified", "None", "None"),
+                new InvestigationTraceStep(2, "check-limit", "doc-mel-05", 2, "rewritten", "CitationRewrite", "ManualReview"),
+            ]);
+
+    private static void AssertSameTrace(InvestigationTrace expected, InvestigationTrace actual)
+    {
+        Assert.Equal(expected with { Steps = null! }, actual with { Steps = null! });
+        Assert.Equal(expected.Steps, actual.Steps);
+    }
+
+    private static int CountTraceRows(DbContextOptions<CaseStateDbContext> options)
+    {
+        using var db = new CaseStateDbContext(options);
+        return db.InvestigationTraces.Count();
     }
 
     private static SqliteConnection OpenMigratedSqlite(out DbContextOptions<CaseStateDbContext> options)

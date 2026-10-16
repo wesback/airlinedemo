@@ -1,0 +1,252 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 283,
+  "branch": "ai-sdlc/issue-283",
+  "commitSha": "ccb967cb7f907beb4a2c7290dc1fa8bb8893765b",
+  "round": 2,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest change blocks trailing-space collisions by rejecting those identifiers, but the exact-identifier persistence requirement remains unmet for distinct identifiers that differ by surrounding whitespace.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 169,
+          "message": "The fix rejects identifiers with surrounding whitespace instead of preserving distinct exact identifiers, so the prior exact-key persistence finding remains unresolved.",
+          "confidence": 0.85,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AppendTrace validates each identifier through InvestigationTraceRules.Validate, which now calls RequireExactKey and rejects any value whose Trim() changes its length.",
+            "failureScenario": "After appending a trace with RunId \"run-1\", a caller appending the same case and investigation with RunId \"run-1 \" gets ArgumentException. The SQL store still cannot persist both distinct exact identifiers; rejecting the second identifier does not resolve the prior finding."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The trailing-space collision is addressed by rejecting surrounding whitespace, but the shared validation also rejects identifiers the file-backed contract permits. This leaves the SQL implementation short of preserving that contract.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 165,
+          "message": "Rejecting identifiers with surrounding whitespace in shared validation changes the file-backed trace contract. Preserve those identifiers in the SQL key representation instead of rejecting them across stores.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "InvestigationTraceRules.Validate now calls RequireExactKey for the three identifiers. The shared validation is used when appending traces, including through the file-backed store.",
+            "failureScenario": "Appending a file-backed trace whose RunId is \"run-1 \" now throws ArgumentException, although the file-backed contract allows it as a distinct exact identifier. The change therefore avoids SQL key collisions by breaking the contract it is meant to persist."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest fix rejects identifiers with leading or trailing whitespace in application validation and adds database constraints against surrounding spaces. I found no new reachable defect or security vulnerability in the reviewed changes.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 188,
+      "total": 199,
+      "percent": 94.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 48,
+          "total": 48,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 9,
+          "total": 9,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "covered": 49,
+          "total": 53,
+          "missed": [
+            71,
+            72,
+            73,
+            74
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 82,
+          "total": 89,
+          "missed": [
+            265,
+            266,
+            308,
+            309,
+            310,
+            365,
+            366
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -1,0 +1,240 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 283,
+  "branch": "ai-sdlc/issue-283",
+  "commitSha": "18b126b04e2296b19a3b10b9fdc01a58ad6ff399",
+  "round": 1,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix distinguishes identifiers by case, but SQL Server still treats identifiers with trailing spaces as equal. That leaves the exact-identifier persistence contract incomplete.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 26,
+          "message": "The case-sensitive collation still allows SQL Server to collapse identifiers that differ by trailing spaces. The composite key must preserve exact identifier distinctions required by the contract.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The SQL Server migration applies a case-sensitive collation to RunId, but SQL Server string equality and unique-key comparisons still ignore trailing spaces. AppendTrace checks the composite key through FindTraceRow and then relies on that key when saving.",
+            "failureScenario": "On SQL Server, after appending a trace with RunId \"run-1\", appending one with RunId \"run-1 \" for the same case and investigation is treated as a duplicate and throws TraceConflictException, even though the identifiers differ exactly."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The migration now applies a case-sensitive SQL Server collation to the trace key columns, resolving the prior finding. I found no new defect in the reviewed delta.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The case-sensitive collation addresses case-only differences, but SQL Server still treats identifiers with trailing spaces as equal for the composite key. This leaves a reachable exact-identifier persistence defect.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 22,
+          "message": "The key collation still lets SQL Server collapse identifiers that differ by trailing spaces, so the SQL store cannot persist every distinct exact identifier combination allowed by the contract.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The SQL Server columns now use a case-sensitive collation, but SQL Server string comparisons still ignore trailing spaces. Identifier validation rejects whitespace-only values but permits trailing spaces. AppendTrace checks for an existing key, then translates a primary-key collision into TraceConflictException.",
+            "failureScenario": "On SQL Server, after appending a trace with RunId \"run-1\", appending one with RunId \"run-1 \" for the same case and investigation is rejected as a duplicate, although the identifiers differ exactly and the file-backed contract permits both."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 170,
+      "total": 181,
+      "percent": 93.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 48,
+          "total": 48,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "covered": 40,
+          "total": 44,
+          "missed": [
+            59,
+            60,
+            61,
+            62
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 82,
+          "total": 89,
+          "missed": [
+            265,
+            266,
+            308,
+            309,
+            310,
+            365,
+            366
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

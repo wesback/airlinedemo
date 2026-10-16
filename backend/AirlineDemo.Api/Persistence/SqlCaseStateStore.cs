@@ -257,6 +257,184 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         return new CommitResult(Load(db, row.CaseId), Replayed: false);
     }
 
+    /// <summary>Appends a trace. Traces are never updated or deleted; a duplicate (case, run, investigation) fails and keeps the first record.</summary>
+    public void AppendTrace(CaseScope scope, InvestigationTrace trace)
+    {
+        InvestigationTraceRules.Validate(trace);
+        const int MaxTraceIdentifierUtf16Units = 128;
+        foreach (var (name, value) in new[]
+        {
+            (nameof(trace.CaseId), trace.CaseId),
+            (nameof(trace.RunId), trace.RunId),
+            (nameof(trace.InvestigationId), trace.InvestigationId),
+        })
+        {
+            if (value.Length > MaxTraceIdentifierUtf16Units)
+            {
+                throw new ArgumentException("Trace identifiers are limited to 128 UTF-16 code units.", name);
+            }
+        }
+
+        if (trace.CaseId != scope.CaseId)
+        {
+            throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
+        }
+
+        using var db = NewContext();
+        using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
+        var keyHash = TraceKey(trace.CaseId, trace.RunId, trace.InvestigationId);
+        if (FindTraceRow(db, trace.CaseId, trace.RunId, trace.InvestigationId) is not null)
+        {
+            throw new TraceConflictException();
+        }
+
+        db.InvestigationTraces.Add(new InvestigationTraceRow
+        {
+            KeyHash = keyHash,
+            CaseId = trace.CaseId,
+            RunId = trace.RunId,
+            InvestigationId = trace.InvestigationId,
+            BasisVersion = trace.BasisVersion,
+            ModelDeploymentName = trace.ModelDeploymentName,
+            ApiVersion = trace.ApiVersion,
+            Region = trace.Region,
+            ContentFilterSetting = trace.ContentFilterSetting,
+            Decision = trace.Decision,
+            ActorToken = trace.ActorToken,
+            Outcome = trace.Outcome,
+            CaseIdUtf16 = Utf16Bytes(trace.CaseId),
+            RunIdUtf16 = Utf16Bytes(trace.RunId),
+            InvestigationIdUtf16 = Utf16Bytes(trace.InvestigationId),
+            CaseIdLength = trace.CaseId.Length,
+            RunIdLength = trace.RunId.Length,
+            InvestigationIdLength = trace.InvestigationId.Length,
+        });
+        db.InvestigationTraceSteps.AddRange(trace.Steps.Select(s => new InvestigationTraceStepRow
+        {
+            KeyHash = keyHash,
+            Sequence = s.Sequence,
+            ToolName = s.ToolName,
+            DocumentId = s.DocumentId,
+            PageNumber = s.PageNumber,
+            CitationCheckOutcome = s.CitationCheckOutcome,
+            CorrectionCode = s.CorrectionCode,
+            PolicyHandover = s.PolicyHandover,
+        }));
+
+        try
+        {
+            db.SaveChanges();
+        }
+        catch (DbUpdateException)
+        {
+            throw new TraceConflictException();
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>Returns the trace only when the case, run and investigation ids all match exactly; otherwise null.</summary>
+    public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId)
+    {
+        if (!Same(caseId, scope.CaseId))
+        {
+            return null;
+        }
+
+        using var db = NewContext();
+        var row = FindTraceRow(db, caseId, runId, investigationId);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var keyHash = row.KeyHash;
+        var steps = db.InvestigationTraceSteps
+            .Where(s => s.KeyHash == keyHash)
+            .OrderBy(s => s.Sequence)
+            .ToList()
+            .Select(s => new InvestigationTraceStep(
+                s.Sequence,
+                s.ToolName,
+                s.DocumentId,
+                s.PageNumber,
+                s.CitationCheckOutcome,
+                s.CorrectionCode,
+                s.PolicyHandover))
+            .ToList();
+
+        return new InvestigationTrace(
+            caseId,
+            runId,
+            investigationId,
+            row.BasisVersion,
+            row.ModelDeploymentName,
+            row.ApiVersion,
+            row.Region,
+            row.ContentFilterSetting,
+            row.Decision,
+            row.ActorToken,
+            row.Outcome,
+            steps);
+    }
+
+    /// <summary>Finds a trace by key, then applies an ordinal check so the database collation cannot widen a match.</summary>
+    private static InvestigationTraceRow? FindTraceRow(CaseStateDbContext db, string caseId, string runId, string investigationId)
+    {
+        if (string.IsNullOrEmpty(caseId) || string.IsNullOrEmpty(runId) || string.IsNullOrEmpty(investigationId))
+        {
+            return null;
+        }
+
+        var keyHash = TraceKey(caseId, runId, investigationId);
+        var row = db.InvestigationTraces.FirstOrDefault(t => t.KeyHash == keyHash);
+        return row is not null
+            && row.CaseIdUtf16.AsSpan().SequenceEqual(Utf16Bytes(caseId))
+            && row.RunIdUtf16.AsSpan().SequenceEqual(Utf16Bytes(runId))
+            && row.InvestigationIdUtf16.AsSpan().SequenceEqual(Utf16Bytes(investigationId))
+                ? row
+                : null;
+    }
+
+    // Hashes the exact, length-prefixed (case, run, investigation) triple. Each UTF-16 code unit is written as-is,
+    // so lone surrogates and U+FFFD stay distinct; SQL padding or collation cannot merge distinct ids.
+    private static byte[] TraceKey(string caseId, string runId, string investigationId)
+    {
+        using var stream = new System.IO.MemoryStream();
+        foreach (var part in new[] { caseId, runId, investigationId })
+        {
+            WriteUInt32(stream, part.Length);
+            foreach (var unit in part)
+            {
+                stream.WriteByte((byte)(unit >> 8));
+                stream.WriteByte((byte)unit);
+            }
+        }
+
+        return SHA256.HashData(stream.ToArray());
+    }
+
+    // Exact code units, little-endian, so lone surrogates survive where SQL text would replace them.
+    private static byte[] Utf16Bytes(string value)
+    {
+        var bytes = new byte[value.Length * 2];
+        for (var i = 0; i < value.Length; i++)
+        {
+            bytes[2 * i] = (byte)value[i];
+            bytes[2 * i + 1] = (byte)(value[i] >> 8);
+        }
+
+        return bytes;
+    }
+
+    private static void WriteUInt32(System.IO.Stream stream, int value)
+    {
+        stream.WriteByte((byte)(value >> 24));
+        stream.WriteByte((byte)(value >> 16));
+        stream.WriteByte((byte)(value >> 8));
+        stream.WriteByte((byte)value);
+    }
+
     private static WorkItemRow? FindWorkItem(CaseStateDbContext db, string caseId, string itemId) =>
         db.WorkItems
             .Where(w => w.CaseId == caseId && w.ItemId == itemId)
