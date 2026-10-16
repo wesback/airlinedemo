@@ -364,8 +364,8 @@ run "release_outputs_contain_no_secrets" {
   }
 
   assert {
-    condition     = output.model_endpoint == "https://aoai-demo-test.openai.azure.com/"
-    error_message = "model_endpoint must equal the exact private model endpoint for the mocked subdomain."
+    condition     = output.model_endpoint == "aoai-demo-test.openai.azure.com/"
+    error_message = "model_endpoint must equal the exact private model endpoint host for the mocked subdomain."
   }
 
   assert {

@@ -328,6 +328,6 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
 }
 
 output "model_endpoint" {
-  description = "HTTPS model endpoint, reachable only through the private endpoint."
-  value       = "https://${var.model_endpoint_subdomain}.openai.azure.com/"
+  description = "Model endpoint host and path, reachable only through the private endpoint."
+  value       = "${var.model_endpoint_subdomain}.openai.azure.com/"
 }

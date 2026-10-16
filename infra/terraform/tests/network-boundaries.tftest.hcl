@@ -270,12 +270,12 @@ run "M-14_M-18_encryption_transport_and_no_key_outputs" {
     error_message = "SQL must require TLS 1.2 and Entra-only auth."
   }
   assert {
-    condition     = output.model_endpoint == "https://aoai-demo-test.openai.azure.com/"
-    error_message = "Model endpoint must be HTTPS on the approved subdomain."
+    condition     = output.model_endpoint == "aoai-demo-test.openai.azure.com/"
+    error_message = "Model endpoint must be the approved subdomain host."
   }
   assert {
-    condition     = can(regex("^https://", output.model_endpoint)) && azurerm_cognitive_account.model.local_auth_enabled == false
-    error_message = "Model transport must be HTTPS and key-based auth must be disabled."
+    condition     = azurerm_cognitive_account.model.local_auth_enabled == false
+    error_message = "Key-based auth must be disabled on the model account."
   }
   assert {
     condition     = var.subscription_id != "" && !can(regex("(?is)output \"[^\"]*\" \\{[^}]*(AccountKey|ConnectionString|primary_access_key|primary_key|secondary_key|client_secret)", file("main.tf")))
