@@ -11,7 +11,7 @@ public sealed record SourceFixtureManifest
     public static readonly IReadOnlyList<string> RequiredSources =
         ["technical", "maintenance", "finance", "records", "contracts"];
 
-    private static readonly Regex Sha256Pattern = new("^[0-9a-fA-F]{64}$", RegexOptions.CultureInvariant);
+    private static readonly Regex Sha256Pattern = new(@"\A[0-9a-fA-F]{64}\z", RegexOptions.CultureInvariant);
 
     public string SchemaVersion { get; init; } = string.Empty;
 

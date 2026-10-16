@@ -55,6 +55,11 @@ public sealed class SourceFixtureLoaderTests
             ["sha256 must be 64 hexadecimal characters."],
             malformedDigest.Validate());
 
+        var digestWithTrailingNewline = ValidManifest() with { Sha256 = ValidDigest + "\n" };
+        Assert.Equal(
+            ["sha256 must be 64 hexadecimal characters."],
+            digestWithTrailingNewline.Validate());
+
         var missingCount = ValidManifest();
         var counts = new Dictionary<string, int>(missingCount.RecordCounts);
         counts.Remove("finance");
