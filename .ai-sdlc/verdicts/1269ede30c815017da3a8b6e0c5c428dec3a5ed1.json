@@ -1,0 +1,274 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 287,
+  "branch": "ai-sdlc/issue-287",
+  "commitSha": "1269ede30c815017da3a8b6e0c5c428dec3a5ed1",
+  "round": 0,
+  "pipelineVersion": "5711d2b",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint-flow and supported-claim tests address their stated behaviors. The client-registration test omits the required first-request check and adds source scans that the acceptance criterion prohibits.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 381,
+          "message": "TRACE-PRODUCER-11 is incompletely tested: the client-registration test omits the required first request and exact-once factory assertion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HostRegistersAzureOpenAIChatClientWithoutCallingIt resolves IChatClient and checks that the injected factory was not called, but never sends a request through the client.",
+            "failureScenario": "If the registered client fails to use the credential factory on its first request, this test still passes because it only checks client resolution. It therefore does not verify TRACE-PRODUCER-11's requirement that the first request calls the factory exactly once using a fake HTTP handler."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 407,
+          "message": "The tests add source scans despite TRACE-PRODUCER-11 explicitly prohibiting source scans in unit tests.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HostConstructsCredentialOnlyThroughRegisteredFactory scans production C# source for credential constructors; DefaultAzureCredentialIsNamedOnlyInsideTheLazyCredentialFactory also scans source files for credential names.",
+            "failureScenario": "These source scans are added to the unit tests even though TRACE-PRODUCER-11 explicitly says not to add a source scan and assigns inspection of the complete production registration to review."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint flow and supported-claim tests address their stated criteria. The client-registration test does not verify that the first request invokes the credential factory exactly once.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 381,
+          "message": "TRACE-PRODUCER-11 is incomplete: the test must send one request through the client and assert that the counting credential factory is called exactly once.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "HostRegistersAzureOpenAIChatClientWithoutCallingIt resolves IChatClient and checks that the credential factory was not called. It never sends a request through the client.",
+            "failureScenario": "If the lazy credential is never used for the first Azure OpenAI request, this test still passes because it only verifies the factory count is zero before any request. It therefore does not prove TRACE-PRODUCER-11's required first-request behavior: the factory is called exactly once."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed production code introduces no security vulnerability I could confirm. The client-registration test does not cover the first token request required by AC: TRACE-PRODUCER-11.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 345,
+          "message": "AC: TRACE-PRODUCER-11 is not fully tested: the client-registration test omits the required first-request check.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HostRegistersAzureOpenAIChatClientWithoutCallingIt resolves IChatClient and checks that the credential factory counter stays at zero. It never sends a request through the client or verifies credential creation on the first token request.",
+            "failureScenario": "If resolving IChatClient remains lazy but the first token request fails to invoke the registered credential factory exactly once, this test still passes. AC: TRACE-PRODUCER-11 requires exercising that request with a fake HTTP handler and asserting the factory call count."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 3,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api/Investigation/LazyTokenCredential.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 9,
+      "total": 9,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/LazyTokenCredential.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

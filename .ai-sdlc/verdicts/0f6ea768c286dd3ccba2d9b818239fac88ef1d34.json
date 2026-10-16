@@ -1,0 +1,240 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 287,
+  "branch": "ai-sdlc/issue-287",
+  "commitSha": "0f6ea768c286dd3ccba2d9b818239fac88ef1d34",
+  "round": 0,
+  "pipelineVersion": "6e45645",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The supported-claim recorder test covers its stated assertions. The endpoint-flow and client-registration tests do not prove all behavior required by their acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 368,
+          "message": "TRACE-PRODUCER-11 requires proving that client resolution resolves no credential, but this test does not observe or assert credential resolution.",
+          "confidence": 0.93,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test resolves IChatClient and then checks only whether the configured endpoint has a pending connection.",
+            "failureScenario": "If resolving IChatClient resolves a credential without making a request to the configured endpoint, listener.Pending() remains false and the test passes, despite violating TRACE-PRODUCER-11."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 326,
+          "message": "TRACE-PRODUCER-09 specifies using the committed return-status.txt fixture, but the test substitutes hard-coded text.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test passes hard-coded statusText to FixtureSourceFactory and creates the uploaded PDF from that same string; it does not load the committed return-status.txt fixture.",
+            "failureScenario": "If return-status.txt changes or is missing, this test still passes using the hard-coded text, so it does not verify the fixture-backed evidence flow required by TRACE-PRODUCER-09."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new tests cover the scripted event flow and supported-claim trace, but two required checks are missing: use of the committed synthetic fixture and detection of credential resolution during client registration.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 328,
+          "message": "TRACE-PRODUCER-09 requires the endpoint flow test to use the committed return-status.txt fixture, but the test substitutes a hardcoded string and generated PDF.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AcceptedEvidenceRunsScriptedToolCallsAndPersistsOrderedEvents supplies statusText directly to the fake source and constructs the uploaded PDF from that same string; it does not load the committed return-status.txt fixture.",
+            "failureScenario": "If the committed fixture changes or stops matching the uploaded evidence, this test still passes because it uses its own hardcoded text. It therefore does not verify TRACE-PRODUCER-09 with the required fixture."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 370,
+          "message": "TRACE-PRODUCER-11 does not assert that resolving IChatClient resolves no credential.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "HostRegistersAzureOpenAIChatClientWithoutCallingIt resolves IChatClient and checks listener.Pending(), which only detects a connection to the local endpoint; it does not observe credential resolution.",
+            "failureScenario": "If resolving IChatClient resolves a credential without connecting to the endpoint, listener.Pending() remains false and the test passes, although TRACE-PRODUCER-11 requires the test to fail when a credential is resolved."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests exercise the scripted trace flow and supported claim recording. The client registration test cannot detect credential resolution, leaving one required acceptance criterion unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 363,
+          "message": "The host registration test does not verify that resolving IChatClient resolves no credential, as required by AC: TRACE-PRODUCER-11.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test resolves IChatClient, then checks only that the local TCP listener has no pending connection. It does not observe credential resolution.",
+            "failureScenario": "If resolving IChatClient also resolves an Azure credential without making a network request, the test still passes, so AC: TRACE-PRODUCER-11 is not covered."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "tests-only change: no production file touched",
+    "redKind": "",
+    "greenExit": 0,
+    "redExit": 0,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

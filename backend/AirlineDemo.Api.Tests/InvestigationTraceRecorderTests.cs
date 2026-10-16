@@ -212,6 +212,31 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
         Assert.Empty(names.Intersect(forbidden));
     }
 
+    // AC: TRACE-PRODUCER-10
+    [Fact]
+    public void SupportedClaimIsPersistedWithCorrectionNone()
+    {
+        var store = new CaseStateStore(_path);
+        var scope = store.CreateCase("case-1", "owner-1");
+        var recorder = new InvestigationTraceRecorder(store, scope, Context("run-supported"));
+
+        var supported = ClaimValidator.Validate(
+            new InvestigationClaim("Reserve approval", [new DocumentWitness("doc-1", 1, "Reserve approval granted on page one")]),
+            ClaimKind.MissingRequirement,
+            Basis(),
+            "Reserve approval");
+        Assert.Equal(ClaimStatus.Supported, supported.Status);
+
+        recorder.RecordValidation(supported);
+        recorder.Complete("approved");
+
+        var trace = store.FindTrace(scope, "case-1", "run-supported", "inv-1");
+        Assert.NotNull(trace);
+        var validation = Assert.Single(trace.Steps, s => s.ToolName == "claim-validation");
+        Assert.Equal("None", validation.CorrectionCode);
+        Assert.DoesNotContain(trace.Steps, s => s.CorrectionCode == "Downgraded");
+    }
+
     [Fact]
     public async Task TraceOfARealInvestigationHoldsNoToolArgumentDocumentTextPromptResponseOrQuote()
     {
