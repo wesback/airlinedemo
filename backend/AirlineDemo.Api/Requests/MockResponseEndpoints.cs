@@ -185,7 +185,7 @@ public sealed class MockResponseService(
         if (existing is not null)
         {
             if (existing.CapabilityId != AssessmentExecutionService.ReviewCapability
-                || existing.State != "open" || existing.Owner != AssessmentExecutionService.ReviewOwner)
+                || existing.Owner != AssessmentExecutionService.ReviewOwner)
                 throw new InvalidDataException("Mock response review work item does not match its receipt.");
             return;
         }

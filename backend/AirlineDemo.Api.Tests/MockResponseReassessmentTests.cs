@@ -359,6 +359,28 @@ public sealed class MockResponseReassessmentTests : IDisposable
         }
     }
     [Fact]
+    public void Replay_returns_original_receipt_when_review_work_item_is_closed()
+    {
+        using var fixture = new Fixture();
+        var command = fixture.Command();
+        var accepted = fixture.Service.Accept(fixture.Scope, "presenter", command);
+        Assert.Equal(MockResponseOutcome.Accepted, accepted.Outcome);
+        var acceptedReceipt = Assert.IsType<MockResponseReceipt>(accepted.Receipt);
+        var workItem = Assert.Single(fixture.Cases.Read(fixture.Scope).WorkItems!);
+        Assert.Equal("open", workItem.State);
+        fixture.Cases.ChangeWorkItemState(
+            fixture.Scope, fixture.Cases.Read(fixture.Scope).Revision, workItem.ItemId, "closed", "reviewer");
+
+        var replay = fixture.Service.Accept(fixture.Scope, "presenter", command);
+
+        Assert.Equal(MockResponseOutcome.Replayed, replay.Outcome);
+        Assert.Equal(acceptedReceipt, replay.Receipt);
+        Assert.Equal("closed", Assert.Single(fixture.Cases.Read(fixture.Scope).WorkItems!).State);
+        Assert.Single(fixture.Assessments.List(CaseId), item => item.BasisVersion == 2);
+        Assert.Single(fixture.Cases.Read(fixture.Scope).Audit,
+            audit => audit.Action == MockResponseService.AcceptedAction);
+    }
+    [Fact]
     public void New_response_basis_preserves_history_and_suppresses_stale_actions()
     {
         using var fixture = new Fixture();
