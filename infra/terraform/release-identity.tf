@@ -1,13 +1,6 @@
 # Workflow identities for building, signing, and releasing digest-pinned images (FR-011, AC-018, AC-019).
 # GitHub Actions authenticates with OIDC federation: no client secret, storage key, or registry password is stored.
 
-variable "signing_key_name" {
-  description = "Name of the Key Vault key used to sign image digests."
-  type        = string
-  default     = "release-image-signing"
-  nullable    = false
-}
-
 variable "signing_certificate_name" {
   description = "Name of the Key Vault certificate whose public part verifies image signatures."
   type        = string
@@ -19,6 +12,8 @@ locals {
   github_oidc_issuer = "https://token.actions.githubusercontent.com"
   github_audience    = "api://AzureADTokenExchange"
   github_repository  = "wesback/airlinedemo"
+  # Key Vault creates the key that backs a certificate under the certificate's name, so this is the signing key.
+  signing_key_id    = "${azurerm_key_vault.kv.id}/keys/${var.signing_certificate_name}"
 }
 
 resource "azurerm_user_assigned_identity" "build" {
@@ -64,14 +59,6 @@ resource "azurerm_role_assignment" "release_acr_push" {
   principal_id         = azurerm_user_assigned_identity.release.principal_id
 }
 
-resource "azurerm_key_vault_key" "signing" {
-  name         = var.signing_key_name
-  key_vault_id = azurerm_key_vault.kv.id
-  key_type     = "RSA"
-  key_size     = 3072
-  key_opts     = ["sign", "verify"]
-}
-
 resource "azurerm_key_vault_certificate" "signing" {
   name         = var.signing_certificate_name
   key_vault_id = azurerm_key_vault.kv.id
@@ -101,7 +88,7 @@ resource "azurerm_key_vault_certificate" "signing" {
 }
 
 resource "azurerm_role_assignment" "release_signing_key" {
-  scope                = azurerm_key_vault_key.signing.resource_versionless_id
+  scope                = local.signing_key_id
   role_definition_name = "Key Vault Crypto User"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
 }

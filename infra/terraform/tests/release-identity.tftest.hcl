@@ -19,13 +19,6 @@ mock_provider "azurerm" {
     }
   }
 
-  mock_resource "azurerm_key_vault_key" {
-    defaults = {
-      id                      = "https://kv-demo-test.vault.azure.net/keys/release-image-signing/0000"
-      resource_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/keys/release-image-signing"
-    }
-  }
-
   mock_resource "azurerm_key_vault_certificate" {
     defaults = {
       id                  = "https://kv-demo-test.vault.azure.net/certificates/release-image-signing-certificate/0000"
@@ -288,13 +281,6 @@ run "signing_rights_are_resource_scoped" {
   command = apply
 
   override_resource {
-    target = azurerm_key_vault_key.signing
-    values = {
-      resource_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/keys/release-image-signing"
-    }
-  }
-
-  override_resource {
     target = azurerm_key_vault_certificate.signing
     values = {
       resource_manager_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-image-signing-certificate"
@@ -349,8 +335,8 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
-    condition     = azurerm_role_assignment.release_signing_key.role_definition_name == "Key Vault Crypto User" && azurerm_role_assignment.release_signing_key.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/keys/release-image-signing" && azurerm_role_assignment.release_signing_key.principal_id == azurerm_user_assigned_identity.release.principal_id
-    error_message = "The release identity must hold Key Vault Crypto User scoped to the signing key only."
+    condition     = azurerm_role_assignment.release_signing_key.role_definition_name == "Key Vault Crypto User" && azurerm_role_assignment.release_signing_key.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/keys/release-image-signing-certificate" && azurerm_role_assignment.release_signing_key.principal_id == azurerm_user_assigned_identity.release.principal_id
+    error_message = "The release identity must hold Key Vault Crypto User scoped to the key named like the signing certificate (vault id + /keys/ + certificate name) only."
   }
 
   assert {
@@ -369,8 +355,13 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
-    condition     = length(regexall("(?m)scope\\s*=\\s*(azurerm_container_registry[.]acr[.]id|azurerm_container_app[.]app[.]id|azurerm_key_vault_key[.]signing[.]resource_versionless_id|azurerm_key_vault_certificate[.]signing[.]resource_manager_id)\\s*$", file("${path.module}/release-identity.tf"))) == 5
+    condition     = length(regexall("(?m)scope\\s*=\\s*(azurerm_container_registry[.]acr[.]id|azurerm_container_app[.]app[.]id|local[.]signing_key_id|azurerm_key_vault_certificate[.]signing[.]resource_manager_id)\\s*$", file("${path.module}/release-identity.tf"))) == 5
     error_message = "Every workflow role must be scoped to the ACR, the application, the signing key, or the signing certificate; never to a subscription, resource group, or vault."
+  }
+
+  assert {
+    condition     = length(regexall("azurerm_key_vault_key", file("${path.module}/release-identity.tf"))) == 0
+    error_message = "release-identity.tf must not declare a separate Key Vault key; the signing key is the one Key Vault creates for the certificate."
   }
 
   assert {

@@ -43,6 +43,8 @@ public sealed class ReleaseIdentityContractTests
     {
         ("main.tf", "terraform_contributor"),
         ("identity-and-telemetry.tf", "telemetry_reader"),
+        // Scope is the vault id + "/keys/" + certificate name; Terraform test signing_rights_are_resource_scoped evaluates it.
+        ("release-identity.tf", "release_signing_key"),
     };
 
     // RELEASE-ID-01: exactly one Terraform grant gives the app identity a role on the ACR, and it is AcrPull.
@@ -143,6 +145,9 @@ public sealed class ReleaseIdentityContractTests
             new[] { "build_identity_client_id", "release_identity_client_id" },
             Regex.Matches(release, @"^output\s+""([^""]+)""", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToArray());
 
+        // The signing key is the key Key Vault creates for the certificate; release-identity.tf must not declare its own.
+        Assert.DoesNotContain("azurerm_key_vault_key", release);
+
         // The existing terraform_principal_object_id grant (Contributor) must never resolve to a workflow identity.
         var testFile = File.ReadAllText(Path.Combine(root, "tests", "release-identity.tftest.hcl"));
         var inputPrincipal = Regex.Match(testFile, @"^\s*terraform_principal_object_id\s*=\s*""([^""]+)""", RegexOptions.Multiline).Groups[1].Value;
@@ -155,6 +160,38 @@ public sealed class ReleaseIdentityContractTests
         Assert.NotEmpty(workflowPrincipals);
         Assert.NotEmpty(inputPrincipal);
         Assert.All(workflowPrincipals, p => Assert.NotEqual(inputPrincipal, p));
+    }
+
+    // Baseline of every role assignment under infra/terraform: a new or renamed grant fails until this list is changed on purpose.
+    [Fact]
+    public void Role_assignments_are_held_to_a_baseline()
+    {
+        var files = ReadTerraformFiles();
+
+        var names = files
+            .SelectMany(f => Regex.Matches(f.Text, @"resource\s+""azurerm_role_assignment""\s+""(\w+)""").Select(m => m.Groups[1].Value))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "app_acr_pull",
+                "app_evidence",
+                "app_openai_user",
+                "app_telemetry",
+                "build_acr_push",
+                "migration_sql",
+                "release_acr_push",
+                "release_container_app",
+                "release_signing_certificate",
+                "release_signing_key",
+                "telemetry_reader",
+                "terraform_contributor",
+            },
+            names);
+
+        Assert.DoesNotContain(files, f => Regex.IsMatch(f.Text, @"(?m)^\s*module\s+"""));
     }
 
     [Fact]
