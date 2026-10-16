@@ -353,6 +353,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
     public async Task HostRegistersAzureOpenAIChatClientWithoutCallingIt()
     {
         // Any connection to the configured endpoint lands on this listener; resolving the client must not connect.
+        var credentialsResolved = 0;
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         try
@@ -367,7 +368,16 @@ public sealed class EvidenceInvestigationTests : IDisposable
                         ["CaseState:Path"] = _statePath,
                         ["AzureOpenAI:Endpoint"] = $"http://127.0.0.1:{port}/",
                     }));
-                builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
+                // Resolving this credential is what the test must not cause: the factory counts every resolution.
+                builder.ConfigureTestServices(services =>
+                {
+                    services.AddSingleton(FakeApprovedManifest.Approved());
+                    services.AddSingleton<Azure.Core.TokenCredential>(_ =>
+                    {
+                        Interlocked.Increment(ref credentialsResolved);
+                        throw new InvalidOperationException("the credential must not be resolved while resolving the chat client");
+                    });
+                });
             });
 
             var services = factory.Services;
@@ -378,6 +388,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
 
             Assert.NotNull(chatClient);
             Assert.False(listener.Pending());
+            Assert.Equal(0, Volatile.Read(ref credentialsResolved));
             Assert.Empty(azureEvents.Events.Skip(eventsBefore));
         }
         finally

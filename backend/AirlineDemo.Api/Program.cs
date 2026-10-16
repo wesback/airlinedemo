@@ -45,7 +45,9 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
         ?? throw new InvalidOperationException("No approved model manifest is configured; accepted evidence cannot be investigated.");
     var deployment = manifest.DeploymentName
         ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
-    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), new Azure.Identity.DefaultAzureCredential())
+    // The credential is resolved on the first token request, not here (a test can register a TokenCredential to observe it).
+    var credential = new LazyTokenCredential(() => sp.GetService<Azure.Core.TokenCredential>() ?? new Azure.Identity.DefaultAzureCredential());
+    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential)
         .GetChatClient(deployment)
         .AsIChatClient();
 });
