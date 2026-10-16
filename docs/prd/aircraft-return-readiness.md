@@ -2,11 +2,11 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.9.0"
+version: "0.9.1"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
-last_updated: "2026-10-15"
+last_updated: "2026-10-16"
 product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003", "GOAL-004"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.9.0 | Last Updated: 2026-10-15
+> **aircraft-return-readiness** | Status: Draft | Version: 0.9.1 | Last Updated: 2026-10-16
 
 ## Executive Summary
 
@@ -103,8 +103,8 @@ These source design positions are carried forward as draft product decisions, no
 | DD-040 | The headline case tells the presentation's story. The seeded case is shown as aircraft `MOCK-AC-001` (a display label; stored identifiers keep their `SYN-` shapes). Its scenario clock stands nine months before the contractual return date, both fixed in the fixture; scenario time never follows the server clock. The headline missing-history path is an engine life-limited part (LLP): an engine LLP release certificate without its back-to-birth history. The ambiguous-identity path is the engine whose serial number is one digit from another's. The other seeded paths (a component contradiction, corrupt and truncated files, a linked partner reply) stay. |
 | DD-041 | The case opens on a readiness summary computed by the server from case state, in one sentence of counts and the scenario countdown, for example "Return in 9 months. 1 records gap found, 1 routine request sent, 1 item held for internal review, 2 documents not processed." The counts come from the same projections as the queues and never include an ambiguous or unprocessed item as a gap. |
 | DD-042 | The dashboard shows a completed investigation's real correlated trace as an ordered list of steps: each tool the investigator called, each citation check with its outcome (and any correction it made), and the point where deterministic policy took over. It reads the stored trace; it shows no prompt, response or document text (DD-029). The recorded 30-second trace in the demonstration is a capture of this view from a real run. |
-| DD-043 | The evaluation and cost documentation supports the presentation's numbers and labels every one. Per arm: gap-detection precision and recall, citation validity rate, forbidden-action rate, latency p50 and p95 per package, cost per page processed and per case. The cost disclosure also shows the value of a recovered day (the case's EUR250,000 per idle aircraft-month, about EUR8,200 per day) and the number of recovered days that pay for the platform per transition prepared. Each figure carries one label: case-study stipulation, external evidence, scenario assumption, architectural decision, synthetic demonstration result, or unvalidated target. A figure that has not been measured is shown as "not measured", never as an estimate. |
-| DD-040 | Arm D is the single-call comparator for Arm B and uses the same approved model deployment configuration as Arm B, without iterative tool use or agent citation reflection. |
+| DD-043 | The evaluation and cost documentation supports the presentation's numbers and labels every one. Per arm: gap-detection precision and recall, citation validity rate, forbidden-action rate, latency p50 and p95 per package, cost per page processed and per case. The cost disclosure also shows the value of a recovered day (the case's EUR250,000 per idle aircraft-month, about EUR8,200 per day) and the number of recovered days that pay for the platform per transition prepared. Each figure carries one label: case-study stipulation, external evidence, scenario assumption, architectural decision, synthetic demonstration result, unvalidated target, or derived (a figure computed from other labelled figures, such as the break-even days). A figure that has not been measured is shown as "not measured", never as an estimate. |
+| DD-044 | Arm D is the single-call comparator for Arm B and uses the same approved model deployment configuration as Arm B, without iterative tool use or agent citation reflection. |
 
 ## Product Goals
 
@@ -297,7 +297,7 @@ The following are required future verification outcomes. Their inclusion is not 
 | AC-022 | Given the seeded case, every capability card shows two text lines supplied by the server, `Case study: <level>` and `Demo: <level>`, from one table: records investigation L4 and L3, utilisation and reserves L3 and L2, contract compliance L3 and L2, transition planning L2 and design-only, credit and sanctions L2 and design-only, portfolio supervisor not in the table and design-only. The client never computes or edits either value; a missing value shows Unknown. | FR-014 |
 | AC-023 | Given the seeded case, the first view shows the readiness summary of DD-041: the scenario countdown to the return date and the counts of gaps found, requests sent, items held for review and documents not processed, matching the queue and capability projections. The headline case holds one engine LLP gap, one routine request sent to the mock inbox and one ambiguous engine serial held for internal review, and the summary appears within the 20-second outcome time of AC-012. An ambiguous or unprocessed item is never counted as a gap. | FR-014, FR-012 |
 | AC-024 | Given a completed investigation, the dashboard lists its real trace as ordered steps (tool, citation-check outcome, any correction, policy handover) with no prompt, response or document text, and an investigation with no trace shows "no trace recorded" instead of a reconstructed one. | FR-014, FR-012 |
-| AC-025 | Given the evaluation and cost documentation, every figure of DD-043 is present per arm or per transition with exactly one label, a figure not yet measured reads "not measured", the value of a recovered day and the break-even days per transition are shown as stipulation and derived, and no figure is presented as validated customer savings. | FR-014, FR-009 |
+| AC-025 | Given the evaluation and cost documentation, every figure of DD-043 is present per arm or per transition with exactly one label, a figure not yet measured reads "not measured", the value of a recovered day is labelled case-study stipulation, the break-even days per transition are labelled derived, and no figure is presented as validated customer savings. | FR-014, FR-009 |
 
 Status for AC-001 through AC-025: **Not assessed**. This PRD records acceptance intent, not implementation or runtime status.
 
