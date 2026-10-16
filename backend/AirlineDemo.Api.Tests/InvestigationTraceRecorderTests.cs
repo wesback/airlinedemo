@@ -24,6 +24,24 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
     private static IReadOnlyDictionary<string, BasisDocument> Basis() =>
         new Dictionary<string, BasisDocument> { ["doc-1"] = BasisDocument.Create("doc-1", ["Reserve approval granted on page one"]) };
 
+    [Fact]
+    public void CompletedInvestigationWithNoToolOrCitationActivityRecordsOutcomeAndHandover()
+    {
+        var store = new CaseStateStore(_path);
+        var scope = store.CreateCase("case-1", "presenter");
+        var recorder = new InvestigationTraceRecorder(store, scope, Context("run-no-activity"));
+
+        recorder.Complete("approved");
+
+        var trace = store.FindTrace(scope, "case-1", "run-no-activity", "inv-1");
+        Assert.NotNull(trace);
+        Assert.Equal("approved", trace.Outcome);
+        var step = Assert.Single(trace.Steps);
+        Assert.Equal(InvestigationTraceRecorder.DeterministicPolicy, step.PolicyHandover);
+        Assert.Equal(InvestigationTraceRecorder.NoValue, step.DocumentId);
+        Assert.Equal(0, step.PageNumber);
+    }
+
     private const string Region = "swedencentral";
 
     private const string ApprovedJson = """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""";

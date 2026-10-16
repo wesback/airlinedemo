@@ -174,8 +174,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
 
         // The failure reaches the caller: the submission is not reported as successful.
         using var first = await PostPackageAsync(client, presenter, "synthetic-evidence-a.pdf", pdf);
-        Assert.NotEqual(HttpStatusCode.Created, first.StatusCode);
-        Assert.NotEqual(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.InternalServerError, first.StatusCode);
         var runId = failing.AttemptedRunId!;
         var store = new CaseStateStore(_statePath);
         Assert.Null(store.FindTrace(ScopeFor(store), Case, runId, "inv-" + runId));
