@@ -256,9 +256,18 @@ public sealed class MockResponseReassessmentTests : IDisposable
         Assert.NotEqual(state.Basis[0].BasisDigest, state.Basis[1].BasisDigest);
         Assert.Equal(3, state.Audit.Count);
         Assert.Equal(assessmentsBefore, fixture.Assessments.List(CaseId).Take(assessmentsBefore.Count));
-        Assert.Equal("Review", fixture.Assessments.List(CaseId)[^1].Outcome);
+        var reassessment = fixture.Assessments.List(CaseId)[^1];
+        Assert.Equal("Baseline", reassessment.Outcome);
+        Assert.Equal("supported baseline", reassessment.Reason);
+        var assessedClaim = Assert.Single(reassessment.Claims);
+        Assert.Equal("Baseline", assessedClaim.Kind);
+        Assert.Equal(ResponseText, assessedClaim.Value);
+        var responseWitness = Assert.Single(assessedClaim.Witnesses);
+        Assert.Equal(result.Receipt.DocumentId, responseWitness.DocumentId);
+        Assert.Equal(1, responseWitness.Page);
         var reassessedBasis = fixture.Assessments.CurrentBasis(CaseId)!;
         Assert.Equal(2, reassessedBasis.BasisVersion);
+        Assert.Equal(ResponseText, reassessedBasis.Documents[responseWitness.DocumentId].Pages[responseWitness.Page - 1]);
         Assert.Throws<NotSupportedException>(() =>
             ((IDictionary<string, BasisDocument>)reassessedBasis.Documents).Add("mutated", BasisDocument.Create("mutated", ["Injected"])));
         Assert.Single(fixture.Inbox.Requests);
@@ -282,6 +291,25 @@ public sealed class MockResponseReassessmentTests : IDisposable
         Assert.Equal(seeded, request);
         Assert.Equal(0, outbound.Calls);
         var cases = factory.Services.GetRequiredService<ICaseStateStore>();
-        Assert.Single(cases.Read(cases.AuthorizeCase(CaseId, "presenter")).Audit, audit => audit.Action == MockResponseService.AcceptedAction);
+        var scope = cases.AuthorizeCase(CaseId, "presenter");
+        Assert.Single(cases.Read(scope).Audit, audit => audit.Action == MockResponseService.AcceptedAction);
+        var inbox = factory.Services.GetRequiredService<MockRequestInbox>();
+        var assessments = factory.Services.GetRequiredService<AssessmentStore>();
+        var priorAssessment = Assert.Single(assessments.List(CaseId), item => item.BasisVersion == 2);
+        Assert.Equal("Baseline", priorAssessment.Outcome);
+        var claim = Assert.Single(priorAssessment.Claims);
+        var witness = Assert.Single(claim.Witnesses);
+        var basis = assessments.CurrentBasis(CaseId)!;
+        var repeated = new AssessmentExecutionService(cases, inbox, assessments).Assess(
+            scope,
+            basis,
+            [new AssessmentClaim(
+                ClaimKind.Baseline,
+                claim.Value,
+                claim.Component,
+                claim.SerialNumber,
+                [new DocumentWitness(witness.DocumentId, witness.Page, basis.Documents[witness.DocumentId].Pages[witness.Page - 1])])]);
+        Assert.Equal(("Baseline", "supported baseline", 2), (repeated.Outcome, repeated.Reason, repeated.BasisVersion));
+        Assert.Single(inbox.Requests);
     }
 }

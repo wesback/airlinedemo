@@ -8,6 +8,7 @@ using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Policy;
 using AirlineDemo.Api.Reviews;
 using Microsoft.AspNetCore.Http;
 
@@ -92,8 +93,14 @@ public sealed class MockResponseService(
                     cases.Commit(scope, state.Revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
                         JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
                     assessments.SetCurrentBasis(scope.CaseId, nextAssessmentBasis);
-                    assessments.Append(new AssessmentRecord(scope.CaseId, nextAssessmentBasis.BasisId, nextAssessmentBasis.BasisVersion,
-                        "Review", "synthetic response received; authorized disposition required", [], null, null));
+                    var responseClaim = new AssessmentClaim(
+                        ClaimKind.Baseline,
+                        command.Body,
+                        "mock-response",
+                        command.ReportId,
+                        [new DocumentWitness(documentId, 1, command.Body)]);
+                    new AssessmentExecutionService(cases, requests, assessments)
+                        .Assess(scope, nextAssessmentBasis, [responseClaim]);
                 }))
                     return new(MockResponseOutcome.Stale, null);
             }
