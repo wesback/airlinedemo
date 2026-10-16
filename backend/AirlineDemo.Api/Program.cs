@@ -32,6 +32,10 @@ if (!string.IsNullOrEmpty(approvedModelManifestPath))
 {
     builder.Services.AddSingleton(ApprovedModelManifest.Load(approvedModelManifestPath));
 }
+// No model client is configured in this host, so an investigation fails closed
+// instead of sending evidence anywhere. Hosts that configure a model replace this registration.
+builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(_ =>
+    throw new InvalidOperationException("No investigation model is configured; accepted evidence is not sent to a model."));
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();
