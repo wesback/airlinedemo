@@ -10,6 +10,7 @@ using AirlineDemo.Api.Runs;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
 namespace AirlineDemo.Api.Tests;
@@ -323,6 +324,129 @@ public sealed class SqlCaseStateStoreTests
 
         Assert.Throws<CaseAccessDeniedException>(() => store.Read(scope));
         Assert.Throws<CaseAccessDeniedException>(() => store.GetBasisVersion(scope, 1));
+    }
+
+    // AC1 (basis immutability): version 1 keeps its content and digests across an append and a restart,
+    // and every attempt to replace it is rejected without changing persisted state.
+    [Fact]
+    public void AC1_basis_digests_are_immutable_across_appends_and_restart()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-basis", "owner-b");
+        var v1 = CaseStateStore.CreateBasisVersion(1, "basis one", string.Empty);
+        store.Commit(scope, 0, new CaseCommit(v1, null, "owner-b", "basis-1", "v1"));
+        var v2 = CaseStateStore.CreateBasisVersion(2, "basis two", v1.BasisDigest);
+        store.Commit(scope, 1, new CaseCommit(v2, null, "owner-b", "basis-2", "v2"));
+
+        var reloaded = new SqlCaseStateStore(options);
+        var before = reloaded.Read(scope);
+        Assert.Equal(2, before.Revision);
+        Assert.Equal(2, before.Basis.Count);
+        var stored = before.Basis[0];
+        Assert.Equal(1, stored.Version);
+        Assert.Equal(v1.Content, stored.Content);
+        Assert.Equal(v1.ContentDigest, stored.ContentDigest);
+        Assert.Equal(v1.BasisDigest, stored.BasisDigest);
+
+        var auditBefore = CountAuditEvents(options);
+        var decisionsBefore = CaptureDecisions(options, before.CaseId);
+
+        Assert.Throws<BasisIntegrityException>(() =>
+            reloaded.Commit(scope, before.Revision, new CaseCommit(v1 with { ContentDigest = "changed" }, null, "owner-b", "replace", "digest")));
+        AssertStateUnchanged(reloaded, options, scope, before, auditBefore, decisionsBefore);
+
+        Assert.Throws<BasisIntegrityException>(() =>
+            reloaded.Commit(scope, before.Revision, new CaseCommit(v1 with { BasisDigest = "changed" }, null, "owner-b", "replace", "chain")));
+        AssertStateUnchanged(reloaded, options, scope, before, auditBefore, decisionsBefore);
+
+        Assert.Throws<BasisIntegrityException>(() =>
+            reloaded.Commit(scope, before.Revision, new CaseCommit(v1 with { Content = "changed payload" }, null, "owner-b", "replace", "payload")));
+        AssertStateUnchanged(reloaded, options, scope, before, auditBefore, decisionsBefore);
+
+        // A fresh store over the same database sees the original version 1 after the rejected attempts.
+        var restarted = new SqlCaseStateStore(options).Read(scope);
+        Assert.Equal(v1.Content, restarted.Basis[0].Content);
+        Assert.Equal(v1.ContentDigest, restarted.Basis[0].ContentDigest);
+        Assert.Equal(v1.BasisDigest, restarted.Basis[0].BasisDigest);
+    }
+
+    // AC2 (receipts): an exact replay returns the original receipt and fingerprint without a revision or audit change;
+    // the same receipt ID with a changed payload is rejected.
+    [Fact]
+    public void AC2_exact_receipt_replay_is_idempotent_and_changed_payload_is_rejected()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-replay", "owner-p");
+        var basis = CaseStateStore.CreateBasisVersion(1, "replay basis", string.Empty);
+        var first = store.Commit(scope, 0, new CaseCommit(basis, "receipt-p", "owner-p", "open", "first"));
+        Assert.False(first.Replayed);
+
+        var before = store.Read(scope);
+        var auditBefore = CountAuditEvents(options);
+        var decisionsBefore = CaptureDecisions(options, before.CaseId);
+        Assert.Equal(new[] { ("receipt-p", decisionsBefore[0].Fingerprint) }, decisionsBefore);
+
+        var replay = store.Commit(scope, before.Revision, new CaseCommit(basis, "receipt-p", "owner-p", "open", "first"));
+        Assert.True(replay.Replayed);
+        Assert.Equal(new[] { "receipt-p" }, replay.State.ReceiptIds);
+        Assert.Equal(before.Revision, replay.State.Revision);
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
+
+        Assert.Throws<ReceiptConflictException>(() =>
+            store.Commit(scope, before.Revision, new CaseCommit(basis, "receipt-p", "owner-p", "open", "changed")));
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
+    }
+
+    // AC3 (atomicity): a failure after the SQL changes are applied but before the transaction commits rolls back
+    // the basis, receipt, and audit event together.
+    [Fact]
+    public void AC3_failed_commit_rolls_back_all_records()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-rollback", "owner-rb");
+        var before = store.Read(scope);
+        var auditBefore = CountAuditEvents(options);
+        var decisionsBefore = CaptureDecisions(options, before.CaseId);
+
+        // The interceptor is attached only after case creation so the case row itself is not affected.
+        var interceptor = new FailAfterSaveInterceptor();
+        var faultyOptions = new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        var faulty = new SqlCaseStateStore(faultyOptions);
+
+        var basis = CaseStateStore.CreateBasisVersion(1, "rollback basis", string.Empty);
+        interceptor.Armed = true;
+        Assert.Throws<InjectedCommitFailure>(() =>
+            faulty.Commit(scope, before.Revision, new CaseCommit(basis, "receipt-rb", "owner-rb", "open", "rollback")));
+        interceptor.Armed = false;
+
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
+        Assert.Empty(store.Read(scope).Basis);
+        Assert.Empty(store.Read(scope).ReceiptIds);
+    }
+
+    private sealed class InjectedCommitFailure : Exception
+    {
+    }
+
+    private sealed class FailAfterSaveInterceptor : SaveChangesInterceptor
+    {
+        public bool Armed { get; set; }
+
+        public override int SavedChanges(SaveChangesCompletedEventData eventData, int result)
+        {
+            if (Armed)
+            {
+                throw new InjectedCommitFailure();
+            }
+
+            return base.SavedChanges(eventData, result);
+        }
     }
 
     private static void AssertStateUnchanged(
