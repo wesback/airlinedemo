@@ -311,4 +311,19 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.Null(source.GetSourcePage(Case, "two.pdf", 3));
         Assert.Null(source.GetSourcePage(Case, "two.pdf", 0));
     }
+
+    [Fact]
+    public void CitationToALaterPageIsSupportedNotDowngraded()
+    {
+        var extracted = AirlineDemo.Api.Evidence.EvidenceIntake.ExtractText(ReadFixture("two-pages.pdf"));
+        var basis = new Dictionary<string, BasisDocument> { ["two.pdf"] = AirlineDemo.Api.Evidence.EvidenceEndpoints.BasisDocumentFor("two.pdf", extracted.Text) };
+
+        var onPageTwo = ClaimValidator.Validate(
+            new InvestigationClaim("Beta only on page two.", [new DocumentWitness("two.pdf", 2, "Beta only on page two.")]), ClaimKind.Baseline, basis, "Beta");
+        var onWrongPage = ClaimValidator.Validate(
+            new InvestigationClaim("Beta only on page two.", [new DocumentWitness("two.pdf", 1, "Beta only on page two.")]), ClaimKind.Baseline, basis, "Beta");
+
+        Assert.Equal(ClaimStatus.Supported, onPageTwo.Status);
+        Assert.Equal(ClaimStatus.Downgraded, onWrongPage.Status);
+    }
 }

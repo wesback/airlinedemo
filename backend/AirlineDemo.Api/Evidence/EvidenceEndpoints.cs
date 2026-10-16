@@ -166,7 +166,7 @@ public static class EvidenceEndpoints
         foreach (var name in accepted)
         {
             var text = basis.History($"{caseId}/{name}").First(v => v.Version == pinned[name]).Text;
-            documents[name] = BasisDocument.Create(name, [text]);
+            documents[name] = BasisDocumentFor(name, text);
             // The model receives page text only; ModelCallGate still refuses text that is not registered synthetic content.
             evidenceTexts.Add(text.TrimEnd('\r', '\n'));
         }
@@ -190,6 +190,10 @@ public static class EvidenceEndpoints
         {
         }
     }
+
+    /// <summary>The validation basis keeps one entry per page, so a claim citing page 2 is checked against page 2.</summary>
+    internal static BasisDocument BasisDocumentFor(string name, string text) =>
+        BasisDocument.Create(name, text.Split(EvidenceIntake.PageSeparator));
 
     private static IResult GetPackage(string caseId, string packageId, HttpContext http, DemoSessionStore sessions, EvidencePackageStore packages)
     {
