@@ -100,11 +100,33 @@ public sealed class MockResponseService(
             {
                 if (!assessments.RunIfCurrent(scope.CaseId, current, () =>
                 {
-                    cases.Commit(scope, state.Revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
-                        JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
-                    assessments.SetCurrentBasis(scope.CaseId, nextAssessmentBasis);
-                    new AssessmentExecutionService(cases, requests, assessments)
-                        .Assess(scope, nextAssessmentBasis, responseClaims);
+                    var assessmentService = new AssessmentExecutionService(cases, requests, assessments);
+                    if (responseClaims.Count == 0)
+                    {
+                        assessments.SetCurrentBasis(scope.CaseId, nextAssessmentBasis);
+                        var reassessed = false;
+                        try
+                        {
+                            assessmentService.Assess(scope, nextAssessmentBasis, responseClaims);
+                            reassessed = true;
+                        }
+                        finally
+                        {
+                            if (!reassessed)
+                                assessments.SetCurrentBasis(scope.CaseId, current);
+                        }
+
+                        var revision = cases.Read(scope).Revision;
+                        cases.Commit(scope, revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
+                            JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
+                    }
+                    else
+                    {
+                        cases.Commit(scope, state.Revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
+                            JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
+                        assessments.SetCurrentBasis(scope.CaseId, nextAssessmentBasis);
+                        assessmentService.Assess(scope, nextAssessmentBasis, responseClaims);
+                    }
                 }))
                     return new(MockResponseOutcome.Stale, null);
             }

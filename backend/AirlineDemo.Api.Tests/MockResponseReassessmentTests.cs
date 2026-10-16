@@ -29,7 +29,7 @@ public sealed class MockResponseReassessmentTests : IDisposable
         private readonly string _path = Path.Combine(Path.GetTempPath(), $"mock-response-{Guid.NewGuid():N}.json");
         public bool FailPersist { get; set; }
 
-        public Fixture(bool independentlySupportsResponse = false)
+        public Fixture(bool independentlySupportsResponse = false, bool failReviewWorkItem = false)
         {
             Cases = new CaseStateStore(_path, () =>
             {
@@ -49,7 +49,8 @@ public sealed class MockResponseReassessmentTests : IDisposable
             }
 
             Assessments.SetCurrentBasis(CaseId, Basis);
-            Service = new MockResponseService(Cases, Inbox, Assessments, TimeProvider.System);
+            ICaseStateStore responseCases = failReviewWorkItem ? new WorkItemFailingCaseStateStore(Cases) : Cases;
+            Service = new MockResponseService(responseCases, Inbox, Assessments, TimeProvider.System);
             FirstRequest = AddRequest(Inbox, Basis, "delivery-event-1", "request-report-1");
             Assessments.Append(new AssessmentRecord(
                 CaseId, BasisId, 1, "Request", "eligible missing requirement", [], FirstRequest.RequestId, null));
@@ -71,6 +72,26 @@ public sealed class MockResponseReassessmentTests : IDisposable
             foreach (var path in new[] { _path, _path + ".lock", _path + ".tmp" })
                 if (File.Exists(path)) File.Delete(path);
         }
+    }
+    private sealed class WorkItemFailingCaseStateStore(ICaseStateStore inner) : ICaseStateStore
+    {
+        public CaseScope AuthorizeCase(string caseId, string owner) => inner.AuthorizeCase(caseId, owner);
+        public string? OwnerOf(string caseId) => inner.OwnerOf(caseId);
+        public CaseScope CreateCase(string caseId, string owner) => inner.CreateCase(caseId, owner);
+        public CaseState Read(CaseScope scope) => inner.Read(scope);
+        public BasisVersion GetBasisVersion(CaseScope scope, int version) => inner.GetBasisVersion(scope, version);
+        public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => inner.ReadAudit(scope);
+        public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit) =>
+            inner.Commit(scope, expectedRevision, commit);
+        public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope) => inner.ListWorkItems(scope);
+        public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor) =>
+            throw new IOException("injected review work-item write failure");
+        public CommitResult ChangeWorkItemState(
+            CaseScope scope, long expectedRevision, string itemId, string state, string actor) =>
+            inner.ChangeWorkItemState(scope, expectedRevision, itemId, state, actor);
+        public void AppendTrace(CaseScope scope, InvestigationTrace trace) => inner.AppendTrace(scope, trace);
+        public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId) =>
+            inner.FindTrace(scope, caseId, runId, investigationId);
     }
     private sealed class CountingHandler : HttpMessageHandler
     {
@@ -240,6 +261,29 @@ public sealed class MockResponseReassessmentTests : IDisposable
             Assert.Equal(before.ReceiptIds, after.ReceiptIds);
             Assert.Equal(before.Audit, after.Audit);
             Assert.Equal(assessmentsBefore, fixture.Assessments.List(CaseId));
+            var currentBasis = Assert.IsType<AssessmentBasis>(fixture.Assessments.CurrentBasis(CaseId));
+            Assert.Equal(fixture.Basis.BasisId, currentBasis.BasisId);
+            Assert.Equal(fixture.Basis.BasisVersion, currentBasis.BasisVersion);
+            Assert.Equal(fixture.Basis.ScenarioTime, currentBasis.ScenarioTime);
+            Assert.Equal(fixture.Basis.Coverage, currentBasis.Coverage);
+            Assert.Equal(fixture.Basis.Documents["source-records"].Pages, currentBasis.Documents["source-records"].Pages);
+            Assert.Empty(after.WorkItems!);
+            Assert.Single(fixture.Inbox.Requests);
+        }
+        using (var fixture = new Fixture(failReviewWorkItem: true))
+        {
+            var before = fixture.Cases.Read(fixture.Scope);
+            var assessmentsBefore = fixture.Assessments.List(CaseId);
+            Assert.Throws<IOException>(() =>
+                fixture.Service.Accept(fixture.Scope, "presenter", fixture.Command()));
+            var after = fixture.Cases.Read(fixture.Scope);
+            Assert.Equal(before.Revision, after.Revision);
+            Assert.Equal(before.Basis, after.Basis);
+            Assert.Equal(before.ReceiptIds, after.ReceiptIds);
+            Assert.Equal(before.Audit, after.Audit);
+            Assert.Empty(after.WorkItems!);
+            Assert.Equal(assessmentsBefore, fixture.Assessments.List(CaseId));
+            Assert.Equal(fixture.Basis.BasisVersion, fixture.Assessments.CurrentBasis(CaseId)!.BasisVersion);
             Assert.Single(fixture.Inbox.Requests);
         }
     }
