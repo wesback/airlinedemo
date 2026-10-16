@@ -400,7 +400,11 @@ public sealed class TelemetryPrivacyTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = AppPasscode,
+                    ["CaseState:Path"] = CaseSeed.CreateFile(),
+                }));
             builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
         });
         using var client = factory.CreateClient();
@@ -413,7 +417,7 @@ public sealed class TelemetryPrivacyTests
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/cases/case-001/reviews")
         {
-            Content = JsonContent.Create(new { expectedRevision = 1, decision = "accept" }),
+            Content = JsonContent.Create(new { expectedRevision = 1, expectedBasisVersion = 1, decision = "accept", reason = "basis reviewed" }),
         };
         request.Headers.Add("Cookie", cookie);
         request.Headers.Add("X-CSRF-Token", csrf);
@@ -450,7 +454,9 @@ public sealed class TelemetryPrivacyTests
             builder.ConfigureServices(services =>
             {
                 services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger));
-                services.AddSingleton<CaseStore, IntegrityFailingCaseStore>();
+                var path = CaseSeed.CreateFile();
+                services.AddSingleton<ICaseStateStore>(_ => new CaseStateStore(path,
+                    () => throw new BasisIntegrityException("Forced integrity failure for alert-path test.")));
             });
         });
         using var client = factory.CreateClient();
@@ -463,7 +469,7 @@ public sealed class TelemetryPrivacyTests
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/cases/case-001/reviews")
         {
-            Content = JsonContent.Create(new { expectedRevision = 1, decision = "accept" }),
+            Content = JsonContent.Create(new { expectedRevision = 1, expectedBasisVersion = 1, decision = "accept", reason = "basis reviewed" }),
         };
         request.Headers.Add("Cookie", cookie);
         request.Headers.Add("X-CSRF-Token", csrf);
@@ -475,12 +481,6 @@ public sealed class TelemetryPrivacyTests
             .Where(p => p.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.IntegritySignatureFailure)
             .ToList();
         Assert.Single(alerts);
-    }
-
-    private sealed class IntegrityFailingCaseStore : CaseStore
-    {
-        public override ReviewOutcome RecordReview(string id, int expectedRevision, string decision, out CaseRecord? updated) =>
-            throw new BasisIntegrityException("Forced integrity failure for alert-path test.");
     }
 
     private static Dictionary<string, string?> ToProperties(IReadOnlyList<KeyValuePair<string, object?>> state) =>
