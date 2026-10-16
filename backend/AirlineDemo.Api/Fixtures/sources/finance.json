@@ -1,0 +1,41 @@
+{
+  "sourceId": "finance",
+  "records": [
+    {
+      "recordId": "fin-lease-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "lease_terms",
+      "synthetic": true,
+      "payload": { "leaseId": "SYN-LEASE-001", "billingPeriod": "monthly", "reserveBasis": "flight_hour_and_cycle", "currency": "USD" }
+    },
+    {
+      "recordId": "fin-reserve-rate-hour-2026-08",
+      "recordVersion": 1,
+      "asOf": "2026-08-01",
+      "caseId": "case-001",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "rateBasis": "per_flight_hour", "rate": "395.00", "currency": "USD", "effectiveFrom": "2026-08-01" }
+    },
+    {
+      "recordId": "fin-reserve-rate-hour-2026-10",
+      "recordVersion": 2,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "rateBasis": "per_flight_hour", "rate": "410.00", "currency": "USD", "effectiveFrom": "2026-10-01" }
+    },
+    {
+      "recordId": "fin-reserve-rate-cycle-2026-10",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "rateBasis": "per_cycle", "rate": "275.00", "currency": "USD", "effectiveFrom": "2026-10-01" }
+    }
+  ]
+}
