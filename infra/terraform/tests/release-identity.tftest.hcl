@@ -420,7 +420,7 @@ run "release_outputs_contain_no_secrets" {
   }
 
   assert {
-    condition     = length(flatten([for f in fileset(path.module, "*.tf") : [for b in regexall("(?ms)^(output\\s+\"\\w+\"|locals)\\s*\\{.*?^\\}", file("${path.module}/${f}")) : b if can(regex("(?i)access_key|connection_string|client_secret|password|private_key|primary_key|secondary_key|sas_token|sig=|\\.secret|key_vault_secret|tls_private", b))]])) == 0
+    condition     = length(flatten([for f in fileset(path.module, "*.tf") : [for b in regexall("(?ms)^(?:output\\s+\"\\w+\"|locals)\\s*\\{.*?(?:\\n(?:resource|data|variable|output|locals|module|provider|terraform)[\\s\"{]|\\z)", file("${path.module}/${f}")) : b if can(regex("(?i)access_key|connection_string|client_secret|password|private_key|primary_key|secondary_key|sas_token|sig=|\\.secret|key_vault_secret|tls_private", b))]])) == 0
     error_message = "No Terraform output or locals block may reference a credential-bearing attribute (access key, connection string, client secret, password, private key, or secret), so an output cannot expose one through a local; whatever its evaluated value."
   }
 
