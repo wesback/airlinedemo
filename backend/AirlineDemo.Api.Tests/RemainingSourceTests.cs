@@ -113,6 +113,26 @@ public sealed class RemainingSourceTests
             },
             records[1].Payload.Fields);
 
+        AssertFields(
+            new Dictionary<string, string>
+            {
+                ["documentId"] = "SYN-DOC0011",
+                ["documentVersion"] = "1",
+                ["documentType"] = "release-to-service",
+                ["parseStatus"] = "complete",
+            },
+            records[0].Payload.Fields);
+
+        AssertFields(
+            new Dictionary<string, string>
+            {
+                ["documentId"] = "SYN-DOC0013",
+                ["documentVersion"] = "1",
+                ["documentType"] = "shop-visit-record",
+                ["parseStatus"] = "complete",
+            },
+            records[2].Payload.Fields);
+
         var mismatched = await new RecordsSource().GetAsync("case-002", "rec-doc-arr-0011");
         Assert.Equal("rec-doc-arr-0011", Assert.IsType<SourceRecordNotFound<SourceRecord<RecordsPayload>>>(mismatched).RecordId);
     }
