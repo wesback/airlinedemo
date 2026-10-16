@@ -313,6 +313,15 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             .Select(w => new WorkItem(w.CaseId, w.ItemId, w.CapabilityId, w.State, w.Owner, w.CreatedAt))
             .ToList();
 
+        var traces = db.InvestigationTraces
+            .Where(t => t.CaseId == caseId)
+            .OrderBy(t => t.RunId)
+            .ThenBy(t => t.InvestigationId)
+            .ToList()
+            .Where(t => Same(t.CaseId, caseId))
+            .Select(t => ToTrace(db, t))
+            .ToList();
+
         var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var decision in decisions)
         {
@@ -327,7 +336,101 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             decisions.Select(d => d.ReceiptId).ToList().AsReadOnly(),
             audit.AsReadOnly(),
             new ReadOnlyDictionary<string, string>(fingerprints),
-            items.AsReadOnly());
+            items.AsReadOnly(),
+            traces.AsReadOnly());
+    }
+
+    /// <summary>Inserts one trace and its steps in a serializable transaction; a repeated run and investigation is rejected.</summary>
+    public void AppendInvestigationTrace(CaseScope scope, InvestigationTrace trace)
+    {
+        var problem = InvestigationTraceRules.Problem(trace, scope.CaseId);
+        if (problem is not null)
+        {
+            throw new ArgumentException(problem, nameof(trace));
+        }
+
+        using var db = NewContext();
+        using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
+        _ = FindCase(db, scope.CaseId) ?? throw new CaseAccessDeniedException();
+        if (FindTrace(db, scope.CaseId, trace.RunId, trace.InvestigationId) is not null)
+        {
+            throw new InvalidOperationException("Investigation trace already exists for this run and investigation.");
+        }
+
+        var row = new InvestigationTraceRow
+        {
+            CaseId = scope.CaseId,
+            RunId = trace.RunId,
+            InvestigationId = trace.InvestigationId,
+            BasisVersion = trace.BasisVersion,
+            ModelDeploymentName = trace.ModelDeploymentName,
+            ApiVersion = trace.ApiVersion,
+            Region = trace.Region,
+            ContentFilterSetting = trace.ContentFilterSetting,
+            Decision = trace.Decision,
+            ActorToken = trace.ActorToken,
+            Outcome = trace.Outcome,
+        };
+        db.InvestigationTraces.Add(row);
+        try
+        {
+            db.InvestigationTraceSteps.AddRange(trace.Steps.Select(s => new InvestigationTraceStepRow
+            {
+                CaseId = scope.CaseId,
+                RunId = trace.RunId,
+                InvestigationId = trace.InvestigationId,
+                Sequence = s.Sequence,
+                ToolName = s.ToolName,
+                DocumentId = s.DocumentId,
+                PageNumber = s.PageNumber,
+                CitationCheckOutcome = s.CitationCheckOutcome,
+                CorrectionCode = s.CorrectionCode,
+                PolicyHandover = s.PolicyHandover,
+            }));
+            db.SaveChanges();
+        }
+        catch (DbUpdateException)
+        {
+            throw new InvalidOperationException("Investigation trace already exists for this run and investigation.");
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>Returns the trace only when the case, run, and investigation all match exactly.</summary>
+    public InvestigationTrace? ReadInvestigationTrace(CaseScope scope, string runId, string investigationId)
+    {
+        using var db = NewContext();
+        _ = FindCase(db, scope.CaseId) ?? throw new CaseAccessDeniedException();
+        if (string.IsNullOrEmpty(runId) || string.IsNullOrEmpty(investigationId))
+        {
+            return null;
+        }
+
+        return FindTrace(db, scope.CaseId, runId, investigationId) is { } row ? ToTrace(db, row) : null;
+    }
+
+    private static InvestigationTraceRow? FindTrace(CaseStateDbContext db, string caseId, string runId, string investigationId) =>
+        db.InvestigationTraces
+            .Where(t => t.CaseId == caseId && t.RunId == runId && t.InvestigationId == investigationId)
+            .AsEnumerable()
+            .FirstOrDefault(t => Same(t.CaseId, caseId) && Same(t.RunId, runId) && Same(t.InvestigationId, investigationId));
+
+    private static InvestigationTrace ToTrace(CaseStateDbContext db, InvestigationTraceRow row)
+    {
+        var steps = db.InvestigationTraceSteps
+            .Where(s => s.CaseId == row.CaseId && s.RunId == row.RunId && s.InvestigationId == row.InvestigationId)
+            .OrderBy(s => s.Sequence)
+            .AsEnumerable()
+            .Select(s => new InvestigationTraceStep(
+                s.Sequence, s.ToolName, s.DocumentId, s.PageNumber,
+                s.CitationCheckOutcome, s.CorrectionCode, s.PolicyHandover))
+            .ToList();
+
+        return new InvestigationTrace(
+            row.CaseId, row.RunId, row.InvestigationId, row.BasisVersion, row.ModelDeploymentName,
+            row.ApiVersion, row.Region, row.ContentFilterSetting, row.Decision, row.ActorToken,
+            row.Outcome, steps.AsReadOnly());
     }
 
     private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.Ordinal);

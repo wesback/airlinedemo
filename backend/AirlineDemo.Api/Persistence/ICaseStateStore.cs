@@ -25,4 +25,10 @@ public interface ICaseStateStore
     CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor);
 
     CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor);
+
+    /// <summary>Appends a trace. Traces are never updated or deleted; a repeated run and investigation is rejected.</summary>
+    void AppendInvestigationTrace(CaseScope scope, InvestigationTrace trace);
+
+    /// <summary>Returns the trace only when the scope's case, the run and the investigation all match exactly.</summary>
+    InvestigationTrace? ReadInvestigationTrace(CaseScope scope, string runId, string investigationId);
 }

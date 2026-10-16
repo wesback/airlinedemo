@@ -21,7 +21,7 @@ public sealed class SqlCaseStateStoreTests
     private static readonly string[] InterfaceMethods =
     [
         "AuthorizeCase", "OwnerOf", "CreateCase", "Read", "GetBasisVersion", "ReadAudit", "Commit",
-        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState",
+        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState", "AppendInvestigationTrace", "ReadInvestigationTrace",
     ];
 
     // AC1: interface contract and file-backed registration; no database connection.
@@ -54,6 +54,9 @@ public sealed class SqlCaseStateStoreTests
         db.Database.Migrate();
 
         Assert.Contains("20261014190000_InitialCaseStateSchema", db.Database.GetAppliedMigrations());
+        Assert.Contains("20261015010000_AddCaseWorkItems", db.Database.GetAppliedMigrations());
+        Assert.Contains("20261015120000_AddInvestigationTraces", db.Database.GetAppliedMigrations());
+        AssertMapped(db, typeof(InvestigationTraceRow), "dbo", "case_investigation_traces");
         AssertMapped(db, typeof(CaseRow), "dbo", "cases");
         AssertMapped(db, typeof(CaseDocumentRow), "dbo", "case_documents");
         AssertMapped(db, typeof(CaseDecisionRow), "dbo", "case_decisions");
@@ -232,6 +235,7 @@ public sealed class SqlCaseStateStoreTests
 
         using var db = new CaseStateDbContext(options);
         Assert.Contains("20261014190000_InitialCaseStateSchema", db.Database.GetAppliedMigrations());
+        Assert.Contains("20261015120000_AddInvestigationTraces", db.Database.GetAppliedMigrations());
         Assert.Equal(1, db.Cases.Count());
         Assert.Equal(1, db.CaseDocuments.Count());
         Assert.Equal(1, db.CaseDecisions.Count());
@@ -509,6 +513,52 @@ public sealed class SqlCaseStateStoreTests
             .OrderBy(d => d.Id)
             .Select(d => new ValueTuple<string, string>(d.ReceiptId, d.Fingerprint))
             .ToList();
+    }
+
+    // M-03 over SQLite: trace writes are INSERT-only and a duplicate run and investigation leaves the original row unchanged.
+    [Fact]
+    public void TraceWritesAreAppendOnly()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var recorder = new CommandRecorder();
+        var recordingOptions = new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(recorder)
+            .Options;
+
+        var store = new SqlCaseStateStore(recordingOptions);
+        var scope = store.CreateCase("case-a", "owner-a");
+        recorder.Commands.Clear();
+
+        store.AppendInvestigationTrace(scope, InvestigationTraceStoreTests.SampleTrace());
+        var duplicate = InvestigationTraceStoreTests.SampleTrace(decision: "reject");
+        Assert.Throws<InvalidOperationException>(() => store.AppendInvestigationTrace(scope, duplicate));
+
+        var traceCommands = recorder.Commands.Where(c => c.Contains("case_investigation_trace", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(traceCommands);
+        Assert.All(traceCommands, c => Assert.Contains(LeadingKeyword(c), new[] { "SELECT", "INSERT" }));
+
+        var read = store.ReadInvestigationTrace(scope, "run-1", "inv-1");
+        Assert.NotNull(read);
+        Assert.Equal("approve", read.Decision);
+        Assert.Equal(2, read.Steps.Count);
+        Assert.Equal(new[] { 1, 2 }, read.Steps.Select(s => s.Sequence).ToArray());
+    }
+
+    // TRACE-STORE-03 over SQLite: the trace is returned only when case, run and investigation all match exactly.
+    [Fact]
+    public void TraceLookupRequiresExactCaseRunAndInvestigation()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-a", "owner-a");
+        var otherScope = store.CreateCase("case-b", "owner-a");
+        store.AppendInvestigationTrace(scope, InvestigationTraceStoreTests.SampleTrace());
+
+        Assert.NotNull(store.ReadInvestigationTrace(scope, "run-1", "inv-1"));
+        Assert.Null(store.ReadInvestigationTrace(scope, "run-2", "inv-1"));
+        Assert.Null(store.ReadInvestigationTrace(scope, "run-1", "inv-2"));
+        Assert.Null(store.ReadInvestigationTrace(otherScope, "run-1", "inv-1"));
     }
 
     private static SqliteConnection OpenMigratedSqlite(out DbContextOptions<CaseStateDbContext> options)
