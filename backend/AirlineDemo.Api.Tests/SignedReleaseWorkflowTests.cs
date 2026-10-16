@@ -211,19 +211,39 @@ public sealed class SignedReleaseWorkflowTests
             "Notation must be installed before the signing step runs.");
     }
 
-    // AC: the requested digest must match the digest recorded by the specified CI build run before signing.
+    // AC: RELEASE-DIGEST-01. The digest is read from its own artifact of the specified build run, never the release run.
     [Fact]
-    public void Release_binds_requested_digest_to_build_run_before_signing()
+    public void Release_downloads_digest_artifact_from_the_named_build_run()
+    {
+        var workflow = ReadWorkflow();
+        var step = StepBody(workflow, "Download image digest");
+
+        Assert.Contains("uses: actions/download-artifact@v4", step);
+        Assert.Contains("name: image-digest", step);
+        Assert.Contains("path: evidence/image", step);
+        Assert.Contains("run-id: ${{ inputs.build_run_id }}", step);
+        Assert.Contains("github-token: ${{ github.token }}", step);
+        Assert.DoesNotContain("github.run_id", step);
+    }
+
+    // AC: RELEASE-DIGEST-02. The requested digest must be well formed and equal the image-digest artifact before signing.
+    [Fact]
+    public void Release_binds_requested_digest_to_separate_artifact_before_signing()
     {
         var workflow = ReadWorkflow();
         var check = StepBody(workflow, "Verify build evidence present");
 
+        Assert.Contains("[[ ! \"$IMAGE_DIGEST\" =~ ^sha256:[0-9a-f]{64}$ ]]", check);
         Assert.Contains("test -s evidence/image/digest.txt", check);
         Assert.Contains("was not produced by build run", check);
+        Assert.Contains("image-digest artifact recorded", check);
         Assert.Contains("\"$built\" != \"$IMAGE_DIGEST\"", check);
+        Assert.True(workflow.IndexOf("- name: Download image digest", StringComparison.Ordinal)
+            < workflow.IndexOf("- name: Verify build evidence present", StringComparison.Ordinal),
+            "The image-digest artifact must be downloaded before it is checked.");
         Assert.True(workflow.IndexOf("- name: Verify build evidence present", StringComparison.Ordinal)
             < workflow.IndexOf("- name: Sign image digest", StringComparison.Ordinal),
-            "Provenance must be checked before the digest is signed.");
+            "Digest binding must be checked before the digest is signed.");
     }
 
     // AC: the signature itself is exported and retained, not only an inspection report.
