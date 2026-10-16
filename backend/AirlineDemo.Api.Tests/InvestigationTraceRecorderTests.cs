@@ -173,7 +173,7 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
         var recorder = new InvestigationTraceRecorder(store, scope, Context());
 
         var downgraded = ClaimValidator.Validate(
-            new InvestigationClaim("secret reserve approval passcode-123", [new DocumentWitness("doc-1", 1, "Reserve approval granted on page one")]),
+            new InvestigationClaim("secret reserve approval passcode-123 session=cookie-abc", [new DocumentWitness("doc-1", 1, "Reserve approval granted on page one")]),
             ClaimKind.MissingRequirement,
             Basis(),
             "");
@@ -200,12 +200,35 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
         var json = JsonSerializer.Serialize(trace);
         Assert.DoesNotContain("passcode-123", json);
         Assert.DoesNotContain("Reserve approval granted on page one", json);
+        Assert.DoesNotContain("session=cookie-abc", json);
 
         var forbidden = new[] { "Arguments", "DocumentText", "Prompt", "Response", "Quote", "Passcode", "Cookie" };
         var names = typeof(InvestigationTrace).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name)
             .Concat(typeof(InvestigationTraceStep).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name))
             .ToArray();
         Assert.Empty(names.Intersect(forbidden));
+    }
+
+    [Fact]
+    public async Task TraceOfARealInvestigationHoldsNoToolArgumentDocumentTextPromptResponseOrQuote()
+    {
+        var store = new CaseStateStore(_path);
+        var scope = store.CreateCase("case-1", "owner-1");
+        var args = Page(1);
+        args["note"] = "SENTINEL-TOOL-ARGUMENT";
+        var model = new ScriptedClient(Call("c1", CaseReadTools.SourcePageTool, args), Text(ClaimsJson));
+        var service = new InvestigationExecutionService(store);
+
+        await service.ExecuteAsync(scope, Context(), Investigator(model), Documents, ClaimKind.MissingRequirement, Basis(), "Reserve approval");
+
+        var json = JsonSerializer.Serialize(store.FindTrace(scope, "case-1", "run-1", "inv-1"));
+        Assert.DoesNotContain("SENTINEL-TOOL-ARGUMENT", json);
+        Assert.DoesNotContain(Documents[0], json);
+        Assert.DoesNotContain("Return readiness is pending reserve approval", json);
+        Assert.DoesNotContain("read-only investigator", json);
+        Assert.DoesNotContain(BoundedInvestigator.Instructions, json);
+        Assert.DoesNotContain(ClaimsJson, json);
+        Assert.DoesNotContain("\"quote\"", json);
     }
 
     [Fact]
