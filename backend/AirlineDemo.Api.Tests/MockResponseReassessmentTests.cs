@@ -234,23 +234,34 @@ public sealed class MockResponseReassessmentTests : IDisposable
                 cases.ListWorkItems(scope).Count, inbox.Requests.Count, assessments.List(CaseId).Count);
         }
         var before = Snapshot();
+        // A refused attempt discloses nothing protected: the complete body has no case, request, basis or evidence content.
+        async Task AssertWithholdsAsync(HttpResponseMessage response, params string[] protectedValues)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            foreach (var value in protectedValues) Assert.DoesNotContain(value, body, StringComparison.OrdinalIgnoreCase);
+        }
+        var protectedCommon = new[] { seeded.RequestId, BasisId, "original evidence" };
 
         using var unauthenticated = await PostResponseAsync(client, null, CaseId, Response(seeded, "event-unauth", "report-unauth"));
         Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+        await AssertWithholdsAsync(unauthenticated, [.. protectedCommon, CaseId]);
 
         using var forgedCase = await PostResponseAsync(client, session, "case-forged", Response(seeded, "event-case", "report-case"));
         Assert.Equal(HttpStatusCode.NotFound, forgedCase.StatusCode);
+        await AssertWithholdsAsync(forgedCase, [.. protectedCommon, CaseId]);
 
         using var forgedRequest = await PostResponseAsync(client, session, CaseId,
             Response(seeded with { RequestId = "REQ-forged" }, "event-request", "report-request"));
         Assert.Equal(HttpStatusCode.NotFound, forgedRequest.StatusCode);
-        Assert.DoesNotContain(seeded.RequestId, await forgedRequest.Content.ReadAsStringAsync());
+        await AssertWithholdsAsync(forgedRequest, protectedCommon);
 
         using var forgedBasis = await PostResponseAsync(client, session, CaseId, Response(seeded, "event-basis", "report-basis", "basis-forged"));
         Assert.Equal(HttpStatusCode.Conflict, forgedBasis.StatusCode);
+        await AssertWithholdsAsync(forgedBasis, protectedCommon);
         using var timeMismatch = await PostResponseAsync(client, session, CaseId,
             Response(seeded, "event-date", "report-date") with { ScenarioTime = "2026-01-01T00:00:00Z" });
         Assert.Equal(HttpStatusCode.BadRequest, timeMismatch.StatusCode);
+        await AssertWithholdsAsync(timeMismatch, protectedCommon);
         // None of the unauthenticated, forged-case, forged-request, forged-basis and wrong-time attempts changed any state.
         Assert.Equal(before, Snapshot());
 
