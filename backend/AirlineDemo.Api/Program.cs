@@ -26,6 +26,8 @@ builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
+// Sources register only after the complete signed fixture set verifies; any refusal stops startup.
+SourceFixtureLoader.LoadPinned(System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"));
 builder.Services.AddSingleton<ISourceSystem<TechnicalPayload>, TechnicalSource>();
 builder.Services.AddSingleton<ISourceSystem<FinancePayload>, FinanceSource>();
 builder.Services.AddSingleton<ISourceSystem<MaintenancePayload>, MaintenanceSource>();
