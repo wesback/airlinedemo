@@ -51,6 +51,7 @@ public sealed class WorkItemRow
 
 public sealed class InvestigationTraceRow
 {
+    public byte[] KeyHash { get; set; } = [];
     public string CaseId { get; set; } = string.Empty;
     public string RunId { get; set; } = string.Empty;
     public string InvestigationId { get; set; } = string.Empty;
@@ -66,9 +67,7 @@ public sealed class InvestigationTraceRow
 
 public sealed class InvestigationTraceStepRow
 {
-    public string CaseId { get; set; } = string.Empty;
-    public string RunId { get; set; } = string.Empty;
-    public string InvestigationId { get; set; } = string.Empty;
+    public byte[] KeyHash { get; set; } = [];
     public int Sequence { get; set; }
     public string ToolName { get; set; } = string.Empty;
     public string DocumentId { get; set; } = string.Empty;
@@ -97,7 +96,8 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
         modelBuilder.Entity<InvestigationTraceRow>(e =>
         {
             e.ToTable("investigation_traces", "dbo");
-            e.HasKey(x => new { x.CaseId, x.RunId, x.InvestigationId });
+            e.HasKey(x => x.KeyHash);
+            e.Property(x => x.KeyHash).HasMaxLength(32).IsFixedLength();
             e.Property(x => x.CaseId).HasMaxLength(128);
             e.Property(x => x.RunId).HasMaxLength(128);
             e.Property(x => x.InvestigationId).HasMaxLength(128);
@@ -113,10 +113,8 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
         modelBuilder.Entity<InvestigationTraceStepRow>(e =>
         {
             e.ToTable("investigation_trace_steps", "dbo");
-            e.HasKey(x => new { x.CaseId, x.RunId, x.InvestigationId, x.Sequence });
-            e.Property(x => x.CaseId).HasMaxLength(128);
-            e.Property(x => x.RunId).HasMaxLength(128);
-            e.Property(x => x.InvestigationId).HasMaxLength(128);
+            e.HasKey(x => new { x.KeyHash, x.Sequence });
+            e.Property(x => x.KeyHash).HasMaxLength(32).IsFixedLength();
             e.Property(x => x.ToolName).HasMaxLength(128).IsRequired();
             e.Property(x => x.DocumentId).HasMaxLength(256).IsRequired();
             e.Property(x => x.CitationCheckOutcome).HasMaxLength(64).IsRequired();

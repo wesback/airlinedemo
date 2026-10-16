@@ -5,6 +5,7 @@ namespace AirlineDemo.Api.Persistence.Migrations;
 
 /// <summary>
 /// Adds the append-only investigation trace record and its ordered steps. Run under the migration identity only.
+/// Rows are keyed by a SHA-256 of the exact (case, run, investigation) identifiers, so SQL padding or collation cannot merge distinct ids.
 /// </summary>
 [DbContext(typeof(CaseStateDbContext))]
 [Migration("20261015120000_AddInvestigationTraces")]
@@ -12,7 +13,7 @@ public class AddInvestigationTraces : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        // Identifiers are compared exactly, so the key columns must not collapse case on case-insensitive databases.
+        // The identifier columns are informational; exact matching is enforced by KeyHash.
         var keyCollation = migrationBuilder.ActiveProvider == "Microsoft.EntityFrameworkCore.SqlServer"
             ? "Latin1_General_100_CS_AS"
             : null;
@@ -22,6 +23,7 @@ public class AddInvestigationTraces : Migration
             schema: "dbo",
             columns: table => new
             {
+                KeyHash = table.Column<byte[]>(type: "varbinary(32)", fixedLength: true, maxLength: 32, nullable: false),
                 CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
                 RunId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
                 InvestigationId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
@@ -36,8 +38,7 @@ public class AddInvestigationTraces : Migration
             },
             constraints: table =>
             {
-                table.PrimaryKey("PK_investigation_traces", x => new { x.CaseId, x.RunId, x.InvestigationId });
-                table.CheckConstraint("CK_investigation_traces_exact_keys", ExactKeySql("CaseId", "RunId", "InvestigationId"));
+                table.PrimaryKey("PK_investigation_traces", x => x.KeyHash);
             });
 
         migrationBuilder.CreateTable(
@@ -45,9 +46,7 @@ public class AddInvestigationTraces : Migration
             schema: "dbo",
             columns: table => new
             {
-                CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
-                RunId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
-                InvestigationId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false, collation: keyCollation),
+                KeyHash = table.Column<byte[]>(type: "varbinary(32)", fixedLength: true, maxLength: 32, nullable: false),
                 Sequence = table.Column<int>(type: "int", nullable: false),
                 ToolName = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 DocumentId = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
@@ -58,14 +57,9 @@ public class AddInvestigationTraces : Migration
             },
             constraints: table =>
             {
-                table.PrimaryKey("PK_investigation_trace_steps", x => new { x.CaseId, x.RunId, x.InvestigationId, x.Sequence });
-                table.CheckConstraint("CK_investigation_trace_steps_exact_keys", ExactKeySql("CaseId", "RunId", "InvestigationId"));
+                table.PrimaryKey("PK_investigation_trace_steps", x => new { x.KeyHash, x.Sequence });
             });
     }
-
-    // SQL Server pads nvarchar comparisons, so 'id' and 'id ' collapse under any collation; reject surrounding spaces at the database.
-    private static string ExactKeySql(params string[] columns) =>
-        string.Join(" AND ", columns.Select(c => $"\"{c}\" NOT LIKE ' %' AND \"{c}\" NOT LIKE '% '"));
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {

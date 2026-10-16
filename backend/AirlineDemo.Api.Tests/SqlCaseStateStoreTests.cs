@@ -565,24 +565,21 @@ public sealed class SqlCaseStateStoreTests
     }
 
     // AC: all InvestigationTrace and step fields persist, steps reload in Sequence order, and (CaseId, RunId, InvestigationId) is unique in the database.
-    // AC: M-03 — identifiers differing only by surrounding spaces stay distinct; SQL Server would otherwise pad them into one key.
+    // AC: M-03 — identifiers differing only by surrounding spaces are distinct exact keys; SQL Server would otherwise pad them into one key.
     [Fact]
-    public void TraceKeysRejectSurroundingWhitespace()
+    public void TraceKeysKeepSurroundingWhitespaceDistinct()
     {
         using var connection = OpenMigratedSqlite(out var options);
         var store = new SqlCaseStateStore(options);
         var scope = store.CreateCase("case-1", "owner-a");
         store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", " run-1", "inv-1"));
 
-        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1")));
-        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", " run-1", "inv-1")));
-        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1 ")));
-        Assert.Null(store.FindTrace(scope, "case-1", "run-1 ", "inv-1"));
-
-        using var raw = connection.CreateCommand();
-        raw.CommandText = "INSERT INTO investigation_traces (CaseId, RunId, InvestigationId, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) "
-            + "VALUES ('case-1', 'run-1 ', 'inv-1', 3, 'm', 'v', 'r', 'f', 'd', 't', 'o')";
-        Assert.ThrowsAny<DbException>(() => raw.ExecuteNonQuery());
+        Assert.Equal("run-1 ", store.FindTrace(scope, "case-1", "run-1 ", "inv-1")!.RunId);
+        Assert.Equal(" run-1", store.FindTrace(scope, "case-1", " run-1", "inv-1")!.RunId);
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1 ", "inv-2"));
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1")));
     }
 
     [Fact]
@@ -600,8 +597,28 @@ public sealed class SqlCaseStateStoreTests
         AssertSameTrace(trace, stored);
         Assert.Equal(new[] { 1, 2 }, stored.Steps.Select(s => s.Sequence));
 
+        byte[] storedKey;
+        using (var read = new CaseStateDbContext(options))
+        {
+            storedKey = read.InvestigationTraces.Single().KeyHash;
+        }
+
         using var db = new CaseStateDbContext(options);
-        db.InvestigationTraces.Add(new InvestigationTraceRow { CaseId = "case-1", RunId = "run-1", InvestigationId = "inv-1" });
+        db.InvestigationTraces.Add(new InvestigationTraceRow
+        {
+            KeyHash = storedKey,
+            CaseId = "case-1",
+            RunId = "run-1",
+            InvestigationId = "inv-1",
+            BasisVersion = 3,
+            ModelDeploymentName = "model-deploy-x",
+            ApiVersion = "2025-01-01",
+            Region = "eastus",
+            ContentFilterSetting = "enabled",
+            Decision = "approve",
+            ActorToken = "tok-7f3a",
+            Outcome = "ready",
+        });
         Assert.ThrowsAny<DbUpdateException>(() => db.SaveChanges());
     }
 

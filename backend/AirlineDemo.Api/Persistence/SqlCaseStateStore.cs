@@ -268,6 +268,7 @@ public sealed class SqlCaseStateStore : ICaseStateStore
 
         using var db = NewContext();
         using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
+        var keyHash = TraceKey(trace.CaseId, trace.RunId, trace.InvestigationId);
         if (FindTraceRow(db, trace.CaseId, trace.RunId, trace.InvestigationId) is not null)
         {
             throw new TraceConflictException();
@@ -275,6 +276,7 @@ public sealed class SqlCaseStateStore : ICaseStateStore
 
         db.InvestigationTraces.Add(new InvestigationTraceRow
         {
+            KeyHash = keyHash,
             CaseId = trace.CaseId,
             RunId = trace.RunId,
             InvestigationId = trace.InvestigationId,
@@ -289,9 +291,7 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         });
         db.InvestigationTraceSteps.AddRange(trace.Steps.Select(s => new InvestigationTraceStepRow
         {
-            CaseId = trace.CaseId,
-            RunId = trace.RunId,
-            InvestigationId = trace.InvestigationId,
+            KeyHash = keyHash,
             Sequence = s.Sequence,
             ToolName = s.ToolName,
             DocumentId = s.DocumentId,
@@ -328,11 +328,11 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             return null;
         }
 
+        var keyHash = row.KeyHash;
         var steps = db.InvestigationTraceSteps
-            .Where(s => s.CaseId == caseId && s.RunId == runId && s.InvestigationId == investigationId)
+            .Where(s => s.KeyHash == keyHash)
             .OrderBy(s => s.Sequence)
             .ToList()
-            .Where(s => Same(s.CaseId, caseId) && Same(s.RunId, runId) && Same(s.InvestigationId, investigationId))
             .Select(s => new InvestigationTraceStep(
                 s.Sequence,
                 s.ToolName,
@@ -366,9 +366,15 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             return null;
         }
 
-        var row = db.InvestigationTraces.FirstOrDefault(t => t.CaseId == caseId && t.RunId == runId && t.InvestigationId == investigationId);
+        var keyHash = TraceKey(caseId, runId, investigationId);
+        var row = db.InvestigationTraces.FirstOrDefault(t => t.KeyHash == keyHash);
         return row is not null && Same(row.CaseId, caseId) && Same(row.RunId, runId) && Same(row.InvestigationId, investigationId) ? row : null;
     }
+
+    // Hashes the exact, length-prefixed (case, run, investigation) triple, so SQL padding or collation cannot merge distinct ids.
+    private static byte[] TraceKey(string caseId, string runId, string investigationId) =>
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            $"{caseId.Length}:{caseId}|{runId.Length}:{runId}|{investigationId.Length}:{investigationId}"));
 
     private static WorkItemRow? FindWorkItem(CaseStateDbContext db, string caseId, string itemId) =>
         db.WorkItems
