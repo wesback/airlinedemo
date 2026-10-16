@@ -25,9 +25,11 @@ internal sealed class AcceptedEvidenceReadSource(
 
     public string? GetSourcePage(string requestedCaseId, string documentId, int page)
     {
-        if (!Owns(requestedCaseId) || page != 1 || !acceptedFileNames.Contains(documentId, StringComparer.Ordinal)) return null;
+        if (!Owns(requestedCaseId) || page < 1 || !acceptedFileNames.Contains(documentId, StringComparer.Ordinal)) return null;
         if (!pinnedVersions.TryGetValue(documentId, out var version)) return null;
-        return basis.History($"{caseId}/{documentId}").FirstOrDefault(v => v.Version == version)?.Text;
+        var text = basis.History($"{caseId}/{documentId}").FirstOrDefault(v => v.Version == version)?.Text;
+        var pages = text?.Split(EvidenceIntake.PageSeparator);
+        return pages is not null && page <= pages.Length ? pages[page - 1] : null;
     }
 
     public IReadOnlyList<string> SearchWithinBasis(string requestedCaseId, string query) => Array.Empty<string>();

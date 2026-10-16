@@ -293,4 +293,22 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.Equal("approved", completedTrace.Outcome);
         Assert.Equal(InvestigationTraceRecorder.DeterministicPolicy, completedTrace.Steps[^1].PolicyHandover);
     }
+
+    [Fact]
+    public void EvidenceSourceReturnsOnlyTheCitedPageOfAMultiPageDocument()
+    {
+        var extracted = AirlineDemo.Api.Evidence.EvidenceIntake.ExtractText(ReadFixture("two-pages.pdf"));
+        Assert.Equal(AirlineDemo.Api.Evidence.EvidenceProcessingState.Complete, extracted.State);
+        var basis = new AirlineDemo.Api.Evidence.EvidenceBasisStore();
+        basis.CommitAll([($"{Case}/two.pdf", extracted.Text)]);
+        var source = new AirlineDemo.Api.Evidence.EvidenceCaseReadSourceFactory(basis)
+            .Create(Case, ["two.pdf"], new Dictionary<string, int> { ["two.pdf"] = 1 });
+
+        Assert.Contains("Alpha only on page one.", source.GetSourcePage(Case, "two.pdf", 1));
+        Assert.DoesNotContain("Beta", source.GetSourcePage(Case, "two.pdf", 1));
+        Assert.Contains("Beta only on page two.", source.GetSourcePage(Case, "two.pdf", 2));
+        Assert.DoesNotContain("Alpha", source.GetSourcePage(Case, "two.pdf", 2));
+        Assert.Null(source.GetSourcePage(Case, "two.pdf", 3));
+        Assert.Null(source.GetSourcePage(Case, "two.pdf", 0));
+    }
 }
