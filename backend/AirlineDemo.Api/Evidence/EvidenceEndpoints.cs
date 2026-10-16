@@ -176,7 +176,15 @@ public static class EvidenceEndpoints
         var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted, pinned), manifest, registry,
             manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat);
 
-        await investigations.ExecuteAsync(scope, context, investigator, accepted, ClaimKind.Baseline, documents, string.Empty, ct);
+        // A gate refusal (evidence not in the synthetic registry) is an escalated outcome: the trace is already appended
+        // with that outcome. Any append failure is a different exception and still reaches the caller.
+        try
+        {
+            await investigations.ExecuteAsync(scope, context, investigator, accepted, ClaimKind.Baseline, documents, string.Empty, ct);
+        }
+        catch (ModelGateException)
+        {
+        }
     }
 
     private static IResult GetPackage(string caseId, string packageId, HttpContext http, DemoSessionStore sessions, EvidencePackageStore packages)
