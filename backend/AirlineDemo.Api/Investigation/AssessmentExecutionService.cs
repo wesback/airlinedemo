@@ -53,15 +53,22 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
     public const string ReviewOwner = "technical-reviewer";
     public const string Actor = "assessment-service";
 
+    private static readonly IReadOnlyDictionary<string, BasisDocument> NoDocuments =
+        new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
+
     public AssessmentRecord Assess(CaseScope scope, AssessmentBasis basis, IReadOnlyList<AssessmentClaim> claims)
     {
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(basis);
         ArgumentNullException.ThrowIfNull(claims);
 
+        var current = assessments.CurrentBasis(scope.CaseId);
+        var isCurrent = current is not null && current.BasisId == basis.BasisId && current.BasisVersion == basis.BasisVersion;
+        // Evidence, coverage and identity come only from the stored accepted basis; the supplied basis is matched by identity.
+        var documents = isCurrent ? current!.Documents : NoDocuments;
         var validated = claims
             .Select(claim => ClaimValidator.Validate(
-                new InvestigationClaim(claim.Value, claim.Witnesses), claim.Kind, basis.Documents, claim.Value))
+                new InvestigationClaim(claim.Value, claim.Witnesses), claim.Kind, documents, claim.Value))
             .ToArray();
         var assessed = claims
             .Select(claim => new AssessedClaim(
@@ -72,29 +79,28 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
                 (claim.Witnesses ?? []).Where(w => w is not null).Select(w => new AssessedWitness(w.DocumentId, w.Page)).ToArray()))
             .ToArray();
 
-        var current = assessments.CurrentBasis(scope.CaseId);
-        var isCurrent = current is not null && current.BasisId == basis.BasisId && current.BasisVersion == basis.BasisVersion;
         var (outcome, reason) = isCurrent
-            ? Route(basis, validated)
+            ? Route(current!, validated)
             : (Review, "supplied basis is not the current accepted basis");
         string? requestId = null;
         string? workItemId = null;
 
         if (outcome == Request)
         {
+            var active = current!;
             var claim = claims[0];
-            var finding = new DeliveryFinding(basis.Coverage, validated, basis.IdentityAmbiguous, basis.BasisId, basis.BasisVersion);
+            var finding = new DeliveryFinding(active.Coverage, validated, active.IdentityAmbiguous, active.BasisId, active.BasisVersion);
             var envelope = new DeliveryEnvelope(
-                $"{scope.CaseId}:{basis.BasisId}:{basis.BasisVersion}:assessment",
+                $"{scope.CaseId}:{active.BasisId}:{active.BasisVersion}:assessment",
                 scope.CaseId,
-                $"assessment-{basis.BasisVersion}",
-                basis.BasisId,
-                basis.BasisVersion,
-                basis.ScenarioTime,
+                $"assessment-{active.BasisVersion}",
+                active.BasisId,
+                active.BasisVersion,
+                active.ScenarioTime,
                 claim.Component,
                 claim.SerialNumber,
                 claim.Value);
-            var delivery = inbox.Submit(envelope, finding, basis.ScenarioTime);
+            var delivery = inbox.Submit(envelope, finding, active.ScenarioTime);
             if (delivery.Outcome == DeliveryOutcome.Delivered && delivery.Receipt is not null)
             {
                 requestId = delivery.Receipt.RequestId;

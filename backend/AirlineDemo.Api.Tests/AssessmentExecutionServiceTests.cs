@@ -111,18 +111,22 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
     public void Ambiguous_or_unsupported_claim_creates_review_item_not_request()
     {
         var conflict = new AssessmentClaim(ClaimKind.Conflict, Value, "Engine", "ENG-123", [new DocumentWitness("return-status", 1, Quote)]);
-        var scenarios = new (AssessmentBasis Basis, AssessmentClaim[] Claims)[]
+        var incomplete = new ProcessingCoverage(2, 1, 0, 0);
+        var scenarios = new (AssessmentBasis Stored, AssessmentBasis Supplied, AssessmentClaim[] Claims)[]
         {
-            (CurrentBasis(ambiguous: true), [Missing()]),
-            (CurrentBasis(), [conflict]),
-            (CurrentBasis(coverage: new ProcessingCoverage(2, 1, 0, 0)), [Missing()]),
-            (CurrentBasis(), [Missing(docId: "history")]),
-            (CurrentBasis(version: BasisVersion - 1), [Missing()]),
+            (CurrentBasis(ambiguous: true), CurrentBasis(ambiguous: true), [Missing()]),
+            (CurrentBasis(), CurrentBasis(), [conflict]),
+            (CurrentBasis(coverage: incomplete), CurrentBasis(coverage: incomplete), [Missing()]),
+            (CurrentBasis(), CurrentBasis(), [Missing(docId: "history")]),
+            (CurrentBasis(), CurrentBasis(version: BasisVersion - 1), [Missing()]),
+            // A supplied complete basis cannot override the stored incomplete coverage of the current basis.
+            (CurrentBasis(coverage: incomplete), CurrentBasis(), [Missing()]),
         };
 
-        foreach (var (basis, claims) in scenarios)
+        foreach (var (stored, supplied, claims) in scenarios)
         {
-            var record = _service.Assess(_scope, basis, claims);
+            _assessments.SetCurrentBasis("case-1", stored);
+            var record = _service.Assess(_scope, supplied, claims);
             Assert.Equal("Review", record.Outcome);
             Assert.NotNull(record.WorkItemId);
             Assert.Null(record.RequestId);
@@ -139,6 +143,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.Empty(_inbox.Requests);
 
         // A clear supported missing requirement does not add a review item.
+        _assessments.SetCurrentBasis("case-1", CurrentBasis());
         var clear = _service.Assess(_scope, CurrentBasis(), [Missing()]);
         Assert.Equal("Request", clear.Outcome);
         Assert.Equal(scenarios.Length, _store.ListWorkItems(_scope).Count);
@@ -156,6 +161,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
             ["return-status"] = BasisDocument.Create("return-status", [$"{QuoteSentinel} {Value}", $"{DocumentSentinel} {PromptSentinel}"]),
         };
 
+        _assessments.SetCurrentBasis("case-1", CurrentBasis(documents: documents));
         var record = _service.Assess(_scope, CurrentBasis(documents: documents), [Missing(quote: $"{QuoteSentinel} {Value}")]);
 
         var claim = Assert.Single(record.Claims);
