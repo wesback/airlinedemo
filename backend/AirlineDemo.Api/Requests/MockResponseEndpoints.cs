@@ -86,6 +86,16 @@ public sealed class MockResponseService(
             var receipt = new MockResponseReceipt(command.EventId, scope.CaseId, request.RequestId, command.ReportId,
                 command.BasisId, command.BasisVersion, current.BasisId, nextVersion, storedBasis.BasisDigest, documentId);
             var detail = new ResponseAuditDetail(fingerprint, receipt);
+            var priorResponseDocuments = ReadResponseAudit(state).Select(item => item.Receipt.DocumentId);
+            var responseWitnesses = FindIndependentWitnesses(current, command.Body, priorResponseDocuments);
+            IReadOnlyList<AssessmentClaim> responseClaims = responseWitnesses.Count == 0
+                ? []
+                : [new AssessmentClaim(
+                    ClaimKind.Baseline,
+                    command.Body,
+                    "mock-response",
+                    command.ReportId,
+                    responseWitnesses)];
             try
             {
                 if (!assessments.RunIfCurrent(scope.CaseId, current, () =>
@@ -93,14 +103,8 @@ public sealed class MockResponseService(
                     cases.Commit(scope, state.Revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
                         JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
                     assessments.SetCurrentBasis(scope.CaseId, nextAssessmentBasis);
-                    var responseClaim = new AssessmentClaim(
-                        ClaimKind.Baseline,
-                        command.Body,
-                        "mock-response",
-                        command.ReportId,
-                        [new DocumentWitness(documentId, 1, command.Body)]);
                     new AssessmentExecutionService(cases, requests, assessments)
-                        .Assess(scope, nextAssessmentBasis, [responseClaim]);
+                        .Assess(scope, nextAssessmentBasis, responseClaims);
                 }))
                     return new(MockResponseOutcome.Stale, null);
             }
@@ -146,6 +150,23 @@ public sealed class MockResponseService(
         state.Audit.Where(a => a.Action == AcceptedAction)
             .Select(a => JsonSerializer.Deserialize<ResponseAuditDetail>(a.Detail, JsonOptions)
                 ?? throw new InvalidDataException("Mock response audit detail is empty."));
+
+    private static IReadOnlyList<DocumentWitness> FindIndependentWitnesses(
+        AssessmentBasis basis, string value, IEnumerable<string> responseDocumentIds)
+    {
+        var responseDocuments = responseDocumentIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var document in basis.Documents.Values)
+        {
+            if (responseDocuments.Contains(document.DocumentId) || document.Pages is null) continue;
+            for (var page = 0; page < document.Pages.Count; page++)
+            {
+                if (document.Pages[page].Contains(value, StringComparison.Ordinal))
+                    return [new DocumentWitness(document.DocumentId, page + 1, value)];
+            }
+        }
+
+        return [];
+    }
 
     private static string Fingerprint(string caseId, MockResponseCommand command) =>
         Digest(caseId, command.EventId, command.ReportId, command.RequestId, command.BasisId,

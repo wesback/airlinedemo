@@ -29,7 +29,7 @@ public sealed class MockResponseReassessmentTests : IDisposable
         private readonly string _path = Path.Combine(Path.GetTempPath(), $"mock-response-{Guid.NewGuid():N}.json");
         public bool FailPersist { get; set; }
 
-        public Fixture()
+        public Fixture(bool independentlySupportsResponse = false)
         {
             Cases = new CaseStateStore(_path, () =>
             {
@@ -41,6 +41,13 @@ public sealed class MockResponseReassessmentTests : IDisposable
             Inbox = new MockRequestInbox();
             Assessments = new AssessmentStore();
             Basis = CurrentBasis();
+            if (independentlySupportsResponse)
+            {
+                var documents = Basis.Documents.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+                documents.Add("independent-response", BasisDocument.Create("independent-response", [ResponseText]));
+                Basis = Basis with { Documents = documents };
+            }
+
             Assessments.SetCurrentBasis(CaseId, Basis);
             Service = new MockResponseService(Cases, Inbox, Assessments, TimeProvider.System);
             FirstRequest = AddRequest(Inbox, Basis, "delivery-event-1", "request-report-1");
@@ -172,7 +179,7 @@ public sealed class MockResponseReassessmentTests : IDisposable
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
         var cases = factory.Services.GetRequiredService<ICaseStateStore>();
         var state = cases.Read(cases.AuthorizeCase(CaseId, "presenter"));
-        Assert.Equal((2, 2, 1), (state.Basis.Count, state.Revision, state.ReceiptIds.Count));
+        Assert.Equal((2, 3, 1), (state.Basis.Count, state.Revision, state.ReceiptIds.Count));
     }
     [Fact]
     public async Task Replay_conflict_date_race_and_fault_are_atomic()
@@ -254,26 +261,62 @@ public sealed class MockResponseReassessmentTests : IDisposable
         Assert.Equal(firstBasis, state.Basis[0]);
         Assert.Equal(2, state.Basis.Count);
         Assert.NotEqual(state.Basis[0].BasisDigest, state.Basis[1].BasisDigest);
-        Assert.Equal(3, state.Audit.Count);
+        Assert.Equal(4, state.Audit.Count);
         Assert.Equal(assessmentsBefore, fixture.Assessments.List(CaseId).Take(assessmentsBefore.Count));
         var reassessment = fixture.Assessments.List(CaseId)[^1];
-        Assert.Equal("Baseline", reassessment.Outcome);
-        Assert.Equal("supported baseline", reassessment.Reason);
-        var assessedClaim = Assert.Single(reassessment.Claims);
-        Assert.Equal("Baseline", assessedClaim.Kind);
-        Assert.Equal(ResponseText, assessedClaim.Value);
-        var responseWitness = Assert.Single(assessedClaim.Witnesses);
-        Assert.Equal(result.Receipt.DocumentId, responseWitness.DocumentId);
-        Assert.Equal(1, responseWitness.Page);
+        Assert.Equal("Review", reassessment.Outcome);
+        Assert.Equal("no claim", reassessment.Reason);
+        Assert.Empty(reassessment.Claims);
         var reassessedBasis = fixture.Assessments.CurrentBasis(CaseId)!;
         Assert.Equal(2, reassessedBasis.BasisVersion);
-        Assert.Equal(ResponseText, reassessedBasis.Documents[responseWitness.DocumentId].Pages[responseWitness.Page - 1]);
+        Assert.Equal(ResponseText, reassessedBasis.Documents[result.Receipt!.DocumentId].Pages[0]);
         Assert.Throws<NotSupportedException>(() =>
             ((IDictionary<string, BasisDocument>)reassessedBasis.Documents).Add("mutated", BasisDocument.Create("mutated", ["Injected"])));
         Assert.Single(fixture.Inbox.Requests);
         Assert.False(TechnicalReviewPolicy.Decisions(state).Single().Current);
         Assert.False(TechnicalReviewPolicy.AuthorizesRequest(state));
-        Assert.Empty(state.WorkItems!);
+        var workItem = Assert.Single(state.WorkItems!);
+        Assert.Equal("records-investigation", workItem.CapabilityId);
+        Assert.Equal("open", workItem.State);
+    }
+    [Fact]
+    public void Response_is_supported_only_by_independently_established_evidence()
+    {
+        using var fixture = new Fixture(independentlySupportsResponse: true);
+
+        var result = fixture.Service.Accept(fixture.Scope, "presenter", fixture.Command());
+
+        Assert.Equal(MockResponseOutcome.Accepted, result.Outcome);
+        var reassessment = fixture.Assessments.List(CaseId)[^1];
+        Assert.Equal("Baseline", reassessment.Outcome);
+        Assert.Equal("supported baseline", reassessment.Reason);
+        var claim = Assert.Single(reassessment.Claims);
+        Assert.Equal("Baseline", claim.Kind);
+        Assert.Equal(ResponseText, claim.Value);
+        var witness = Assert.Single(claim.Witnesses);
+        Assert.Equal("independent-response", witness.DocumentId);
+        Assert.Equal(1, witness.Page);
+        Assert.NotEqual(result.Receipt!.DocumentId, witness.DocumentId);
+    }
+    [Fact]
+    public void Prior_unverified_response_cannot_support_a_later_response()
+    {
+        using var fixture = new Fixture();
+        var first = fixture.Service.Accept(fixture.Scope, "presenter", fixture.Command());
+        Assert.Equal(MockResponseOutcome.Accepted, first.Outcome);
+
+        var basis = fixture.Assessments.CurrentBasis(CaseId)!;
+        var request = AddRequest(fixture.Inbox, basis, "delivery-event-2", "request-report-2");
+        var second = fixture.Service.Accept(fixture.Scope, "presenter",
+            new MockResponseCommand("response-event-2", "response-report-2", request.RequestId,
+                basis.BasisId, basis.BasisVersion, basis.ScenarioTime, ResponseText));
+
+        Assert.Equal(MockResponseOutcome.Accepted, second.Outcome);
+        var reassessment = fixture.Assessments.List(CaseId)[^1];
+        Assert.Equal("Review", reassessment.Outcome);
+        Assert.Equal("no claim", reassessment.Reason);
+        Assert.Empty(reassessment.Claims);
+        Assert.Equal(3, fixture.Assessments.CurrentBasis(CaseId)!.BasisVersion);
     }
     [Fact]
     public async Task Response_does_not_close_request_or_dispatch_externally()
@@ -296,20 +339,15 @@ public sealed class MockResponseReassessmentTests : IDisposable
         var inbox = factory.Services.GetRequiredService<MockRequestInbox>();
         var assessments = factory.Services.GetRequiredService<AssessmentStore>();
         var priorAssessment = Assert.Single(assessments.List(CaseId), item => item.BasisVersion == 2);
-        Assert.Equal("Baseline", priorAssessment.Outcome);
-        var claim = Assert.Single(priorAssessment.Claims);
-        var witness = Assert.Single(claim.Witnesses);
+        Assert.Equal("Review", priorAssessment.Outcome);
+        Assert.Equal("no claim", priorAssessment.Reason);
+        Assert.Empty(priorAssessment.Claims);
         var basis = assessments.CurrentBasis(CaseId)!;
         var repeated = new AssessmentExecutionService(cases, inbox, assessments).Assess(
             scope,
             basis,
-            [new AssessmentClaim(
-                ClaimKind.Baseline,
-                claim.Value,
-                claim.Component,
-                claim.SerialNumber,
-                [new DocumentWitness(witness.DocumentId, witness.Page, basis.Documents[witness.DocumentId].Pages[witness.Page - 1])])]);
-        Assert.Equal(("Baseline", "supported baseline", 2), (repeated.Outcome, repeated.Reason, repeated.BasisVersion));
+            []);
+        Assert.Equal(("Review", "no claim", 2), (repeated.Outcome, repeated.Reason, repeated.BasisVersion));
         Assert.Single(inbox.Requests);
     }
 }
