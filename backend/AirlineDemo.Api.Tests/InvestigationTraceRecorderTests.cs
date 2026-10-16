@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using Microsoft.Extensions.AI;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -22,6 +23,60 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
 
     private static IReadOnlyDictionary<string, BasisDocument> Basis() =>
         new Dictionary<string, BasisDocument> { ["doc-1"] = BasisDocument.Create("doc-1", ["Reserve approval granted on page one"]) };
+
+    private const string Region = "swedencentral";
+
+    private const string ApprovedJson = """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""";
+
+    private const string ClaimsJson =
+        """[{"text":"Reserve approval","witnesses":[{"documentId":"doc-1","page":1,"quote":"Reserve approval granted on page one"}]}]""";
+
+    private const string BadQuoteClaimsJson =
+        """[{"text":"Reserve approval","witnesses":[{"documentId":"doc-1","page":1,"quote":"Reserve approval missing"}]}]""";
+
+    private static readonly string[] Documents = ["Reserve approval granted on page one"];
+
+    private static ApprovedModelManifest Approved() => ApprovedModelManifest.Parse(ApprovedJson);
+
+    private static BoundedInvestigator Investigator(IChatClient model) =>
+        new("case-1", new FixtureSource(), Approved(), SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model);
+
+    private static ChatResponse Call(string callId, string name, IDictionary<string, object?>? args = null) =>
+        new(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(callId, name, args)]));
+
+    private static ChatResponse Text(string text) => new(new ChatMessage(ChatRole.Assistant, text));
+
+    private static IDictionary<string, object?> Page(int page) => new Dictionary<string, object?> { ["documentId"] = "doc-1", ["page"] = page };
+
+    private sealed class FixtureSource : ICaseReadSource
+    {
+        public IReadOnlyList<string> GetInventory(string caseId) => ["doc-1"];
+
+        public string? GetApprovedRequirements(string caseId) => null;
+
+        public string? GetSourcePage(string caseId, string documentId, int page) =>
+            page == 1 ? "Reserve approval granted on page one" : null;
+
+        public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) => [];
+
+        public string? GetProcessingStatus(string caseId) => null;
+    }
+
+    /// <summary>Model stub that always returns the same reply.</summary>
+    private sealed class FixedReplyClient(ChatResponse reply) : IChatClient
+    {
+        public ChatClientMetadata Metadata { get; } = new("fixed");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(reply);
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
+    }
 
     [Fact]
     public void PersistsActualOrderedToolAndCitationOutcomes()
@@ -100,15 +155,15 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
     }
 
     [Fact]
-    public void StoreFailureDoesNotReturnSuccessfulInvestigation()
+    public async Task StoreFailureDoesNotReturnSuccessfulInvestigation()
     {
         var real = new CaseStateStore(_path);
         var scope = real.CreateCase("case-1", "owner-1");
-        var recorder = new InvestigationTraceRecorder(new ThrowingTraceStore(), scope, Context());
+        var investigator = Investigator(new FixedReplyClient(Text(ClaimsJson)));
+        var service = new InvestigationExecutionService(new ThrowingTraceStore());
 
-        recorder.RecordToolCall(CaseReadTools.InventoryTool);
-
-        var error = Assert.Throws<InvalidOperationException>(() => recorder.Complete("approved"));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ExecuteAsync(scope, Context(), investigator, Documents, ClaimKind.MissingRequirement, Basis(), "Reserve approval"));
         Assert.Equal("append failed", error.Message);
     }
 

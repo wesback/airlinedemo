@@ -57,8 +57,7 @@ public sealed class BoundedInvestigator(
     string evidenceVersion,
     IChatClient modelClient,
     IInvestigationLimits? limits = null,
-    InvestigationTelemetry? telemetry = null,
-    InvestigationTraceRecorder? traceRecorder = null)
+    InvestigationTelemetry? telemetry = null)
 {
     public const string UntrustedBegin = "<<<UNTRUSTED_DOCUMENT>>>";
     public const string UntrustedEnd = "<<<END_UNTRUSTED_DOCUMENT>>>";
@@ -78,7 +77,7 @@ public sealed class BoundedInvestigator(
     private readonly InvestigationTelemetry _telemetry = telemetry
         ?? new InvestigationTelemetry(new ConsoleTraceLogger(), "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
 
-    public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default)
+    public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default, InvestigationTraceRecorder? traceRecorder = null)
     {
         ArgumentNullException.ThrowIfNull(documents);
         if (documents.Count == 0)
@@ -115,9 +114,8 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationLimitExceededException(breach);
             }
 
-            result = new InvestigationResult(VerifyClaims(response.Text), gate.Traces);
+            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder), gate.Traces);
             outcome = "approved";
-            traceRecorder?.Complete(outcome);
             return result;
         }
         catch (Exception ex) when (ex is not InvestigationLimitExceededException && limits.Breach is { } tripped)
@@ -127,7 +125,6 @@ public sealed class BoundedInvestigator(
         catch (InvestigationOutputException)
         {
             outcome = "rejected";
-            traceRecorder?.Reject(outcome);
             throw;
         }
         finally
@@ -179,7 +176,7 @@ public sealed class BoundedInvestigator(
             .Where(part => part.Length >= 20)
             .Any(part => claimText.Contains(part, StringComparison.Ordinal));
 
-    private IReadOnlyList<InvestigationClaim> VerifyClaims(string modelText)
+    private IReadOnlyList<InvestigationClaim> VerifyClaims(string modelText, InvestigationTraceRecorder? traceRecorder)
     {
         List<ClaimDto>? dtos;
         try
