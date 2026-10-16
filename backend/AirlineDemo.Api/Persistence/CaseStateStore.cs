@@ -14,6 +14,9 @@ public sealed class RevisionConflictException()
 public sealed class ReceiptConflictException()
     : Exception("Receipt was already used for a different commit; no change was made.");
 
+public sealed class TraceConflictException()
+    : Exception("Investigation trace already exists for this case, run and investigation; no change was made.");
+
 public sealed class BasisIntegrityException(string message) : Exception(message);
 
 /// <summary>Server-issued proof that a case id was authorized; only the store can create one.</summary>
@@ -59,7 +62,8 @@ public sealed record CaseState(
     IReadOnlyList<string> ReceiptIds,
     IReadOnlyList<AuditEvent> Audit,
     IReadOnlyDictionary<string, string> ReceiptFingerprints,
-    IReadOnlyList<WorkItem>? WorkItems = null);
+    IReadOnlyList<WorkItem>? WorkItems = null,
+    IReadOnlyList<InvestigationTrace>? Traces = null);
 
 /// <summary>Required-field rules shared by both case-state stores.</summary>
 internal static class WorkItemRules
@@ -78,6 +82,84 @@ internal static class WorkItemRules
         RequireText(draft.CapabilityId, nameof(draft.CapabilityId));
         RequireText(draft.State, nameof(draft.State));
         RequireText(draft.Owner, nameof(draft.Owner));
+    }
+}
+
+/// <summary>
+/// One ordered, minimized investigation step. Categorical codes only: no document, prompt or response text.
+/// <see cref="CorrectionCode"/> is <c>None</c> when no correction was made; <see cref="PolicyHandover"/> is <c>None</c> when no handover applied.
+/// </summary>
+public sealed record InvestigationTraceStep(
+    int Sequence,
+    string ToolName,
+    string DocumentId,
+    int PageNumber,
+    string CitationCheckOutcome,
+    string CorrectionCode,
+    string PolicyHandover);
+
+/// <summary>
+/// Append-only minimized trace keyed by (CaseId, RunId, InvestigationId). <see cref="ActorToken"/> is opaque and non-identifying.
+/// </summary>
+public sealed record InvestigationTrace(
+    string CaseId,
+    string RunId,
+    string InvestigationId,
+    int BasisVersion,
+    string ModelDeploymentName,
+    string ApiVersion,
+    string Region,
+    string ContentFilterSetting,
+    string Decision,
+    string ActorToken,
+    string Outcome,
+    IReadOnlyList<InvestigationTraceStep> Steps);
+
+internal static class InvestigationTraceRules
+{
+    public static void Validate(InvestigationTrace trace)
+    {
+        Require(trace.CaseId, nameof(trace.CaseId));
+        Require(trace.RunId, nameof(trace.RunId));
+        Require(trace.InvestigationId, nameof(trace.InvestigationId));
+        Require(trace.ModelDeploymentName, nameof(trace.ModelDeploymentName));
+        Require(trace.ApiVersion, nameof(trace.ApiVersion));
+        Require(trace.Region, nameof(trace.Region));
+        Require(trace.ContentFilterSetting, nameof(trace.ContentFilterSetting));
+        Require(trace.Decision, nameof(trace.Decision));
+        Require(trace.ActorToken, nameof(trace.ActorToken));
+        Require(trace.Outcome, nameof(trace.Outcome));
+        if (trace.Steps is null)
+        {
+            throw new ArgumentException("Investigation trace steps are required.", nameof(trace));
+        }
+
+        for (var i = 0; i < trace.Steps.Count; i++)
+        {
+            var step = trace.Steps[i];
+            if (step.Sequence != i + 1)
+            {
+                throw new ArgumentException("Investigation trace steps must be numbered 1..n in append order.", nameof(trace));
+            }
+
+            Require(step.ToolName, "ToolName");
+            Require(step.DocumentId, "DocumentId");
+            Require(step.CitationCheckOutcome, "CitationCheckOutcome");
+            Require(step.CorrectionCode, "CorrectionCode");
+            Require(step.PolicyHandover, "PolicyHandover");
+            if (step.PageNumber < 1)
+            {
+                throw new ArgumentException("Investigation trace PageNumber must be positive.", nameof(trace));
+            }
+        }
+    }
+
+    private static void Require(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"Investigation trace {name} is required.", name);
+        }
     }
 }
 
@@ -211,6 +293,49 @@ public sealed class CaseStateStore : ICaseStateStore
         lock (_gate)
         {
             return Current(scope).WorkItems ?? Array.Empty<WorkItem>();
+        }
+    }
+
+    /// <summary>Appends a trace. Traces are never updated or deleted; a duplicate (case, run, investigation) fails and keeps the first record.</summary>
+    public void AppendTrace(CaseScope scope, InvestigationTrace trace)
+    {
+        InvestigationTraceRules.Validate(trace);
+        if (trace.CaseId != scope.CaseId)
+        {
+            throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
+        }
+
+        lock (_gate)
+        {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
+            var current = Current(scope);
+            var existing = current.Traces ?? Array.Empty<InvestigationTrace>();
+            if (existing.Any(t => t.RunId == trace.RunId && t.InvestigationId == trace.InvestigationId))
+            {
+                throw new TraceConflictException();
+            }
+
+            var updated = Freeze(current with { Traces = [.. existing, trace] });
+            var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
+            Persist(snapshot);
+            _cases = snapshot;
+        }
+    }
+
+    /// <summary>Returns the trace only when the case, run and investigation ids all match exactly; otherwise null.</summary>
+    public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId)
+    {
+        lock (_gate)
+        {
+            var state = Current(scope);
+            if (caseId != scope.CaseId)
+            {
+                return null;
+            }
+
+            return (state.Traces ?? Array.Empty<InvestigationTrace>())
+                .FirstOrDefault(t => t.RunId == runId && t.InvestigationId == investigationId);
         }
     }
 
@@ -451,6 +576,7 @@ public sealed class CaseStateStore : ICaseStateStore
         ReceiptIds = Wrap(state.ReceiptIds),
         Audit = Wrap(state.Audit),
         WorkItems = Wrap(state.WorkItems ?? Array.Empty<WorkItem>()),
+        Traces = Wrap(state.Traces ?? Array.Empty<InvestigationTrace>()),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
@@ -508,6 +634,25 @@ public sealed class CaseStateStore : ICaseStateStore
             || state.ReceiptIds.Any(id => !state.ReceiptFingerprints.ContainsKey(id)))
         {
             throw new InvalidDataException("Receipt fingerprints do not match receipts.");
+        }
+
+        var traces = state.Traces ?? Array.Empty<InvestigationTrace>();
+        if (traces.Any(t => t.CaseId != state.CaseId)
+            || traces.Select(t => (t.RunId, t.InvestigationId)).Distinct().Count() != traces.Count)
+        {
+            throw new InvalidDataException("Investigation traces are invalid.");
+        }
+
+        foreach (var trace in traces)
+        {
+            try
+            {
+                InvestigationTraceRules.Validate(trace);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Investigation traces are invalid.", ex);
+            }
         }
 
         var items = state.WorkItems ?? Array.Empty<WorkItem>();
