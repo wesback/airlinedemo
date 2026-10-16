@@ -130,6 +130,27 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.Null(edited.RequestId);
     }
 
+    // The value returned by CurrentBasis cannot be mutated: every write attempt throws and the stored basis is unchanged.
+    [Fact]
+    public void Mutating_the_value_returned_by_current_basis_cannot_change_the_stored_basis()
+    {
+        var returned = _assessments.CurrentBasis("case-1")!;
+        var returnedDocuments = (IDictionary<string, BasisDocument>)returned.Documents;
+        var returnedPages = (IList<string>)returned.Documents["return-status"].Pages;
+
+        Assert.Throws<NotSupportedException>(() => { returnedDocuments.Remove("return-status"); });
+        Assert.Throws<NotSupportedException>(() => { returnedDocuments["other"] = BasisDocument.Create("other", ["Extra."]); });
+        Assert.Throws<NotSupportedException>(() => { returnedPages.Add("Injected."); });
+        Assert.Throws<NotSupportedException>(() => { returnedPages[0] = "Changed."; });
+
+        var stored = _assessments.CurrentBasis("case-1")!;
+        Assert.Equal([Quote, "Page two text."], stored.Documents["return-status"].Pages);
+        Assert.False(stored.Documents.ContainsKey("other"));
+        var record = _service.Assess(_scope, stored, [Missing()]);
+        Assert.Equal("Request", record.Outcome);
+        Assert.Single(_inbox.Requests);
+    }
+
     // AC-03: ambiguity, conflict, incomplete coverage and a downgraded witness each open one review item and no request.
     [Fact]
     public void Ambiguous_or_unsupported_claim_creates_review_item_not_request()
@@ -145,6 +166,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
             (CurrentBasis(), CurrentBasis(version: BasisVersion - 1), [Missing()]),
             // A supplied complete basis cannot override the stored incomplete coverage of the current basis.
             (CurrentBasis(coverage: incomplete), CurrentBasis(), [Missing()]),
+            (CurrentBasis(), CurrentBasis(), [Missing(), Missing()]),
         };
 
         foreach (var (stored, supplied, claims) in scenarios)
