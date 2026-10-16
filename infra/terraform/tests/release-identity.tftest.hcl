@@ -420,6 +420,11 @@ run "release_outputs_contain_no_secrets" {
   }
 
   assert {
+    condition     = alltrue([for f in fileset(path.module, "*.tf") : length(regexall("(?m)^\\}", file("${path.module}/${f}"))) == length(regexall("(?m)^(?:resource|data|variable|output|locals|module|provider|terraform)\\b[^\\n]*\\{[ \\t]*$", file("${path.module}/${f}")))])
+    error_message = "Every top-level Terraform block must close at exactly one column-zero brace. A column-zero brace inside an output or locals block could end the secret scan early, so the scan cannot be trusted and this fails."
+  }
+
+  assert {
     condition     = length(flatten([for f in fileset(path.module, "*.tf") : [for b in regexall("(?ms)^(?:output\\s+\"\\w+\"|locals)\\s*\\{.*?^\\}", file("${path.module}/${f}")) : b if can(regex("(?i)access_key|connection_string|client_secret|password|private_key|primary_key|secondary_key|sas_token|sig=|\\.secret|key_vault_secret|tls_private|<<", b))]])) == 0
     error_message = "No Terraform output or locals block may reference a credential-bearing attribute (access key, connection string, client secret, password, private key, or secret), so an output cannot expose one through a local; whatever its evaluated value. A block that contains a heredoc (<<) also fails, because its content cannot be scanned reliably."
   }
