@@ -266,12 +266,6 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
         }
 
-        // Lone surrogates cannot round-trip through SQL text, so they are not valid identifiers.
-        if (!IsWellFormedUtf16(trace.CaseId) || !IsWellFormedUtf16(trace.RunId) || !IsWellFormedUtf16(trace.InvestigationId))
-        {
-            throw new ArgumentException("Trace identifiers must be well-formed UTF-16.", nameof(trace));
-        }
-
         using var db = NewContext();
         using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
         var keyHash = TraceKey(trace.CaseId, trace.RunId, trace.InvestigationId);
@@ -294,6 +288,9 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             Decision = trace.Decision,
             ActorToken = trace.ActorToken,
             Outcome = trace.Outcome,
+            CaseIdUtf16 = Utf16Bytes(trace.CaseId),
+            RunIdUtf16 = Utf16Bytes(trace.RunId),
+            InvestigationIdUtf16 = Utf16Bytes(trace.InvestigationId),
         });
         db.InvestigationTraceSteps.AddRange(trace.Steps.Select(s => new InvestigationTraceStepRow
         {
@@ -350,9 +347,9 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             .ToList();
 
         return new InvestigationTrace(
-            row.CaseId,
-            row.RunId,
-            row.InvestigationId,
+            caseId,
+            runId,
+            investigationId,
             row.BasisVersion,
             row.ModelDeploymentName,
             row.ApiVersion,
@@ -374,7 +371,12 @@ public sealed class SqlCaseStateStore : ICaseStateStore
 
         var keyHash = TraceKey(caseId, runId, investigationId);
         var row = db.InvestigationTraces.FirstOrDefault(t => t.KeyHash == keyHash);
-        return row is not null && Same(row.CaseId, caseId) && Same(row.RunId, runId) && Same(row.InvestigationId, investigationId) ? row : null;
+        return row is not null
+            && row.CaseIdUtf16.AsSpan().SequenceEqual(Utf16Bytes(caseId))
+            && row.RunIdUtf16.AsSpan().SequenceEqual(Utf16Bytes(runId))
+            && row.InvestigationIdUtf16.AsSpan().SequenceEqual(Utf16Bytes(investigationId))
+                ? row
+                : null;
     }
 
     // Hashes the exact, length-prefixed (case, run, investigation) triple. Each UTF-16 code unit is written as-is,
@@ -395,21 +397,17 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         return SHA256.HashData(stream.ToArray());
     }
 
-    private static bool IsWellFormedUtf16(string value)
+    // Exact code units, little-endian, so lone surrogates survive where SQL text would replace them.
+    private static byte[] Utf16Bytes(string value)
     {
+        var bytes = new byte[value.Length * 2];
         for (var i = 0; i < value.Length; i++)
         {
-            if (char.IsHighSurrogate(value[i]) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
-            {
-                i++;
-            }
-            else if (char.IsSurrogate(value[i]))
-            {
-                return false;
-            }
+            bytes[2 * i] = (byte)value[i];
+            bytes[2 * i + 1] = (byte)(value[i] >> 8);
         }
 
-        return true;
+        return bytes;
     }
 
     private static void WriteUInt32(System.IO.Stream stream, int value)

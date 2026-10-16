@@ -63,6 +63,9 @@ public sealed class InvestigationTraceRow
     public string Decision { get; set; } = string.Empty;
     public string ActorToken { get; set; } = string.Empty;
     public string Outcome { get; set; } = string.Empty;
+    public byte[] CaseIdUtf16 { get; set; } = [];
+    public byte[] RunIdUtf16 { get; set; } = [];
+    public byte[] InvestigationIdUtf16 { get; set; } = [];
 }
 
 public sealed class InvestigationTraceStepRow
@@ -97,13 +100,16 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
         {
             e.ToTable("investigation_traces", "dbo");
             e.HasKey(x => x.KeyHash);
-            e.HasIndex(x => new { x.CaseId, x.RunId, x.InvestigationId })
+            e.HasIndex(x => new { x.CaseIdUtf16, x.RunIdUtf16, x.InvestigationIdUtf16 })
                 .IsUnique()
                 .HasDatabaseName("UX_investigation_traces_case_run_investigation");
             e.Property(x => x.KeyHash).HasMaxLength(32).IsFixedLength();
             e.Property(x => x.CaseId).HasMaxLength(128);
             e.Property(x => x.RunId).HasMaxLength(128);
             e.Property(x => x.InvestigationId).HasMaxLength(128);
+            e.Property(x => x.CaseIdUtf16).HasMaxLength(256).IsRequired();
+            e.Property(x => x.RunIdUtf16).HasMaxLength(256).IsRequired();
+            e.Property(x => x.InvestigationIdUtf16).HasMaxLength(256).IsRequired();
             e.Property(x => x.ModelDeploymentName).HasMaxLength(256).IsRequired();
             e.Property(x => x.ApiVersion).HasMaxLength(64).IsRequired();
             e.Property(x => x.Region).HasMaxLength(64).IsRequired();

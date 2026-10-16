@@ -582,9 +582,9 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1")));
     }
 
-    // AC: M-03 — lone surrogates are not well-formed identifiers: appends are rejected, nothing is stored, and U+FFFD stays a distinct valid id.
+    // AC: M-03 — lone surrogates are exact identifiers: they persist and reload unchanged, and stay distinct from U+FFFD.
     [Fact]
-    public void TraceRejectsMalformedUtf16Identifiers()
+    public void TraceKeepsLoneSurrogateIdentifiersExact()
     {
         using var connection = OpenMigratedSqlite(out var options);
         var store = new SqlCaseStateStore(options);
@@ -593,15 +593,17 @@ public sealed class SqlCaseStateStoreTests
         const string LowSurrogate = "run-\uDC00";
         const string Replacement = "run-\uFFFD";
 
-        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1")));
-        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", LowSurrogate, "inv-1")));
-        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1", "\uDC00inv")));
-        Assert.Equal(0, CountTraceRows(options));
-
+        store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", LowSurrogate, "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "\uDC00inv"));
         store.AppendTrace(scope, NewTrace("case-1", Replacement, "inv-1"));
+        Assert.Equal(4, CountTraceRows(options));
+
+        Assert.Equal(HighSurrogate, store.FindTrace(scope, "case-1", HighSurrogate, "inv-1")!.RunId);
+        Assert.Equal(LowSurrogate, store.FindTrace(scope, "case-1", LowSurrogate, "inv-1")!.RunId);
+        Assert.Equal("\uDC00inv", store.FindTrace(scope, "case-1", "run-1", "\uDC00inv")!.InvestigationId);
         Assert.Equal(Replacement, store.FindTrace(scope, "case-1", Replacement, "inv-1")!.RunId);
-        Assert.Null(store.FindTrace(scope, "case-1", HighSurrogate, "inv-1"));
-        Assert.Null(store.FindTrace(scope, "case-1", LowSurrogate, "inv-1"));
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1")));
     }
 
     // AC: M-03 — the database itself rejects a second (case, run, investigation) row, even with a different key hash.
@@ -615,8 +617,11 @@ public sealed class SqlCaseStateStoreTests
 
         using var command = connection.CreateCommand();
         command.CommandText =
-            "INSERT INTO investigation_traces (KeyHash, CaseId, RunId, InvestigationId, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) " +
-            "VALUES (randomblob(32), 'case-1', 'run-1', 'inv-1', 1, 'm', 'v', 'r', 'c', 'd', 'a', 'o')";
+            "INSERT INTO investigation_traces (KeyHash, CaseId, RunId, InvestigationId, CaseIdUtf16, RunIdUtf16, InvestigationIdUtf16, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) " +
+            "VALUES (randomblob(32), 'case-1', 'run-1', 'inv-1', @c, @r, @i, 1, 'm', 'v', 'r', 'c', 'd', 'a', 'o')";
+        command.Parameters.AddWithValue("@c", System.Text.Encoding.Unicode.GetBytes("case-1"));
+        command.Parameters.AddWithValue("@r", System.Text.Encoding.Unicode.GetBytes("run-1"));
+        command.Parameters.AddWithValue("@i", System.Text.Encoding.Unicode.GetBytes("inv-1"));
         Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
         Assert.Equal(1, CountTraceRows(options));
     }
