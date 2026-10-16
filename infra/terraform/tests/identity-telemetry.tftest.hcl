@@ -140,6 +140,9 @@ variables {
   key_vault_name                  = "kv-demo-test"
   model_account_name              = "aoai-demo-test"
   model_endpoint_subdomain        = "aoai-demo-test"
+  model_deployment_name           = "gpt-demo-test"
+  model_name                      = "gpt-demo-model"
+  model_version                   = "0000-00-00"
   terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
   budget_amount                   = 100
   budget_start_date               = "2026-11-01T00:00:00Z"

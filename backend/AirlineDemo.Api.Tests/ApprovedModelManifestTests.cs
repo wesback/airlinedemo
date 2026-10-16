@@ -15,12 +15,12 @@ public class ApprovedModelManifestTests
           "deploymentName": "fixture-deployment",
           "model": "fixture-model",
           "apiVersion": "2025-01-01",
-          "region": "eastus2",
+          "region": "swedencentral",
           "contentFilter": "enabled"
         }
         """;
 
-    private const string ApprovedRegion = "eastus2";
+    private const string ApprovedRegion = "swedencentral";
     private const string DefaultBody = "aircraft evidence v1.";
 
     private static ApprovedModelManifest Approved() => ApprovedModelManifest.Parse(ApprovedJson);
@@ -179,7 +179,7 @@ public class ApprovedModelManifestTests
         Assert.Equal("fixture-deployment", trace.DeploymentName);
         Assert.Equal("fixture-model", trace.Model);
         Assert.Equal("2025-01-01", trace.ApiVersion);
-        Assert.Equal("eastus2", trace.Region);
+        Assert.Equal("swedencentral", trace.Region);
         Assert.Equal("enabled", trace.ContentFilter);
         Assert.Equal(SyntheticContentRegistry.Sha256Hex(Marked(body)), Assert.Single(trace.EvidenceSha256));
         Assert.DoesNotContain("reserve figures", JsonSerializer.Serialize(trace));
@@ -318,11 +318,48 @@ public class ApprovedModelManifestTests
     }
 
     [Fact]
-    public void Region_comparison_is_case_insensitive()
+    public void Region_is_fixed_to_sweden_central()
     {
-        var trace = ModelCallGate.Authorize(Approved(), Synthetic(region: "EASTUS2"), Registry());
+        Assert.Empty(Approved().Validate());
 
-        Assert.All(trace.EvidenceSha256, h => Assert.Matches("^[0-9a-f]{64}$", h));
+        foreach (var region in new[]
+        {
+            "eastus2", "northeurope", "westeurope", "southcentralus", "eastus", "westus", "westus2", "westus3",
+            "centralus", "uksouth", "ukwest", "", " ", "SwedenCentral", "swedencentral ", "unknown-region-1"
+        })
+        {
+            Assert.NotEmpty(Approved("region", region).Validate());
+        }
+    }
+
+    [Fact]
+    public void Model_request_must_match_sweden_central_manifest_region()
+    {
+        var manifest = Approved();
+
+        var trace = ModelCallGate.Authorize(manifest, Synthetic(region: "swedencentral"), Registry());
+        Assert.Equal("swedencentral", trace.Region);
+
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(region: "westeurope"), Registry()));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(region: "eastus2"), Registry()));
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(region: ""), Registry()));
+        Assert.Throws<ModelGateException>(() =>
+            ModelCallGate.Authorize(manifest, new ModelRequest("evidence-v1", null, Marked(DefaultBody)), Registry()));
+    }
+
+    [Fact]
+    public void Shipped_manifest_remains_stubbed_and_refused()
+    {
+        var manifest = ApprovedModelManifest.Load(ShippedManifestPath());
+
+        Assert.False(manifest.Approved);
+        Assert.Equal("STUB", manifest.Arm);
+        Assert.Equal("STUB", manifest.DeploymentName);
+        Assert.Equal("STUB", manifest.Model);
+        Assert.Equal("STUB", manifest.ApiVersion);
+        Assert.Equal("STUB", manifest.Region);
+        Assert.Equal("STUB", manifest.ContentFilter);
+        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
     }
 
     [Fact]

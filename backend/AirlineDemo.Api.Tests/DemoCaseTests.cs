@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -245,5 +246,135 @@ public class DemoCaseTests
         Assert.Contains("jane.doe@corp.com", FindViolations("contact jane.doe@corp.com today"));
         Assert.Contains("+44 20 7946 0958", FindViolations("call +44 20 7946 0958"));
         Assert.Contains("Lufthansa", FindViolations("released by Lufthansa technics"));
+    }
+
+    private static Dictionary<string, JsonElement> ExpectedDocuments()
+    {
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(FixtureDir(), "expected.json")));
+        return json.RootElement.GetProperty("documents").EnumerateArray()
+            .ToDictionary(d => d.GetProperty("id").GetString()!, d => d.Clone());
+    }
+
+    private static string PdfText(string file)
+    {
+        using var pdf = PdfDocument.Open(Path.Combine(FixtureDir(), file));
+        return string.Join("\n", pdf.GetPages().Select(p => p.Text));
+    }
+
+    [Fact]
+    public void Headline01_scenario_has_fixed_dates_and_display_label()
+    {
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(FixtureDir(), "expected.json")));
+        var scenario = json.RootElement.GetProperty("scenario");
+        var scenarioNow = scenario.GetProperty("scenarioNow").GetString();
+        var returnDate = scenario.GetProperty("returnDate").GetString();
+        Assert.Equal("2025-01-10", scenarioNow);
+        Assert.Equal("2025-10-10", returnDate);
+
+        var now = DateOnly.ParseExact(scenarioNow!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var ret = DateOnly.ParseExact(returnDate!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        Assert.Equal(ret, now.AddMonths(9));
+
+        var aircraft = scenario.GetProperty("aircraft");
+        Assert.Equal("MOCK-AC-001", aircraft.GetProperty("displayLabel").GetString());
+        Assert.StartsWith("SYN-", aircraft.GetProperty("storedId").GetString());
+        Assert.Equal("EN-SYN-7781", scenario.GetProperty("engine").GetProperty("storedId").GetString());
+
+        var temp = Path.Combine(Path.GetTempPath(), "demo-case-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Generator.Generate(temp);
+            Assert.Equal(
+                File.ReadAllBytes(Path.Combine(FixtureDir(), "expected.json")),
+                File.ReadAllBytes(Path.Combine(temp, "expected.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+            {
+                Directory.Delete(temp, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Headline02_missing_history_is_an_engine_llp()
+    {
+        var doc = ExpectedDocuments()["DOC-04"];
+        Assert.Equal("missing-required-history", doc.GetProperty("situation").GetString());
+        Assert.Equal("reject-and-request-history", doc.GetProperty("policyAction").GetString());
+        Assert.False(doc.GetProperty("accepted").GetBoolean());
+        Assert.Contains("life-limited part", doc.GetProperty("type").GetString()!);
+
+        var text = PdfText(doc.GetProperty("file").GetString()!);
+        Assert.Contains("Engine disk", text);
+        Assert.Contains("S/N: SYN-LLP-0001", text);
+        Assert.Contains("Installed in engine: EN-SYN-7781", text);
+        Assert.True(
+            Regex.IsMatch(text, @"back-to-birth history:?\s*not provided", RegexOptions.IgnoreCase),
+            "DOC-04 must state that back-to-birth history is not provided.");
+
+        foreach (var path in Directory.GetFiles(FixtureDir()))
+        {
+            var content = ReadText(path);
+            Assert.DoesNotContain("CMP-B-0002", content);
+            Assert.DoesNotContain("Hydraulic actuator", content);
+        }
+    }
+
+    [Fact]
+    public void Headline03_other_paths_and_llp_cycle_contradiction_are_preserved()
+    {
+        var expected = new Dictionary<string, (string Situation, string PolicyAction)>
+        {
+            ["DOC-05"] = ("ambiguous-identity", "hold-for-human-identity-check"),
+            ["DOC-06"] = ("corrupt-file", "reject-and-request-resubmission"),
+            ["DOC-07"] = ("truncated-file", "reject-and-request-resubmission"),
+            ["DOC-08"] = ("contradictory-later-document", "hold-and-flag-for-review; DOC-04 is not overwritten"),
+            ["DOC-09"] = ("partner-linked-response", "link-partner-response-to-DOC-03"),
+        };
+        var docs = ExpectedDocuments();
+        foreach (var (id, outcome) in expected)
+        {
+            Assert.Equal(outcome.Situation, docs[id].GetProperty("situation").GetString());
+            Assert.Equal(outcome.PolicyAction, docs[id].GetProperty("policyAction").GetString());
+        }
+
+        var doc4Text = PdfText(docs["DOC-04"].GetProperty("file").GetString()!);
+        var doc8Text = PdfText(docs["DOC-08"].GetProperty("file").GetString()!);
+        Assert.Contains("SYN-LLP-0001", doc4Text);
+        Assert.Contains("SYN-LLP-0001", doc8Text);
+
+        var csn4 = CyclesSinceNew(doc4Text);
+        var csn8 = CyclesSinceNew(doc8Text);
+        Assert.True(csn8 < csn4, $"DOC-08 cycles since new ({csn8}) must be lower than DOC-04 ({csn4}).");
+
+        Assert.Contains("EN-SYN-7718", PdfText(docs["DOC-05"].GetProperty("file").GetString()!));
+    }
+
+    private static int CyclesSinceNew(string text)
+    {
+        var match = Regex.Match(text, @"Cycles since new:\s*(\d+)");
+        Assert.True(match.Success, "Cycles since new not found.");
+        return int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
+
+    [Fact]
+    public void Headline04_readme_documents_the_synthetic_headline_story()
+    {
+        var readme = File.ReadAllText(Path.Combine(FixtureDir(), "README.md"));
+        string[] required =
+        [
+            "MOCK-AC-001", "SYN-AC-001", "EN-SYN-7781", "SYN-LLP-0001", "2025-01-10", "2025-10-10",
+            "nine months before return", "one engine LLP history gap", "one routine request",
+            "one ambiguous engine serial", "All case data and documents are synthetic",
+        ];
+        foreach (var value in required)
+        {
+            Assert.Contains(value, readme);
+        }
+
+        Assert.DoesNotContain("DEMO-AC-01", readme);
+        Assert.DoesNotContain("CMP-B-0002", readme);
     }
 }

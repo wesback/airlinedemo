@@ -1,0 +1,264 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 283,
+  "branch": "ai-sdlc/issue-283",
+  "commitSha": "08d33851bc87c07ab577dbd49f7b873b840e44e7",
+  "round": 5,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round 6 fix addresses trailing spaces and lone surrogates, but its SQL Server uniqueness index still collides for identifiers that differ by trailing U+0000.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 52,
+          "message": "The UTF-16 byte index still collapses identifiers that differ by trailing U+0000 on SQL Server, so distinct exact identifier tuples cannot both be persisted.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The unique index now uses UTF-16 byte columns. SQL Server varbinary comparisons ignore trailing zero bytes, while Utf16Bytes encodes identifiers as UTF-16, so distinct identifiers can have byte keys that compare equal.",
+            "failureScenario": "On SQL Server, append traces with the same case and investigation IDs and RunIds \"run-1\" and \"run-1\\u0000\". Validation accepts both and TraceKey produces distinct hashes, but the unique index treats their RunIdUtf16 values as equal, so the second append fails with TraceConflictException instead of persisting a distinct exact identifier."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest fix preserves trailing spaces and malformed UTF-16 in the encoded keys, but SQL Server varbinary comparison can still collapse distinct identifiers ending in U+0000. The SQLite uniqueness test does not cover that SQL Server behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 52,
+          "message": "The unique index still collapses exact identifiers that differ by trailing U+0000 on SQL Server, so the SQL store cannot persist every distinct identifier tuple.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AppendTrace encodes identifiers with Utf16Bytes and relies on this unique index to enforce tuple uniqueness. InvestigationTraceRules.Validate only rejects null, empty, or whitespace-only identifiers, so a trailing U+0000 is accepted. SQL Server varbinary comparisons treat values differing only by trailing zero bytes as equal.",
+            "failureScenario": "On SQL Server, append a trace with RunId \"run-1\", then one with RunId \"run-1\\u0000\" and the same case and investigation IDs. Their hashes differ, but the RunIdUtf16 values compare equal in this index, so the second insert is translated to TraceConflictException instead of persisting the distinct identifier. The SQLite test does not exercise this SQL Server comparison behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The current implementation stores exact UTF-16 identifier bytes and enforces tuple uniqueness on those bytes, resolving the prior trailing-space and malformed-UTF-16 findings. I found no security vulnerability in the reviewed change.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 228,
+      "total": 239,
+      "percent": 95.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 55,
+          "total": 55,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "covered": 54,
+          "total": 58,
+          "missed": [
+            76,
+            77,
+            78,
+            79
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 119,
+          "total": 126,
+          "missed": [
+            265,
+            266,
+            311,
+            312,
+            313,
+            368,
+            369
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

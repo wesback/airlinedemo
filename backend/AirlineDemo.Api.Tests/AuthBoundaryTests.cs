@@ -12,10 +12,18 @@ public sealed class AuthBoundaryTests
 
     private sealed record Session(string Cookie, string Csrf);
 
-    private static WebApplicationFactory<Program> CreateFactory() =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+    private static WebApplicationFactory<Program> CreateFactory()
+    {
+        var path = CaseSeed.CreateFile();
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode })));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = Passcode,
+                    ["Persistence:CaseStateProvider"] = "File",
+                    ["CaseState:Path"] = path,
+                })));
+    }
 
     private static Task<HttpResponseMessage> SignInRawAsync(HttpClient client, string? userId, string? passcode, CancellationToken ct) =>
         client.PostAsJsonAsync("/api/auth/sign-in", new { userId, passcode }, ct);
@@ -126,7 +134,7 @@ public sealed class AuthBoundaryTests
         var ct = TestContext.Current.CancellationToken;
         var reviewer = await SignInAsync(client, "reviewer", ct);
         using var response = await SendAsync(client, HttpMethod.Post, "/api/cases/case-001/reviews",
-            reviewer, false, new { expectedRevision = 1, decision = "accept" }, ct);
+            reviewer, false, new { expectedRevision = 1, expectedBasisVersion = 1, decision = "accept", reason = "basis reviewed" }, ct);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(1, await RevisionAsync(client, reviewer, "case-001", ct));
@@ -140,7 +148,7 @@ public sealed class AuthBoundaryTests
         var ct = TestContext.Current.CancellationToken;
         var presenter = await SignInAsync(client, "presenter", ct);
         using var response = await SendAsync(client, HttpMethod.Post, "/api/cases/case-001/reviews",
-            presenter, true, new { expectedRevision = 1, decision = "accept" }, ct);
+            presenter, true, new { expectedRevision = 1, expectedBasisVersion = 1, decision = "accept", reason = "basis reviewed" }, ct);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(1, await RevisionAsync(client, presenter, "case-001", ct));
@@ -155,7 +163,7 @@ public sealed class AuthBoundaryTests
         var reviewer = await SignInAsync(client, "reviewer", ct);
         var presenter = await SignInAsync(client, "presenter", ct);
         using var response = await SendAsync(client, HttpMethod.Post, "/api/cases/case-002/reviews",
-            reviewer, true, new { expectedRevision = 1, decision = "accept" }, ct);
+            reviewer, true, new { expectedRevision = 1, expectedBasisVersion = 1, decision = "accept", reason = "basis reviewed" }, ct);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(1, await RevisionAsync(client, presenter, "case-002", ct));
@@ -169,7 +177,7 @@ public sealed class AuthBoundaryTests
         var ct = TestContext.Current.CancellationToken;
         var reviewer = await SignInAsync(client, "reviewer", ct);
         using var response = await SendAsync(client, HttpMethod.Post, "/api/cases/case-001/reviews",
-            reviewer, true, new { expectedRevision = 0, decision = "accept" }, ct);
+            reviewer, true, new { expectedRevision = 0, expectedBasisVersion = 1, decision = "accept", reason = "basis reviewed" }, ct);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal(1, await RevisionAsync(client, reviewer, "case-001", ct));
@@ -183,7 +191,7 @@ public sealed class AuthBoundaryTests
         var ct = TestContext.Current.CancellationToken;
         var reviewer = await SignInAsync(client, "reviewer", ct);
         using var response = await SendAsync(client, HttpMethod.Post, "/api/cases/case-001/reviews",
-            reviewer, true, new { expectedRevision = 1, decision = "accept" }, ct);
+            reviewer, true, new { expectedRevision = 1, expectedBasisVersion = 1, decision = "accept", reason = "basis reviewed" }, ct);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(2, await RevisionAsync(client, reviewer, "case-001", ct));

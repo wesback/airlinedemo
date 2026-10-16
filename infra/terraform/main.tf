@@ -199,6 +199,19 @@ resource "azurerm_storage_account" "blob" {
   shared_access_key_enabled         = false
   default_to_oauth_authentication   = true
   infrastructure_encryption_enabled = true
+
+  # Evidence versioning and 14-day recovery of deleted blobs and containers (RETENTION-01).
+  blob_properties {
+    versioning_enabled = true
+
+    delete_retention_policy {
+      days = 14
+    }
+
+    container_delete_retention_policy {
+      days = 14
+    }
+  }
 }
 
 resource "azurerm_key_vault" "kv" {
@@ -221,7 +234,7 @@ resource "azurerm_key_vault" "kv" {
 resource "azurerm_cognitive_account" "model" {
   name                          = var.model_account_name
   resource_group_name           = azurerm_resource_group.demo.name
-  location                      = azurerm_resource_group.demo.location
+  location                      = "swedencentral"
   kind                          = "OpenAI"
   sku_name                      = "S0"
   custom_subdomain_name         = var.model_endpoint_subdomain
@@ -230,6 +243,21 @@ resource "azurerm_cognitive_account" "model" {
 
   network_acls {
     default_action = "Deny"
+  }
+}
+
+resource "azurerm_cognitive_deployment" "model" {
+  name                 = var.model_deployment_name
+  cognitive_account_id = azurerm_cognitive_account.model.id
+
+  model {
+    format  = "OpenAI"
+    name    = var.model_name
+    version = var.model_version
+  }
+
+  sku {
+    name = "GlobalStandard"
   }
 }
 

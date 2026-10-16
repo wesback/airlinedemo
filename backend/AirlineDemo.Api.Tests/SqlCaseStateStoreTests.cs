@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using AirlineDemo.Api.Persistence;
@@ -10,6 +11,7 @@ using AirlineDemo.Api.Runs;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
 namespace AirlineDemo.Api.Tests;
@@ -19,7 +21,7 @@ public sealed class SqlCaseStateStoreTests
     private static readonly string[] InterfaceMethods =
     [
         "AuthorizeCase", "OwnerOf", "CreateCase", "Read", "GetBasisVersion", "ReadAudit", "Commit",
-        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState",
+        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState", "AppendTrace", "FindTrace",
     ];
 
     // AC1: interface contract and file-backed registration; no database connection.
@@ -87,7 +89,7 @@ public sealed class SqlCaseStateStoreTests
         const string connectionString =
             "Server=tcp:case-state.database.windows.net,1433;Database=casestate;Encrypt=True;Authentication=Active Directory Managed Identity;";
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString })
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString })
             .Build();
 
         var services = new ServiceCollection();
@@ -113,14 +115,14 @@ public sealed class SqlCaseStateStoreTests
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString("Server=x;Database=y;Encrypt=True;"));
 
         var forbidden = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString + "Password=secret;" })
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString + "Password=secret;" })
             .Build();
         Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(forbidden));
 
         foreach (var suffix in new[] { "User ID=app;", "UID=app;", "Password=secret;", "PWD=secret;", "Access Token=token;" })
         {
             var configured = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString + suffix })
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString + suffix })
                 .Build();
             Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(configured));
         }
@@ -129,7 +131,7 @@ public sealed class SqlCaseStateStoreTests
         foreach (var duplicate in new[] { "Authentication=Active Directory Default;", "Authentication=Active Directory Managed Identity;" })
         {
             var configured = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:CaseState"] = connectionString + duplicate })
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Persistence:CaseStateProvider"] = "Sql", ["ConnectionStrings:CaseState"] = connectionString + duplicate })
                 .Build();
             Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(configured));
         }
@@ -139,6 +141,36 @@ public sealed class SqlCaseStateStoreTests
         var program = File.ReadAllText(Path.Combine(SourceDirectory(), "..", "AirlineDemo.Api", "Program.cs"));
         Assert.Contains("AddCaseStateStore(builder.Configuration)", program);
     }
+
+    // AC1: commits and audit reads issue only SELECT and INSERT against case_events; no generated command updates or deletes it.
+    [Fact]
+    public void AC1_generated_audit_commands_are_append_only()
+    {
+        using var connection = OpenMigratedSqlite(out _);
+        var recorder = new CommandRecorder();
+        var recordingOptions = new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(recorder)
+            .Options;
+
+        var store = new SqlCaseStateStore(recordingOptions);
+        var scope = store.CreateCase("case-1", "owner-a");
+        recorder.Commands.Clear();
+
+        store.Commit(scope, 0, new CaseCommit(null, null, "owner-a", "open", "opened"));
+        Assert.Single(store.ReadAudit(scope));
+
+        var auditCommands = recorder.Commands.Where(c => c.Contains("case_events", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Contains(auditCommands, c => LeadingKeyword(c) == "SELECT");
+        Assert.Contains(auditCommands, c => LeadingKeyword(c) == "INSERT");
+        Assert.All(auditCommands, c => Assert.Contains(LeadingKeyword(c), new[] { "SELECT", "INSERT" }));
+        Assert.DoesNotContain(recorder.Commands, c =>
+            c.Contains("case_events", StringComparison.OrdinalIgnoreCase)
+            && (LeadingKeyword(c) is "UPDATE" or "DELETE" or "REPLACE" or "UPSERT"));
+    }
+
+    private static string LeadingKeyword(string commandText) =>
+        System.Text.RegularExpressions.Regex.Match(commandText, @"^\s*(\w+)").Groups[1].Value.ToUpperInvariant();
 
     // AC2: the adapter maps the four tables and exposes no audit update or delete; a successful commit appends one audit event.
     [Fact]
@@ -325,6 +357,131 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<CaseAccessDeniedException>(() => store.GetBasisVersion(scope, 1));
     }
 
+    // AC1 (basis immutability): version 1 keeps its content and digests across an append and a restart,
+    // and every attempt to replace it is rejected without changing persisted state.
+    [Fact]
+    public void AC1_basis_digests_are_immutable_across_appends_and_restart()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-basis", "owner-b");
+        var v1 = CaseStateStore.CreateBasisVersion(1, "basis one", string.Empty);
+        store.Commit(scope, 0, new CaseCommit(v1, null, "owner-b", "basis-1", "v1"));
+        var v2 = CaseStateStore.CreateBasisVersion(2, "basis two", v1.BasisDigest);
+        store.Commit(scope, 1, new CaseCommit(v2, null, "owner-b", "basis-2", "v2"));
+
+        var reloaded = new SqlCaseStateStore(options);
+        var before = reloaded.Read(scope);
+        Assert.Equal(2, before.Revision);
+        Assert.Equal(2, before.Basis.Count);
+        var stored = before.Basis[0];
+        Assert.Equal(1, stored.Version);
+        Assert.Equal(v1.Content, stored.Content);
+        Assert.Equal(v1.ContentDigest, stored.ContentDigest);
+        Assert.Equal(v1.BasisDigest, stored.BasisDigest);
+
+        var auditBefore = CountAuditEvents(options);
+        var decisionsBefore = CaptureDecisions(options, before.CaseId);
+
+        Assert.Throws<BasisIntegrityException>(() =>
+            reloaded.Commit(scope, before.Revision, new CaseCommit(v1 with { ContentDigest = "changed" }, null, "owner-b", "replace", "digest")));
+        AssertStateUnchanged(reloaded, options, scope, before, auditBefore, decisionsBefore);
+
+        Assert.Throws<BasisIntegrityException>(() =>
+            reloaded.Commit(scope, before.Revision, new CaseCommit(v1 with { BasisDigest = "changed" }, null, "owner-b", "replace", "chain")));
+        AssertStateUnchanged(reloaded, options, scope, before, auditBefore, decisionsBefore);
+
+        Assert.Throws<BasisIntegrityException>(() =>
+            reloaded.Commit(scope, before.Revision, new CaseCommit(v1 with { Content = "changed payload" }, null, "owner-b", "replace", "payload")));
+        AssertStateUnchanged(reloaded, options, scope, before, auditBefore, decisionsBefore);
+
+        // A fresh store over the same database sees the original version 1 after the rejected attempts.
+        var restarted = new SqlCaseStateStore(options).Read(scope);
+        Assert.Equal(v1.Content, restarted.Basis[0].Content);
+        Assert.Equal(v1.ContentDigest, restarted.Basis[0].ContentDigest);
+        Assert.Equal(v1.BasisDigest, restarted.Basis[0].BasisDigest);
+    }
+
+    // AC2 (receipts): an exact replay returns the original receipt and fingerprint without a revision or audit change;
+    // the same receipt ID with a changed payload is rejected.
+    [Fact]
+    public void AC2_exact_receipt_replay_is_idempotent_and_changed_payload_is_rejected()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-replay", "owner-p");
+        var basis = CaseStateStore.CreateBasisVersion(1, "replay basis", string.Empty);
+        var first = store.Commit(scope, 0, new CaseCommit(basis, "receipt-p", "owner-p", "open", "first"));
+        Assert.False(first.Replayed);
+
+        var before = store.Read(scope);
+        var auditBefore = CountAuditEvents(options);
+        var decisionsBefore = CaptureDecisions(options, before.CaseId);
+        Assert.Equal(new[] { ("receipt-p", decisionsBefore[0].Fingerprint) }, decisionsBefore);
+
+        var replay = store.Commit(scope, before.Revision, new CaseCommit(basis, "receipt-p", "owner-p", "open", "first"));
+        Assert.True(replay.Replayed);
+        Assert.Equal(new[] { "receipt-p" }, replay.State.ReceiptIds);
+        Assert.Equal(first.State.ReceiptFingerprints["receipt-p"], replay.State.ReceiptFingerprints["receipt-p"]);
+        Assert.Equal(decisionsBefore[0].Fingerprint, replay.State.ReceiptFingerprints["receipt-p"]);
+        Assert.Equal(before.Revision, replay.State.Revision);
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
+
+        Assert.Throws<ReceiptConflictException>(() =>
+            store.Commit(scope, before.Revision, new CaseCommit(basis, "receipt-p", "owner-p", "open", "changed")));
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
+    }
+
+    // AC3 (atomicity): a failure after the SQL changes are applied but before the transaction commits rolls back
+    // the basis, receipt, and audit event together.
+    [Fact]
+    public void AC3_failed_commit_rolls_back_all_records()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-rollback", "owner-rb");
+        var before = store.Read(scope);
+        var auditBefore = CountAuditEvents(options);
+        var decisionsBefore = CaptureDecisions(options, before.CaseId);
+
+        // The interceptor is attached only after case creation so the case row itself is not affected.
+        var interceptor = new FailAfterSaveInterceptor();
+        var faultyOptions = new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        var faulty = new SqlCaseStateStore(faultyOptions);
+
+        var basis = CaseStateStore.CreateBasisVersion(1, "rollback basis", string.Empty);
+        interceptor.Armed = true;
+        Assert.Throws<InjectedCommitFailure>(() =>
+            faulty.Commit(scope, before.Revision, new CaseCommit(basis, "receipt-rb", "owner-rb", "open", "rollback")));
+        interceptor.Armed = false;
+
+        AssertStateUnchanged(store, options, scope, before, auditBefore, decisionsBefore);
+        Assert.Empty(store.Read(scope).Basis);
+        Assert.Empty(store.Read(scope).ReceiptIds);
+    }
+
+    private sealed class InjectedCommitFailure : Exception
+    {
+    }
+
+    private sealed class FailAfterSaveInterceptor : SaveChangesInterceptor
+    {
+        public bool Armed { get; set; }
+
+        public override int SavedChanges(SaveChangesCompletedEventData eventData, int result)
+        {
+            if (Armed)
+            {
+                throw new InjectedCommitFailure();
+            }
+
+            return base.SavedChanges(eventData, result);
+        }
+    }
+
     private static void AssertStateUnchanged(
         SqlCaseStateStore store,
         DbContextOptions<CaseStateDbContext> options,
@@ -352,6 +509,235 @@ public sealed class SqlCaseStateStoreTests
             .OrderBy(d => d.Id)
             .Select(d => new ValueTuple<string, string>(d.ReceiptId, d.Fingerprint))
             .ToList();
+    }
+
+    // AC: M-03 — trace records are append-only: a duplicate fails, the original is untouched, and trace commands are SELECT/INSERT only.
+    [Fact]
+    public void TraceWritesAreAppendOnly()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var recorder = new CommandRecorder();
+        var recordingOptions = new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(recorder)
+            .Options;
+        var store = new SqlCaseStateStore(recordingOptions);
+        var scope = store.CreateCase("case-1", "owner-a");
+        var original = NewTrace("case-1", "run-1", "inv-1");
+        recorder.Commands.Clear();
+
+        store.AppendTrace(scope, original);
+        var duplicate = NewTrace("case-1", "run-1", "inv-1", actor: "tok-other") with
+        {
+            Steps = [new InvestigationTraceStep(1, "other-tool", "doc-x", 9, "unverified", "None", "None")],
+        };
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, duplicate));
+
+        var reloaded = new SqlCaseStateStore(options);
+        var reloadedScope = reloaded.AuthorizeCase("case-1", "owner-a");
+        AssertSameTrace(original, reloaded.FindTrace(reloadedScope, "case-1", "run-1", "inv-1")!);
+
+        var traceCommands = recorder.Commands.Where(c => c.Contains("investigation_trace", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Contains(traceCommands, c => LeadingKeyword(c) == "INSERT");
+        Assert.All(traceCommands, c => Assert.Contains(LeadingKeyword(c), new[] { "SELECT", "INSERT" }));
+        Assert.DoesNotContain(recorder.Commands, c =>
+            c.Contains("investigation_trace", StringComparison.OrdinalIgnoreCase)
+            && (LeadingKeyword(c) is "UPDATE" or "DELETE" or "REPLACE" or "UPSERT"));
+    }
+
+    // AC: TRACE-STORE-03 — FindTrace requires the exact case, run and investigation ids; each mismatch independently returns null.
+    [Fact]
+    public void TraceLookupRequiresExactCaseRunAndInvestigation()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        var trace = NewTrace("case-1", "run-1", "inv-1");
+        store.AppendTrace(scope, trace);
+
+        Assert.Null(store.FindTrace(scope, "case-2", "run-1", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-2", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1", "inv-2"));
+        Assert.Null(store.FindTrace(scope, "CASE-1", "run-1", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "RUN-1", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1", "INV-1"));
+        AssertSameTrace(trace, store.FindTrace(scope, "case-1", "run-1", "inv-1")!);
+    }
+
+    // AC: all InvestigationTrace and step fields persist, steps reload in Sequence order, and (CaseId, RunId, InvestigationId) is unique in the database.
+    // AC: M-03 — identifiers differing only by surrounding spaces are distinct exact keys; SQL Server would otherwise pad them into one key.
+    [Fact]
+    public void TraceKeysKeepSurroundingWhitespaceDistinct()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", " run-1", "inv-1"));
+
+        Assert.Equal("run-1 ", store.FindTrace(scope, "case-1", "run-1 ", "inv-1")!.RunId);
+        Assert.Equal(" run-1", store.FindTrace(scope, "case-1", " run-1", "inv-1")!.RunId);
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1 ", "inv-2"));
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1")));
+    }
+
+    // AC: M-03 — lone surrogates are exact identifiers: they persist and reload unchanged, and stay distinct from U+FFFD.
+    [Fact]
+    public void TraceKeepsLoneSurrogateIdentifiersExact()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        const string HighSurrogate = "run-\uD800";
+        const string LowSurrogate = "run-\uDC00";
+        const string Replacement = "run-\uFFFD";
+
+        store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", LowSurrogate, "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "\uDC00inv"));
+        store.AppendTrace(scope, NewTrace("case-1", Replacement, "inv-1"));
+        Assert.Equal(4, CountTraceRows(options));
+
+        Assert.Equal(HighSurrogate, store.FindTrace(scope, "case-1", HighSurrogate, "inv-1")!.RunId);
+        Assert.Equal(LowSurrogate, store.FindTrace(scope, "case-1", LowSurrogate, "inv-1")!.RunId);
+        Assert.Equal("\uDC00inv", store.FindTrace(scope, "case-1", "run-1", "\uDC00inv")!.InvestigationId);
+        Assert.Equal(Replacement, store.FindTrace(scope, "case-1", Replacement, "inv-1")!.RunId);
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, NewTrace("case-1", HighSurrogate, "inv-1")));
+    }
+
+    // AC: M-03 — the database itself rejects a second (case, run, investigation) row, even with a different key hash.
+    [Fact]
+    public void TraceIdentifierTupleIsUniqueInDatabase()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "INSERT INTO investigation_traces (KeyHash, CaseId, RunId, InvestigationId, CaseIdUtf16, CaseIdLength, RunIdUtf16, RunIdLength, InvestigationIdUtf16, InvestigationIdLength, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) " +
+            "VALUES (randomblob(32), 'case-1', 'run-1', 'inv-1', @c, 6, @r, 5, @i, 5, 1, 'm', 'v', 'r', 'c', 'd', 'a', 'o')";
+        command.Parameters.AddWithValue("@c", System.Text.Encoding.Unicode.GetBytes("case-1"));
+        command.Parameters.AddWithValue("@r", System.Text.Encoding.Unicode.GetBytes("run-1"));
+        command.Parameters.AddWithValue("@i", System.Text.Encoding.Unicode.GetBytes("inv-1"));
+        Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+        Assert.Equal(1, CountTraceRows(options));
+    }
+
+    [Fact]
+    public void TraceIdentifierLengthIsLimited()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+
+        // 64 surrogate pairs is exactly 128 UTF-16 code units and is accepted.
+        var atLimit = string.Concat(Enumerable.Repeat("\uD83D\uDE00", 64));
+        store.AppendTrace(scope, NewTrace("case-1", atLimit, "inv-1"));
+        Assert.Equal(1, CountTraceRows(options));
+
+        // One code unit over the limit is rejected, including when the extra unit is half a surrogate pair.
+        var overByOneSurrogate = atLimit + "\uD83D";
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", overByOneSurrogate, "inv-1")));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-2", new string('a', 129))));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-3", atLimit + "bc")));
+        Assert.Equal(1, CountTraceRows(options));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-2", new string('a', 129)));
+
+        // CaseId is limited too: a scope for the overlong case id reaches the length check and is rejected by name.
+        var longCaseId = new string('c', 129);
+        var longScope = store.CreateCase(longCaseId, "owner-a");
+        var caseIdError = Assert.Throws<ArgumentException>(() => store.AppendTrace(longScope, NewTrace(longCaseId, "run-4", "inv-1")));
+        Assert.Equal("CaseId", caseIdError.ParamName);
+        Assert.Equal(1, CountTraceRows(options));
+    }
+
+    [Fact]
+    public void TraceIdentifiersDifferingByTrailingNulAreDistinct()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1\0", "inv-1"));
+
+        Assert.Equal(2, CountTraceRows(options));
+        Assert.Equal("run-1", store.FindTrace(scope, "case-1", "run-1", "inv-1")!.RunId);
+        Assert.Equal("run-1\0", store.FindTrace(scope, "case-1", "run-1\0", "inv-1")!.RunId);
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1\0\0", "inv-1"));
+    }
+
+    [Fact]
+    public void TracePersistenceRoundTripsAllFields()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        var trace = NewTrace("case-1", "run-1", "inv-1");
+        store.AppendTrace(scope, trace);
+
+        var reloaded = new SqlCaseStateStore(options);
+        var reloadedScope = reloaded.AuthorizeCase("case-1", "owner-a");
+        var stored = reloaded.FindTrace(reloadedScope, "case-1", "run-1", "inv-1")!;
+        AssertSameTrace(trace, stored);
+        Assert.Equal(new[] { 1, 2 }, stored.Steps.Select(s => s.Sequence));
+
+        byte[] storedKey;
+        using (var read = new CaseStateDbContext(options))
+        {
+            storedKey = read.InvestigationTraces.Single().KeyHash;
+        }
+
+        using var db = new CaseStateDbContext(options);
+        db.InvestigationTraces.Add(new InvestigationTraceRow
+        {
+            KeyHash = storedKey,
+            CaseId = "case-1",
+            RunId = "run-1",
+            InvestigationId = "inv-1",
+            BasisVersion = 3,
+            ModelDeploymentName = "model-deploy-x",
+            ApiVersion = "2025-01-01",
+            Region = "eastus",
+            ContentFilterSetting = "enabled",
+            Decision = "approve",
+            ActorToken = "tok-7f3a",
+            Outcome = "ready",
+        });
+        Assert.ThrowsAny<DbUpdateException>(() => db.SaveChanges());
+    }
+
+    private static InvestigationTrace NewTrace(string caseId, string runId, string investigationId, string actor = "tok-7f3a") =>
+        new(
+            caseId,
+            runId,
+            investigationId,
+            BasisVersion: 3,
+            ModelDeploymentName: "model-deploy-x",
+            ApiVersion: "2025-01-01",
+            Region: "westeurope",
+            ContentFilterSetting: "strict-filter",
+            Decision: "return-to-service",
+            ActorToken: actor,
+            Outcome: "escalated",
+            Steps:
+            [
+                new InvestigationTraceStep(1, "search-manual", "doc-ata-32", 14, "verified", "None", "None"),
+                new InvestigationTraceStep(2, "check-limit", "doc-mel-05", 2, "rewritten", "CitationRewrite", "ManualReview"),
+            ]);
+
+    private static void AssertSameTrace(InvestigationTrace expected, InvestigationTrace actual)
+    {
+        Assert.Equal(expected with { Steps = null! }, actual with { Steps = null! });
+        Assert.Equal(expected.Steps, actual.Steps);
+    }
+
+    private static int CountTraceRows(DbContextOptions<CaseStateDbContext> options)
+    {
+        using var db = new CaseStateDbContext(options);
+        return db.InvestigationTraces.Count();
     }
 
     private static SqliteConnection OpenMigratedSqlite(out DbContextOptions<CaseStateDbContext> options)
@@ -441,6 +827,29 @@ public sealed class SqlCaseStateStoreTests
         Assert.Equal("closed", Assert.Single(reloaded.ListWorkItems(reloadedScope)).State);
         Assert.Equal(2, reloaded.Read(reloadedScope).Revision);
         Assert.Equal(auditAfterChange, reloaded.ReadAudit(reloadedScope));
+    }
+
+    private sealed class CommandRecorder : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = new();
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result)
+        {
+            Commands.Add(command.CommandText);
+            return result;
+        }
+
+        public override InterceptionResult<int> NonQueryExecuting(DbCommand command, CommandEventData eventData, InterceptionResult<int> result)
+        {
+            Commands.Add(command.CommandText);
+            return result;
+        }
+
+        public override InterceptionResult<object> ScalarExecuting(DbCommand command, CommandEventData eventData, InterceptionResult<object> result)
+        {
+            Commands.Add(command.CommandText);
+            return result;
+        }
     }
 
     private static string SourceDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;

@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Obligations;
+using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Reviews;
 
 namespace AirlineDemo.Api.Finance;
 
@@ -46,11 +49,19 @@ public static class FinanceDemoData
 public static class FinanceEndpoints
 {
     public const string ReservePeriod = "2026-09";
+    public const string FinanceReviewerRole = "finance-reviewer";
+    public const string LegalReviewerRole = "legal-reviewer";
+    public const string ReserveDecisionAction = "reserve.decided";
+    public const string LegalDecisionAction = "obligation.legal-decided";
+    public const int MaxReasonLength = 2000;
+    private const string ReasonError = "A reason of 1 to 2000 characters is required.";
 
     public static IEndpointRouteBuilder MapFinanceEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/cases/{caseId}/reserve", GetReserve);
         app.MapGet("/api/cases/{caseId}/obligations", GetObligations);
+        app.MapPost("/api/cases/{caseId}/reserve/decisions", RecordReserveDecision);
+        app.MapPost("/api/cases/{caseId}/obligations/{id}/decisions", RecordLegalDecision);
         return app;
     }
 
@@ -74,4 +85,88 @@ public static class FinanceEndpoints
         if (input?.Obligation is null) return Results.NotFound();
         return Results.Ok(ObligationEvaluator.Evaluate(input.Obligation, time.GetUtcNow(), input.NoticeDrafts));
     }
+
+    // Simulated decisions: they append one audit event and never issue an invoice or send a notice.
+    private static IResult RecordReserveDecision(string caseId, FinanceDecisionCommand body, HttpContext http, DemoSessionStore sessions, ICaseStateStore store)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null) return DemoAuthEndpoints.Unauthenticated();
+        if (!DemoAuthEndpoints.HasValidAntiForgery(http, session)) return DemoAuthEndpoints.AntiForgeryFailed();
+        if (session.User.Role != FinanceReviewerRole) return RoleNotPermitted();
+        var scope = TechnicalReviewPolicy.ScopeFor(store, session.User.CaseScopes, caseId);
+        if (scope is null) return Results.NotFound();
+        if (body.Decision is not ("approve" or "return")) return BadRequest("Decision must be approve or return.");
+        var reason = NormalizeReason(body.Reason);
+        if (reason is null) return BadRequest(ReasonError);
+
+        var committed = TryCommit(store, scope, body.ExpectedRevision, session.User.Id, ReserveDecisionAction, new { decision = body.Decision, reason });
+        if (committed is null) return Stale();
+        return Results.Ok(new
+        {
+            caseId,
+            decision = body.Decision,
+            reason,
+            revision = committed.State.Revision,
+            auditSequence = committed.State.Audit[^1].Sequence,
+            simulated = true,
+            invoiceIssued = false,
+        });
+    }
+
+    private static IResult RecordLegalDecision(string caseId, string id, FinanceDecisionCommand body, HttpContext http, DemoSessionStore sessions, ICaseStateStore store, FinanceInputStore inputs, TimeProvider time)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null) return DemoAuthEndpoints.Unauthenticated();
+        if (!DemoAuthEndpoints.HasValidAntiForgery(http, session)) return DemoAuthEndpoints.AntiForgeryFailed();
+        if (session.User.Role != LegalReviewerRole) return RoleNotPermitted();
+        var scope = TechnicalReviewPolicy.ScopeFor(store, session.User.CaseScopes, caseId);
+        if (scope is null) return Results.NotFound();
+        if (body.Decision is not ("signed-off" or "rejected")) return BadRequest("Decision must be signed-off or rejected.");
+        var reason = NormalizeReason(body.Reason);
+        if (reason is null) return BadRequest(ReasonError);
+
+        var input = inputs.Find(caseId);
+        var draft = input?.NoticeDrafts.FirstOrDefault(d => d.ObligationId == id && d.Status == NoticeDraftStatus.Current);
+        if (input?.Obligation?.Id != id || draft is null) return Results.NotFound();
+
+        var record = ObligationEvaluator.RecordLegalDecision(draft, session.User.Id, body.Decision, reason, time.GetUtcNow());
+        var committed = TryCommit(store, scope, body.ExpectedRevision, session.User.Id, LegalDecisionAction, record);
+        if (committed is null) return Stale();
+        return Results.Ok(new
+        {
+            caseId,
+            obligationId = id,
+            noticeDraftId = draft.Id,
+            decision = body.Decision,
+            reason,
+            revision = committed.State.Revision,
+            auditSequence = committed.State.Audit[^1].Sequence,
+            simulated = true,
+            noticeSent = false,
+        });
+    }
+
+    /// <summary>Returns null when the expected revision is stale; nothing is committed in that case.</summary>
+    private static CommitResult? TryCommit(ICaseStateStore store, CaseScope scope, long expectedRevision, string actorId, string action, object detail)
+    {
+        try
+        {
+            return store.Commit(scope, expectedRevision, new CaseCommit(null, null, actorId, action, JsonSerializer.Serialize(detail)));
+        }
+        catch (RevisionConflictException)
+        {
+            return null;
+        }
+    }
+
+    private static string? NormalizeReason(string? reason) =>
+        reason is null || reason.Length > MaxReasonLength || reason.Trim().Length == 0 ? null : reason.Trim();
+
+    private static IResult RoleNotPermitted() => Results.Json(new { error = "Role not permitted." }, statusCode: StatusCodes.Status403Forbidden);
+
+    private static IResult BadRequest(string error) => Results.BadRequest(new { error });
+
+    private static IResult Stale() => Results.Json(new { error = "Case revision is stale." }, statusCode: StatusCodes.Status409Conflict);
 }
+
+public sealed record FinanceDecisionCommand(long ExpectedRevision, string? Decision, string? Reason);
