@@ -16,10 +16,12 @@ public sealed class WorkloadAdmissionLimits(TimeProvider time)
     public const string InvestigationKind = "investigation-concurrency-limit";
     public const string PackageLimitError = "package submission limit exceeded";
     public const string InvestigationLimitError = "investigation concurrency limit exceeded";
+    // Only the most recent refusals are kept, so repeated refusals cannot grow memory without bound.
+    public const int MaxRecordedEvents = 256;
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Queue<DateTimeOffset>> _admittedPackages = new(StringComparer.Ordinal);
-    private readonly List<AdmissionEvent> _events = [];
+    private readonly Queue<AdmissionEvent> _events = new();
     private int _activeInvestigations;
 
     public IReadOnlyList<AdmissionEvent> Events
@@ -52,7 +54,7 @@ public sealed class WorkloadAdmissionLimits(TimeProvider time)
 
             if (admitted.Count >= PackageAttemptsPerWindow)
             {
-                _events.Add(new AdmissionEvent(now, PackageKind, userId, PackageLimitError));
+                Record(new AdmissionEvent(now, PackageKind, userId, PackageLimitError));
                 return false;
             }
 
@@ -68,13 +70,19 @@ public sealed class WorkloadAdmissionLimits(TimeProvider time)
         {
             if (_activeInvestigations >= MaxConcurrentInvestigations)
             {
-                _events.Add(new AdmissionEvent(time.GetUtcNow(), InvestigationKind, "application", InvestigationLimitError));
+                Record(new AdmissionEvent(time.GetUtcNow(), InvestigationKind, "application", InvestigationLimitError));
                 return null;
             }
 
             _activeInvestigations++;
             return new InvestigationSlot(this);
         }
+    }
+
+    private void Record(AdmissionEvent refusal)
+    {
+        if (_events.Count == MaxRecordedEvents) _events.Dequeue();
+        _events.Enqueue(refusal);
     }
 
     private void Release()

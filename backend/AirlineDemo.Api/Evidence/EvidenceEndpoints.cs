@@ -114,6 +114,11 @@ public static class EvidenceEndpoints
         var invalid = EvidenceIntake.Validate(documents);
         if (invalid is not null) return Results.BadRequest(new { error = invalid });
 
+        // Refused before the case is created or any package, basis entry or investigation result is written; held until the investigation finishes.
+        using var investigationSlot = admission.TryAdmitInvestigation();
+        if (investigationSlot is null)
+            return Results.Json(new { error = WorkloadAdmissionLimits.InvestigationLimitError }, statusCode: StatusCodes.Status429TooManyRequests);
+
         // Authorize before anything is saved: a non-owner must not write evidence into another user's case.
         CaseScope scope;
         try
@@ -126,11 +131,6 @@ public static class EvidenceEndpoints
         {
             return Results.NotFound();
         }
-
-        // Refused before any package or basis entry is written, and held until the investigation finishes.
-        using var investigationSlot = admission.TryAdmitInvestigation();
-        if (investigationSlot is null)
-            return Results.Json(new { error = WorkloadAdmissionLimits.InvestigationLimitError }, statusCode: StatusCodes.Status429TooManyRequests);
 
         var packageId = PackageIdFor(caseId, documents);
         var (record, created) = packages.Submit(packageId, caseId,
