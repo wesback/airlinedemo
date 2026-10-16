@@ -136,6 +136,107 @@ public sealed class SupplyChainWorkflowTests
         Assert.Contains("path: artifacts/", step);
     }
 
+    // IMAGE-BUILD-01: publishing runs only after a successful gate, on pushes to main.
+    [Fact]
+    public void Publish_job_is_limited_to_successful_main_pushes()
+    {
+        var job = JobBody(ReadWorkflow(), "publish-image");
+
+        Assert.Contains("\n    needs: build-and-gate\n", job);
+        Assert.Contains("\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n", job);
+        Assert.DoesNotContain("pull_request", job);
+        Assert.DoesNotContain("workflow_dispatch", job);
+        Assert.DoesNotContain("refs/heads/release", job);
+    }
+
+    // IMAGE-BUILD-01: the job runs on the private-network runner and refuses public ACR resolution before login.
+    [Fact]
+    public void Publish_job_runs_on_private_network_runner()
+    {
+        var workflow = ReadWorkflow();
+        var job = JobBody(workflow, "publish-image");
+        var check = StepBody(workflow, "Verify ACR resolves to a private address");
+
+        Assert.Contains("\n    runs-on: [self-hosted, linux, x64, private-acr]\n", job);
+        Assert.Contains("os.environ[\"ACR_LOGIN_SERVER\"]", check);
+        Assert.Contains("socket.getaddrinfo(host", check);
+        Assert.Contains("a.is_private", check);
+        Assert.Contains("sys.exit(", check);
+        Assert.True(job.IndexOf("Verify ACR resolves", StringComparison.Ordinal) < job.IndexOf("Log in to ACR", StringComparison.Ordinal),
+            "The private-address check must run before registry login.");
+    }
+
+    // IMAGE-BUILD-01: Azure authentication uses OIDC with the existing variables and no stored credentials.
+    [Fact]
+    public void Publish_job_authenticates_with_oidc_and_no_stored_credentials()
+    {
+        var job = JobBody(ReadWorkflow(), "publish-image");
+
+        Assert.Contains("\n    permissions:\n      contents: read\n      id-token: write\n", job);
+        Assert.Contains("client-id: ${{ vars.AZURE_CLIENT_ID }}", job);
+        Assert.Contains("tenant-id: ${{ vars.AZURE_TENANT_ID }}", job);
+        Assert.Contains("subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}", job);
+        Assert.DoesNotContain("creds:", job);
+        Assert.DoesNotContain("AZURE_CLIENT_SECRET", job);
+    }
+
+    // IMAGE-BUILD-02: the root Dockerfile is pushed to the configured ACR repository and the digest is captured.
+    [Fact]
+    public void Publish_job_pushes_the_built_image_and_records_its_digest()
+    {
+        var workflow = ReadWorkflow();
+        var job = JobBody(workflow, "publish-image");
+        var build = StepBody(workflow, "Build and push image");
+        var record = StepBody(workflow, "Record image digest");
+
+        Assert.Contains("ACR_NAME: ${{ vars.ACR_NAME }}", job);
+        Assert.Contains("ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}", job);
+        Assert.Contains("IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}", job);
+        Assert.Contains("az acr login --name \"$ACR_NAME\"", job);
+        Assert.Contains("file: ./Dockerfile", build);
+        Assert.Contains("push: true", build);
+        Assert.Contains("${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_REPOSITORY }}", build);
+        Assert.Contains("DIGEST: ${{ steps.build.outputs.digest }}", record);
+        Assert.Contains("^sha256:[0-9a-f]{64}$", record);
+        Assert.DoesNotContain("steps.build.outputs.metadata", record);
+    }
+
+    // IMAGE-BUILD-03: the digest is written and uploaded only after the push, with 90-day retention.
+    [Fact]
+    public void Image_digest_artifact_is_published_with_retention()
+    {
+        var workflow = ReadWorkflow();
+        var job = JobBody(workflow, "publish-image");
+        var record = StepBody(workflow, "Record image digest");
+        var upload = StepBody(workflow, "Upload image digest");
+
+        Assert.Contains("mkdir -p artifacts/image", record);
+        Assert.Contains("> artifacts/image/digest.txt", record);
+        Assert.Contains("name: image-digest", upload);
+        Assert.Contains("path: artifacts/image/digest.txt", upload);
+        Assert.Contains("retention-days: 90", upload);
+        Assert.True(job.IndexOf("name: Build and push image", StringComparison.Ordinal) < job.IndexOf("name: Record image digest", StringComparison.Ordinal),
+            "The digest must be recorded after the push.");
+        Assert.True(job.IndexOf("name: Record image digest", StringComparison.Ordinal) < job.IndexOf("name: Upload image digest", StringComparison.Ordinal),
+            "The digest artifact must be uploaded after it is recorded.");
+    }
+
+    // M-12: publication depends on the gate, and the SBOM and severity gate steps run before it.
+    [Fact]
+    public void Publish_job_waits_for_the_existing_supply_chain_gate()
+    {
+        var workflow = ReadWorkflow();
+        var gateJob = JobBody(workflow, "build-and-gate");
+        var publishStart = workflow.IndexOf("\n  publish-image:\n", StringComparison.Ordinal);
+
+        Assert.Contains("\n    needs: build-and-gate\n", JobBody(workflow, "publish-image"));
+        Assert.True(publishStart > 0);
+        Assert.True(gateJob.IndexOf("- name: SBOM (.NET)", StringComparison.Ordinal) < gateJob.IndexOf("- name: SBOM (npm)", StringComparison.Ordinal));
+        Assert.True(gateJob.IndexOf("- name: SBOM (npm)", StringComparison.Ordinal) < gateJob.IndexOf("- name: Severity gate", StringComparison.Ordinal));
+        Assert.True(gateJob.IndexOf("- name: Severity gate", StringComparison.Ordinal) < gateJob.IndexOf("- name: Upload supply-chain evidence", StringComparison.Ordinal));
+        Assert.DoesNotContain("publish-image", gateJob);
+    }
+
     [Fact]
     public void Supply_chain_commands_use_verified_options()
     {
@@ -795,6 +896,16 @@ public sealed class SupplyChainWorkflowTests
 
         var next = workflow.IndexOf("\n      - ", start + header.Length, StringComparison.Ordinal);
         return next < 0 ? workflow[start..] : workflow[start..next];
+    }
+
+    private static string JobBody(string workflow, string jobName)
+    {
+        var header = $"\n  {jobName}:\n";
+        var start = workflow.IndexOf(header, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Workflow job '{jobName}' is missing.");
+
+        var next = System.Text.RegularExpressions.Regex.Match(workflow[(start + header.Length)..], @"\n  [a-z][a-z-]*:\n");
+        return next.Success ? workflow.Substring(start, header.Length + next.Index) : workflow[start..];
     }
 
     private static string FindRepoRoot()
