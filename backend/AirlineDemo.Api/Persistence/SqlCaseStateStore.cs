@@ -263,6 +263,54 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             .AsEnumerable()
             .FirstOrDefault(w => Same(w.CaseId, caseId) && Same(w.ItemId, itemId));
 
+    public void AppendTrace(CaseScope scope, InvestigationTrace trace)
+    {
+        InvestigationTraceRules.Validate(trace);
+        if (trace.CaseId != scope.CaseId)
+        {
+            throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
+        }
+
+        using var db = NewContext();
+        using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
+        _ = FindCase(db, scope.CaseId) ?? throw new CaseAccessDeniedException();
+
+        var exists = db.CaseTraces
+            .Where(t => t.CaseId == trace.CaseId && t.RunId == trace.RunId && t.InvestigationId == trace.InvestigationId)
+            .AsEnumerable()
+            .Any(t => Same(t.CaseId, trace.CaseId) && Same(t.RunId, trace.RunId) && Same(t.InvestigationId, trace.InvestigationId));
+        if (exists)
+        {
+            throw new TraceConflictException();
+        }
+
+        db.CaseTraces.Add(new CaseTraceRow
+        {
+            CaseId = trace.CaseId,
+            RunId = trace.RunId,
+            InvestigationId = trace.InvestigationId,
+            TraceJson = JsonSerializer.Serialize(trace),
+        });
+        db.SaveChanges();
+        tx.Commit();
+    }
+
+    public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId)
+    {
+        using var db = NewContext();
+        _ = FindCase(db, scope.CaseId) ?? throw new CaseAccessDeniedException();
+        if (!Same(caseId, scope.CaseId))
+        {
+            return null;
+        }
+
+        var row = db.CaseTraces
+            .Where(t => t.CaseId == caseId && t.RunId == runId && t.InvestigationId == investigationId)
+            .AsEnumerable()
+            .FirstOrDefault(t => Same(t.CaseId, caseId) && Same(t.RunId, runId) && Same(t.InvestigationId, investigationId));
+        return row is null ? null : JsonSerializer.Deserialize<InvestigationTrace>(row.TraceJson);
+    }
+
     private CaseStateDbContext NewContext() => new(_options);
 
     /// <summary>Finds a case by key, then applies an ordinal check so the database collation cannot widen a match.</summary>

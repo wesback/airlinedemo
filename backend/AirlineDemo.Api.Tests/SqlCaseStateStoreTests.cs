@@ -21,7 +21,7 @@ public sealed class SqlCaseStateStoreTests
     private static readonly string[] InterfaceMethods =
     [
         "AuthorizeCase", "OwnerOf", "CreateCase", "Read", "GetBasisVersion", "ReadAudit", "Commit",
-        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState",
+        "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState", "AppendTrace", "FindTrace",
     ];
 
     // AC1: interface contract and file-backed registration; no database connection.

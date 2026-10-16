@@ -49,6 +49,15 @@ public sealed class WorkItemRow
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class CaseTraceRow
+{
+    public long Id { get; set; }
+    public string CaseId { get; set; } = string.Empty;
+    public string RunId { get; set; } = string.Empty;
+    public string InvestigationId { get; set; } = string.Empty;
+    public string TraceJson { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// EF Core model for the provisioned Azure SQL case-state schema. Schema changes are applied only
 /// by the migration identity; the app identity holds data-plane grants only (see identity-and-telemetry.tf).
@@ -60,6 +69,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CaseDecisionRow> CaseDecisions => Set<CaseDecisionRow>();
     public DbSet<CaseEventRow> CaseEvents => Set<CaseEventRow>();
     public DbSet<WorkItemRow> WorkItems => Set<WorkItemRow>();
+    public DbSet<CaseTraceRow> CaseTraces => Set<CaseTraceRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -101,6 +111,18 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.CapabilityId).HasMaxLength(128).IsRequired();
             e.Property(x => x.State).HasMaxLength(64).IsRequired();
             e.Property(x => x.Owner).HasMaxLength(256).IsRequired();
+        });
+
+        modelBuilder.Entity<CaseTraceRow>(e =>
+        {
+            e.ToTable("case_traces", "dbo");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).UseIdentityColumn();
+            e.Property(x => x.CaseId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.RunId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.InvestigationId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.TraceJson).IsRequired();
+            e.HasIndex(x => new { x.CaseId, x.RunId, x.InvestigationId }).IsUnique();
         });
 
         modelBuilder.Entity<CaseEventRow>(e =>
