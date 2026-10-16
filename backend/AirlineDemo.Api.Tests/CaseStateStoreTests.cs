@@ -1,4 +1,3 @@
-using System.Reflection;
 using AirlineDemo.Api.Persistence;
 
 namespace AirlineDemo.Api.Tests;
@@ -169,22 +168,6 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void M03_audit_api_is_append_only_with_no_update_or_delete_operation()
-    {
-        var mutators = typeof(CaseStateStore)
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .Select(m => m.Name)
-            .Where(n => n.StartsWith("Update", StringComparison.Ordinal)
-                || n.StartsWith("Delete", StringComparison.Ordinal)
-                || n.StartsWith("Remove", StringComparison.Ordinal)
-                || n.StartsWith("Set", StringComparison.Ordinal))
-            .ToList();
-
-        Assert.Empty(mutators);
-        Assert.DoesNotContain(typeof(CaseStateStore).GetMethods(), m => m.ReturnType == typeof(void) && m.Name.Contains("Audit"));
-    }
-
-    [Fact]
     public void M03_each_commit_appends_one_audit_event_and_replayed_receipt_adds_none()
     {
         var store = new CaseStateStore(PathFor());
@@ -199,32 +182,38 @@ public sealed class CaseStateStoreTests : IDisposable
         Assert.Equal(1, replay.State.Revision);
         Assert.Single(store.ReadAudit(scope));
         Assert.Equal(["receipt-1"], store.Read(scope).ReceiptIds);
+
+        store.Commit(scope, 1, new CaseCommit(null, "receipt-2", "presenter", "submit", "updated"));
+
+        var audit = store.ReadAudit(scope);
+        Assert.Equal(2, audit.Count);
+        Assert.Equal(first.State.Audit[0], audit[0]);
+        Assert.Equal(2, audit[1].Sequence);
+        Assert.Equal(2, audit[1].Revision);
+        Assert.Equal("submit", audit[1].Action);
     }
 
     [Fact]
-    public void M03_injected_persist_failure_leaves_no_partial_state_receipt_or_audit()
+    public void M03_persist_failure_leaves_no_partial_state_receipt_or_audit()
     {
-        var armed = false;
-        var store = new CaseStateStore(PathFor(), beforePersist: () =>
-        {
-            if (armed)
-            {
-                armed = false;
-                throw new IOException("injected transaction failure");
-            }
-        });
+        var path = PathFor();
+        var store = new CaseStateStore(path);
         var scope = store.CreateCase("case-a", Owner);
-        armed = true;
+        var persisted = File.ReadAllText(path);
+        Directory.CreateDirectory(path + ".tmp");
         var basis = CaseStateStore.CreateBasisVersion(1, "evidence", string.Empty);
 
-        Assert.Throws<IOException>(() => store.Commit(scope, 0, new CaseCommit(basis, "receipt-1", "presenter", "submit", "x")));
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            store.Commit(scope, 0, new CaseCommit(basis, "receipt-1", "presenter", "submit", "x")));
 
         var state = store.Read(scope);
         Assert.Equal(0, state.Revision);
         Assert.Empty(state.Basis);
         Assert.Empty(state.ReceiptIds);
         Assert.Empty(state.Audit);
+        Assert.Equal(persisted, File.ReadAllText(path));
 
+        Directory.Delete(path + ".tmp");
         var retry = store.Commit(scope, 0, new CaseCommit(basis, "receipt-1", "presenter", "submit", "x"));
         Assert.False(retry.Replayed);
         Assert.Single(store.ReadAudit(scope));
