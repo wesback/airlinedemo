@@ -117,6 +117,9 @@ public sealed record InvestigationTrace(
 
 internal static class InvestigationTraceRules
 {
+    // Marks a step with no document (a tool call or a correction). Such a step has PageNumber 0.
+    public const string NoValue = "None";
+
     public static void Validate(InvestigationTrace trace)
     {
         Require(trace.CaseId, nameof(trace.CaseId));
@@ -147,9 +150,9 @@ internal static class InvestigationTraceRules
             Require(step.CitationCheckOutcome, "CitationCheckOutcome");
             Require(step.CorrectionCode, "CorrectionCode");
             Require(step.PolicyHandover, "PolicyHandover");
-            if (step.PageNumber < 1)
+            if (step.DocumentId == NoValue ? step.PageNumber != 0 : step.PageNumber < 1)
             {
-                throw new ArgumentException("Investigation trace PageNumber must be positive.", nameof(trace));
+                throw new ArgumentException("Investigation trace PageNumber must be positive for a cited document, and 0 when there is none.", nameof(trace));
             }
         }
     }

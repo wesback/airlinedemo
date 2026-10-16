@@ -57,7 +57,8 @@ public sealed class BoundedInvestigator(
     string evidenceVersion,
     IChatClient modelClient,
     IInvestigationLimits? limits = null,
-    InvestigationTelemetry? telemetry = null)
+    InvestigationTelemetry? telemetry = null,
+    InvestigationTraceRecorder? traceRecorder = null)
 {
     public const string UntrustedBegin = "<<<UNTRUSTED_DOCUMENT>>>";
     public const string UntrustedEnd = "<<<END_UNTRUSTED_DOCUMENT>>>";
@@ -97,7 +98,7 @@ public sealed class BoundedInvestigator(
         var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var evidence = new List<string>(documents);
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits);
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits, name => traceRecorder?.RecordToolCall(name));
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
         var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
         var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
@@ -116,6 +117,7 @@ public sealed class BoundedInvestigator(
 
             result = new InvestigationResult(VerifyClaims(response.Text), gate.Traces);
             outcome = "approved";
+            traceRecorder?.Complete(outcome);
             return result;
         }
         catch (Exception ex) when (ex is not InvestigationLimitExceededException && limits.Breach is { } tripped)
@@ -125,6 +127,7 @@ public sealed class BoundedInvestigator(
         catch (InvestigationOutputException)
         {
             outcome = "rejected";
+            traceRecorder?.Reject(outcome);
             throw;
         }
         finally
@@ -218,7 +221,17 @@ public sealed class BoundedInvestigator(
                 var page = source.GetSourcePage(caseId, witness.DocumentId, witness.Page);
                 if (page is null || !page.Contains(witness.Quote, StringComparison.Ordinal))
                 {
+                    if (witness.Page >= 1)
+                    {
+                        traceRecorder?.RecordCitationCheck(witness.DocumentId, witness.Page, InvestigationTraceRecorder.CitationQuoteNotOnPage);
+                    }
+
                     throw new InvestigationOutputException("witness quote is not on the cited page");
+                }
+
+                if (witness.Page >= 1)
+                {
+                    traceRecorder?.RecordCitationCheck(witness.DocumentId, witness.Page, InvestigationTraceRecorder.CitationVerified);
                 }
 
                 witnesses.Add(new DocumentWitness(witness.DocumentId, witness.Page, witness.Quote));
@@ -267,7 +280,8 @@ public sealed class BoundedInvestigator(
         string dataRegion,
         string evidenceVersion,
         IReadOnlyList<string> evidence,
-        IInvestigationLimits limits) : DelegatingChatClient(inner)
+        IInvestigationLimits limits,
+        Action<string>? onToolCall = null) : DelegatingChatClient(inner)
     {
         private readonly List<ModelCallTrace> _traces = [];
         private readonly List<string> _toolsUsed = [];
@@ -301,6 +315,8 @@ public sealed class BoundedInvestigator(
                     await limits.AfterModelCallAsync(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, cancellationToken);
                     foreach (var call in response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>())
                     {
+                        // Every requested call is recorded in order, including repeats of the same tool.
+                        onToolCall?.Invoke(call.Name);
                         if (!_toolsUsed.Contains(call.Name))
                         {
                             _toolsUsed.Add(call.Name);
