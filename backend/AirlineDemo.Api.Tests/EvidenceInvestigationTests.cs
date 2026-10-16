@@ -276,6 +276,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var trace = started.FindTrace(ScopeFor(started), Case, acceptedId, "inv-" + acceptedId);
         Assert.NotNull(trace);
         Assert.Equal("rejected", trace.Outcome);
+        Assert.Equal("escalate", trace.Decision);
         Assert.Empty(trace.Steps);
 
         // A completed investigation records its outcome and the deterministic-policy handover.
