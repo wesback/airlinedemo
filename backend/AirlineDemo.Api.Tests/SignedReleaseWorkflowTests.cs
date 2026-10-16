@@ -1,5 +1,6 @@
 namespace AirlineDemo.Api.Tests;
 
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 public sealed class SignedReleaseWorkflowTests
@@ -211,19 +212,54 @@ public sealed class SignedReleaseWorkflowTests
             "Notation must be installed before the signing step runs.");
     }
 
-    // AC: the requested digest must match the digest recorded by the specified CI build run before signing.
+    // AC: RELEASE-DIGEST-01. The digest is read from its own artifact of the specified build run, never the release run.
     [Fact]
-    public void Release_binds_requested_digest_to_build_run_before_signing()
+    public void Release_downloads_digest_artifact_from_the_named_build_run()
     {
         var workflow = ReadWorkflow();
-        var check = StepBody(workflow, "Verify build evidence present");
+        var step = StepBody(workflow, "Download image digest");
 
-        Assert.Contains("test -s evidence/image/digest.txt", check);
-        Assert.Contains("was not produced by build run", check);
-        Assert.Contains("\"$built\" != \"$IMAGE_DIGEST\"", check);
+        Assert.Contains("uses: actions/download-artifact@v4", step);
+        Assert.Contains("name: image-digest", step);
+        Assert.Contains("path: evidence/image", step);
+        Assert.Contains("run-id: ${{ inputs.build_run_id }}", step);
+        Assert.Contains("github-token: ${{ github.token }}", step);
+        Assert.DoesNotContain("github.run_id", step);
+    }
+
+    // AC: RELEASE-DIGEST-02. The requested digest must be well formed and equal the image-digest artifact before signing.
+    [Fact]
+    public void Release_binds_requested_digest_to_separate_artifact_before_signing()
+    {
+        var workflow = ReadWorkflow();
+        var script = RunScript(workflow, "Verify build evidence present");
+
+        // A malformed value that also matches the artifact must be rejected by the format guard itself.
+        var malformed = "sha256:" + new string('A', 64);
+        var malformedRun = RunDigestCheck(script, malformed, malformed);
+        Assert.Equal(1, malformedRun.ExitCode);
+        Assert.Contains("IMAGE_DIGEST must be sha256:<64 lowercase hex>", malformedRun.Output);
+        Assert.DoesNotContain("was not produced by build run", malformedRun.Output);
+
+        // Covers every lowercase hex digit, so the guard must accept the full [0-9a-f] range.
+        var valid = "sha256:" + string.Concat(Enumerable.Repeat("0123456789abcdef", 4));
+        var matching = RunDigestCheck(script, valid, valid);
+        Assert.Equal(0, matching.ExitCode);
+
+        var missing = RunDigestCheck(script, valid, artifactDigest: null);
+        Assert.Equal(1, missing.ExitCode);
+
+        var other = "sha256:" + new string('b', 64);
+        var mismatch = RunDigestCheck(script, valid, other);
+        Assert.Equal(1, mismatch.ExitCode);
+        Assert.Contains("image digest " + valid + " was not produced by build run 1", mismatch.Output);
+        Assert.Contains("image-digest artifact recorded " + other, mismatch.Output);
+        Assert.True(workflow.IndexOf("- name: Download image digest", StringComparison.Ordinal)
+            < workflow.IndexOf("- name: Verify build evidence present", StringComparison.Ordinal),
+            "The image-digest artifact must be downloaded before it is checked.");
         Assert.True(workflow.IndexOf("- name: Verify build evidence present", StringComparison.Ordinal)
             < workflow.IndexOf("- name: Sign image digest", StringComparison.Ordinal),
-            "Provenance must be checked before the digest is signed.");
+            "Digest binding must be checked before the digest is signed.");
     }
 
     // AC: the signature itself is exported and retained, not only an inspection report.
@@ -238,6 +274,58 @@ public sealed class SignedReleaseWorkflowTests
         Assert.Contains("artifacts/signature/signature.cose", sign);
         Assert.Contains("exported signature does not match its registry digest", sign);
         Assert.Contains("test -s artifacts/signature/signature.cose", sign);
+    }
+
+    private static string RunScript(string workflow, string stepName)
+    {
+        var lines = StepBody(workflow, stepName).Split('\n');
+        var runIndex = Array.FindIndex(lines, line => line.Trim() == "run: |");
+        Assert.True(runIndex >= 0, $"Workflow step '{stepName}' has no run script.");
+
+        return string.Join('\n', lines.Skip(runIndex + 1).Select(line => line.Length >= 10 ? line[10..] : line.TrimStart()));
+    }
+
+    // Runs a release check script in a temporary directory with the evidence files present.
+    // A null artifactDigest means evidence/image/digest.txt is absent.
+    private static (int ExitCode, string Output) RunDigestCheck(string script, string requestedDigest, string? artifactDigest)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "release-digest-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "evidence", "sbom"));
+            Directory.CreateDirectory(Path.Combine(dir, "evidence", "audit"));
+            Directory.CreateDirectory(Path.Combine(dir, "evidence", "image"));
+            File.WriteAllText(Path.Combine(dir, "evidence", "sbom", "dotnet-sbom.cdx.json"), "{}");
+            File.WriteAllText(Path.Combine(dir, "evidence", "sbom", "npm-sbom.cdx.json"), "{}");
+            File.WriteAllText(Path.Combine(dir, "evidence", "audit", "dotnet-vulnerable.txt"), "none");
+            File.WriteAllText(Path.Combine(dir, "evidence", "audit", "npm-audit.json"), "{}");
+            if (artifactDigest is not null)
+            {
+                File.WriteAllText(Path.Combine(dir, "evidence", "image", "digest.txt"), artifactDigest + "\n");
+            }
+
+            var scriptPath = Path.Combine(dir, "check.sh");
+            File.WriteAllText(scriptPath, script);
+
+            var psi = new ProcessStartInfo("bash", scriptPath)
+            {
+                WorkingDirectory = dir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.Environment["IMAGE_DIGEST"] = requestedDigest;
+            psi.Environment["BUILD_RUN_ID"] = "1";
+
+            using var process = Process.Start(psi) ?? throw new InvalidOperationException("bash could not be started.");
+            var stderr = process.StandardError.ReadToEndAsync();
+            var stdout = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            return (process.ExitCode, stdout + stderr.Result);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     private static string ReadWorkflow() =>
