@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace AirlineDemo.Api.SourceSystems;
@@ -9,6 +10,46 @@ namespace AirlineDemo.Api.SourceSystems;
 public sealed class SourceFixtureRefusedException(string message) : InvalidOperationException(message);
 
 public sealed record VerifiedSourceFixture(string SourceId, SourceFixtureManifest Manifest, byte[] FixtureBytes);
+
+public enum SourceFixturePublication
+{
+    Published,
+    AlreadyPublished,
+}
+
+public sealed record StoredFixturePack(string Version, string Digest);
+
+public sealed record StoredSourceRecord(string SourceId, string Version, int Ordinal, string CaseId);
+
+public sealed record StoredBasisPin(string SourceId, string Version, string Sha256);
+
+public sealed record StoredAuditEvent(int Sequence, string Action, string Version);
+
+public sealed record StoredCaseDatum(string CaseId, string Value);
+
+// Every collection is replaced as a whole on publication and never edited in place.
+public sealed record PublishedFixtureState(
+    IReadOnlyList<StoredFixturePack> Packs,
+    IReadOnlyList<StoredSourceRecord> SourceRecords,
+    IReadOnlyList<StoredBasisPin> BasisPins,
+    IReadOnlyList<StoredAuditEvent> AuditEvents,
+    IReadOnlyList<StoredCaseDatum> CaseData)
+{
+    public static PublishedFixtureState Empty { get; } = new([], [], [], [], []);
+}
+
+public sealed class SourceFixtureStore(PublishedFixtureState initial)
+{
+    private PublishedFixtureState state = initial;
+
+    // Serializes read-stage-commit so concurrent publications cannot build from the same snapshot and lose each other's version.
+    internal object PublishLock { get; } = new();
+
+    public PublishedFixtureState State => state;
+
+    // A single reference swap: readers observe either the previous complete state or the next one.
+    internal void Commit(PublishedFixtureState next) => state = next;
+}
 
 // Refuse-on-mismatch loader for the five signed source fixtures (PRD FR-002, AC-004, AC-005).
 // The manifest digest detects drift only; the detached RSA-PSS signature establishes authenticity.
@@ -51,6 +92,83 @@ public static class SourceFixtureLoader
         }
 
         return verified;
+    }
+
+    private const string PublishAction = "source-fixtures.published";
+
+    // Verifies the complete set, then publishes it with one commit. A refusal or a failure before the commit leaves the store unchanged.
+    // beforeCommit is the publication test seam: it runs on the staged state and may throw to simulate a publication failure.
+    internal static SourceFixturePublication LoadAndPublish(
+        string directory,
+        byte[]? trustKeySpki,
+        SourceFixtureStore store,
+        Action<PublishedFixtureState>? beforeCommit = null)
+    {
+        var verified = Load(directory, trustKeySpki);
+
+        var versions = verified.Values.Select(fixture => fixture.Manifest.SourceFixtureVersion).Distinct(StringComparer.Ordinal).ToList();
+        if (versions.Count != 1)
+        {
+            throw new SourceFixtureRefusedException("Source fixtures must share one sourceFixtureVersion; publication is refused.");
+        }
+
+        var version = versions[0];
+        var digest = PackDigest(verified);
+
+        lock (store.PublishLock)
+        {
+            var current = store.State;
+
+            var stored = current.Packs.FirstOrDefault(pack => string.Equals(pack.Version, version, StringComparison.Ordinal));
+            if (stored is not null)
+            {
+                if (string.Equals(stored.Digest, digest, StringComparison.Ordinal))
+                {
+                    return SourceFixturePublication.AlreadyPublished;
+                }
+
+                throw new SourceFixtureRefusedException($"Source fixture version '{version}' is already stored with different content; publication is refused.");
+            }
+
+            var next = Stage(current, verified, version, digest);
+            beforeCommit?.Invoke(next);
+            store.Commit(next);
+            return SourceFixturePublication.Published;
+        }
+    }
+
+    private static string PackDigest(IReadOnlyDictionary<string, VerifiedSourceFixture> verified)
+    {
+        var lines = SourceFixtureManifest.RequiredSources
+            .Select(source => $"{source} {verified[source].Manifest.Sha256.ToLowerInvariant()}\n");
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Concat(lines)))).ToLowerInvariant();
+    }
+
+    private static PublishedFixtureState Stage(
+        PublishedFixtureState current,
+        IReadOnlyDictionary<string, VerifiedSourceFixture> verified,
+        string version,
+        string digest)
+    {
+        var packs = new List<StoredFixturePack>(current.Packs) { new StoredFixturePack(version, digest) };
+        var records = new List<StoredSourceRecord>(current.SourceRecords);
+        var pins = new List<StoredBasisPin>(current.BasisPins);
+        var audits = new List<StoredAuditEvent>(current.AuditEvents);
+
+        foreach (var source in SourceFixtureManifest.RequiredSources)
+        {
+            var fixture = verified[source];
+            var caseIds = ReadRecordCaseIds(source, fixture.FixtureBytes);
+            for (var ordinal = 0; ordinal < caseIds.Count; ordinal++)
+            {
+                records.Add(new StoredSourceRecord(source, version, ordinal, caseIds[ordinal]));
+            }
+
+            pins.Add(new StoredBasisPin(source, version, fixture.Manifest.Sha256.ToLowerInvariant()));
+        }
+
+        audits.Add(new StoredAuditEvent(audits.Count + 1, PublishAction, version));
+        return new PublishedFixtureState(packs, records, pins, audits, current.CaseData);
     }
 
     private static VerifiedSourceFixture LoadSource(string directory, string source, RSA trustKey)

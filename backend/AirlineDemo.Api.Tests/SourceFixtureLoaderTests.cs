@@ -205,6 +205,74 @@ public sealed class SourceFixtureLoaderTests
         AssertRefused(dir.Path, key);
     }
 
+    // AC-005, NFR-002: a refused load (bad signature, or a publication failure after validation) leaves every published collection unchanged.
+    [Fact]
+    public void ValidationOrPublicationFailureLeavesPublishedStateUnchanged()
+    {
+        using var key = RSA.Create(2048);
+        var spki = key.ExportSubjectPublicKeyInfo();
+        using var validDir = new TempDirectory();
+        using var badDir = new TempDirectory();
+        WriteSet(validDir.Path, key);
+        WriteSet(badDir.Path, key);
+        var signaturePath = Path.Combine(badDir.Path, "technical.manifest.sig");
+        var signature = File.ReadAllBytes(signaturePath);
+        signature[0] ^= 0xFF;
+        File.WriteAllBytes(signaturePath, signature);
+
+        var seed = new PublishedFixtureState(
+            [new StoredFixturePack("2026.09.1", "aa")],
+            [new StoredSourceRecord("technical", "2026.09.1", 0, "arr-core")],
+            [new StoredBasisPin("technical", "2026.09.1", "aa")],
+            [new StoredAuditEvent(1, "source-fixtures.published", "2026.09.1")],
+            [new StoredCaseDatum("arr-core", "unrelated case data")]);
+        var store = new SourceFixtureStore(seed);
+        var before = Snapshot(store.State);
+
+        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(badDir.Path, spki, store));
+        AssertSnapshot(before, store.State);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            SourceFixtureLoader.LoadAndPublish(validDir.Path, spki, store, _ => throw new InvalidOperationException("publication failed")));
+        AssertSnapshot(before, store.State);
+    }
+
+    // AC-005, NFR-002: the same stored version with the same digest is a no-op; with different content it is refused and the store is unchanged.
+    [Fact]
+    public void ReusedVersionWithDifferentContentIsRefused()
+    {
+        using var key = RSA.Create(2048);
+        var spki = key.ExportSubjectPublicKeyInfo();
+        using var validDir = new TempDirectory();
+        using var changedDir = new TempDirectory();
+        WriteSet(validDir.Path, key);
+        WriteSet(changedDir.Path, key, recordCaseIds: ["arr-core", "case-a", "case-b", "arr-core"]);
+
+        var store = new SourceFixtureStore(PublishedFixtureState.Empty);
+        Assert.Equal(SourceFixturePublication.Published, SourceFixtureLoader.LoadAndPublish(validDir.Path, spki, store));
+        var before = Snapshot(store.State);
+
+        Assert.Equal(SourceFixturePublication.AlreadyPublished, SourceFixtureLoader.LoadAndPublish(validDir.Path, spki, store));
+        AssertSnapshot(before, store.State);
+
+        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(changedDir.Path, spki, store));
+        AssertSnapshot(before, store.State);
+    }
+
+    private static (IReadOnlyList<StoredFixturePack> Packs, IReadOnlyList<StoredSourceRecord> Records, IReadOnlyList<StoredBasisPin> Pins, IReadOnlyList<StoredAuditEvent> Audits, IReadOnlyList<StoredCaseDatum> Cases) Snapshot(PublishedFixtureState state) =>
+        (state.Packs.ToList(), state.SourceRecords.ToList(), state.BasisPins.ToList(), state.AuditEvents.ToList(), state.CaseData.ToList());
+
+    private static void AssertSnapshot(
+        (IReadOnlyList<StoredFixturePack> Packs, IReadOnlyList<StoredSourceRecord> Records, IReadOnlyList<StoredBasisPin> Pins, IReadOnlyList<StoredAuditEvent> Audits, IReadOnlyList<StoredCaseDatum> Cases) expected,
+        PublishedFixtureState actual)
+    {
+        Assert.Equal(expected.Packs, actual.Packs);
+        Assert.Equal(expected.Records, actual.SourceRecords);
+        Assert.Equal(expected.Pins, actual.BasisPins);
+        Assert.Equal(expected.Audits, actual.AuditEvents);
+        Assert.Equal(expected.Cases, actual.CaseData);
+    }
+
     private static void AssertRefused(string directory, RSA trustKey) =>
         Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(directory, trustKey.ExportSubjectPublicKeyInfo()));
 
