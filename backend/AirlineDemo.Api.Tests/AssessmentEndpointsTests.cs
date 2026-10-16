@@ -40,7 +40,6 @@ public sealed class AssessmentEndpointsTests
         public readonly WebApplicationFactory<Program> Factory;
         public readonly HttpClient Client;
         public AssessmentStore Assessments => Factory.Services.GetRequiredService<AssessmentStore>();
-        public AssessmentApiRecordStore ApiRecords => Factory.Services.GetRequiredService<AssessmentApiRecordStore>();
         public MockRequestInbox Inbox => Factory.Services.GetRequiredService<MockRequestInbox>();
         public AssessmentExecutionService Execution => Factory.Services.GetRequiredService<AssessmentExecutionService>();
         public ICaseStateStore Cases => Factory.Services.GetRequiredService<ICaseStateStore>();
@@ -147,7 +146,12 @@ public sealed class AssessmentEndpointsTests
         var finding = new DeliveryFinding(Complete, [validated], false, basisId, version);
         var result = h.Inbox.Submit(envelope, finding, ScenarioTime);
         Assert.Equal(DeliveryOutcome.Delivered, result.Outcome);
-        return result.Receipt!;
+        var receipt = result.Receipt!;
+        var scope = h.Scope(caseId);
+        var state = h.Cases.Read(scope);
+        h.Cases.Commit(scope, state.Revision, new CaseCommit(
+            null, receipt.RequestId, "test", "seed-request", reportId, RequestReceipt: receipt));
+        return receipt;
     }
 
     [Fact]
@@ -174,9 +178,9 @@ public sealed class AssessmentEndpointsTests
         var witness = Assert.Single(claim.GetProperty("witnesses").EnumerateArray());
         Assert.Equal("doc-17", witness.GetProperty("documentId").GetString());
         Assert.Equal(1, witness.GetProperty("page").GetInt32());
-        var receipt = Assert.Single(h.Inbox.Requests);
+        var receipt = Assert.Single(h.Cases.Read(h.Scope()).RequestReceipts!);
         Assert.Equal(receipt.RequestId, assessment.GetProperty("requestId").GetString());
-        var stored = Assert.Single(h.Assessments.List(CaseId));
+        var stored = Assert.Single(h.Cases.Read(h.Scope()).Assessments!);
         Assert.Equal(receipt.RequestId, stored.RequestId);
         Assert.Equal("Request", stored.Outcome);
 
@@ -230,8 +234,8 @@ public sealed class AssessmentEndpointsTests
     {
         await using var h = new Harness();
         var seeded = h.Execution.Assess(h.Scope(), h.Assessments.CurrentBasis(CaseId)!, [h.Claim()]);
-        var seededId = h.ApiRecords.Append(seeded);
-        var receipt = Assert.Single(h.Inbox.Requests);
+        var seededId = seeded.AssessmentId;
+        var receipt = Assert.Single(h.Cases.Read(h.Scope()).RequestReceipts!);
         var presenter = await SignInAsync(h.Client, "presenter");
         var reviewer = await SignInAsync(h.Client, "reviewer");
         var finance = await SignInAsync(h.Client, "fin-1");
@@ -269,11 +273,12 @@ public sealed class AssessmentEndpointsTests
         bool withToken = true,
         string? token = null)
     {
-        var assessments = JsonSerializer.Serialize(h.Assessments.List(CaseId));
-        var otherAssessments = JsonSerializer.Serialize(h.Assessments.List(OtherCaseId));
-        var receipts = JsonSerializer.Serialize(h.Inbox.Requests);
         var scope = h.Scope();
         var otherScope = h.Scope(OtherCaseId);
+        var assessments = JsonSerializer.Serialize(h.Cases.Read(scope).Assessments);
+        var otherAssessments = JsonSerializer.Serialize(h.Cases.Read(otherScope).Assessments);
+        var receipts = JsonSerializer.Serialize(h.Cases.Read(scope).RequestReceipts);
+        var otherReceipts = JsonSerializer.Serialize(h.Cases.Read(otherScope).RequestReceipts);
         var workItems = JsonSerializer.Serialize(h.Cases.Read(scope).WorkItems);
         var otherWorkItems = JsonSerializer.Serialize(h.Cases.Read(otherScope).WorkItems);
         using var response = await SendAsync(h.Client, method, path, session, withToken, token);
@@ -281,14 +286,15 @@ public sealed class AssessmentEndpointsTests
         var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.DoesNotContain(Value, responseBody, StringComparison.Ordinal);
         Assert.DoesNotContain(protectedAssessmentId, responseBody, StringComparison.Ordinal);
-        foreach (var receipt in h.Inbox.Requests)
+        foreach (var receipt in h.Cases.Read(scope).RequestReceipts!)
         {
             Assert.DoesNotContain(receipt.RequestId, responseBody, StringComparison.Ordinal);
             Assert.DoesNotContain(receipt.Body, responseBody, StringComparison.Ordinal);
         }
-        Assert.Equal(assessments, JsonSerializer.Serialize(h.Assessments.List(CaseId)));
-        Assert.Equal(otherAssessments, JsonSerializer.Serialize(h.Assessments.List(OtherCaseId)));
-        Assert.Equal(receipts, JsonSerializer.Serialize(h.Inbox.Requests));
+        Assert.Equal(assessments, JsonSerializer.Serialize(h.Cases.Read(scope).Assessments));
+        Assert.Equal(otherAssessments, JsonSerializer.Serialize(h.Cases.Read(otherScope).Assessments));
+        Assert.Equal(receipts, JsonSerializer.Serialize(h.Cases.Read(scope).RequestReceipts));
+        Assert.Equal(otherReceipts, JsonSerializer.Serialize(h.Cases.Read(otherScope).RequestReceipts));
         Assert.Equal(workItems, JsonSerializer.Serialize(h.Cases.Read(scope).WorkItems));
         Assert.Equal(otherWorkItems, JsonSerializer.Serialize(h.Cases.Read(otherScope).WorkItems));
     }

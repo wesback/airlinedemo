@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Requests;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -63,7 +65,9 @@ public sealed record CaseState(
     IReadOnlyList<AuditEvent> Audit,
     IReadOnlyDictionary<string, string> ReceiptFingerprints,
     IReadOnlyList<WorkItem>? WorkItems = null,
-    IReadOnlyList<InvestigationTrace>? Traces = null);
+    IReadOnlyList<InvestigationTrace>? Traces = null,
+    IReadOnlyList<AssessmentRecord>? Assessments = null,
+    IReadOnlyList<DeliveryReceipt>? RequestReceipts = null);
 
 /// <summary>Required-field rules shared by both case-state stores.</summary>
 internal static class WorkItemRules
@@ -172,7 +176,42 @@ public sealed record CaseCommit(
     string Actor,
     string Action,
     string Detail,
-    DateTimeOffset? At = null);
+    DateTimeOffset? At = null,
+    AssessmentRecord? Assessment = null,
+    DeliveryReceipt? RequestReceipt = null);
+
+internal static class AssessmentCommitRules
+{
+    public static AssessmentRecord Snapshot(AssessmentRecord assessment) =>
+        assessment with
+        {
+            Claims = Array.AsReadOnly(assessment.Claims.Select(c => c with
+            {
+                Witnesses = Array.AsReadOnly(c.Witnesses.ToArray()),
+            }).ToArray()),
+        };
+
+    public static void Validate(string caseId, CaseCommit commit)
+    {
+        var assessment = commit.Assessment;
+        var receipt = commit.RequestReceipt;
+        if (assessment is not null &&
+            (string.IsNullOrWhiteSpace(assessment.AssessmentId) || assessment.CaseId != caseId ||
+             string.IsNullOrWhiteSpace(assessment.BasisId) || assessment.BasisVersion < 1 ||
+             assessment.Claims is null || assessment.Claims.Any(c => c.Witnesses is null)))
+            throw new ArgumentException("Assessment identity and claims must be valid.", nameof(commit));
+        if (receipt is not null &&
+            (string.IsNullOrWhiteSpace(receipt.EventId) || string.IsNullOrWhiteSpace(receipt.RequestId) ||
+             receipt.CaseId != caseId || string.IsNullOrWhiteSpace(receipt.ReportId) ||
+             string.IsNullOrWhiteSpace(receipt.BasisId) || receipt.BasisVersion < 1 ||
+             string.IsNullOrWhiteSpace(receipt.TemplateVersion) || receipt.Body is null ||
+             commit.ReceiptId != receipt.RequestId ||
+             assessment is not null && (assessment.CaseId != receipt.CaseId ||
+             assessment.BasisId != receipt.BasisId || assessment.BasisVersion != receipt.BasisVersion ||
+             assessment.RequestId != receipt.RequestId)))
+            throw new ArgumentException("Request receipt must match its assessment and case.", nameof(commit));
+    }
+}
 
 public sealed record CommitResult(CaseState State, bool Replayed);
 
@@ -426,6 +465,7 @@ public sealed class CaseStateStore : ICaseStateStore
     /// </summary>
     public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
     {
+        AssessmentCommitRules.Validate(scope.CaseId, commit);
         lock (_gate)
         {
             using var fileLock = AcquireFileLock();
@@ -446,6 +486,21 @@ public sealed class CaseStateStore : ICaseStateStore
             if (expectedRevision != current.Revision)
             {
                 throw new RevisionConflictException();
+            }
+
+            var assessments = (current.Assessments ?? Array.Empty<AssessmentRecord>()).ToList();
+            if (commit.Assessment is { } assessment)
+            {
+                if (assessments.Any(a => a.AssessmentId == assessment.AssessmentId))
+                    throw new InvalidOperationException("Assessment already exists in this case.");
+                assessments.Add(AssessmentCommitRules.Snapshot(assessment));
+            }
+            var requestReceipts = (current.RequestReceipts ?? Array.Empty<DeliveryReceipt>()).ToList();
+            if (commit.RequestReceipt is { } requestReceipt)
+            {
+                if (requestReceipts.Any(r => r.EventId == requestReceipt.EventId || r.RequestId == requestReceipt.RequestId))
+                    throw new InvalidOperationException("Request receipt already exists in this case.");
+                requestReceipts.Add(requestReceipt);
             }
 
             var basis = current.Basis.ToList();
@@ -485,6 +540,8 @@ public sealed class CaseStateStore : ICaseStateStore
                 ReceiptIds = receipts,
                 Audit = audit,
                 ReceiptFingerprints = fingerprints,
+                Assessments = assessments,
+                RequestReceipts = requestReceipts,
             });
             var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
             Persist(snapshot);
@@ -581,6 +638,8 @@ public sealed class CaseStateStore : ICaseStateStore
         Audit = Wrap(state.Audit),
         WorkItems = Wrap(state.WorkItems ?? Array.Empty<WorkItem>()),
         Traces = Wrap((state.Traces ?? Array.Empty<InvestigationTrace>()).Select(SnapshotTrace)),
+        Assessments = Wrap((state.Assessments ?? Array.Empty<AssessmentRecord>()).Select(AssessmentCommitRules.Snapshot)),
+        RequestReceipts = Wrap(state.RequestReceipts ?? Array.Empty<DeliveryReceipt>()),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
@@ -592,16 +651,22 @@ public sealed class CaseStateStore : ICaseStateStore
     private static ReadOnlyCollection<T> Wrap<T>(IEnumerable<T> items) => new(items.ToList());
 
     /// <summary>Digest of the commit payload, used to tell a true replay from a reused receipt ID.</summary>
-    private static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
+    private static string Fingerprint(CaseCommit commit)
     {
-        basisVersion = commit.NewBasis?.Version,
-        content = commit.NewBasis?.Content,
-        contentDigest = commit.NewBasis?.ContentDigest,
-        basisDigest = commit.NewBasis?.BasisDigest,
-        commit.Actor,
-        commit.Action,
-        commit.Detail,
-    }));
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["basisVersion"] = commit.NewBasis?.Version,
+            ["content"] = commit.NewBasis?.Content,
+            ["contentDigest"] = commit.NewBasis?.ContentDigest,
+            ["basisDigest"] = commit.NewBasis?.BasisDigest,
+            ["Actor"] = commit.Actor,
+            ["Action"] = commit.Action,
+            ["Detail"] = commit.Detail,
+        };
+        if (commit.Assessment is not null) payload["Assessment"] = commit.Assessment;
+        if (commit.RequestReceipt is not null) payload["RequestReceipt"] = commit.RequestReceipt;
+        return Digest(JsonSerializer.Serialize(payload));
+    }
 
     private static void Validate(CaseState state)
     {
@@ -671,6 +736,17 @@ public sealed class CaseStateStore : ICaseStateStore
         {
             throw new InvalidDataException("Work items are invalid.");
         }
+
+        var assessments = state.Assessments ?? Array.Empty<AssessmentRecord>();
+        if (assessments.Any(a => a.CaseId != state.CaseId || string.IsNullOrWhiteSpace(a.AssessmentId)
+            || string.IsNullOrWhiteSpace(a.BasisId) || a.BasisVersion < 1 || a.Claims is null
+            || a.Claims.Any(c => c.Witnesses is null))
+            || assessments.Select(a => a.AssessmentId).Distinct(StringComparer.Ordinal).Count() != assessments.Count)
+            throw new InvalidDataException("Assessment history is invalid.");
+        var receipts = state.RequestReceipts ?? Array.Empty<DeliveryReceipt>();
+        if (receipts.Any(r => r.CaseId != state.CaseId || string.IsNullOrWhiteSpace(r.BasisId) || r.BasisVersion < 1)
+            || receipts.Select(r => r.EventId).Distinct(StringComparer.Ordinal).Count() != receipts.Count)
+            throw new InvalidDataException("Request receipt history is invalid.");
     }
 
     private static string Digest(string value) =>

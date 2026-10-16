@@ -64,7 +64,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.Equal("Request", record.Outcome);
         Assert.NotNull(record.RequestId);
         Assert.Null(record.WorkItemId);
-        var request = Assert.Single(_inbox.Requests);
+        var request = Assert.Single(_store.Read(_scope).RequestReceipts!);
         Assert.Equal(record.RequestId, request.RequestId);
         Assert.Equal("case-1", request.CaseId);
         Assert.Equal(BasisId, request.BasisId);
@@ -74,6 +74,13 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
             "case-1:basis-7:3:assessment", "case-1", "assessment-3", BasisId, BasisVersion, ScenarioTime, "Engine", "ENG-123", Value);
         Assert.Equal(MockRequestTemplate.Render(expected, record.RequestId!), request.Body);
         Assert.Empty(_store.ListWorkItems(_scope));
+
+        var revision = _store.Read(_scope).Revision;
+        var replay = _service.Assess(_scope, CurrentBasis(), [Missing()]);
+        Assert.Equal(record.AssessmentId, replay.AssessmentId);
+        Assert.Equal(revision, _store.Read(_scope).Revision);
+        Assert.Single(_store.Read(_scope).Assessments!);
+        Assert.Single(_store.Read(_scope).RequestReceipts!);
     }
 
     // AC-01 negative: the typed value is absent from the cited quote, so the claim is downgraded and no request is created.
@@ -85,7 +92,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.Equal("Review", record.Outcome);
         Assert.Equal("downgraded claim: claim value not in witness quote", record.Reason);
         Assert.Null(record.RequestId);
-        Assert.Empty(_inbox.Requests);
+        Assert.Empty(_store.Read(_scope).RequestReceipts!);
     }
 
     // AC-02: a supported baseline creates no request and no review item; a missing requirement does not take that outcome.
@@ -99,7 +106,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.Equal("Baseline", record.Outcome);
         Assert.Null(record.RequestId);
         Assert.Null(record.WorkItemId);
-        Assert.Empty(_inbox.Requests);
+        Assert.Empty(_store.Read(_scope).RequestReceipts!);
         Assert.Empty(_store.ListWorkItems(_scope));
 
         var missing = _service.Assess(_scope, CurrentBasis(), [Missing()]);
@@ -148,7 +155,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.False(stored.Documents.ContainsKey("other"));
         var record = _service.Assess(_scope, stored, [Missing()]);
         Assert.Equal("Request", record.Outcome);
-        Assert.Single(_inbox.Requests);
+        Assert.Single(_store.Read(_scope).RequestReceipts!);
     }
 
     // AC-03: ambiguity, conflict, incomplete coverage and a downgraded witness each open one review item and no request.
@@ -186,7 +193,7 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
             Assert.Equal("open", item.State);
             Assert.Equal("technical-reviewer", item.Owner);
         });
-        Assert.Empty(_inbox.Requests);
+        Assert.Empty(_store.Read(_scope).RequestReceipts!);
 
         // A clear supported missing requirement does not add a review item.
         _assessments.SetCurrentBasis("case-1", CurrentBasis());
@@ -219,8 +226,8 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.Equal("return-status", witness.DocumentId);
         Assert.Equal(1, witness.Page);
 
-        var stored = Assert.Single(_assessments.List("case-1"));
-        Assert.Equal(record, stored);
+        var stored = Assert.Single(_store.Read(_scope).Assessments!);
+        Assert.Equal(JsonSerializer.Serialize(record), JsonSerializer.Serialize(stored));
         var json = JsonSerializer.Serialize(stored, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         Assert.Contains("\"kind\"", json);
         Assert.Contains("\"value\"", json);

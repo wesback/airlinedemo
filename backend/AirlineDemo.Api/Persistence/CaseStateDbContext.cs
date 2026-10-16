@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Requests;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -83,6 +85,27 @@ public sealed class InvestigationTraceStepRow
     public string PolicyHandover { get; set; } = string.Empty;
 }
 
+public sealed class AssessmentHistoryRow
+{
+    public string AssessmentId { get; set; } = string.Empty;
+    public string CaseId { get; set; } = string.Empty;
+    public string BasisId { get; set; } = string.Empty;
+    public int BasisVersion { get; set; }
+    public string Payload { get; set; } = string.Empty;
+}
+
+public sealed class RequestReceiptRow
+{
+    public string EventId { get; set; } = string.Empty;
+    public string RequestId { get; set; } = string.Empty;
+    public string CaseId { get; set; } = string.Empty;
+    public string ReportId { get; set; } = string.Empty;
+    public string BasisId { get; set; } = string.Empty;
+    public int BasisVersion { get; set; }
+    public string TemplateVersion { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// EF Core model for the provisioned Azure SQL case-state schema. Schema changes are applied only
 /// by the migration identity; the app identity holds data-plane grants only (see identity-and-telemetry.tf).
@@ -96,6 +119,8 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<WorkItemRow> WorkItems => Set<WorkItemRow>();
     public DbSet<InvestigationTraceRow> InvestigationTraces => Set<InvestigationTraceRow>();
     public DbSet<InvestigationTraceStepRow> InvestigationTraceSteps => Set<InvestigationTraceStepRow>();
+    public DbSet<AssessmentHistoryRow> AssessmentHistory => Set<AssessmentHistoryRow>();
+    public DbSet<RequestReceiptRow> RequestReceipts => Set<RequestReceiptRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -132,6 +157,34 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.CitationCheckOutcome).HasMaxLength(64).IsRequired();
             e.Property(x => x.CorrectionCode).HasMaxLength(128).IsRequired();
             e.Property(x => x.PolicyHandover).HasMaxLength(128).IsRequired();
+        });
+
+        modelBuilder.Entity<AssessmentHistoryRow>(e =>
+        {
+            e.ToTable("case_assessments", "dbo", t =>
+            {
+                t.HasCheckConstraint("CK_case_assessments_basis_id", "LEN(LTRIM(RTRIM([BasisId]))) > 0");
+                t.HasCheckConstraint("CK_case_assessments_basis_version", "BasisVersion > 0");
+            });
+            e.HasKey(x => new { x.CaseId, x.AssessmentId });
+            e.Property(x => x.CaseId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.AssessmentId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.BasisId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.Payload).IsRequired();
+        });
+
+        modelBuilder.Entity<RequestReceiptRow>(e =>
+        {
+            e.ToTable("case_request_receipts", "dbo");
+            e.HasKey(x => new { x.CaseId, x.EventId });
+            e.HasIndex(x => new { x.CaseId, x.RequestId }).IsUnique();
+            e.Property(x => x.CaseId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.EventId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.RequestId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.ReportId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.BasisId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.TemplateVersion).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Body).IsRequired();
         });
 
         modelBuilder.Entity<CaseRow>(e =>

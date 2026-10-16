@@ -26,7 +26,6 @@ builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddCaseStateStore(builder.Configuration);
 builder.Services.AddSingleton<InvestigationExecutionService>();
 builder.Services.AddSingleton<AssessmentStore>();
-builder.Services.AddSingleton<AssessmentApiRecordStore>();
 builder.Services.AddSingleton<MockRequestInbox>();
 builder.Services.AddSingleton<AssessmentExecutionService>();
 builder.Services.AddEvidenceBlobStore(builder.Configuration);

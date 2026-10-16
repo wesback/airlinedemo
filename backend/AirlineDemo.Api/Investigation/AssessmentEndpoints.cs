@@ -17,24 +17,6 @@ public sealed record AssessmentClaimSubmission(
 
 public sealed record AssessmentWitnessSubmission(string? DocumentId, int Page, string? Quote);
 
-public sealed class AssessmentApiRecordStore
-{
-    private readonly object _gate = new();
-    private readonly Dictionary<(string CaseId, string Id), AssessmentRecord> _records = new();
-
-    public string Append(AssessmentRecord record)
-    {
-        var id = $"assessment-{Guid.NewGuid():N}";
-        lock (_gate) _records[(record.CaseId, id)] = record;
-        return id;
-    }
-
-    public AssessmentRecord? Find(string caseId, string id)
-    {
-        lock (_gate) return _records.TryGetValue((caseId, id), out var record) ? record : null;
-    }
-}
-
 public static class AssessmentEndpoints
 {
     public static IEndpointRouteBuilder MapAssessmentEndpoints(this IEndpointRouteBuilder app)
@@ -52,7 +34,6 @@ public static class AssessmentEndpoints
         DemoSessionStore sessions,
         ICaseStateStore cases,
         AssessmentStore assessments,
-        AssessmentApiRecordStore apiRecords,
         AssessmentExecutionService execution)
     {
         var (denial, access) = Authorize(caseId, http, sessions, cases);
@@ -92,8 +73,7 @@ public static class AssessmentEndpoints
         if (basis is null) return Results.NotFound();
 
         var record = execution.Assess(access!.Scope, basis, claims);
-        var id = apiRecords.Append(record);
-        return Results.Created($"/api/cases/{caseId}/assessments/{id}", View(id, record));
+        return Results.Created($"/api/cases/{caseId}/assessments/{record.AssessmentId}", View(record.AssessmentId, record));
     }
 
     private static IResult GetAssessment(
@@ -101,13 +81,12 @@ public static class AssessmentEndpoints
         string id,
         HttpContext http,
         DemoSessionStore sessions,
-        ICaseStateStore cases,
-        AssessmentApiRecordStore apiRecords)
+        ICaseStateStore cases)
     {
-        var (denial, _) = Authorize(caseId, http, sessions, cases);
+        var (denial, access) = Authorize(caseId, http, sessions, cases);
         if (denial is not null) return denial;
 
-        var record = apiRecords.Find(caseId, id);
+        var record = cases.Read(access!.Scope).Assessments?.FirstOrDefault(a => a.AssessmentId == id);
         return record is null ? Results.NotFound() : Results.Ok(View(id, record));
     }
 
@@ -115,14 +94,12 @@ public static class AssessmentEndpoints
         string caseId,
         HttpContext http,
         DemoSessionStore sessions,
-        ICaseStateStore cases,
-        MockRequestInbox inbox)
+        ICaseStateStore cases)
     {
-        var (denial, _) = Authorize(caseId, http, sessions, cases);
+        var (denial, access) = Authorize(caseId, http, sessions, cases);
         if (denial is not null) return denial;
 
-        var receipts = inbox.Requests
-            .Where(receipt => receipt.CaseId == caseId)
+        var receipts = (cases.Read(access!.Scope).RequestReceipts ?? [])
             .Select(receipt => new
             {
                 receipt.RequestId,

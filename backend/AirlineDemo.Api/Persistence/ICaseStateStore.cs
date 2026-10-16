@@ -1,8 +1,7 @@
 namespace AirlineDemo.Api.Persistence;
 
 /// <summary>
-/// Scoped, versioned case state. Implemented by the file-backed <see cref="CaseStateStore"/>;
-/// the SQL adapter implements the same contract once runtime storage switches.
+/// Scoped, versioned case state shared by the file-backed and SQL adapters.
 /// </summary>
 public interface ICaseStateStore
 {

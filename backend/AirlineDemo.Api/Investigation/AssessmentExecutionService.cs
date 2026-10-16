@@ -37,7 +37,8 @@ public sealed record AssessmentRecord(
     string Reason,
     IReadOnlyList<AssessedClaim> Claims,
     string? RequestId,
-    string? WorkItemId);
+    string? WorkItemId,
+    string AssessmentId = "");
 
 /// <summary>
 /// Validates typed claims against the current basis and applies the deterministic policy. A single supported
@@ -84,6 +85,8 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
             : (Review, "supplied basis is not the current accepted basis");
         string? requestId = null;
         string? workItemId = null;
+        DeliveryReceipt? requestReceipt = null;
+        AssessmentRecord? committedRecord = null;
 
         if (outcome == Request)
         {
@@ -101,9 +104,27 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
                 claim.SerialNumber,
                 claim.Value);
             DeliveryResult? delivery = null;
-            // The basis check and the submission share one lock, so a superseding basis cannot land between them.
+            // The basis check, receipt preparation and commit share a lock, so the stored basis cannot change mid-submission.
             var submitted = assessments.RunIfCurrent(scope.CaseId, active, () =>
-                delivery = inbox.Submit(envelope, finding, active.ScenarioTime));
+            {
+                delivery = inbox.Prepare(envelope, finding, active.ScenarioTime);
+                if (delivery.Outcome != DeliveryOutcome.Delivered || delivery.Receipt is null) return;
+                var prior = (store.Read(scope).RequestReceipts ?? []).FirstOrDefault(r => r.EventId == envelope.EventId);
+                if (prior is not null && prior != delivery.Receipt)
+                {
+                    delivery = new DeliveryResult(DeliveryOutcome.Conflict, 409, "event id reused with a changed envelope", null);
+                    return;
+                }
+
+                requestReceipt = prior ?? delivery.Receipt;
+                requestId = requestReceipt.RequestId;
+                committedRecord = CreateRecord(scope, basis, outcome, reason, assessed, requestId, null);
+                var revision = store.Read(scope).Revision;
+                store.Commit(scope, revision, new CaseCommit(
+                    null, requestReceipt.RequestId, Actor, "assessment",
+                    $"{committedRecord.AssessmentId} {committedRecord.Outcome} on basis {committedRecord.BasisId} v{committedRecord.BasisVersion}",
+                    Assessment: committedRecord, RequestReceipt: requestReceipt));
+            });
             if (!submitted)
             {
                 outcome = Review;
@@ -111,7 +132,7 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
             }
             else if (delivery!.Outcome == DeliveryOutcome.Delivered && delivery.Receipt is not null)
             {
-                requestId = delivery.Receipt.RequestId;
+                return committedRecord!;
             }
             else
             {
@@ -131,11 +152,25 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
                 Actor);
         }
 
-        var record = new AssessmentRecord(
-            scope.CaseId, basis.BasisId, basis.BasisVersion, outcome, reason, assessed, requestId, workItemId);
-        assessments.Append(record);
+        var record = CreateRecord(scope, basis, outcome, reason, assessed, requestId, workItemId);
+        var state = store.Read(scope);
+        store.Commit(scope, state.Revision, new CaseCommit(
+            null, requestReceipt?.RequestId, Actor, "assessment",
+            $"{record.AssessmentId} {record.Outcome} on basis {record.BasisId} v{record.BasisVersion}",
+            Assessment: record, RequestReceipt: requestReceipt));
         return record;
     }
+
+    private static AssessmentRecord CreateRecord(
+        CaseScope scope,
+        AssessmentBasis basis,
+        string outcome,
+        string reason,
+        IReadOnlyList<AssessedClaim> claims,
+        string? requestId,
+        string? workItemId) =>
+        new(scope.CaseId, basis.BasisId, basis.BasisVersion, outcome, reason, claims, requestId, workItemId,
+            requestId is null ? $"assessment-{Guid.NewGuid():N}" : $"assessment-{requestId}");
 
     private static (string Outcome, string Reason) Route(AssessmentBasis basis, IReadOnlyList<ValidatedClaim> validated)
     {

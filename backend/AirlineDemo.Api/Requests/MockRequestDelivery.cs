@@ -169,16 +169,33 @@ public sealed class MockRequestInbox
         get { lock (_gate) return _audit.ToArray(); }
     }
 
-    public DeliveryResult Submit(DeliveryEnvelope envelope, DeliveryFinding finding, string expectedScenarioTime)
+    public DeliveryResult Prepare(DeliveryEnvelope envelope, DeliveryFinding finding, string expectedScenarioTime)
     {
         ArgumentNullException.ThrowIfNull(envelope);
         ArgumentNullException.ThrowIfNull(finding);
-
         if (!string.Equals(envelope.ScenarioTime, expectedScenarioTime, StringComparison.Ordinal))
-        {
             return new DeliveryResult(DeliveryOutcome.ScenarioTimeMismatch, 400, "scenario time mismatch", null);
-        }
+        var decision = MockDeliveryPolicy.Evaluate(finding, envelope);
+        var outcome = decision.Kind switch
+        {
+            DeliveryDecisionKind.Eligible => DeliveryOutcome.Delivered,
+            DeliveryDecisionKind.CompleteBaseline => DeliveryOutcome.CompleteBaseline,
+            DeliveryDecisionKind.Blocked => DeliveryOutcome.Blocked,
+            _ => DeliveryOutcome.Review,
+        };
+        if (outcome != DeliveryOutcome.Delivered)
+            return new DeliveryResult(outcome, 200, decision.Reason, null);
+        var requestId = RequestIdFor(envelope);
+        var receipt = new DeliveryReceipt(
+            envelope.EventId, requestId, envelope.CaseId, envelope.ReportId, envelope.BasisId,
+            envelope.BasisVersion, MockRequestTemplate.Version, MockRequestTemplate.Render(envelope, requestId));
+        return new DeliveryResult(DeliveryOutcome.Delivered, 201, "delivered", receipt);
+    }
 
+    public DeliveryResult Submit(DeliveryEnvelope envelope, DeliveryFinding finding, string expectedScenarioTime)
+    {
+        var prepared = Prepare(envelope, finding, expectedScenarioTime);
+        if (prepared.Outcome == DeliveryOutcome.ScenarioTimeMismatch) return prepared;
         var fingerprint = Fingerprint(envelope);
         lock (_gate)
         {
@@ -194,28 +211,8 @@ public sealed class MockRequestInbox
                 return new DeliveryResult(DeliveryOutcome.Conflict, 409, "report id already scoped to another event", null);
             }
 
-            var decision = MockDeliveryPolicy.Evaluate(finding, envelope);
-            if (decision.Kind != DeliveryDecisionKind.Eligible)
-            {
-                var outcome = decision.Kind switch
-                {
-                    DeliveryDecisionKind.CompleteBaseline => DeliveryOutcome.CompleteBaseline,
-                    DeliveryDecisionKind.Blocked => DeliveryOutcome.Blocked,
-                    _ => DeliveryOutcome.Review,
-                };
-                return new DeliveryResult(outcome, 200, decision.Reason, null);
-            }
-
-            var requestId = RequestIdFor(envelope);
-            var receipt = new DeliveryReceipt(
-                envelope.EventId,
-                requestId,
-                envelope.CaseId,
-                envelope.ReportId,
-                envelope.BasisId,
-                envelope.BasisVersion,
-                MockRequestTemplate.Version,
-                MockRequestTemplate.Render(envelope, requestId));
+            if (prepared.Outcome != DeliveryOutcome.Delivered) return prepared;
+            var receipt = prepared.Receipt!;
 
             if (InjectWriteFailure)
             {
@@ -225,8 +222,8 @@ public sealed class MockRequestInbox
             _byEvent[envelope.EventId] = (fingerprint, receipt);
             _reportEvent[(envelope.CaseId, envelope.ReportId)] = envelope.EventId;
             _requests.Add(receipt);
-            _audit.Add($"delivered {requestId} for event {envelope.EventId} on basis {envelope.BasisId} v{envelope.BasisVersion}");
-            return new DeliveryResult(DeliveryOutcome.Delivered, 201, "delivered", receipt);
+            _audit.Add($"delivered {receipt.RequestId} for event {envelope.EventId} on basis {envelope.BasisId} v{envelope.BasisVersion}");
+            return prepared;
         }
     }
 

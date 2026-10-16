@@ -8,6 +8,8 @@ using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Persistence.Migrations;
 using AirlineDemo.Api.Reviews;
 using AirlineDemo.Api.Runs;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Requests;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -54,6 +56,7 @@ public sealed class SqlCaseStateStoreTests
         db.Database.Migrate();
 
         Assert.Contains("20261014190000_InitialCaseStateSchema", db.Database.GetAppliedMigrations());
+        Assert.Contains("20261016120000_AddAssessmentHistory", db.Database.GetAppliedMigrations());
         AssertMapped(db, typeof(CaseRow), "dbo", "cases");
         AssertMapped(db, typeof(CaseDocumentRow), "dbo", "case_documents");
         AssertMapped(db, typeof(CaseDecisionRow), "dbo", "case_decisions");
@@ -236,6 +239,59 @@ public sealed class SqlCaseStateStoreTests
         Assert.Equal(1, db.CaseDocuments.Count());
         Assert.Equal(1, db.CaseDecisions.Count());
         Assert.Equal(1, db.CaseEvents.Count());
+    }
+
+    [Fact]
+    public void AC_AssessmentHistorySchemaRejectsMissingBasisReference()
+    {
+        using var connection = OpenMigratedSqlite(out _);
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "INSERT INTO case_assessments (CaseId, AssessmentId, BasisVersion, Payload) VALUES ('case-1', 'a-1', 1, '{}')";
+        Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+        command.CommandText =
+            "INSERT INTO case_assessments (CaseId, AssessmentId, BasisId, Payload) VALUES ('case-1', 'a-2', 'basis-1', '{}')";
+        Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+        command.CommandText =
+            "INSERT INTO case_assessments (CaseId, AssessmentId, BasisId, BasisVersion, Payload) VALUES ('case-1', 'a-3', ' ', 1, '{}')";
+        Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+        command.CommandText =
+            "INSERT INTO case_assessments (CaseId, AssessmentId, BasisId, BasisVersion, Payload) VALUES ('case-1', 'a-4', 'basis-1', 0, '{}')";
+        Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+    }
+
+    [Fact]
+    public void AC_AssessmentAndReceiptCommitRoundTripsWithinCaseScope()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-a", "owner-a");
+        store.CreateCase("case-b", "owner-b");
+        var assessment = new AssessmentRecord(
+            "case-a", "basis-a", 7, "Request", "supported gap",
+            [new AssessedClaim("MissingRequirement", "approval", "Engine", "ENG-7", [new AssessedWitness("doc-1", 3)])],
+            "REQ-7", null, "assessment-7");
+        var receipt = new DeliveryReceipt("event-7", "REQ-7", "case-a", "report-7", "basis-a", 7, "template-4", "body-7");
+        store.Commit(scope, 0, new CaseCommit(
+            null, receipt.RequestId, "assessment-service", "assessment", "delivered",
+            Assessment: assessment, RequestReceipt: receipt));
+
+        var reloaded = new SqlCaseStateStore(options);
+        var restoredScope = reloaded.AuthorizeCase("case-a", "owner-a");
+        var restored = Assert.Single(reloaded.Read(restoredScope).Assessments!);
+        Assert.Equal(assessment.AssessmentId, restored.AssessmentId);
+        Assert.Equal((assessment.CaseId, assessment.BasisId, assessment.BasisVersion, assessment.Outcome),
+            (restored.CaseId, restored.BasisId, restored.BasisVersion, restored.Outcome));
+        var expectedClaim = Assert.Single(assessment.Claims);
+        var actualClaim = Assert.Single(restored.Claims);
+        Assert.Equal((expectedClaim.Kind, expectedClaim.Value, expectedClaim.Component, expectedClaim.SerialNumber),
+            (actualClaim.Kind, actualClaim.Value, actualClaim.Component, actualClaim.SerialNumber));
+        Assert.Equal(new AssessedWitness("doc-1", 3), Assert.Single(actualClaim.Witnesses));
+        Assert.Equal(receipt, Assert.Single(reloaded.Read(restoredScope).RequestReceipts!));
+        Assert.Equal(1L, Assert.Single(reloaded.ReadAudit(restoredScope)).Revision);
+        var other = reloaded.AuthorizeCase("case-b", "owner-b");
+        Assert.Null(reloaded.Read(other).Assessments!.FirstOrDefault(a => a.AssessmentId == assessment.AssessmentId));
+        Assert.Empty(reloaded.Read(other).RequestReceipts!);
     }
 
     // AC4: ordinal owner matching, scope isolation, duplicate IDs, and stale-revision rejection, each with a positive case.
