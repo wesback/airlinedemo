@@ -1,7 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AirlineDemo.Api.Evidence;
 
@@ -61,6 +65,10 @@ public static class EvidenceEndpoints
         EvidenceBasisStore basis,
         EvidencePackageStore packages,
         IsolatedPdfParserOptions parserOptions,
+        ICaseStateStore caseStore,
+        EvidenceCaseReadSourceFactory caseSources,
+        InvestigationExecutionService investigations,
+        IServiceProvider services,
         CancellationToken ct)
     {
         var session = DemoAuthEndpoints.CurrentSession(request.HttpContext, sessions);
@@ -100,11 +108,92 @@ public static class EvidenceEndpoints
         var invalid = EvidenceIntake.Validate(documents);
         if (invalid is not null) return Results.BadRequest(new { error = invalid });
 
+        // Authorize before anything is saved: a non-owner must not write evidence into another user's case.
+        CaseScope scope;
+        try
+        {
+            scope = caseStore.OwnerOf(caseId) is not null
+                ? caseStore.AuthorizeCase(caseId, session.User.Id)
+                : caseStore.CreateCase(caseId, session.User.Id);
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Results.NotFound();
+        }
+
         var packageId = PackageIdFor(caseId, documents);
         var (record, created) = packages.Submit(packageId, caseId,
             () => EvidenceIntake.ProcessPackage(caseId, documents, basis, parserOptions));
+        // Runs on every submission until the trace exists, so a retry after a failed append re-runs only the investigation.
+        await RunInvestigationAsync(record, caseId, scope, session.User.Id, caseSources, basis, services, investigations, ct);
         return created ? Results.Created($"/api/cases/{caseId}/packages/{packageId}", record) : Results.Ok(record);
     }
+
+    private static async Task RunInvestigationAsync(
+        EvidencePackageRecord record,
+        string caseId,
+        CaseScope scope,
+        string actorId,
+        EvidenceCaseReadSourceFactory caseSources,
+        EvidenceBasisStore basis,
+        IServiceProvider services,
+        InvestigationExecutionService investigations,
+        CancellationToken ct)
+    {
+        var accepted = record.Documents.Where(d => d.Status == "accepted").Select(d => d.FileName).Distinct(StringComparer.Ordinal).ToList();
+        if (accepted.Count == 0) return;
+
+        // Accepted evidence must not succeed without its investigation trace, so a missing model is a failure, not a skip.
+        var chat = services.GetService<IChatClient>()
+            ?? throw new InvalidOperationException("No investigation model is configured; accepted evidence cannot be investigated.");
+
+        var manifest = services.GetRequiredService<ApprovedModelManifest>();
+        var registry = services.GetRequiredService<SyntheticContentRegistry>();
+        var caseStore = services.GetRequiredService<ICaseStateStore>();
+
+        var runId = record.PackageId;
+        var investigationId = "inv-" + runId;
+        if (caseStore.FindTrace(scope, caseId, runId, investigationId) is not null) return;
+
+        // Pin each document to the version this package accepted, so a retry investigates the same evidence.
+        // Duplicate accepted filenames pin to the newest accepted version of that name, so the lookup cannot throw.
+        var pinned = record.Documents
+            .Where(d => d.Status == "accepted" && d.Version is not null)
+            .GroupBy(d => d.FileName, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Max(d => d.Version!.Value), StringComparer.Ordinal);
+        var documents = new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
+        var evidenceTexts = new List<string>(accepted.Count);
+        foreach (var name in accepted)
+        {
+            var text = basis.History($"{caseId}/{name}").First(v => v.Version == pinned[name]).Text;
+            documents[name] = BasisDocumentFor(name, text);
+            // The model receives page text only; ModelCallGate still refuses text that is not registered synthetic content.
+            evidenceTexts.Add(text.TrimEnd('\r', '\n'));
+        }
+
+        var basisVersion = accepted.Max(name => pinned[name]);
+        var actorToken = "actor-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(actorId)))[..16].ToLowerInvariant();
+        var context = new InvestigationTraceContext(runId, investigationId, basisVersion,
+            manifest.DeploymentName ?? string.Empty, manifest.ApiVersion ?? string.Empty, manifest.Region ?? string.Empty,
+            manifest.ContentFilter ?? string.Empty, "escalate", actorToken);
+        var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted, pinned), manifest, registry,
+            manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat);
+
+        // A gate refusal (evidence not in the synthetic registry) or model output that breaks the claim contract is a recorded
+        // outcome (escalated, rejected): the trace is already appended with it. Any append failure is a different exception
+        // and still reaches the caller.
+        try
+        {
+            await investigations.ExecuteAsync(scope, context, investigator, evidenceTexts, ClaimKind.Baseline, documents, string.Empty, ct);
+        }
+        catch (Exception ex) when (ex is ModelGateException or InvestigationOutputException)
+        {
+        }
+    }
+
+    /// <summary>The validation basis keeps one entry per page, so a claim citing page 2 is checked against page 2.</summary>
+    internal static BasisDocument BasisDocumentFor(string name, string text) =>
+        BasisDocument.Create(name, text.Split(EvidenceIntake.PageSeparator));
 
     private static IResult GetPackage(string caseId, string packageId, HttpContext http, DemoSessionStore sessions, EvidencePackageStore packages)
     {

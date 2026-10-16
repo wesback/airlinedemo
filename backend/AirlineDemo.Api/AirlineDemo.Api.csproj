@@ -8,6 +8,7 @@
     <None Include="Fixtures/sources/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="Investigation/SyntheticFixtures/*.txt" />
     <EmbeddedResource Include="Auth/Fixtures/demo-users-v1.json" LogicalName="AirlineDemo.Api.Auth.Fixtures.demo-users-v1.json" />
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
     <EmbeddedResource Include="Fixtures/sources/technical.json" LogicalName="AirlineDemo.Api.Fixtures.sources.technical.json" />
     <EmbeddedResource Include="Fixtures/sources/finance.json" LogicalName="AirlineDemo.Api.Fixtures.sources.finance.json" />
     <EmbeddedResource Include="Fixtures/sources/maintenance.json" LogicalName="AirlineDemo.Api.Fixtures.sources.maintenance.json" />

@@ -1,0 +1,347 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "6bd1939df88cfe4fa5dcea7792049d7dc719d0d8",
+  "round": 0,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production investigation path and append-failure handling are present, but the changed tests leave required endpoint event flow, supported-validation recording, file-backed duplicate-key behavior, and lazy client resolution unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 158,
+          "message": "AC TRACE-PRODUCER-01 is not verified through the endpoint: the required scripted event flow and ordered trace assertions are missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AcceptedEvidenceRunsInvestigationAndPersistsTrace submits accepted evidence with CountingChatClient, which returns no tool calls or claims, then asserts the trace has no steps.",
+            "failureScenario": "If the endpoint stops recording tool calls, citation checks, or handover events, this test still passes. It does not cover AC TRACE-PRODUCER-01’s required scripted inventory call, source-page call, supported claim, and ordered trace assertions."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 176,
+          "message": "AC TRACE-PRODUCER-02 lacks an assertion that a supported validation is persisted with correction code None.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "RecordsDowngradeWithoutUntrustedContent records both downgraded and supported validations, but only asserts that a downgraded correction exists; it never asserts that the supported validation is persisted with correction code None.",
+            "failureScenario": "If supported validations are omitted from traces, the test still passes because the downgraded correction remains present."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 170,
+          "message": "AC TRACE-PRODUCER-05 is not verified for the file-backed store; the required InvestigationTraceStoreTests contract test is absent.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AppendsAndFindsInvestigationTrace checks duplicate-key behavior for SqlCaseStateStore. The changed tests use the file-backed CaseStateStore for recorder operations but do not test duplicate-key append behavior there.",
+            "failureScenario": "If CaseStateStore replaces an existing trace for a duplicate case, run, and investigation key, the SQL contract test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 1,
+          "message": "AC TRACE-PRODUCER-06 is not verified: the required HostRegistersAzureOpenAIChatClientWithoutCallingIt test is absent.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed tests replace IChatClient with fakes and do not resolve the production registration using AzureOpenAI:Endpoint and an approved manifest.",
+            "failureScenario": "If the production registration is missing or resolves a credential or contacts the model during service resolution, the changed tests do not detect it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds the investigation lifecycle and trace persistence, but several acceptance criteria lack the specified behavior tests. In particular, the endpoint test expects an empty trace, and the required host-registration and file-backed-store contract tests are absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 142,
+          "message": "AC TRACE-PRODUCER-01 is not covered by the endpoint test: it does not exercise or assert the required ordered tool-call, citation-check, and handover events.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AcceptedEvidenceRunsInvestigationAndPersistsTrace uses CountingChatClient, which returns no claims or tool calls, then asserts that the trace has no steps.",
+            "failureScenario": "If package submission stops recording tool calls, citation checks, or handover, this test still passes because its fake produces no events and it expects an empty trace. AC TRACE-PRODUCER-01 requires the scripted endpoint flow and ordered trace assertions."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 111,
+          "message": "AC TRACE-PRODUCER-02 lacks its required test assertions for event order and supported validations with correction code None.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "RecordsDowngradeWithoutUntrustedContent calls RecordValidation directly for downgraded and supported claims, but asserts only the downgraded correction. It does not assert that a supported claim is persisted with correction code None or verify the required ordered categorical events.",
+            "failureScenario": "If supported validations are omitted from traces, this test still passes. The required RecordsOrderedCategoricalEventsWithoutUntrustedContent test is absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 170,
+          "message": "AC TRACE-PRODUCER-05 is unverified for the file-backed store; the required InvestigationTraceStoreTests is missing.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AppendsAndFindsInvestigationTrace verifies SQL-store behavior. The changed tests do not include the required InvestigationTraceStoreTests contract test for the file-backed store.",
+            "failureScenario": "If the file-backed store replaces an existing trace for a duplicate case, run, and investigation key, the SQL test still passes and does not detect the violation of AC TRACE-PRODUCER-05."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 1,
+          "message": "The required AC TRACE-PRODUCER-06 host test is absent, so the production client registration and lazy resolution are not verified.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed tests override IChatClient with fakes, and no HostRegistersAzureOpenAIChatClientWithoutCallingIt test resolves the production registration using the configured endpoint and an approved manifest.",
+            "failureScenario": "If the production IChatClient registration is removed or resolves credentials during service registration, the endpoint tests can still pass because they replace that registration. AC TRACE-PRODUCER-06 remains unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable through the changed code. The investigation source is limited to accepted documents for the requested case, and trace lookup and writes use the authorized case scope.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/CountingChatClient.cs",
+      "backend/AirlineDemo.Api.Tests/EvidenceEndpointsTests.cs",
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/FakeApprovedManifest.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

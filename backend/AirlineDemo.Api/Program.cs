@@ -3,11 +3,13 @@ using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Finance;
+using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.SourceSystems;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 using AirlineDemo.Api.Reviews;
+using Microsoft.Extensions.AI;
 
 if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Switch)
 {
@@ -20,11 +22,33 @@ builder.Services.AddAirlineDiagnostics(builder.Configuration);
 builder.Services.AddSingleton<DemoSessionStore>();
 builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddCaseStateStore(builder.Configuration);
+builder.Services.AddSingleton<InvestigationExecutionService>();
 builder.Services.AddEvidenceBlobStore(builder.Configuration);
 builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
+builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
+builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
+var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
+if (!string.IsNullOrEmpty(approvedModelManifestPath))
+{
+    builder.Services.AddSingleton(ApprovedModelManifest.Load(approvedModelManifestPath));
+}
+// Resolved lazily: constructing the client makes no network request and fetches no token.
+// The model gate still refuses any request while the manifest is unapproved.
+builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
+{
+    var endpoint = builder.Configuration["AzureOpenAI:Endpoint"]
+        ?? throw new InvalidOperationException("AzureOpenAI:Endpoint is not configured; accepted evidence cannot be investigated.");
+    var manifest = sp.GetService<ApprovedModelManifest>()
+        ?? throw new InvalidOperationException("No approved model manifest is configured; accepted evidence cannot be investigated.");
+    var deployment = manifest.DeploymentName
+        ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
+    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), new Azure.Identity.DefaultAzureCredential())
+        .GetChatClient(deployment)
+        .AsIChatClient();
+});
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 // Sources register only after the complete signed fixture set verifies; any refusal stops startup.
 SourceFixtureLoader.LoadPinned(System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"));

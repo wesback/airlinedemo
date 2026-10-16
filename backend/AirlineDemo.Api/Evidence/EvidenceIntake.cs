@@ -99,6 +99,9 @@ public static class EvidenceIntake
     public const long MaxPackageBytes = 50L * 1024 * 1024;
     public const int MaxPagesPerDocument = 200;
 
+    /// <summary>Separates the pages of a stored document text.</summary>
+    public const char PageSeparator = '\f';
+
     /// <summary>
     /// Validates a package and commits extracted text as new basis versions only when every document is accepted.
     /// A rejected package creates no basis content, so no partial basis is ever stored.
@@ -233,6 +236,7 @@ public static class EvidenceIntake
             }
 
             var text = new StringBuilder();
+            var pageIndex = 0;
             foreach (var page in pdf.GetPages())
             {
                 if (withinMemoryLimit is not null && !withinMemoryLimit())
@@ -250,6 +254,8 @@ public static class EvidenceIntake
                     return (EvidenceProcessingState.RejectedPermanent, "images are not accepted", "");
                 }
 
+                // A form feed separates pages, so a citation can be checked against the page it names. A one-page text is unchanged.
+                if (pageIndex++ > 0) text.Append(PageSeparator);
                 text.AppendLine(page.Text);
             }
 

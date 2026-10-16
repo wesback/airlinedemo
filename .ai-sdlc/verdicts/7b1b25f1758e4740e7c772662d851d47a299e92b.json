@@ -1,0 +1,300 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "7b1b25f1758e4740e7c772662d851d47a299e92b",
+  "round": 3,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint tests address the previously reported missing scenarios, and the accepted-version pinning prevents retries from switching evidence. The production path still fails for duplicate accepted filenames and when the host has no registered chat client.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 150,
+          "message": "Duplicate accepted filenames make the new investigation path throw before execution, leaving an accepted package without its required trace.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "SubmitPackage accepts multiple uploaded files, and EvidenceIntake commits each accepted file under its case-and-filename key. RunInvestigationAsync then builds pinned versions with ToDictionary keyed by filename.",
+            "failureScenario": "A package contains two accepted PDFs with the same filename. Both are committed and included in record.Documents; ToDictionary throws for the duplicate key, so the endpoint returns an error without invoking the investigator or persisting a trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 135,
+          "message": "The production host has no IChatClient registration, so accepted package submissions cannot run the investigation lifecycle.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The production Program.cs shown in this change registers no IChatClient. For accepted documents, RunInvestigationAsync requires one and throws before calling InvestigationExecutionService when GetService<IChatClient>() returns null.",
+            "failureScenario": "In the configured production host without an IChatClient registration, a package with accepted evidence reaches RunInvestigationAsync, throws, and never invokes the investigator or writes a trace."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes address the earlier evidence-version and endpoint-test gaps. Accepted evidence still cannot run an investigation in the production host because no IChatClient is registered.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 136,
+          "message": "AC TRACE-PRODUCER-01 remains unmet: the production host has no IChatClient registration, so accepted evidence fails before the investigation service is invoked.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "SubmitPackage calls RunInvestigationAsync for accepted documents. That method requires an IChatClient before it calls InvestigationExecutionService; the production Program.cs setup does not register one.",
+            "failureScenario": "In the production host, submitting a package with accepted evidence reaches the missing-client check and throws before the investigator runs or a trace is persisted. The endpoint no longer returns success, but AC TRACE-PRODUCER-01 still is not fulfilled."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The missing model registration still blocks the production investigation lifecycle. The new endpoint tests also do not prove ordered event persistence and allow a successful retry response without a trace.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 134,
+          "message": "Accepted package submissions still cannot run in the production host because no IChatClient is registered. Throwing on the missing client prevents a false success, but leaves the required investigation lifecycle unavailable.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The production host does not register an IChatClient. For accepted documents, RunInvestigationAsync therefore throws before calling InvestigationExecutionService.ExecuteAsync.",
+            "failureScenario": "A user submits a package containing an accepted document in the configured host; the endpoint fails instead of running the investigation and persisting its trace, so TRACE-PRODUCER-01 is unmet."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 158,
+          "message": "The accepted-package endpoint test does not verify ordered trace events as required by TRACE-PRODUCER-01; it explicitly expects an empty trace.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AcceptedEvidenceRunsInvestigationAndPersistsTrace asserts that the stored trace has no steps, despite TRACE-PRODUCER-01 requiring the endpoint test to assert ordered events.",
+            "failureScenario": "If the endpoint invokes the model but stops recording its tool or citation events, this test still passes because it expects an empty Steps collection."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 184,
+          "message": "The retry test can pass when the endpoint returns HTTP 201 Created without a trace, so it does not prove that retries fail while the required trace is absent.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The retry assertion rejects only HTTP 200; HTTP 201 Created is also a successful package response and passes this assertion.",
+            "failureScenario": "If a retry returns 201 Created while the trace append still fails and no trace exists, TraceAppendFailureCannotReturnSuccessfulSubmission passes despite TRACE-PRODUCER-03 being violated."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/CountingChatClient.cs",
+      "backend/AirlineDemo.Api.Tests/EvidenceEndpointsTests.cs",
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/FakeApprovedManifest.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

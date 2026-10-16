@@ -77,29 +77,21 @@ public sealed class BoundedInvestigator(
     private readonly InvestigationTelemetry _telemetry = telemetry
         ?? new InvestigationTelemetry(new ConsoleTraceLogger(), "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
 
-    public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default)
+    public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default, InvestigationTraceRecorder? traceRecorder = null)
     {
-        ArgumentNullException.ThrowIfNull(documents);
-        if (documents.Count == 0)
-        {
-            throw new ArgumentException("at least one document is required", nameof(documents));
-        }
-
-        foreach (var text in documents)
-        {
-            if (text is null || text.Contains(UntrustedBegin, StringComparison.Ordinal) || text.Contains(UntrustedEnd, StringComparison.Ordinal))
-            {
-                throw new ArgumentException("document text is missing or contains an untrusted-data delimiter", nameof(documents));
-            }
-        }
+        ValidateDocuments(documents);
 
         // Every document text that reaches the model, including tool results, is added here before the next call is gated.
         var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var evidence = new List<string>(documents);
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits);
+        // The model chooses tool names, so only the declared tools are recorded by name; anything else is one fixed label.
+        var knownTools = new HashSet<string>(StringComparer.Ordinal);
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits,
+            name => traceRecorder?.RecordToolCall(knownTools.Contains(name) ? name : InvestigationTraceRecorder.UnknownTool));
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
         var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
+        foreach (var function in tools.Functions) knownTools.Add(function.Name);
         var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
 
         InvestigationResult? result = null;
@@ -114,7 +106,7 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationLimitExceededException(breach);
             }
 
-            result = new InvestigationResult(VerifyClaims(response.Text), gate.Traces);
+            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder), gate.Traces);
             outcome = "approved";
             return result;
         }
@@ -131,6 +123,24 @@ public sealed class BoundedInvestigator(
         {
             EmitTrace(traceId, gate.ToolsUsed, result, outcome, limits);
             (limits as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>Refuses an investigation before it starts: no documents, a missing text, or a text that carries a delimiter.</summary>
+    internal static void ValidateDocuments(IReadOnlyList<string> documents)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        if (documents.Count == 0)
+        {
+            throw new ArgumentException("at least one document is required", nameof(documents));
+        }
+
+        foreach (var text in documents)
+        {
+            if (text is null || text.Contains(UntrustedBegin, StringComparison.Ordinal) || text.Contains(UntrustedEnd, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("document text is missing or contains an untrusted-data delimiter", nameof(documents));
+            }
         }
     }
 
@@ -176,7 +186,7 @@ public sealed class BoundedInvestigator(
             .Where(part => part.Length >= 20)
             .Any(part => claimText.Contains(part, StringComparison.Ordinal));
 
-    private IReadOnlyList<InvestigationClaim> VerifyClaims(string modelText)
+    private IReadOnlyList<InvestigationClaim> VerifyClaims(string modelText, InvestigationTraceRecorder? traceRecorder)
     {
         List<ClaimDto>? dtos;
         try
@@ -218,7 +228,17 @@ public sealed class BoundedInvestigator(
                 var page = source.GetSourcePage(caseId, witness.DocumentId, witness.Page);
                 if (page is null || !page.Contains(witness.Quote, StringComparison.Ordinal))
                 {
+                    if (witness.Page >= 1)
+                    {
+                        traceRecorder?.RecordCitationCheck(witness.DocumentId, witness.Page, InvestigationTraceRecorder.CitationQuoteNotOnPage);
+                    }
+
                     throw new InvestigationOutputException("witness quote is not on the cited page");
+                }
+
+                if (witness.Page >= 1)
+                {
+                    traceRecorder?.RecordCitationCheck(witness.DocumentId, witness.Page, InvestigationTraceRecorder.CitationVerified);
                 }
 
                 witnesses.Add(new DocumentWitness(witness.DocumentId, witness.Page, witness.Quote));
@@ -267,7 +287,8 @@ public sealed class BoundedInvestigator(
         string dataRegion,
         string evidenceVersion,
         IReadOnlyList<string> evidence,
-        IInvestigationLimits limits) : DelegatingChatClient(inner)
+        IInvestigationLimits limits,
+        Action<string>? onToolCall = null) : DelegatingChatClient(inner)
     {
         private readonly List<ModelCallTrace> _traces = [];
         private readonly List<string> _toolsUsed = [];
@@ -301,6 +322,8 @@ public sealed class BoundedInvestigator(
                     await limits.AfterModelCallAsync(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, cancellationToken);
                     foreach (var call in response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>())
                     {
+                        // Every requested call is recorded in order, including repeats of the same tool.
+                        onToolCall?.Invoke(call.Name);
                         if (!_toolsUsed.Contains(call.Name))
                         {
                             _toolsUsed.Add(call.Name);

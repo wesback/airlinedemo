@@ -26,6 +26,8 @@ public sealed class EvidenceEndpointsTests
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode }));
             // The test host runs as root on Linux, so the default parser cannot isolate its worker; point it at this test assembly.
+            builder.ConfigureTestServices(services => services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(new CountingChatClient()));
+            builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
             builder.ConfigureTestServices(services => services.AddSingleton(new IsolatedPdfParserOptions
             {
                 WorkerFileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",

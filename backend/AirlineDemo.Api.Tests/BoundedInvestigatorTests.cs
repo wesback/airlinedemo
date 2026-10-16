@@ -289,7 +289,8 @@ public class BoundedInvestigatorTests
             Region,
             "evidence-v1",
             new List<string> { ReturnStatusText },
-            NoInvestigationLimits.Instance)!;
+            NoInvestigationLimits.Instance,
+            null)!;
 
         Assert.Throws<NotSupportedException>(() => gate.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "x")]));
         Assert.Empty(inner.Requests);

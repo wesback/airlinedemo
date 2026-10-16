@@ -1,0 +1,348 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "39834abef20b8505bfee24cb16d4787af4c9eb78",
+  "round": 0,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production host cannot resolve an investigation client, and the endpoint test does not verify the required ordered investigation events. The client registration and supported-validation trace requirements also lack the specified coverage.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 34,
+          "message": "AC TRACE-PRODUCER-01 and AC TRACE-PRODUCER-06 are unmet: the host does not register the Azure OpenAI client configured with the endpoint, DefaultAzureCredential, and approved manifest deployment.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The host registers an IChatClient factory that throws whenever the client is resolved. SubmitPackage resolves it for accepted evidence before calling InvestigationExecutionService.",
+            "failureScenario": "A package with accepted evidence is submitted in the production host. Resolving IChatClient throws, so the investigation does not run and its trace is not persisted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 160,
+          "message": "AC TRACE-PRODUCER-01 lacks the required endpoint behavior test: it does not use the specified scripted tool calls and supported claim or assert the ordered tool-call, citation-check, and handover events.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AcceptedEvidenceRunsInvestigationAndPersistsTrace uses CountingChatClient, which returns an empty claim list, then asserts that the stored trace has no steps.",
+            "failureScenario": "If accepted package submission stops recording tool calls or citation checks, this test still passes because its response produces no such events and the test expects an empty Steps collection."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 1,
+          "message": "AC TRACE-PRODUCER-06 has no test in this change for resolving the configured Azure OpenAI client without a network call.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed test file contains no HostRegistersAzureOpenAIChatClientWithoutCallingIt test; the only host registration test setup replaces IChatClient with a fake.",
+            "failureScenario": "The production host can lack the required Azure OpenAI registration or resolve a credential during registration without any test in this change detecting it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 176,
+          "message": "AC TRACE-PRODUCER-02 is not fully verified: no test asserts that supported claims are persisted with correction code None.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "RecordsDowngradeWithoutUntrustedContent records both downgraded and supported validations, but asserts only that one correction step exists; it does not assert a supported validation step with correction code None.",
+            "failureScenario": "If supported validations are omitted from traces, the test still passes because the downgraded correction remains present and is the only step it checks."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The host’s IChatClient factory always throws, so accepted packages cannot run the required investigation lifecycle. The endpoint test also accepts an empty trace, and changed tests leave required event and file-backed append behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 35,
+          "message": "The production host does not register the required Azure OpenAI client; its IChatClient registration always throws, so accepted evidence cannot start an investigation.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The host registers an IChatClient factory that throws whenever resolved. EvidenceEndpoints.RunInvestigationAsync resolves it before invoking InvestigationExecutionService. The registration does not configure AzureOpenAI:Endpoint, DefaultAzureCredential, or the approved manifest deployment name.",
+            "failureScenario": "When a package contains accepted evidence, the endpoint resolves IChatClient and throws before the investigation runs or its trace is persisted. This leaves TRACE-PRODUCER-01 and TRACE-PRODUCER-06 unmet."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 158,
+          "message": "The TRACE-PRODUCER-01 endpoint test does not verify the required accepted-evidence event flow: it uses an empty-response client instead of the scripted inventory call, page call, and supported claim, and does not assert ordered trace events.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AcceptedEvidenceRunsInvestigationAndPersistsTrace uses CountingChatClient, which returns an empty claim list without tool calls, then asserts that the persisted trace has no steps.",
+            "failureScenario": "If endpoint execution fails to record tool calls, citation checks, or handover, this test still passes because its fake produces none of those events and it expects an empty Steps collection."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 111,
+          "message": "TRACE-PRODUCER-02 lacks a test proving that an actual supported investigation claim is persisted with correction code None, as required by RecordsOrderedCategoricalEventsWithoutUntrustedContent.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "RecordsDowngradeWithoutUntrustedContent calls RecordValidation directly for supported and downgraded claims. PersistsActualOrderedToolAndCitationOutcomes exercises an investigation, but its claim is downgraded; no test verifies that a supported claim produced by the investigation is persisted with correction code None.",
+            "failureScenario": "If the execution service omits supported validation events while still recording downgraded claims, the direct recorder test still passes and the investigation test only checks its downgraded claim."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs",
+          "line": 172,
+          "message": "TRACE-PRODUCER-05 has no file-backed store contract test verifying that duplicate trace keys cannot replace the original; the required InvestigationTraceStoreTests is absent.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AppendsAndFindsInvestigationTrace tests append immutability and exact-key lookup for SqlCaseStateStore. The changed tests use CaseStateStore for recorder operations, but do not verify its duplicate-key append behavior.",
+            "failureScenario": "If the file-backed store replaces an existing trace when the same case, run, and investigation key is appended, the changed tests would not detect the violation of TRACE-PRODUCER-05."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new investigation path can write traces to an existing case for any authenticated submitter who supplies its case ID.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 140,
+          "message": "The trace write bypasses caller authorization by authorizing with the case's stored owner instead of verifying the authenticated actor. OWASP A01:2025 Broken Access Control.",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RunInvestigationAsync derives an authorized CaseScope from the case's stored owner, without checking that owner against the authenticated actorId.",
+            "failureScenario": "An authenticated user submits accepted evidence using another user's caseId. The endpoint loads that case's owner and authorizes the trace write as that owner, allowing the caller to add an investigation trace to a case they do not own."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/CountingChatClient.cs",
+      "backend/AirlineDemo.Api.Tests/EvidenceEndpointsTests.cs",
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/FakeApprovedManifest.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
