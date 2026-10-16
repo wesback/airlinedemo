@@ -35,6 +35,8 @@ if (!string.IsNullOrEmpty(approvedModelManifestPath))
 {
     builder.Services.AddSingleton(ApprovedModelManifest.Load(approvedModelManifestPath));
 }
+// The only place a DefaultAzureCredential is constructed; it runs on the first token request, never while registering the client.
+builder.Services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () => new Azure.Identity.DefaultAzureCredential());
 // Resolved lazily: constructing the client makes no network request and fetches no token.
 // The model gate still refuses any request while the manifest is unapproved.
 builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
@@ -45,9 +47,8 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
         ?? throw new InvalidOperationException("No approved model manifest is configured; accepted evidence cannot be investigated.");
     var deployment = manifest.DeploymentName
         ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
-    // The credential is created on the first token request, not here. A test can register a credential factory to observe every creation.
-    var createCredential = sp.GetService<Func<Azure.Core.TokenCredential>>()
-        ?? (() => sp.GetService<Azure.Core.TokenCredential>() ?? new Azure.Identity.DefaultAzureCredential());
+    // The credential is created on the first token request, not here. Every creation goes through the registered factory, so a test can observe them all.
+    var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
     var credential = new LazyTokenCredential(createCredential);
     return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential)
         .GetChatClient(deployment)
