@@ -368,14 +368,14 @@ public sealed class EvidenceInvestigationTests : IDisposable
                         ["CaseState:Path"] = _statePath,
                         ["AzureOpenAI:Endpoint"] = $"http://127.0.0.1:{port}/",
                     }));
-                // Resolving this credential is what the test must not cause: the factory counts every resolution.
+                // Creating a credential is what the test must not cause: the host calls this factory for every creation, including a direct DefaultAzureCredential.
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddSingleton(FakeApprovedManifest.Approved());
-                    services.AddSingleton<Azure.Core.TokenCredential>(_ =>
+                    services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () =>
                     {
                         Interlocked.Increment(ref credentialsResolved);
-                        throw new InvalidOperationException("the credential must not be resolved while resolving the chat client");
+                        throw new InvalidOperationException("the credential must not be created while resolving the chat client");
                     });
                 });
             });
@@ -397,11 +397,44 @@ public sealed class EvidenceInvestigationTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task LazyCredentialCreatesOnceOnFirstTokenRequest()
+    {
+        var created = 0;
+        var expires = DateTimeOffset.UtcNow.AddHours(1);
+        var credential = new LazyTokenCredential(() =>
+        {
+            Interlocked.Increment(ref created);
+            return new StaticTokenCredential(new Azure.Core.AccessToken("token-value", expires));
+        });
+        var context = new Azure.Core.TokenRequestContext(new[] { "https://cognitiveservices.azure.com/.default" });
+
+        Assert.Equal(0, Volatile.Read(ref created));
+
+        var first = credential.GetToken(context, CancellationToken.None);
+        var second = await credential.GetTokenAsync(context, CancellationToken.None);
+
+        Assert.Equal("token-value", first.Token);
+        Assert.Equal(expires, first.ExpiresOn);
+        Assert.Equal("token-value", second.Token);
+        Assert.Equal(expires, second.ExpiresOn);
+        Assert.Equal(1, Volatile.Read(ref created));
+    }
+
     // Reads the committed synthetic fixture that the endpoint-flow test is built on.
     private static string ReturnStatusFixture([CallerFilePath] string testFile = "")
     {
         var path = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFile)!, "..", "AirlineDemo.Api", "Investigation", "SyntheticFixtures", "return-status.txt"));
         return File.ReadAllText(path).Trim();
+    }
+
+    // Returns one fixed token, so the lazy wrapper's token methods can be checked without Azure.
+    private sealed class StaticTokenCredential(Azure.Core.AccessToken token) : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) => token;
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(token);
     }
 
     // Records Azure.Identity diagnostics; a token request or credential use made while resolving the client shows up here.
