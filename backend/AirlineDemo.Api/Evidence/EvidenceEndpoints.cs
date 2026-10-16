@@ -108,19 +108,32 @@ public static class EvidenceEndpoints
         var invalid = EvidenceIntake.Validate(documents);
         if (invalid is not null) return Results.BadRequest(new { error = invalid });
 
+        // Authorize before anything is saved: a non-owner must not write evidence into another user's case.
+        CaseScope scope;
+        try
+        {
+            scope = caseStore.OwnerOf(caseId) is not null
+                ? caseStore.AuthorizeCase(caseId, session.User.Id)
+                : caseStore.CreateCase(caseId, session.User.Id);
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Results.NotFound();
+        }
+
         var packageId = PackageIdFor(caseId, documents);
         var (record, created) = packages.Submit(packageId, caseId,
             () => EvidenceIntake.ProcessPackage(caseId, documents, basis, parserOptions));
         // Runs on every submission until the trace exists, so a retry after a failed append re-runs only the investigation.
-        await RunInvestigationAsync(record, caseId, session.User.Id, caseStore, caseSources, basis, services, investigations, ct);
+        await RunInvestigationAsync(record, caseId, scope, session.User.Id, caseSources, basis, services, investigations, ct);
         return created ? Results.Created($"/api/cases/{caseId}/packages/{packageId}", record) : Results.Ok(record);
     }
 
     private static async Task RunInvestigationAsync(
         EvidencePackageRecord record,
         string caseId,
+        CaseScope scope,
         string actorId,
-        ICaseStateStore caseStore,
         EvidenceCaseReadSourceFactory caseSources,
         EvidenceBasisStore basis,
         IServiceProvider services,
@@ -136,10 +149,7 @@ public static class EvidenceEndpoints
 
         var manifest = services.GetRequiredService<ApprovedModelManifest>();
         var registry = services.GetRequiredService<SyntheticContentRegistry>();
-        // Authorize with the authenticated actor: a non-owner must be refused, not granted the owner's scope.
-        var scope = caseStore.OwnerOf(caseId) is not null
-            ? caseStore.AuthorizeCase(caseId, actorId)
-            : caseStore.CreateCase(caseId, actorId);
+        var caseStore = services.GetRequiredService<ICaseStateStore>();
 
         var runId = record.PackageId;
         var investigationId = "inv-" + runId;
