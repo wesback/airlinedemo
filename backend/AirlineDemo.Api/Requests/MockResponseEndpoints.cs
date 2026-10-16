@@ -45,15 +45,17 @@ public sealed class MockResponseService(
             var state = cases.Read(scope);
             var current = assessments.CurrentBasis(scope.CaseId);
             if (current is null) return NotFound();
-            if (!string.Equals(command.ScenarioTime, current.ScenarioTime, StringComparison.Ordinal))
-                return new(MockResponseOutcome.ScenarioTimeMismatch, null);
             var fingerprint = Fingerprint(scope.CaseId, command);
             var priorEvent = FindEvent(state, command.EventId);
             if (priorEvent is not null)
-                return priorEvent.Fingerprint == fingerprint
-                    ? new(MockResponseOutcome.Replayed, priorEvent.Receipt)
-                    : Conflict();
+            {
+                if (priorEvent.Fingerprint != fingerprint) return Conflict();
+                CompletePostCommit(scope, command, priorEvent.Receipt);
+                return new(MockResponseOutcome.Replayed, priorEvent.Receipt);
+            }
 
+            if (!string.Equals(command.ScenarioTime, current.ScenarioTime, StringComparison.Ordinal))
+                return new(MockResponseOutcome.ScenarioTimeMismatch, null);
             if (state.ReceiptFingerprints.ContainsKey(command.EventId)
                 || FindReport(state, command.ReportId) is not null
                 || FindRequestResponse(state, command.RequestId) is not null)
@@ -69,64 +71,20 @@ public sealed class MockResponseService(
                 return new(MockResponseOutcome.Stale, null);
             var nextVersion = checked(current.BasisVersion + 1);
             var documentId = "response-" + Digest(scope.CaseId, command.EventId)[..16].ToLowerInvariant();
-            var documents = current.Documents.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
-            documents.Add(documentId, BasisDocument.Create(documentId, [command.Body]));
-            var nextAssessmentBasis = current with
-            {
-                BasisVersion = nextVersion,
-                Documents = documents,
-                Coverage = current.Coverage with
-                {
-                    Inventory = checked(current.Coverage.Inventory + 1),
-                    Processed = checked(current.Coverage.Processed + 1),
-                },
-            };
             var storedBasis = CaseStateStore.CreateBasisVersion(nextVersion, command.Body,
                 state.Basis.Count == 0 ? string.Empty : state.Basis[^1].BasisDigest);
             var receipt = new MockResponseReceipt(command.EventId, scope.CaseId, request.RequestId, command.ReportId,
                 command.BasisId, command.BasisVersion, current.BasisId, nextVersion, storedBasis.BasisDigest, documentId);
-            var detail = new ResponseAuditDetail(fingerprint, receipt);
-            var priorResponseDocuments = ReadResponseAudit(state).Select(item => item.Receipt.DocumentId);
-            var responseWitnesses = FindIndependentWitnesses(current, command.Body, priorResponseDocuments);
-            IReadOnlyList<AssessmentClaim> responseClaims = responseWitnesses.Count == 0
-                ? []
-                : [new AssessmentClaim(
-                    ClaimKind.Baseline,
-                    command.Body,
-                    "mock-response",
-                    command.ReportId,
-                    responseWitnesses)];
+            var nextBasis = AddResponseDocument(current, receipt, command.Body);
+            var plan = PlanReassessment(scope, nextBasis, command, state);
+            var detail = new ResponseAuditDetail(fingerprint, receipt, plan.Outcome, plan.Reason);
             try
             {
                 if (!assessments.RunIfCurrent(scope.CaseId, current, () =>
                 {
-                    var assessmentService = new AssessmentExecutionService(cases, requests, assessments);
-                    if (responseClaims.Count == 0)
-                    {
-                        assessments.SetCurrentBasis(scope.CaseId, nextAssessmentBasis);
-                        var reassessed = false;
-                        try
-                        {
-                            assessmentService.Assess(scope, nextAssessmentBasis, responseClaims);
-                            reassessed = true;
-                        }
-                        finally
-                        {
-                            if (!reassessed)
-                                assessments.SetCurrentBasis(scope.CaseId, current);
-                        }
-
-                        var revision = cases.Read(scope).Revision;
-                        cases.Commit(scope, revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
-                            JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
-                    }
-                    else
-                    {
-                        cases.Commit(scope, state.Revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
-                            JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
-                        assessments.SetCurrentBasis(scope.CaseId, nextAssessmentBasis);
-                        assessmentService.Assess(scope, nextAssessmentBasis, responseClaims);
-                    }
+                    cases.Commit(scope, state.Revision, new CaseCommit(storedBasis, command.EventId, actor, AcceptedAction,
+                        JsonSerializer.Serialize(detail, JsonOptions), time.GetUtcNow()));
+                    CompletePostCommit(scope, nextBasis, plan);
                 }))
                     return new(MockResponseOutcome.Stale, null);
             }
@@ -136,19 +94,193 @@ public sealed class MockResponseService(
                 var racedEvent = FindEvent(latest, command.EventId);
                 if (racedEvent is not null)
                 {
-                    return racedEvent.Fingerprint == fingerprint
-                        ? new(MockResponseOutcome.Replayed, racedEvent.Receipt)
-                        : Conflict();
+                    if (racedEvent.Fingerprint != fingerprint) return Conflict();
+                    CompletePostCommit(scope, command, racedEvent.Receipt);
+                    return new(MockResponseOutcome.Replayed, racedEvent.Receipt);
                 }
 
                 return Conflict();
             }
             catch (ReceiptConflictException)
             {
-                return Conflict();
+                var latest = cases.Read(scope);
+                var racedEvent = FindEvent(latest, command.EventId);
+                if (racedEvent is null || racedEvent.Fingerprint != fingerprint) return Conflict();
+                CompletePostCommit(scope, command, racedEvent.Receipt);
+                return new(MockResponseOutcome.Replayed, racedEvent.Receipt);
             }
             return new(MockResponseOutcome.Accepted, receipt);
         }
+    }
+
+    private void CompletePostCommit(
+        CaseScope scope,
+        MockResponseCommand command,
+        MockResponseReceipt receipt)
+    {
+        var state = cases.Read(scope);
+        var current = assessments.CurrentBasis(scope.CaseId)
+            ?? throw new InvalidDataException("Accepted mock response has no assessment basis.");
+        var nextBasis = ReconstructResponseBasis(current, state, receipt, command.Body);
+        var plannedRecord = PlanReassessment(scope, nextBasis, command, state);
+        CompletePostCommit(scope, nextBasis, plannedRecord);
+    }
+
+    private void CompletePostCommit(
+        CaseScope scope,
+        AssessmentBasis nextBasis,
+        AssessmentRecord plannedRecord)
+    {
+        var current = assessments.CurrentBasis(scope.CaseId);
+        if (current is null || current.BasisVersion <= nextBasis.BasisVersion)
+            assessments.SetCurrentBasis(scope.CaseId, nextBasis);
+        else if (current.BasisId != nextBasis.BasisId)
+            throw new InvalidDataException("Accepted mock response does not match the current assessment history.");
+        EnsureWorkItem(scope, plannedRecord);
+        EnsureAssessmentRecord(plannedRecord);
+    }
+
+    private AssessmentRecord PlanReassessment(
+        CaseScope scope,
+        AssessmentBasis basis,
+        MockResponseCommand command,
+        CaseState state)
+    {
+        var responseDocuments = ReadResponseAudit(state).Select(item => item.Receipt.DocumentId)
+            .Append("response-" + Digest(scope.CaseId, command.EventId)[..16].ToLowerInvariant());
+        var witnesses = FindIndependentWitnesses(basis, command.Body, responseDocuments);
+        IReadOnlyList<AssessmentClaim> claims = witnesses.Count == 0
+            ? []
+            : [new AssessmentClaim(ClaimKind.Baseline, command.Body, "mock-response", command.ReportId, witnesses)];
+        var validated = claims.Select(claim => ClaimValidator.Validate(
+            new InvestigationClaim(claim.Value, claim.Witnesses), claim.Kind, basis.Documents, claim.Value)).ToArray();
+        var assessedClaims = claims.Select(claim => new AssessedClaim(
+            claim.Kind.ToString(),
+            claim.Value,
+            claim.Component,
+            claim.SerialNumber,
+            claim.Witnesses.Select(witness => new AssessedWitness(witness.DocumentId, witness.Page)).ToArray())).ToArray();
+        var (outcome, reason) = !basis.Coverage.IsComplete
+            ? (AssessmentExecutionService.Review, "processing or inventory coverage incomplete")
+            : basis.IdentityAmbiguous
+                ? (AssessmentExecutionService.Review, "ambiguous identity")
+                : validated.Any(claim => claim.Kind == ClaimKind.Conflict)
+                    ? (AssessmentExecutionService.Review, "conflicting evidence")
+                    : validated.FirstOrDefault(claim => claim.Status == ClaimStatus.Downgraded) is { } downgraded
+                        ? (AssessmentExecutionService.Review, $"downgraded claim: {downgraded.Reason}")
+                        : validated.Length == 0
+                            ? (AssessmentExecutionService.Review, "no claim")
+                            : (AssessmentExecutionService.Baseline, "supported baseline");
+        var workItemId = outcome == AssessmentExecutionService.Review
+            ? "mock-response-review-response-" + Digest(scope.CaseId, command.EventId)[..16].ToLowerInvariant()
+            : null;
+        return new AssessmentRecord(
+            scope.CaseId, basis.BasisId, basis.BasisVersion, outcome, reason, assessedClaims, null, workItemId);
+    }
+
+    private void EnsureWorkItem(CaseScope scope, AssessmentRecord record)
+    {
+        if (record.WorkItemId is null) return;
+        var existing = cases.ListWorkItems(scope).FirstOrDefault(item => item.ItemId == record.WorkItemId);
+        if (existing is not null)
+        {
+            if (existing.CapabilityId != AssessmentExecutionService.ReviewCapability
+                || existing.State != "open" || existing.Owner != AssessmentExecutionService.ReviewOwner)
+                throw new InvalidDataException("Mock response review work item does not match its receipt.");
+            return;
+        }
+
+        cases.CreateWorkItem(scope, cases.Read(scope).Revision,
+            new WorkItemDraft(record.WorkItemId, AssessmentExecutionService.ReviewCapability,
+                "open", AssessmentExecutionService.ReviewOwner), AssessmentExecutionService.Actor);
+    }
+
+    private void EnsureAssessmentRecord(AssessmentRecord record)
+    {
+        var existing = assessments.List(record.CaseId).FirstOrDefault(item =>
+            (record.WorkItemId is not null && item.WorkItemId == record.WorkItemId)
+            || (item.BasisId == record.BasisId && item.BasisVersion == record.BasisVersion
+                && AssessmentRecordsEqual(item, record)));
+        if (existing is null)
+        {
+            assessments.Append(record);
+            return;
+        }
+
+        if (!AssessmentRecordsEqual(existing, record))
+            throw new InvalidDataException("Mock response assessment does not match its receipt.");
+    }
+
+    private static bool AssessmentRecordsEqual(AssessmentRecord left, AssessmentRecord right) =>
+        left.CaseId == right.CaseId && left.BasisId == right.BasisId && left.BasisVersion == right.BasisVersion
+        && left.Outcome == right.Outcome && left.Reason == right.Reason && left.RequestId == right.RequestId
+        && left.WorkItemId == right.WorkItemId && left.Claims.Count == right.Claims.Count
+        && left.Claims.Zip(right.Claims).All(pair =>
+            pair.First.Kind == pair.Second.Kind && pair.First.Value == pair.Second.Value
+            && pair.First.Component == pair.Second.Component && pair.First.SerialNumber == pair.Second.SerialNumber
+            && pair.First.Witnesses.SequenceEqual(pair.Second.Witnesses));
+
+    private static AssessmentBasis AddResponseDocument(
+        AssessmentBasis current,
+        MockResponseReceipt receipt,
+        string body)
+    {
+        if (current.BasisId != receipt.RequestBasisId || current.BasisVersion != receipt.RequestBasisVersion)
+            throw new InvalidDataException("Accepted mock response was based on a different assessment basis.");
+        var documents = current.Documents.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        documents.Add(receipt.DocumentId, BasisDocument.Create(receipt.DocumentId, [body]));
+        return current with
+        {
+            BasisVersion = receipt.BasisVersion,
+            Documents = documents,
+            Coverage = current.Coverage with
+            {
+                Inventory = checked(current.Coverage.Inventory + 1),
+                Processed = checked(current.Coverage.Processed + 1),
+            },
+        };
+    }
+
+    private static AssessmentBasis ReconstructResponseBasis(
+        AssessmentBasis current,
+        CaseState state,
+        MockResponseReceipt receipt,
+        string body)
+    {
+        if (current.BasisId == receipt.RequestBasisId
+            && current.BasisVersion == receipt.RequestBasisVersion)
+            return AddResponseDocument(current, receipt, body);
+        if (current.BasisId != receipt.BasisId || current.BasisVersion < receipt.BasisVersion)
+            throw new InvalidDataException("Accepted mock response cannot be reconciled with the current assessment basis.");
+        if (!current.Documents.TryGetValue(receipt.DocumentId, out var response)
+            || response.Pages.Count != 1 || response.Pages[0] != body)
+            throw new InvalidDataException("Accepted mock response basis does not match its receipt.");
+        if (current.BasisVersion == receipt.BasisVersion) return current;
+
+        var documents = current.Documents.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        var laterDocuments = ReadResponseAudit(state)
+            .Where(item => item.Receipt.BasisId == receipt.BasisId
+                && item.Receipt.BasisVersion > receipt.BasisVersion
+                && item.Receipt.BasisVersion <= current.BasisVersion)
+            .Select(item => item.Receipt.DocumentId);
+        var removed = 0;
+        foreach (var documentId in laterDocuments)
+        {
+            if (documents.Remove(documentId)) removed++;
+        }
+
+        if (removed == 0 || current.Coverage.Inventory < removed || current.Coverage.Processed < removed)
+            throw new InvalidDataException("Accepted mock response history is incomplete.");
+        return current with
+        {
+            BasisVersion = receipt.BasisVersion,
+            Documents = documents,
+            Coverage = current.Coverage with
+            {
+                Inventory = current.Coverage.Inventory - removed,
+                Processed = current.Coverage.Processed - removed,
+            },
+        };
     }
 
     private static bool IsValid(MockResponseCommand command)
@@ -206,7 +338,11 @@ public sealed class MockResponseService(
     }
     private static MockResponseResult NotFound() => new(MockResponseOutcome.NotFound, null);
     private static MockResponseResult Conflict() => new(MockResponseOutcome.Conflict, null);
-    private sealed record ResponseAuditDetail(string Fingerprint, MockResponseReceipt Receipt);
+    private sealed record ResponseAuditDetail(
+        string Fingerprint,
+        MockResponseReceipt Receipt,
+        string ReassessmentOutcome,
+        string ReassessmentReason);
 }
 
 public static class MockResponseEndpoints
