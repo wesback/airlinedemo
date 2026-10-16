@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace AirlineDemo.Api.SourceSystems;
@@ -12,9 +14,13 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
 
     private readonly IReadOnlyList<SourceRecord<TPayload>> _records;
 
-    protected FixtureSourceSystem(string sourceId, string resourceName, Func<IReadOnlyDictionary<string, string>, TPayload> createPayload)
+    protected FixtureSourceSystem(
+        string sourceId,
+        string resourceName,
+        SourceFixtureManifest manifest,
+        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload)
     {
-        _records = Load(sourceId, resourceName, createPayload);
+        _records = Load(sourceId, resourceName, manifest, createPayload);
     }
 
     public Task<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>> ListAsync(
@@ -43,16 +49,52 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
     private static IReadOnlyList<SourceRecord<TPayload>> Load(
         string sourceId,
         string resourceName,
+        SourceFixtureManifest manifest,
         Func<IReadOnlyDictionary<string, string>, TPayload> createPayload)
     {
         using var stream = typeof(FixtureSourceSystem<TPayload>).Assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Embedded source fixture '{resourceName}' is missing.");
-        var file = JsonSerializer.Deserialize<FixtureFile>(stream, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return ParseFixture(sourceId, resourceName, manifest, buffer.ToArray(), createPayload);
+    }
+
+    // Verifies the fixture bytes against the signed manifest (metadata, digest, record count) before any record is served (AC-004).
+    internal static IReadOnlyList<SourceRecord<TPayload>> ParseFixture(
+        string sourceId,
+        string resourceName,
+        SourceFixtureManifest manifest,
+        byte[] content,
+        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload)
+    {
+        var manifestProblems = manifest.Validate();
+        if (manifestProblems.Count > 0)
+        {
+            throw new InvalidOperationException($"Source manifest for '{sourceId}' is invalid: {string.Join(" ", manifestProblems)}");
+        }
+
+        if (!string.Equals(manifest.ScenarioDate, ScenarioDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Source manifest for '{sourceId}' declares scenarioDate '{manifest.ScenarioDate}', expected '{ScenarioDate:yyyy-MM-dd}'.");
+        }
+
+        var digest = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+        if (!string.Equals(digest, manifest.Sha256.ToLowerInvariant(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Source fixture '{resourceName}' does not match its signed digest.");
+        }
+
+        var file = JsonSerializer.Deserialize<FixtureFile>(new ReadOnlySpan<byte>(content), new JsonSerializerOptions(JsonSerializerDefaults.Web))
             ?? throw new InvalidOperationException($"Embedded source fixture '{resourceName}' is empty.");
 
         if (!string.Equals(file.SourceId, sourceId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"Source fixture '{resourceName}' declares sourceId '{file.SourceId}', expected '{sourceId}'.");
+        }
+
+        if (!manifest.RecordCounts.TryGetValue(sourceId, out var declaredCount) || declaredCount != file.Records.Count)
+        {
+            throw new InvalidOperationException($"Source fixture '{resourceName}' has {file.Records.Count} records; manifest declares {declaredCount}.");
         }
 
         var recordIds = new HashSet<string>(StringComparer.Ordinal);
@@ -124,4 +166,24 @@ public sealed class TechnicalSource()
     : FixtureSourceSystem<TechnicalPayload>(
         "technical",
         "AirlineDemo.Api.Fixtures.sources.technical.json",
-        fields => new TechnicalPayload(fields));
+        CoreManifest,
+        fields => new TechnicalPayload(fields))
+{
+    // Signed manifest for technical.json: its SHA-256 digest and declared record counts (AC-004).
+    // Sources this story does not supply yet are declared with zero records.
+    internal static readonly SourceFixtureManifest CoreManifest = new()
+    {
+        SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
+        SourceFixtureVersion = "2026.10.1",
+        ScenarioDate = "2026-10-01",
+        Sha256 = "a80a96dfc3764a4b30c6888123f78eead97e9e87c23fd84e26246757a16d4ba9",
+        RecordCounts = new Dictionary<string, int>
+        {
+            ["technical"] = 5,
+            ["maintenance"] = 0,
+            ["finance"] = 0,
+            ["records"] = 0,
+            ["contracts"] = 0,
+        },
+    };
+}

@@ -103,4 +103,52 @@ public sealed class TechnicalFinanceSourceTests
             new SourceRecordNotFound<SourceRecord<TechnicalPayload>>("tech-missing-999"),
             await technical.GetAsync(CoreCase, "tech-missing-999"));
     }
+
+    [Fact]
+    public void FixtureBytesThatDifferFromSignedDigestAreRejected()
+    {
+        // AC-004: a fixture altered after signing is refused before any record is served.
+        var tampered = EmbeddedBytes("AirlineDemo.Api.Fixtures.sources.technical.json").Append((byte)'\n').ToArray();
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            FixtureSourceSystem<TechnicalPayload>.ParseFixture(
+                "technical",
+                "AirlineDemo.Api.Fixtures.sources.technical.json",
+                TechnicalSource.CoreManifest,
+                tampered,
+                fields => new TechnicalPayload(fields)));
+
+        Assert.Equal(
+            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' does not match its signed digest.",
+            error.Message);
+    }
+
+    [Fact]
+    public void FixtureRecordCountThatDiffersFromManifestIsRejected()
+    {
+        // AC-004: the manifest's declared record count must match the fixture's records.
+        var counts = new Dictionary<string, int>(TechnicalSource.CoreManifest.RecordCounts) { ["technical"] = 4 };
+        var manifest = TechnicalSource.CoreManifest with { RecordCounts = counts };
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            FixtureSourceSystem<TechnicalPayload>.ParseFixture(
+                "technical",
+                "AirlineDemo.Api.Fixtures.sources.technical.json",
+                manifest,
+                EmbeddedBytes("AirlineDemo.Api.Fixtures.sources.technical.json"),
+                fields => new TechnicalPayload(fields)));
+
+        Assert.Equal(
+            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' has 5 records; manifest declares 4.",
+            error.Message);
+    }
+
+    private static byte[] EmbeddedBytes(string resourceName)
+    {
+        using var stream = typeof(TechnicalSource).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Missing {resourceName}.");
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
 }
