@@ -398,6 +398,40 @@ public sealed class EvidenceInvestigationTests : IDisposable
     }
 
     [Fact]
+    public void HostConstructsCredentialOnlyThroughRegisteredFactory()
+    {
+        // The factory test above cannot see a credential built inline in the client registration, so this scans the host and
+        // investigation sources (the chat client path) for every credential construction. The blob store is a separate path and is not scanned.
+        var root = FindRepositoryRoot();
+        var apiDir = Path.Combine(root, "backend", "AirlineDemo.Api");
+        var pattern = new System.Text.RegularExpressions.Regex(
+            @"new\s+(Azure\.Identity\.)?(DefaultAzureCredential|ManagedIdentityCredential|AzureCliCredential|AzureDeveloperCliCredential|ChainedTokenCredential|EnvironmentCredential|WorkloadIdentityCredential|VisualStudioCredential)\s*\(");
+
+        var sources = new[] { Path.Combine(apiDir, "Program.cs") }
+            .Concat(Directory.EnumerateFiles(Path.Combine(apiDir, "Investigation"), "*.cs", SearchOption.AllDirectories));
+        var matches = sources
+            .SelectMany(path => File.ReadAllLines(path)
+                .Select((line, index) => (path, line, index))
+                .Where(entry => pattern.IsMatch(entry.line))
+                .Select(entry => $"{Path.GetRelativePath(root, entry.path).Replace('\\', '/')}:{entry.index + 1}"))
+            .ToList();
+
+        // Exactly one construction, the factory in Program.cs that runs on the first token request.
+        var match = Assert.Single(matches);
+        Assert.StartsWith("backend/AirlineDemo.Api/Program.cs:", match);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "backend", "AirlineDemo.Api", "Program.cs")))
+        {
+            dir = dir.Parent;
+        }
+        return dir?.FullName ?? throw new InvalidOperationException("Repository root with backend/AirlineDemo.Api/Program.cs not found.");
+    }
+
+    [Fact]
     public async Task LazyCredentialCreatesOnceOnFirstTokenRequest()
     {
         var created = 0;
