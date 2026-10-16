@@ -193,6 +193,9 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
         var trace = store.FindTrace(scope, "case-1", "run-1", "inv-1");
 
         Assert.NotNull(trace);
+        // Both validations are persisted, in order: the downgraded claim, then the supported one (no correction).
+        var validations = trace.Steps.Where(s => s.ToolName == "claim-validation").ToArray();
+        Assert.Equal(new[] { "Downgraded", "None" }, validations.Select(v => v.CorrectionCode).ToArray());
         var correction = Assert.Single(trace.Steps, s => s.CorrectionCode != "None");
         Assert.Equal("Downgraded", correction.CorrectionCode);
         Assert.Equal("claim-validation", correction.ToolName);
