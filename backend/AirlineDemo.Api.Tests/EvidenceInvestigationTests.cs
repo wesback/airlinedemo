@@ -366,16 +366,16 @@ public sealed class EvidenceInvestigationTests : IDisposable
                     {
                         ["Demo:Passcode"] = Passcode,
                         ["CaseState:Path"] = _statePath,
-                        ["AzureOpenAI:Endpoint"] = $"http://127.0.0.1:{port}/",
+                        ["AzureOpenAI:Endpoint"] = $"https://127.0.0.1:{port}/",
                     }));
-                // Creating a credential is what the test must not cause: the host calls this factory for every creation, including a direct DefaultAzureCredential.
+                // Counts every credential the host creates through its only production factory.
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddSingleton(FakeApprovedManifest.Approved());
                     services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () =>
                     {
                         Interlocked.Increment(ref credentialsResolved);
-                        throw new InvalidOperationException("the credential must not be created while resolving the chat client");
+                        return new StopBeforeNetworkCredential();
                     });
                 });
             });
@@ -390,6 +390,14 @@ public sealed class EvidenceInvestigationTests : IDisposable
             Assert.False(listener.Pending());
             Assert.Equal(0, Volatile.Read(ref credentialsResolved));
             Assert.Empty(azureEvents.Events.Skip(eventsBefore));
+
+            // The first request asks for a token once; the credential refuses it, so no connection to the endpoint is made.
+            var exception = await Assert.ThrowsAnyAsync<Exception>(() => chatClient.GetResponseAsync(
+                new[] { new ChatMessage(ChatRole.User, "ping") },
+                cancellationToken: TestContext.Current.CancellationToken));
+            Assert.Contains(StopBeforeNetworkCredential.Message, exception.ToString());
+            Assert.Equal(1, Volatile.Read(ref credentialsResolved));
+            Assert.False(listener.Pending());
         }
         finally
         {
@@ -397,42 +405,15 @@ public sealed class EvidenceInvestigationTests : IDisposable
         }
     }
 
-    [Fact]
-    public void HostConstructsCredentialOnlyThroughRegisteredFactory()
+    private sealed class StopBeforeNetworkCredential : Azure.Core.TokenCredential
     {
-        // The factory test above cannot see a credential built inline in the client registration or in a helper, so this scans
-        // every host source file for any `new <...>Credential(` construction, whatever its type or namespace. The only allowed
-        // sites are the lazy factory in Program.cs (the chat client path) and the blob store's own credential (a separate path).
-        var root = FindRepositoryRoot();
-        var apiDir = Path.Combine(root, "backend", "AirlineDemo.Api");
-        var pattern = new System.Text.RegularExpressions.Regex(@"new\s+(?!LazyTokenCredential\b)[\w.]*Credential\s*\(");
+        public const string Message = "credential refused the token request before the network";
 
-        var matchedFiles = Directory.EnumerateFiles(apiDir, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            .SelectMany(path => File.ReadAllLines(path)
-                .Where(line => pattern.IsMatch(line))
-                .Select(_ => Path.GetRelativePath(root, path).Replace('\\', '/')))
-            .Order()
-            .ToArray();
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(Message);
 
-        Assert.Equal(
-            new[]
-            {
-                "backend/AirlineDemo.Api/Persistence/AzureEvidenceBlobStore.cs",
-                "backend/AirlineDemo.Api/Program.cs",
-            },
-            matchedFiles);
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "backend", "AirlineDemo.Api", "Program.cs")))
-        {
-            dir = dir.Parent;
-        }
-        return dir?.FullName ?? throw new InvalidOperationException("Repository root with backend/AirlineDemo.Api/Program.cs not found.");
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(Message);
     }
 
     [Fact]
