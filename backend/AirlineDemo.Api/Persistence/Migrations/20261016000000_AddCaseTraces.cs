@@ -17,8 +17,9 @@ public class AddCaseTraces : Migration
             schema: "dbo",
             columns: table => new
             {
-                Id = table.Column<long>(type: "bigint", nullable: false)
-                    .Annotation("SqlServer:Identity", "1, 1"),
+                Id = table.Column<long>(type: migrationBuilder.ActiveProvider == "Microsoft.EntityFrameworkCore.Sqlite" ? "INTEGER" : "bigint", nullable: false)
+                    .Annotation("SqlServer:Identity", "1, 1")
+                    .Annotation("Sqlite:Autoincrement", true),
                 CaseId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 RunId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 InvestigationId = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),

@@ -12,6 +12,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 
 namespace AirlineDemo.Api.Tests;
@@ -168,6 +169,63 @@ public sealed class SqlCaseStateStoreTests
             c.Contains("case_events", StringComparison.OrdinalIgnoreCase)
             && (LeadingKeyword(c) is "UPDATE" or "DELETE" or "REPLACE" or "UPSERT"));
     }
+
+    // AC: TRACE-PRODUCER-01 (SQL contract): an appended trace is found by its exact key; traces are never overwritten.
+    [Fact]
+    public void AppendsAndFindsInvestigationTrace()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+
+        var trace = SampleTrace("case-1", "run-1", "inv-1");
+        store.AppendTrace(scope, trace);
+
+        var found = store.FindTrace(scope, "case-1", "run-1", "inv-1");
+        Assert.NotNull(found);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(trace), System.Text.Json.JsonSerializer.Serialize(found));
+
+        Assert.Null(store.FindTrace(scope, "case-1", "run-2", "inv-1"));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1", "inv-2"));
+        Assert.Null(store.FindTrace(scope, "case-2", "run-1", "inv-1"));
+        Assert.Throws<TraceConflictException>(() => store.AppendTrace(scope, trace));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, SampleTrace("case-2", "run-1", "inv-1")));
+    }
+
+    // AC: TRACE-PRODUCER-01 (migration): the trace table migration applies and rolls back cleanly.
+    [Fact]
+    public void AddCaseTracesMigrationAppliesAndRollsBack()
+    {
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlite(connection).Options;
+        using var db = new CaseStateDbContext(options);
+        db.Database.Migrate();
+        Assert.Contains("20261016000000_AddCaseTraces", db.Database.GetAppliedMigrations());
+
+        db.GetInfrastructure().GetRequiredService<IMigrator>().Migrate("20261014190000_InitialCaseStateSchema");
+        Assert.DoesNotContain("20261016000000_AddCaseTraces", db.Database.GetAppliedMigrations());
+    }
+
+    private static InvestigationTrace SampleTrace(string caseId, string runId, string investigationId) =>
+        new(
+            caseId,
+            runId,
+            investigationId,
+            BasisVersion: 1,
+            ModelDeploymentName: "model-deployment",
+            ApiVersion: "2024-01-01",
+            Region: "eastus",
+            ContentFilterSetting: "default",
+            Decision: "escalate",
+            ActorToken: "actor-token",
+            Outcome: "approved",
+            Steps:
+            [
+                new InvestigationTraceStep(1, "get_case_inventory", "doc-1", 1, "none", "None", "none"),
+                new InvestigationTraceStep(2, "get_case_inventory", "doc-1", 1, "verified", "None", "none"),
+                new InvestigationTraceStep(3, "policy", "doc-1", 1, "none", "None", "deterministic-policy"),
+            ]);
 
     private static string LeadingKeyword(string commandText) =>
         System.Text.RegularExpressions.Regex.Match(commandText, @"^\s*(\w+)").Groups[1].Value.ToUpperInvariant();
