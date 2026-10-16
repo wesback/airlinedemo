@@ -119,9 +119,9 @@ internal static class InvestigationTraceRules
 {
     public static void Validate(InvestigationTrace trace)
     {
-        Require(trace.CaseId, nameof(trace.CaseId));
-        Require(trace.RunId, nameof(trace.RunId));
-        Require(trace.InvestigationId, nameof(trace.InvestigationId));
+        RequireExactKey(trace.CaseId, nameof(trace.CaseId));
+        RequireExactKey(trace.RunId, nameof(trace.RunId));
+        RequireExactKey(trace.InvestigationId, nameof(trace.InvestigationId));
         Require(trace.ModelDeploymentName, nameof(trace.ModelDeploymentName));
         Require(trace.ApiVersion, nameof(trace.ApiVersion));
         Require(trace.Region, nameof(trace.Region));
@@ -159,6 +159,16 @@ internal static class InvestigationTraceRules
         if (string.IsNullOrWhiteSpace(value))
         {
             throw new ArgumentException($"Investigation trace {name} is required.", name);
+        }
+    }
+
+    // SQL Server pads nvarchar comparisons, so 'id' and 'id ' would collide on the key; reject surrounding whitespace.
+    private static void RequireExactKey(string? value, string name)
+    {
+        Require(value, name);
+        if (value!.Length != value.Trim().Length)
+        {
+            throw new ArgumentException($"Investigation trace {name} must not have leading or trailing whitespace.", name);
         }
     }
 }

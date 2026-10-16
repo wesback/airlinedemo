@@ -565,6 +565,26 @@ public sealed class SqlCaseStateStoreTests
     }
 
     // AC: all InvestigationTrace and step fields persist, steps reload in Sequence order, and (CaseId, RunId, InvestigationId) is unique in the database.
+    // AC: M-03 — identifiers differing only by surrounding spaces stay distinct; SQL Server would otherwise pad them into one key.
+    [Fact]
+    public void TraceKeysRejectSurroundingWhitespace()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1 ", "inv-1")));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", " run-1", "inv-1")));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1 ")));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1 ", "inv-1"));
+
+        using var raw = connection.CreateCommand();
+        raw.CommandText = "INSERT INTO investigation_traces (CaseId, RunId, InvestigationId, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) "
+            + "VALUES ('case-1', 'run-1 ', 'inv-1', 3, 'm', 'v', 'r', 'f', 'd', 't', 'o')";
+        Assert.ThrowsAny<DbException>(() => raw.ExecuteNonQuery());
+    }
+
     [Fact]
     public void TracePersistenceRoundTripsAllFields()
     {

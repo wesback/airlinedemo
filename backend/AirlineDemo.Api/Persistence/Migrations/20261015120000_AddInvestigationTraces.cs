@@ -34,7 +34,11 @@ public class AddInvestigationTraces : Migration
                 ActorToken = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
                 Outcome = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
             },
-            constraints: table => table.PrimaryKey("PK_investigation_traces", x => new { x.CaseId, x.RunId, x.InvestigationId }));
+            constraints: table =>
+            {
+                table.PrimaryKey("PK_investigation_traces", x => new { x.CaseId, x.RunId, x.InvestigationId });
+                table.CheckConstraint("CK_investigation_traces_exact_keys", ExactKeySql("CaseId", "RunId", "InvestigationId"));
+            });
 
         migrationBuilder.CreateTable(
             name: "investigation_trace_steps",
@@ -52,8 +56,16 @@ public class AddInvestigationTraces : Migration
                 CorrectionCode = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 PolicyHandover = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
             },
-            constraints: table => table.PrimaryKey("PK_investigation_trace_steps", x => new { x.CaseId, x.RunId, x.InvestigationId, x.Sequence }));
+            constraints: table =>
+            {
+                table.PrimaryKey("PK_investigation_trace_steps", x => new { x.CaseId, x.RunId, x.InvestigationId, x.Sequence });
+                table.CheckConstraint("CK_investigation_trace_steps_exact_keys", ExactKeySql("CaseId", "RunId", "InvestigationId"));
+            });
     }
+
+    // SQL Server pads nvarchar comparisons, so 'id' and 'id ' collapse under any collation; reject surrounding spaces at the database.
+    private static string ExactKeySql(params string[] columns) =>
+        string.Join(" AND ", columns.Select(c => $"\"{c}\" NOT LIKE ' %' AND \"{c}\" NOT LIKE '% '"));
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
