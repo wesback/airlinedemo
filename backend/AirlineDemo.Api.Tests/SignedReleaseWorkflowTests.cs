@@ -233,7 +233,14 @@ public sealed class SignedReleaseWorkflowTests
         var workflow = ReadWorkflow();
         var check = StepBody(workflow, "Verify build evidence present");
 
-        Assert.Contains("[[ ! \"$IMAGE_DIGEST\" =~ ^sha256:[0-9a-f]{64}$ ]]", check);
+        var guard = System.Text.RegularExpressions.Regex.Match(
+            check,
+            @"if \[\[ ! ""\$IMAGE_DIGEST"" =~ \^sha256:\[0-9a-f\]\{64\}\$ \]\]; then\s+echo [^\n]*\s+exit 1\s+fi");
+        Assert.True(guard.Success, "The format guard must fail the step with exit 1 when IMAGE_DIGEST is malformed.");
+        Assert.True(guard.Index < check.IndexOf("test -s evidence/image/digest.txt", StringComparison.Ordinal),
+            "The format guard must run before the artifact is read, so a matching malformed value still fails.");
+        Assert.True(guard.Index < check.IndexOf("built=", StringComparison.Ordinal),
+            "The format guard must run before the artifact digest is compared.");
         Assert.Contains("test -s evidence/image/digest.txt", check);
         Assert.Contains("was not produced by build run", check);
         Assert.Contains("image-digest artifact recorded", check);
