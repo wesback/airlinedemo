@@ -37,8 +37,11 @@ public class AddInvestigationTraces : Migration
                 ActorToken = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: false),
                 Outcome = table.Column<string>(type: "nvarchar(128)", maxLength: 128, nullable: false),
                 CaseIdUtf16 = table.Column<byte[]>(type: "varbinary(256)", maxLength: 256, nullable: false),
+                CaseIdLength = table.Column<int>(type: "int", nullable: false),
                 RunIdUtf16 = table.Column<byte[]>(type: "varbinary(256)", maxLength: 256, nullable: false),
+                RunIdLength = table.Column<int>(type: "int", nullable: false),
                 InvestigationIdUtf16 = table.Column<byte[]>(type: "varbinary(256)", maxLength: 256, nullable: false),
+                InvestigationIdLength = table.Column<int>(type: "int", nullable: false),
             },
             constraints: table =>
             {
@@ -49,7 +52,12 @@ public class AddInvestigationTraces : Migration
             name: "UX_investigation_traces_case_run_investigation",
             schema: "dbo",
             table: "investigation_traces",
-            columns: new[] { "CaseIdUtf16", "RunIdUtf16", "InvestigationIdUtf16" },
+            columns: new[]
+            {
+                "CaseIdUtf16", "CaseIdLength",
+                "RunIdUtf16", "RunIdLength",
+                "InvestigationIdUtf16", "InvestigationIdLength",
+            },
             unique: true);
 
         migrationBuilder.CreateTable(

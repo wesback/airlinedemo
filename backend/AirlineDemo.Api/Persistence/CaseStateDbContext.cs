@@ -64,8 +64,11 @@ public sealed class InvestigationTraceRow
     public string ActorToken { get; set; } = string.Empty;
     public string Outcome { get; set; } = string.Empty;
     public byte[] CaseIdUtf16 { get; set; } = [];
+    public int CaseIdLength { get; set; }
     public byte[] RunIdUtf16 { get; set; } = [];
+    public int RunIdLength { get; set; }
     public byte[] InvestigationIdUtf16 { get; set; } = [];
+    public int InvestigationIdLength { get; set; }
 }
 
 public sealed class InvestigationTraceStepRow
@@ -100,7 +103,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
         {
             e.ToTable("investigation_traces", "dbo");
             e.HasKey(x => x.KeyHash);
-            e.HasIndex(x => new { x.CaseIdUtf16, x.RunIdUtf16, x.InvestigationIdUtf16 })
+            e.HasIndex(x => new { x.CaseIdUtf16, x.CaseIdLength, x.RunIdUtf16, x.RunIdLength, x.InvestigationIdUtf16, x.InvestigationIdLength })
                 .IsUnique()
                 .HasDatabaseName("UX_investigation_traces_case_run_investigation");
             e.Property(x => x.KeyHash).HasMaxLength(32).IsFixedLength();

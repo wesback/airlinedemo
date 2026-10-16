@@ -261,6 +261,20 @@ public sealed class SqlCaseStateStore : ICaseStateStore
     public void AppendTrace(CaseScope scope, InvestigationTrace trace)
     {
         InvestigationTraceRules.Validate(trace);
+        const int MaxTraceIdentifierUtf16Units = 128;
+        foreach (var (name, value) in new[]
+        {
+            (nameof(trace.CaseId), trace.CaseId),
+            (nameof(trace.RunId), trace.RunId),
+            (nameof(trace.InvestigationId), trace.InvestigationId),
+        })
+        {
+            if (value.Length > MaxTraceIdentifierUtf16Units)
+            {
+                throw new ArgumentException("Trace identifiers are limited to 128 UTF-16 code units.", name);
+            }
+        }
+
         if (trace.CaseId != scope.CaseId)
         {
             throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
@@ -291,6 +305,9 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             CaseIdUtf16 = Utf16Bytes(trace.CaseId),
             RunIdUtf16 = Utf16Bytes(trace.RunId),
             InvestigationIdUtf16 = Utf16Bytes(trace.InvestigationId),
+            CaseIdLength = trace.CaseId.Length,
+            RunIdLength = trace.RunId.Length,
+            InvestigationIdLength = trace.InvestigationId.Length,
         });
         db.InvestigationTraceSteps.AddRange(trace.Steps.Select(s => new InvestigationTraceStepRow
         {

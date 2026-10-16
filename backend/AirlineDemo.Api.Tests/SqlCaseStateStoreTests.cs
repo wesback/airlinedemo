@@ -617,13 +617,49 @@ public sealed class SqlCaseStateStoreTests
 
         using var command = connection.CreateCommand();
         command.CommandText =
-            "INSERT INTO investigation_traces (KeyHash, CaseId, RunId, InvestigationId, CaseIdUtf16, RunIdUtf16, InvestigationIdUtf16, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) " +
-            "VALUES (randomblob(32), 'case-1', 'run-1', 'inv-1', @c, @r, @i, 1, 'm', 'v', 'r', 'c', 'd', 'a', 'o')";
+            "INSERT INTO investigation_traces (KeyHash, CaseId, RunId, InvestigationId, CaseIdUtf16, CaseIdLength, RunIdUtf16, RunIdLength, InvestigationIdUtf16, InvestigationIdLength, BasisVersion, ModelDeploymentName, ApiVersion, Region, ContentFilterSetting, Decision, ActorToken, Outcome) " +
+            "VALUES (randomblob(32), 'case-1', 'run-1', 'inv-1', @c, 6, @r, 5, @i, 5, 1, 'm', 'v', 'r', 'c', 'd', 'a', 'o')";
         command.Parameters.AddWithValue("@c", System.Text.Encoding.Unicode.GetBytes("case-1"));
         command.Parameters.AddWithValue("@r", System.Text.Encoding.Unicode.GetBytes("run-1"));
         command.Parameters.AddWithValue("@i", System.Text.Encoding.Unicode.GetBytes("inv-1"));
         Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
         Assert.Equal(1, CountTraceRows(options));
+    }
+
+    [Fact]
+    public void TraceIdentifierLengthIsLimited()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+
+        // 64 surrogate pairs is exactly 128 UTF-16 code units and is accepted.
+        var atLimit = string.Concat(Enumerable.Repeat("\uD83D\uDE00", 64));
+        store.AppendTrace(scope, NewTrace("case-1", atLimit, "inv-1"));
+        Assert.Equal(1, CountTraceRows(options));
+
+        // One code unit over the limit is rejected, including when the extra unit is half a surrogate pair.
+        var overByOneSurrogate = atLimit + "\uD83D";
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", overByOneSurrogate, "inv-1")));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-2", new string('a', 129))));
+        Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-3", atLimit + "bc")));
+        Assert.Equal(1, CountTraceRows(options));
+        Assert.Null(store.FindTrace(scope, "case-1", "run-2", new string('a', 129)));
+    }
+
+    [Fact]
+    public void TraceIdentifiersDifferingByTrailingNulAreDistinct()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("case-1", "owner-a");
+        store.AppendTrace(scope, NewTrace("case-1", "run-1", "inv-1"));
+        store.AppendTrace(scope, NewTrace("case-1", "run-1\0", "inv-1"));
+
+        Assert.Equal(2, CountTraceRows(options));
+        Assert.Equal("run-1", store.FindTrace(scope, "case-1", "run-1", "inv-1")!.RunId);
+        Assert.Equal("run-1\0", store.FindTrace(scope, "case-1", "run-1\0", "inv-1")!.RunId);
+        Assert.Null(store.FindTrace(scope, "case-1", "run-1\0\0", "inv-1"));
     }
 
     [Fact]
