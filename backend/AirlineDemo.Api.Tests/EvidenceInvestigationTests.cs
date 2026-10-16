@@ -193,6 +193,63 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.NotNull(recoveredStore.FindTrace(ScopeFor(recoveredStore), Case, runId, "inv-" + runId));
     }
 
+    // AC: TRACE-PRODUCER-07
+    [Fact]
+    public async Task NonOwnerSubmissionIsRefusedBeforeAnythingIsSaved()
+    {
+        // The seeded fixture has one presenter, so the case is owned by another user before the presenter submits.
+        new CaseStateStore(_statePath).CreateCase(Case, "fin-1");
+        var model = new CountingChatClient();
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        using var response = await PostPackageAsync(client, presenter, "valid-text.pdf", ReadFixture("valid-text.pdf"));
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        Assert.Equal(0, model.Calls);
+        var basis = factory.Services.GetRequiredService<AirlineDemo.Api.Evidence.EvidenceBasisStore>();
+        Assert.Empty(basis.History($"{Case}/valid-text.pdf"));
+        var packageId = AirlineDemo.Api.Evidence.EvidenceEndpoints.PackageIdFor(Case,
+            [new AirlineDemo.Api.Evidence.EvidenceDocument("valid-text.pdf", ReadFixture("valid-text.pdf"))]);
+        var store = new CaseStateStore(_statePath);
+        Assert.Null(store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId));
+        Assert.Null(factory.Services.GetRequiredService<AirlineDemo.Api.Evidence.EvidencePackageStore>().Find(Case, packageId));
+    }
+
+    // AC: TRACE-PRODUCER-08
+    [Fact]
+    public async Task DuplicateAcceptedFilenamesInvestigateEachNameOnceAtItsNewestVersion()
+    {
+        var model = new CountingChatClient();
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        var form = new MultipartFormDataContent();
+        var first = new ByteArrayContent(ReadFixture("valid-text.pdf"));
+        first.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        form.Add(first, "files", "same.pdf");
+        var second = new ByteArrayContent(ReadFixture("annotated.pdf"));
+        second.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        form.Add(second, "files", "same.pdf");
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{Case}/packages") { Content = form };
+        request.Headers.Add("Cookie", presenter.Cookie);
+        request.Headers.Add("X-CSRF-Token", presenter.Csrf);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        Assert.Equal(1, model.Calls);
+
+        var basis = factory.Services.GetRequiredService<AirlineDemo.Api.Evidence.EvidenceBasisStore>();
+        var newest = basis.History($"{Case}/same.pdf").Max(v => v.Version);
+        var store = new CaseStateStore(_statePath);
+        var trace = store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId);
+        Assert.NotNull(trace);
+        Assert.Equal(newest, trace.BasisVersion);
+    }
+
     // AC: TRACE-PRODUCER-04
     [Fact]
     public async Task RecordsStartedOutcomeAndSkipsPreStartRejection()
