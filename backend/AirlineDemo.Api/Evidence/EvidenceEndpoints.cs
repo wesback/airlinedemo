@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
@@ -68,6 +69,7 @@ public static class EvidenceEndpoints
         ICaseStateStore caseStore,
         EvidenceCaseReadSourceFactory caseSources,
         InvestigationExecutionService investigations,
+        WorkloadAdmissionLimits admission,
         IServiceProvider services,
         CancellationToken ct)
     {
@@ -76,6 +78,10 @@ public static class EvidenceEndpoints
         if (!DemoAuthEndpoints.HasValidAntiForgery(request.HttpContext, session)) return DemoAuthEndpoints.AntiForgeryFailed();
         if (session.User.Role != PresenterRole) return Results.Json(new { error = "Role not permitted." }, statusCode: StatusCodes.Status403Forbidden);
         if (!session.User.CaseScopes.Contains(caseId)) return Results.NotFound();
+
+        // Keyed by the server session identity only; a multipart userId field is never read.
+        if (!admission.TryAdmitPackage(session.User.Id))
+            return Results.Json(new { error = WorkloadAdmissionLimits.PackageLimitError }, statusCode: StatusCodes.Status429TooManyRequests);
 
         // Raise Kestrel's default 30 MB body cap so a valid 50 MiB package reaches EvidenceIntake's own limits.
         var bodySize = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -120,6 +126,11 @@ public static class EvidenceEndpoints
         {
             return Results.NotFound();
         }
+
+        // Refused before any package or basis entry is written, and held until the investigation finishes.
+        using var investigationSlot = admission.TryAdmitInvestigation();
+        if (investigationSlot is null)
+            return Results.Json(new { error = WorkloadAdmissionLimits.InvestigationLimitError }, statusCode: StatusCodes.Status429TooManyRequests);
 
         var packageId = PackageIdFor(caseId, documents);
         var (record, created) = packages.Submit(packageId, caseId,

@@ -1,4 +1,5 @@
 using AirlineDemo.Api;
+using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Evidence;
@@ -28,6 +29,7 @@ builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
+builder.Services.AddSingleton<WorkloadAdmissionLimits>();
 builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
 builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
 var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
