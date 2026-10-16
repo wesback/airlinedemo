@@ -2,7 +2,7 @@
 prd_id: "aircraft-source-systems"
 title: "Synthetic Source-System Stubs and Read-Only Source Port"
 status: "draft"
-version: "0.3.0"
+version: "0.4.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-16"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Synthetic Source-System Stubs and Read-Only Source Port
 
-> **aircraft-source-systems** | Status: Draft | Version: 0.3.0 | Last Updated: 2026-10-16
+> **aircraft-source-systems** | Status: Draft | Version: 0.4.0 | Last Updated: 2026-10-16
 
 ## Executive Summary
 
@@ -35,7 +35,7 @@ This PRD defines five synthetic source-system stubs and one read-only server por
 
 The stubs let the demonstration show the intended shape of the product: a coordinator (the application-owned case state machine, ARR:DD-009) gathers facts from several systems, a bounded investigator reads them through case-scoped read-only tools, and humans decide. The port is the seam where a real system adapter would later replace a stub. Every datum read through it carries provenance (system, record, version, as-of date), and the stubs can simulate an unavailable, stale or conflicting source so the presenter can show how the workflow reacts.
 
-Version 0.3.0 adds Cape Town interest evidence records, per-regime sanctions flags, an IFRS 16 flag topic and a personal-data marker, so each regulatory area in the capstone brief has a defined route to its owner. Version 0.2.0 added the controls an auditor or specialist panel will ask about: an exportable decision dossier, regime and responsibility tags on requirements, a notice-validity checklist, separate finance record kinds for rent, reserves and deposits, and specialist-review flags that can never read as clearance. They show that the controls work; they do not show regulatory compliance.
+Version 0.4.0 withdraws the notice-validity checklist, which is outside the capstone areas. Version 0.3.0 added Cape Town interest evidence records, per-regime sanctions flags, an IFRS 16 flag topic and a personal-data marker, so each regulatory area in the capstone brief has a defined route to its owner. Version 0.2.0 added the controls an auditor or specialist panel will ask about: an exportable decision dossier, regime and responsibility tags on requirements, separate finance record kinds for rent, reserves and deposits, and specialist-review flags that can never read as clearance. They show that the controls work; they do not show regulatory compliance.
 
 This PRD adds no workflow state, role, agent or external action. ARR stays authoritative for case workflow, authority boundaries and the evidence basis. Acceptance criteria describe future verification and are not evidence of delivery.
 
@@ -79,7 +79,6 @@ All systems, records, actors and decisions are synthetic or simulated.
 | DD-015 | IDs are local to this PRD. Cross-references use `ARR:`, `CP:` and `HG:` prefixes. |
 | DD-016 | A decision dossier is a deterministic, read-only export for one recorded human decision (ARR:FR-004, ARR:FR-007 review). It lists the exact document versions, `(sourceId, recordId, recordVersion)` pins, requirement version and applicability tags, deterministic rule or policy version, the investigator trace identifier where one ran, the authenticated actor and role, time, reason, and the audit event identifiers. It is assembled from existing records; it creates no new authority and no approval. Its SHA-256 hash lets a reader confirm it was not edited after export. |
 | DD-017 | Every requirement an assessment uses carries `regime` (`EASA`, `FAA-91`, `FAA-121` or `Other`) and `responsibleParty` (`lessee-operator`, `lessor`, `camo` or `unassigned`), read from `technical` records of kind `applicability`. A requirement without either tag is `needs_review`, never satisfied. Regimes are never cross-applied: a requirement for one regime does not satisfy another. The tags describe fixture scenarios, not legal conclusions. |
-| DD-018 | An obligation notice draft carries a validity checklist read from `contracts` records: governing clause, trigger, recipient, service method, delivery-evidence requirement and cure period. Each item is `present` or `missing`. A draft with any missing item is marked `incomplete` with the reasons. Simulated legal review records a wording decision only; the receipt states `validityDetermined: false`. |
 | DD-019 | `finance` has separate record kinds `rent`, `maintenance_reserve`, `security_deposit` and `reserve_reimbursement`. The reserve consumer reads only `maintenance_reserve` and `reserve_reimbursement`. Its draft separates billed, collected, underbilled, overdue and reimbursable lines, and states that it makes no profit, revenue or cash-recognition claim. |
 | DD-020 | `contracts` carries a record kind `specialist_flag` with a `topic` (`sanctions`, `cape_town`, `ifrs16`, `gdpr` or `other`) and a `result` that may only be `specialist_review_required` or `not_assessed`. A `sanctions` flag also carries a required `regime` of `EU`, `US` or `UK`; one flag covers one regime, and a flag for one regime says nothing about another. No value reads as cleared, compliant, recoverable, classified or recognized; fixture validation rejects any other value. A flag routes the related finding to internal review (ARR:FR-003). |
 | DD-021 | `contracts` carries a record kind `cape_town_interest` with `internationalInterestRef`, `registrationRef`, `idera` (`present`, `absent` or `not_recorded`) and `stateDeclarationNoted` (boolean). It is evidence for counsel. It has no field for priority, remedy, outcome or recoverability, and fixture validation rejects a record that carries one. A finding that relies on it still needs a `cape_town` specialist flag. |
@@ -91,9 +90,9 @@ All systems, records, actors and decisions are synthetic or simulated.
 |---|---|---|---|
 | GOAL-001 | Show a case assembled from five synthetic sources with provenance on every datum, read through one read-only, scope-checked port, used by the investigator, the reserve consumer and the obligation consumer. | Port contract tests, scope negative tests, consumer tests citing source records, and an end-to-end case test pass. | MUST |
 | GOAL-002 | Let a presenter demonstrate a source outage, stale source or document-versus-source conflict and see the workflow react safely and traceably. | Source-mode command tests including negative cases pass; each accepted mode change has an audit record; the dependent finding is blocked, downgraded or routed to review as specified. | MUST |
-| GOAL-003 | Make each human decision reproducible and each applicability, notice and finance distinction explicit, so a reviewer can see what the demonstrator does and does not establish. | Dossier, applicability, notice-checklist, finance-kind, specialist-flag, Cape Town evidence and personal-data tests pass. | MUST |
+| GOAL-003 | Make each human decision reproducible and each applicability and finance distinction explicit, so a reviewer can see what the demonstrator does and does not establish. | Dossier, applicability, finance-kind, specialist-flag, Cape Town evidence and personal-data tests pass. | MUST |
 
-Measured at each release-candidate revision. Baseline: no source stubs, no port, no source tools and no source-mode command, dossier, applicability tag, notice checklist or specialist flag exist (not built). Target: all SRC acceptance criteria marked Automated pass, and the manual items in the release checklist are recorded.
+Measured at each release-candidate revision. Baseline: no source stubs, no port, no source tools and no source-mode command, dossier, applicability tag or specialist flag exist (not built). Target: all SRC acceptance criteria marked Automated pass, and the manual items in the release checklist are recorded.
 
 ## Functional Requirements
 
@@ -113,7 +112,6 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 | FR-010 | Emit source-read, mode-change and load outcomes through the existing server diagnostics filter, without record payloads or authentication secrets. | A read, mode change or load completes or fails. | ARR:DD-029, ARR:NFR-002, ARR:NFR-004. | AC-020 | GOAL-001 |
 | FR-011 | Export a deterministic, hashed, read-only decision dossier for one recorded decision, with the contents in DD-016, limited to the caller's role and case scope. | Authorized user requests the dossier. | ARR:DD-027, ARR:FR-004, ARR:FR-008. | AC-024, AC-025 | GOAL-003 |
 | FR-012 | Tag each requirement used by an assessment with `regime` and `responsibleParty` from `technical` applicability records; treat an untagged requirement as `needs_review` and never cross-apply regimes. | Assessment evaluates a requirement. | ARR:FR-002, ARR:FR-004. | AC-026, AC-027 | GOAL-003 |
-| FR-013 | Attach the notice-validity checklist to each obligation notice draft, mark drafts with missing items `incomplete`, and record legal review as a wording decision only. | Notice draft prepared or reviewed. | ARR:FR-007, ARR:AC-015. | AC-028, AC-029 | GOAL-003 |
 | FR-014 | Keep rent, maintenance reserve, security deposit and reserve reimbursement as separate `finance` record kinds, and keep the reserve draft's lines separate and free of profit or cash claims. | Reserve draft built. | ARR:FR-006, ARR:AC-014. | AC-030 | GOAL-003 |
 | FR-015 | Carry `specialist_flag` records (topics and per-regime sanctions rule in DD-020) and `cape_town_interest` evidence records (DD-021) in `contracts`; flags route the related finding to internal review and can never state clearance. | Finding depends on a flagged topic. | ARR:FR-003. | AC-031, AC-032, AC-033, AC-034, AC-035 | GOAL-003 |
 | FR-016 | Mark each `records` entry with `containsPersonalData` and keep personal-data fields out of summaries, dossiers and diagnostics (DD-022). | Records are loaded or exported. | ARR:NFR-002, ARR:DD-029. | AC-036, AC-037 | GOAL-003 |
@@ -127,7 +125,7 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 - Pinning source records in the evidence basis.
 - A presenter command for simulated source modes and its audit record.
 - A read-only per-case source summary.
-- A hashed decision dossier, requirement regime and responsibility tags, a notice-validity checklist, separate finance record kinds, and specialist-review flags.
+- A hashed decision dossier, requirement regime and responsibility tags, separate finance record kinds, and specialist-review flags.
 
 ### Capability labels
 
@@ -156,7 +154,7 @@ Each source holds a small, fixed set of records per case. Registrations, serials
 | `maintenance` | Work package header, task cards with status (open, closed, deferred), component install/removal events | A records gap explained by an open or deferred work package |
 | `finance` | Lease terms (rates per hour/cycle, reserve basis), billing period, and separate `rent`, `maintenance_reserve`, `security_deposit` and `reserve_reimbursement` records | Reserve rates; a seeded discrepancy |
 | `records` | Document index: `documentId`, `documentVersion`, type, component, date, processing state, `containsPersonalData` | The list of what the document store holds |
-| `contracts` | Obligation clause, `noticeWindowStart`, `noticeWindowEnd`, linked requirement, notice-validity fields (trigger, recipient, service method, delivery evidence, cure period), `specialist_flag` (topics: sanctions with EU/US/UK regime, Cape Town, IFRS 16, GDPR), `cape_town_interest` | Obligation status and notice draft inputs |
+| `contracts` | Obligation clause, `noticeWindowStart`, `noticeWindowEnd`, linked requirement, `specialist_flag` (topics: sanctions with EU/US/UK regime, Cape Town, IFRS 16, GDPR), `cape_town_interest` | Obligation status and notice draft inputs |
 
 Each case fixture seeds at least one situation per column-worth of behavior: Case A has a maintenance record that explains the missing-history finding after the mock response; Case B has a technical record that disagrees with a document on engine identity (routes to internal review); Case C has a complete baseline in all five sources and a `records` entry for the blocked document.
 
@@ -171,7 +169,6 @@ Authenticated `GET /api/v1/cases/{caseId}/sources` returns the source summary (F
 | Records envelope | `contractVersion: integer`, `caseId: string`, `sourceId: string`, `mode: string`, `records: SourceRecord[]`. An unavailable source returns 503 with `error.code = source_unavailable` and no `records`. |
 | SourceRecord | `sourceId`, `recordId`, `recordVersion: integer`, `asOf: YYYY-MM-DD UTC date`, `caseId`, `kind`, `stale: boolean`, `payload: object` (typed per kind), `synthetic: true`. |
 | Decision dossier | `contractVersion`, `caseId`, `decisionId`, `exportedAt`, `basis: {basisId, basisVersion, documents[], sourcePins[], requirements[{id, version, regime, responsibleParty}]}`, `policyVersion`, `traceId: string or null`, `decision: {actorId, role, time, reason, outcome}`, `auditEventIds[]`, `contentHash`, `synthetic: true`, `limitations: string[]`. The hash covers every field except `exportedAt` and itself, so the same inputs give the same hash. |
-| Notice draft checklist | `items: [{name: clause / trigger / recipient / serviceMethod / deliveryEvidence / cureWindow, state: present / missing, sourceRecordId}]`, `status: incomplete / complete`, `validityDetermined: false`. |
 | Specialist flag payload | `topic: sanctions / cape_town / ifrs16 / gdpr / other`, `regime: EU / US / UK` (required for sanctions, absent otherwise), `result: specialist_review_required / not_assessed`, `relatedRequirementId`. |
 | Cape Town interest payload | `internationalInterestRef`, `registrationRef`, `idera: present / absent / not_recorded`, `stateDeclarationNoted: boolean`. |
 | Mode request | `commandId: nonempty string`, `expectedRevision: nonnegative integer`, `mode`. Actor, time and reason are never accepted from the body. |
@@ -274,7 +271,7 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | AC-010 | Given the investigator, when it lists tools, then `list_source_records` and `get_source_record` are present and no source write tool exists; a call with a different case identifier than the server-bound one is refused. | FR-005 | Automated |
 | AC-011 | Given an investigation citing a source record, when the citation self-check runs, then a citation to a record or version not in the basis is downgraded, and source calls count against the call budget. | FR-005 | Automated |
 | AC-012 | Given finance and technical records, when the reserve draft is built, then each line cites its `SourceRecord` and totals equal the existing ARR:AC-014 hand calculation; a removed `finance` rate yields a blocked input, not a zero. | FR-006 | Automated |
-| AC-013 | Given a contracts record, when obligation status is evaluated, then the state and notice-window behavior match ARR:AC-015 and DD-018, the draft cites the record, and no notice is sent. | FR-006 | Automated |
+| AC-013 | Given a contracts record, when obligation status is evaluated, then the state and notice-window behavior match ARR:AC-015 and ARR:DD-018, the draft cites the record, and no notice is sent. | FR-006 | Automated |
 | AC-014 | Given a presenter in scope, when the mode command is issued with a valid token and revision, then the source mode changes for the current run, one audit record is written, and the receipt matches the contract. | FR-007 | Automated |
 | AC-015 | Given a technical, finance, legal or executive role, or a presenter outside case scope, when the command is issued, then the response is 403 or 404 respectively, state is unchanged and no audit record is written. | FR-007 | Automated |
 | AC-016 | Given an exact replay, then the original receipt returns with no new audit record; given a reused identifier with a different payload, 409 `command_id_conflict`; given a stale revision, 409 `stale_revision`; given the current mode, 422 `mode_unchanged`; and a run reset restores every source to `available`. | FR-007 | Automated |
@@ -294,8 +291,6 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | AC-025 | Given a role or case scope that excludes the decision, when the dossier is requested, then the response equals that of a nonexistent decision; given an in-scope response, no document text, prompt, model output, cookie or token appears. | FR-011 | Automated |
 | AC-026 | Given a requirement lacking `regime` or `responsibleParty`, when assessed, then it is `needs_review` and not satisfied, and the reason names the missing tag. | FR-012 | Automated |
 | AC-027 | Given an EASA-tagged and an FAA-91-tagged requirement for the same component, when evidence satisfies only one, then only that requirement is satisfied and the other stays unsatisfied. | FR-012 | Automated |
-| AC-028 | Given a complete `contracts` record set, when a notice draft is prepared, then all six checklist items are `present`, the status is `complete`, `validityDetermined` is false and no notice is sent. | FR-013 | Automated |
-| AC-029 | Given a record set missing the service method or cure period, then the draft is `incomplete` naming the missing items, and a simulated legal approval records wording only with `validityDetermined: false`. | FR-013 | Automated |
 | AC-030 | Given `rent`, `security_deposit`, `maintenance_reserve` and `reserve_reimbursement` records, when the reserve draft is built, then rent and deposit records change no line or total, lines are separated as DD-019 states, the draft carries no profit or cash claim, and a fixture that stores a deposit as a `maintenance_reserve` is rejected. | FR-014 | Automated |
 | AC-031 | Given a `specialist_flag` with a result other than `specialist_review_required` or `not_assessed` (for example `cleared`), when fixtures load, then loading is refused with a reason and no partial data is published. | FR-015 | Automated |
 | AC-032 | Given a finding with a `specialist_review_required` flag, when assessed, then it routes to internal review with zero external requests and no acceptance, and the display text never states clearance, compliance or recoverability. | FR-015 | Automated |
@@ -318,12 +313,11 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | FR-010 | AC-020 |
 | FR-011 | AC-024, AC-025 |
 | FR-012 | AC-026, AC-027 |
-| FR-013 | AC-028, AC-029 |
 | FR-014 | AC-030 |
 | FR-015 | AC-031, AC-032, AC-033, AC-034, AC-035 |
 | FR-016 | AC-036, AC-037 |
 
-Coverage: 16 of 16 FRs have at least one criterion (100%).
+Coverage: 15 of 15 FRs have at least one criterion (100%).
 
 ### FR-to-GOAL Alignment
 
@@ -335,7 +329,7 @@ Coverage: 16 of 16 FRs have at least one criterion (100%).
 
 ## MVP and Release Framing
 
-The release contains FR-001 through FR-016. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-005, ARR:FR-006, ARR:FR-007, ARR:FR-008, ARR:FR-010 and ARR:DD-014, and CP:FR-001, CP:FR-002 and CP:FR-009. If CP is not yet delivered, stories for the Cases A to C fixtures wait for it and the ARR core case fixtures can proceed alone.
+The release contains FR-001 through FR-016, except the withdrawn FR-013. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-005, ARR:FR-006, ARR:FR-007, ARR:FR-008, ARR:FR-010 and ARR:DD-014, and CP:FR-001, CP:FR-002 and CP:FR-009. If CP is not yet delivered, stories for the Cases A to C fixtures wait for it and the ARR core case fixtures can proceed alone.
 
 Suggested story order (each story changes under 500 lines, names its test file, and leaves the tests failing on `main`):
 
@@ -353,10 +347,9 @@ Suggested story order (each story changes under 500 lines, names its test file, 
 12. Source summary endpoint (FR-009) and diagnostics (FR-010).
 13. Finance record kinds and reserve-draft line separation (FR-014).
 14. Requirement applicability tags and `needs_review` rule (FR-012).
-15. Notice-validity checklist and wording-only legal review receipt (FR-013).
-16. Specialist flags (including per-regime sanctions and `ifrs16`) and `cape_town_interest` records, with fixture validation (FR-015).
-17. Personal-data marker and exclusion from summaries, dossiers and diagnostics (FR-016).
-18. Decision dossier export (FR-011); needs stories 5, 6 and 9 and the ARR decision records.
+15. Specialist flags (including per-regime sanctions and `ifrs16`) and `cape_town_interest` records, with fixture validation (FR-015).
+16. Personal-data marker and exclusion from summaries, dossiers and diagnostics (FR-016).
+17. Decision dossier export (FR-011); needs stories 5, 6 and 9 and the ARR decision records.
 
 Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under `backend/AirlineDemo.Api/SourceSystems/`; behavior tests under `backend/AirlineDemo.Api.Tests/`; contract documentation under `docs/`.
 
@@ -365,7 +358,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 - Product owner confirms AC-023 after a rehearsal.
 - Product owner reviews the source fixtures for synthetic-only content and fictional identifiers.
 - Product owner confirms a sample dossier is readable by someone outside the team and states its limitations.
-- Product owner confirms that no slide or screen wording claims compliance, clearance or validity (see FR-013, FR-015).
+- Product owner confirms that no slide or screen wording claims compliance, clearance or validity (see FR-015).
 
 ## Success Metrics
 
@@ -373,7 +366,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 |---|---|---|---|---|
 | GOAL-001 | Automated criteria passing (AC-001 to AC-013, AC-019 to AC-022: 18); records without provenance; cross-case records returned | 0 of 18; not built | 18 of 18; 0; 0 | Test results at each release-candidate revision |
 | GOAL-002 | Mode-command criteria (AC-014 to AC-018) passing; audit record per accepted mode change; automatic requests or acceptances caused by a source problem | 0 of 5; none; not built | 5 of 5; 1 per accepted change and none per replay or rejection; 0 | Test results and audit history |
-| GOAL-003 | Dossier, applicability, notice, finance and specialist-flag criteria passing (AC-024 to AC-037: 14); screens or exports stating compliance, clearance, validity or profit | 0 of 14; not built | 14 of 14; 0 | Test results and manual wording check |
+| GOAL-003 | Dossier, applicability, finance and specialist-flag criteria passing (AC-024 to AC-037 except the withdrawn AC-028 and AC-029: 12); screens or exports stating compliance, clearance, validity or profit | 0 of 12; not built | 12 of 12; 0 | Test results and manual wording check |
 
 ## Risks and Assumptions
 
@@ -384,7 +377,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 | AS-001 | Five stubs with a few records per case are enough to show the multi-system story. | Defined for this PRD. | Add record kinds in a later addendum; the port is unchanged. |
 | AS-002 | Pinning source records in the basis fits ARR's basis model without a new workflow state. | ARR basis is a versioned inventory (ARR glossary). | A small ARR amendment would be needed before story 6. |
 | AS-003 | The investigator's existing budgets absorb two more read tools. | Budgets are frozen configuration (ARR:AS-004). | Re-freeze budgets before scored evaluation. |
-| AS-004 | The ARR decision records hold enough (actor, reason, basis, trace) to assemble a dossier without a new store. | ARR:DD-027 audit and basis records. | A small ARR amendment would be needed before story 18. |
+| AS-004 | The ARR decision records hold enough (actor, reason, basis, trace) to assemble a dossier without a new store. | ARR:DD-027 audit and basis records. | A small ARR amendment would be needed before story 17. |
 
 ### Risk Register
 
@@ -435,6 +428,7 @@ This document defines draft requirements for a fictional, synthetic demonstrator
 
 ## Document Metadata
 
+* Withdrawn in v0.4.0 and not reused: DD-018, FR-013, AC-028, AC-029.
 * Template Version: 1.0.0.
 * Canonical Template: `docs/templates/prd-template.md`.
 * Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.7.0); [Aircraft Case Pack](aircraft-case-pack.md) (CP); [Aircraft Hangar 3D](aircraft-hangar-3d.md) (HG).
