@@ -162,10 +162,13 @@ public static class EvidenceEndpoints
             .GroupBy(d => d.FileName, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Max(d => d.Version!.Value), StringComparer.Ordinal);
         var documents = new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
+        var evidenceTexts = new List<string>(accepted.Count);
         foreach (var name in accepted)
         {
             var text = basis.History($"{caseId}/{name}").First(v => v.Version == pinned[name]).Text;
             documents[name] = BasisDocument.Create(name, [text]);
+            // The model receives page text only; ModelCallGate still refuses text that is not registered synthetic content.
+            evidenceTexts.Add(text.TrimEnd('\r', '\n'));
         }
 
         var basisVersion = accepted.Max(name => pinned[name]);
@@ -180,7 +183,7 @@ public static class EvidenceEndpoints
         // with that outcome. Any append failure is a different exception and still reaches the caller.
         try
         {
-            await investigations.ExecuteAsync(scope, context, investigator, accepted, ClaimKind.Baseline, documents, string.Empty, ct);
+            await investigations.ExecuteAsync(scope, context, investigator, evidenceTexts, ClaimKind.Baseline, documents, string.Empty, ct);
         }
         catch (ModelGateException)
         {
