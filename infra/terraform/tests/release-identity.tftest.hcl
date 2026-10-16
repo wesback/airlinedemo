@@ -134,6 +134,9 @@ variables {
   key_vault_name                  = "kv-demo-test"
   model_account_name              = "aoai-demo-test"
   model_endpoint_subdomain        = "aoai-demo-test"
+  model_deployment_name           = "gpt-demo-test"
+  model_name                      = "gpt-demo-model"
+  model_version                   = "0000-00-00"
   terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
   budget_amount                   = 100
   budget_start_date               = "2026-11-01T00:00:00Z"
@@ -187,6 +190,11 @@ run "registry_is_private_and_pull_scoped" {
   assert {
     condition     = azurerm_private_endpoint.demo["acr"].private_service_connection[0].subresource_names[0] == "registry"
     error_message = "The ACR private endpoint must target the registry subresource."
+  }
+
+  assert {
+    condition     = azurerm_private_endpoint.demo["acr"].private_service_connection[0].private_connection_resource_id == azurerm_container_registry.acr.id
+    error_message = "The ACR private endpoint must target the ACR resource itself, not another resource."
   }
 
   assert {
@@ -407,8 +415,13 @@ run "release_outputs_contain_no_secrets" {
   }
 
   assert {
-    condition     = !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.build_identity_client_id)) && !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", output.release_identity_client_id))
-    error_message = "Release workflow outputs must not contain any credential, connection string, client secret, private key, or signing-key material."
+    condition     = output.build_identity_client_id == azurerm_user_assigned_identity.build.client_id && output.release_identity_client_id == azurerm_user_assigned_identity.release.client_id
+    error_message = "Release workflow outputs must be exactly the workflow identities' client IDs; any other value, including an opaque credential, fails."
+  }
+
+  assert {
+    condition     = length(flatten([for f in fileset(path.module, "*.tf") : [for b in regexall("(?ms)^output\\s+\"\\w+\"\\s*\\{.*?^\\}", file("${path.module}/${f}")) : b if can(regex("(?i)access_key|connection_string|client_secret|password|private_key|primary_key|secondary_key|sas_token|sig=|\\.secret|key_vault_secret|tls_private", b))]])) == 0
+    error_message = "No Terraform output block may reference a credential-bearing attribute (access key, connection string, client secret, password, private key, or secret), whatever its evaluated value."
   }
 
   assert {
@@ -417,8 +430,8 @@ run "release_outputs_contain_no_secrets" {
   }
 
   assert {
-    condition     = length(flatten([for f in fileset(path.module, "*.tf") : regexall("(?m)^output\\s+\"", file("${path.module}/${f}"))])) == 4 && !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", join("\n", [for o in [output.app_sql_grant_statements, output.model_endpoint, output.build_identity_client_id, output.release_identity_client_id] : jsonencode(o)])))
-    error_message = "Every Terraform output in the configuration (all *.tf files) must be one of the four known outputs, and none may contain secret material."
+    condition     = length(flatten([for f in fileset(path.module, "*.tf") : regexall("(?m)^output\\s+\"", file("${path.module}/${f}"))])) == 5 && !can(regex("(?i)secret|password|passwd|accountkey|connectionstring|private[ _-]?key|BEGIN [A-Z ]*KEY|sharedaccesssignature|sig=", join("\n", [for o in [output.app_sql_grant_statements, output.migration_sql_grant_statements, output.model_endpoint, output.build_identity_client_id, output.release_identity_client_id] : jsonencode(o)])))
+    error_message = "Every Terraform output in the configuration (all *.tf files) must be one of the five known outputs, and none may contain secret material."
   }
 }
 
