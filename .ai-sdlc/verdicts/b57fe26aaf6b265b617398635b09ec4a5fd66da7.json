@@ -1,0 +1,257 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 231,
+  "branch": "ai-sdlc/issue-231",
+  "commitSha": "b57fe26aaf6b265b617398635b09ec4a5fd66da7",
+  "round": 0,
+  "pipelineVersion": "0d08e1d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint enforces the stated admission limits and rejection behavior. The per-user quota map retains expired identities indefinitely, creating an unbounded memory growth path.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Admission/WorkloadAdmissionLimits.cs",
+          "line": 21,
+          "message": "Expired per-user quota entries are never removed, so distinct authenticated identities can grow the limiter's in-memory dictionary without bound.",
+          "confidence": 0.82,
+          "category": "performance",
+          "evidence": {
+            "codePathTraced": "Each admitted package attempt adds a per-user queue to _admittedPackages. TryAdmitPackage expires old timestamps but never removes a queue when it becomes empty; the endpoint keys entries by session.User.Id.",
+            "failureScenario": "If a presenter can authenticate under many distinct user IDs and submit once for each, every ID remains in the dictionary after its 60-second window expires. Repeating this grows process memory without bound and can make the application unresponsive or cause it to exit."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint tests cover the main admission and rejection flows, including slot release and rejected state. They do not verify that the package quota spans cases or that the investigation cap spans authenticated users, leaving two explicit acceptance behaviors unproved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 196,
+          "message": "AC: LIMIT-01 does not prove the quota is shared across cases. Submit attempts for the same authenticated user to more than one case and verify the combined eleventh attempt is rejected.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Package_rate_limit_uses_authenticated_session_and_rolling_window submits every package request using the same Case constant.",
+            "failureScenario": "If package quotas are keyed by user and case, the test still passes while a presenter can submit 10 packages in each case, violating LIMIT-01's across-cases limit."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 228,
+          "message": "AC: LIMIT-02 does not prove the concurrency cap is application-wide across users. Hold two endpoint investigations, then attempt a third through a different authenticated session and verify it is rejected.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Concurrent_investigations_are_bounded_and_release_slots sends both admitted investigations and the rejected third request through the same presenter session.",
+            "failureScenario": "If the concurrency limit is enforced per user instead of application-wide, these tests still pass while a second presenter can start two more investigations when the first presenter already has two running."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete, reachable security vulnerability in the changed code. The package quota uses the authenticated session identity, and the investigation slot is released when the endpoint exits.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 64,
+      "total": 64,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/WorkloadAdmissionLimits.cs",
+          "covered": 58,
+          "total": 58,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
