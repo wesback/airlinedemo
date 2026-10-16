@@ -316,7 +316,7 @@ public sealed class CaseStateStore : ICaseStateStore
                 throw new TraceConflictException();
             }
 
-            var updated = Freeze(current with { Traces = [.. existing, trace] });
+            var updated = Freeze(current with { Traces = [.. existing, SnapshotTrace(trace)] });
             var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
             Persist(snapshot);
             _cases = snapshot;
@@ -576,10 +576,14 @@ public sealed class CaseStateStore : ICaseStateStore
         ReceiptIds = Wrap(state.ReceiptIds),
         Audit = Wrap(state.Audit),
         WorkItems = Wrap(state.WorkItems ?? Array.Empty<WorkItem>()),
-        Traces = Wrap(state.Traces ?? Array.Empty<InvestigationTrace>()),
+        Traces = Wrap((state.Traces ?? Array.Empty<InvestigationTrace>()).Select(SnapshotTrace)),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
+
+    /// <summary>Copies a trace's steps into a read-only list so the stored record cannot change through the caller's collection.</summary>
+    private static InvestigationTrace SnapshotTrace(InvestigationTrace trace) =>
+        trace with { Steps = Wrap(trace.Steps) };
 
     private static ReadOnlyCollection<T> Wrap<T>(IEnumerable<T> items) => new(items.ToList());
 
