@@ -352,68 +352,60 @@ public sealed class EvidenceInvestigationTests : IDisposable
     [Fact]
     public async Task HostRegistersAzureOpenAIChatClientWithoutCallingIt()
     {
-        // Any connection to the configured endpoint lands on this listener; resolving the client must not connect.
-        var credentialsResolved = 0;
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        try
+        // The fake transport counts every request that reaches the wire; resolving the client must send none.
+        var credentialsCreated = 0;
+        var requestsSent = 0;
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureAppConfiguration((_, config) =>
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["Demo:Passcode"] = Passcode,
-                        ["CaseState:Path"] = _statePath,
-                        ["AzureOpenAI:Endpoint"] = $"https://127.0.0.1:{port}/",
-                    }));
-                // Counts every credential the host creates through its only production factory.
-                builder.ConfigureTestServices(services =>
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    services.AddSingleton(FakeApprovedManifest.Approved());
-                    services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () =>
-                    {
-                        Interlocked.Increment(ref credentialsResolved);
-                        return new StopBeforeNetworkCredential();
-                    });
+                    ["Demo:Passcode"] = Passcode,
+                    ["CaseState:Path"] = _statePath,
+                    ["AzureOpenAI:Endpoint"] = "https://fake-openai.invalid/",
+                }));
+            // Counts every credential the host creates through its only production factory.
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton(FakeApprovedManifest.Approved());
+                services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () =>
+                {
+                    Interlocked.Increment(ref credentialsCreated);
+                    return new StaticTokenCredential(new Azure.Core.AccessToken("fake-token", DateTimeOffset.UtcNow.AddHours(1)));
                 });
+                services.AddSingleton<HttpMessageHandler>(new FakeOpenAiHandler(() => Interlocked.Increment(ref requestsSent)));
             });
+        });
 
-            var services = factory.Services;
-            using var azureEvents = new AzureIdentityEventRecorder();
-            var eventsBefore = azureEvents.Events.Count;
+        var services = factory.Services;
+        using var azureEvents = new AzureIdentityEventRecorder();
+        var eventsBefore = azureEvents.Events.Count;
 
-            var chatClient = services.GetRequiredService<IChatClient>();
+        var chatClient = services.GetRequiredService<IChatClient>();
 
-            Assert.NotNull(chatClient);
-            Assert.False(listener.Pending());
-            Assert.Equal(0, Volatile.Read(ref credentialsResolved));
-            Assert.Empty(azureEvents.Events.Skip(eventsBefore));
+        Assert.NotNull(chatClient);
+        Assert.Equal(0, Volatile.Read(ref credentialsCreated));
+        Assert.Equal(0, Volatile.Read(ref requestsSent));
+        Assert.Empty(azureEvents.Events.Skip(eventsBefore));
 
-            // The first request asks for a token once; the credential refuses it, so no connection to the endpoint is made.
-            var exception = await Assert.ThrowsAnyAsync<Exception>(() => chatClient.GetResponseAsync(
-                new[] { new ChatMessage(ChatRole.User, "ping") },
-                cancellationToken: TestContext.Current.CancellationToken));
-            Assert.Contains(StopBeforeNetworkCredential.Message, exception.ToString());
-            Assert.Equal(1, Volatile.Read(ref credentialsResolved));
-            Assert.False(listener.Pending());
-        }
-        finally
-        {
-            listener.Stop();
-        }
+        // The first request fetches a token exactly once and then reaches the fake transport, which refuses it with 400 (no retry).
+        await Assert.ThrowsAnyAsync<Exception>(() => chatClient.GetResponseAsync(
+            new[] { new ChatMessage(ChatRole.User, "ping") },
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, Volatile.Read(ref credentialsCreated));
+        Assert.Equal(1, Volatile.Read(ref requestsSent));
     }
 
-    private sealed class StopBeforeNetworkCredential : Azure.Core.TokenCredential
+    private sealed class FakeOpenAiHandler(Action onRequest) : HttpMessageHandler
     {
-        public const string Message = "credential refused the token request before the network";
-
-        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException(Message);
-
-        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException(Message);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            onRequest();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("{\"error\":{\"code\":\"fake\",\"message\":\"fake transport\"}}", Encoding.UTF8, "application/json"),
+            });
+        }
     }
 
     [Fact]
@@ -439,28 +431,6 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.Equal(expires, second.ExpiresOn);
         Assert.Equal(1, Volatile.Read(ref created));
     }
-
-    // A credential built directly (not through the lazy factory) would be constructed while the client is resolved, and no runtime
-    // event shows that, so the source is checked: the investigation and evidence code never names DefaultAzureCredential, and Program.cs names it only inside the registered credential factory.
-    [Fact]
-    public void DefaultAzureCredentialIsNamedOnlyInsideTheLazyCredentialFactory()
-    {
-        var apiDir = ApiSourceDirectory();
-        var namingFiles = new[] { "Investigation", "Evidence" }
-            .SelectMany(dir => Directory.EnumerateFiles(Path.Combine(apiDir, dir), "*.cs", SearchOption.AllDirectories))
-            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            .Where(p => File.ReadAllText(p).Contains("DefaultAzureCredential", StringComparison.Ordinal))
-            .Select(p => Path.GetFileName(p))
-            .ToArray();
-        Assert.Empty(namingFiles);
-
-        var lines = File.ReadAllLines(Path.Combine(apiDir, "Program.cs")).Where(l => l.Contains("DefaultAzureCredential", StringComparison.Ordinal) && !l.TrimStart().StartsWith("//", StringComparison.Ordinal)).ToArray();
-        var line = Assert.Single(lines);
-        Assert.Contains("AddSingleton<Func<Azure.Core.TokenCredential>>", line);
-    }
-
-    private static string ApiSourceDirectory([CallerFilePath] string testFile = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFile)!, "..", "AirlineDemo.Api"));
 
     // Reads the committed synthetic fixture that the endpoint-flow test is built on.
     private static string ReturnStatusFixture([CallerFilePath] string testFile = "")

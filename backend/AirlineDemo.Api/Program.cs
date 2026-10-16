@@ -50,7 +50,14 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
     // The credential is created on the first token request, not here. Every creation goes through the registered factory, so a test can observe them all.
     var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
     var credential = new LazyTokenCredential(createCredential);
-    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential)
+    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions();
+    // Tests register a fake HTTP handler so the first request can be observed without a socket; production registers none.
+    var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
+    if (handler is not null)
+    {
+        options.Transport = new System.ClientModel.Primitives.HttpClientPipelineTransport(new System.Net.Http.HttpClient(handler));
+    }
+    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential, options)
         .GetChatClient(deployment)
         .AsIChatClient();
 });
