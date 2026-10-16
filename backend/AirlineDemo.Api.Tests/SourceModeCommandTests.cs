@@ -267,4 +267,27 @@ public sealed class SourceModeCommandTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Production_registrations_resolve_SourceModeStore_with_system_TimeProvider()
+    {
+        var path = TempStatePath();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = Passcode,
+                    ["CaseState:Path"] = path,
+                })));
+        try
+        {
+            using var scope = factory.Services.CreateScope();
+            Assert.Same(TimeProvider.System, scope.ServiceProvider.GetRequiredService<TimeProvider>());
+            Assert.NotNull(scope.ServiceProvider.GetRequiredService<SourceModeStore>());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
