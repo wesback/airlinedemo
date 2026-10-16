@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using AirlineDemo.Api.Persistence;
@@ -140,6 +141,36 @@ public sealed class SqlCaseStateStoreTests
         var program = File.ReadAllText(Path.Combine(SourceDirectory(), "..", "AirlineDemo.Api", "Program.cs"));
         Assert.Contains("AddCaseStateStore(builder.Configuration)", program);
     }
+
+    // AC1: commits and audit reads issue only SELECT and INSERT against case_events; no generated command updates or deletes it.
+    [Fact]
+    public void AC1_generated_audit_commands_are_append_only()
+    {
+        using var connection = OpenMigratedSqlite(out _);
+        var recorder = new CommandRecorder();
+        var recordingOptions = new DbContextOptionsBuilder<CaseStateDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(recorder)
+            .Options;
+
+        var store = new SqlCaseStateStore(recordingOptions);
+        var scope = store.CreateCase("case-1", "owner-a");
+        recorder.Commands.Clear();
+
+        store.Commit(scope, 0, new CaseCommit(null, null, "owner-a", "open", "opened"));
+        Assert.Single(store.ReadAudit(scope));
+
+        var auditCommands = recorder.Commands.Where(c => c.Contains("case_events", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Contains(auditCommands, c => LeadingKeyword(c) == "SELECT");
+        Assert.Contains(auditCommands, c => LeadingKeyword(c) == "INSERT");
+        Assert.All(auditCommands, c => Assert.Contains(LeadingKeyword(c), new[] { "SELECT", "INSERT" }));
+        Assert.DoesNotContain(recorder.Commands, c =>
+            c.Contains("case_events", StringComparison.OrdinalIgnoreCase)
+            && (LeadingKeyword(c) is "UPDATE" or "DELETE" or "REPLACE" or "UPSERT"));
+    }
+
+    private static string LeadingKeyword(string commandText) =>
+        System.Text.RegularExpressions.Regex.Match(commandText, @"^\s*(\w+)").Groups[1].Value.ToUpperInvariant();
 
     // AC2: the adapter maps the four tables and exposes no audit update or delete; a successful commit appends one audit event.
     [Fact]
@@ -567,6 +598,29 @@ public sealed class SqlCaseStateStoreTests
         Assert.Equal("closed", Assert.Single(reloaded.ListWorkItems(reloadedScope)).State);
         Assert.Equal(2, reloaded.Read(reloadedScope).Revision);
         Assert.Equal(auditAfterChange, reloaded.ReadAudit(reloadedScope));
+    }
+
+    private sealed class CommandRecorder : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = new();
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result)
+        {
+            Commands.Add(command.CommandText);
+            return result;
+        }
+
+        public override InterceptionResult<int> NonQueryExecuting(DbCommand command, CommandEventData eventData, InterceptionResult<int> result)
+        {
+            Commands.Add(command.CommandText);
+            return result;
+        }
+
+        public override InterceptionResult<object> ScalarExecuting(DbCommand command, CommandEventData eventData, InterceptionResult<object> result)
+        {
+            Commands.Add(command.CommandText);
+            return result;
+        }
     }
 
     private static string SourceDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;
