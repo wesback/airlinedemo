@@ -7,7 +7,9 @@ using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Evidence.PdfWorker;
+using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.AI;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,12 +33,47 @@ public sealed class WorkloadAdmissionLimitsTests
         public void Advance(TimeSpan by) => _now += by;
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits) =>
+    // A model stand-in whose investigations hold their admission slot inside the model call until the test releases,
+    // fails or cancels the current gate.
+    private sealed class GatedChatClient : IChatClient
+    {
+        private int _entered;
+
+        public TaskCompletionSource Gate { get; set; } = NewGate();
+
+        public int Entered => Volatile.Read(ref _entered);
+
+        public ChatClientMetadata Metadata { get; } = new("gated");
+
+        public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _entered);
+            await Gate.Task.WaitAsync(cancellationToken);
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, "[]"));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
+    }
+
+    private static TaskCompletionSource NewGate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var i = 0; i < 1000 && !condition(); i++) await Task.Delay(10);
+        Assert.True(condition());
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits, IChatClient? chat = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode }));
-            builder.ConfigureTestServices(services => services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(new CountingChatClient()));
+            builder.ConfigureTestServices(services => services.AddSingleton<IChatClient>(chat ?? new CountingChatClient()));
             builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
             // The test host runs as root on Linux, so point the isolated PDF worker at this test assembly.
             builder.ConfigureTestServices(services => services.AddSingleton(new IsolatedPdfParserOptions
@@ -71,10 +108,41 @@ public sealed class WorkloadAdmissionLimitsTests
         return bytes;
     }
 
-    private static Task<HttpResponseMessage> PostPackageAsync(HttpClient client, Session session, string? forgedUserId = null, int size = 1024)
+    // A one-page text PDF with a valid cross-reference table, so the endpoint accepts it and starts an investigation.
+    // Extra comment bytes make each document distinct, so each submission creates its own package.
+    private static byte[] TextPdf(int extraBytes)
+    {
+        var sb = new StringBuilder("%PDF-1.4\n");
+        if (extraBytes > 0) sb.Append('%', extraBytes).Append('\n');
+        var offsets = new List<int>();
+        void Add(string body)
+        {
+            offsets.Add(sb.Length);
+            sb.Append(offsets.Count).Append(" 0 obj ").Append(body).Append('\n');
+        }
+
+        const string content = "BT /F1 12 Tf 72 720 Td (synthetic page 1) Tj ET";
+        Add("<< /Type /Catalog /Pages 2 0 R >> endobj");
+        Add("<< /Type /Pages /Count 1 /Kids [3 0 R] >> endobj");
+        Add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj");
+        Add($"<< /Length {content.Length} >> stream\n{content}\nendstream endobj");
+        Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj");
+        var xrefPosition = sb.Length;
+        sb.Append("xref\n0 ").Append(offsets.Count + 1).Append("\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            sb.Append(offset.ToString("D10")).Append(" 00000 n \n");
+        }
+
+        sb.Append("trailer << /Size ").Append(offsets.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n")
+            .Append(xrefPosition.ToString("D10")).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(sb.ToString());
+    }
+
+    private static Task<HttpResponseMessage> PostPackageAsync(HttpClient client, Session session, string? forgedUserId = null, int size = 1024, byte[]? bytes = null, CancellationToken ct = default)
     {
         var form = new MultipartFormDataContent();
-        var part = new ByteArrayContent(FakePdf(size));
+        var part = new ByteArrayContent(bytes ?? FakePdf(size));
         part.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(part, EvidenceEndpoints.FormFieldName, "statement.pdf");
         if (forgedUserId is not null) form.Add(new StringContent(forgedUserId), "userId");
@@ -82,24 +150,34 @@ public sealed class WorkloadAdmissionLimitsTests
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{Case}/packages") { Content = form };
         request.Headers.Add("Cookie", session.Cookie);
         request.Headers.Add("X-CSRF-Token", session.Csrf);
-        return client.SendAsync(request);
+        return client.SendAsync(request, ct);
     }
 
     // Reads the same stores the endpoint writes to: a rejected submission must leave none of this state behind.
-    private static void AssertNoPackage(WebApplicationFactory<Program> factory, int size) =>
+    private static void AssertNoPackage(WebApplicationFactory<Program> factory, byte[] bytes) =>
         Assert.Null(factory.Services.GetRequiredService<EvidencePackageStore>()
-            .Find(Case, EvidenceEndpoints.PackageIdFor(Case, [new EvidenceDocument("statement.pdf", FakePdf(size))])));
+            .Find(Case, EvidenceEndpoints.PackageIdFor(Case, [new EvidenceDocument("statement.pdf", bytes)])));
+
+    private static void AssertNoPackage(WebApplicationFactory<Program> factory, int size) =>
+        AssertNoPackage(factory, FakePdf(size));
+
+    // An investigation result is keyed by its package run id; a rejected submission must leave no trace under that key.
+    private static void AssertNoInvestigationResult(WebApplicationFactory<Program> factory, byte[] bytes)
+    {
+        var store = factory.Services.GetRequiredService<ICaseStateStore>();
+        var packageId = EvidenceEndpoints.PackageIdFor(Case, [new EvidenceDocument("statement.pdf", bytes)]);
+        Assert.Null(store.FindTrace(store.AuthorizeCase(Case, "presenter"), Case, packageId, "inv-" + packageId));
+    }
 
     private static int BasisCount(WebApplicationFactory<Program> factory) =>
         factory.Services.GetRequiredService<EvidenceBasisStore>().History($"{Case}/statement.pdf").Count;
 
-    private static void AssertBothInvestigationSlotsAvailable(WorkloadAdmissionLimits limits)
+    // True only when both investigation slots are free; any slot it takes is released before returning.
+    private static bool TwoSlotsFree(WorkloadAdmissionLimits limits)
     {
         using var first = limits.TryAdmitInvestigation();
-        using var second = limits.TryAdmitInvestigation();
-        Assert.NotNull(first);
-        Assert.NotNull(second);
-        Assert.Null(limits.TryAdmitInvestigation());
+        using var second = first is null ? null : limits.TryAdmitInvestigation();
+        return first is not null && second is not null;
     }
 
     [Fact]
@@ -144,57 +222,63 @@ public sealed class WorkloadAdmissionLimitsTests
     public async Task Concurrent_investigations_are_bounded_and_release_slots()
     {
         var limits = new WorkloadAdmissionLimits(TimeProvider.System);
-        using var factory = CreateFactory(limits);
+        var chat = new GatedChatClient();
+        using var factory = CreateFactory(limits, chat);
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
-        var admitted = new CountdownEvent(WorkloadAdmissionLimits.MaxConcurrentInvestigations);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var holders = Enumerable.Range(0, WorkloadAdmissionLimits.MaxConcurrentInvestigations).Select(_ => Task.Run(async () =>
+        // Two endpoint submissions hold both investigation slots inside the model call until the gate is released.
+        var admitted = new[]
         {
-            using var slot = limits.TryAdmitInvestigation() ?? throw new InvalidOperationException("slot refused");
-            admitted.Signal();
-            await release.Task;
-        })).ToArray();
-        await Task.Run(() => admitted.Wait());
+            PostPackageAsync(client, presenter, bytes: TextPdf(1)),
+            PostPackageAsync(client, presenter, bytes: TextPdf(2)),
+        };
+        await Task.WhenAny(admitted[0], admitted[1], Task.Delay(2000));
+        foreach (var early in admitted.Where(t => t.IsCompleted))
+        {
+            using var r = await early;
+            Assert.Fail($"admitted submission finished early: {(int)r.StatusCode} {await r.Content.ReadAsStringAsync()}");
+        }
+        await WaitUntilAsync(() => chat.Entered == 2);
 
-        Assert.Null(limits.TryAdmitInvestigation());
-        var refusal = Assert.Single(limits.Events);
-        Assert.Equal(WorkloadAdmissionLimits.InvestigationKind, refusal.Kind);
-        Assert.Equal(WorkloadAdmissionLimits.InvestigationLimitError, refusal.Error);
-
-        // The endpoint shares this limiter: a submission while both slots are busy is refused before any case, package or result exists.
-        using var refused = await PostPackageAsync(client, presenter);
+        // A third submission is refused before any case, package, basis entry or investigation result is written.
+        using var refused = await PostPackageAsync(client, presenter, bytes: TextPdf(3));
         Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
         var refusedBody = await refused.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(WorkloadAdmissionLimits.InvestigationLimitError, refusedBody.GetProperty("error").GetString());
-        Assert.Equal(2, limits.Events.Count);
-        AssertNoPackage(factory, 1024);
-        Assert.Equal(0, BasisCount(factory));
+        var refusal = Assert.Single(limits.Events);
+        Assert.Equal(WorkloadAdmissionLimits.InvestigationKind, refusal.Kind);
+        Assert.Equal(WorkloadAdmissionLimits.InvestigationLimitError, refusal.Error);
+        Assert.Equal(2, chat.Entered);
+        AssertNoPackage(factory, TextPdf(3));
+        AssertNoInvestigationResult(factory, TextPdf(3));
 
-        // Success: both admitted investigations complete and release their slots.
-        release.SetResult();
-        await Task.WhenAll(holders);
-        AssertBothInvestigationSlotsAvailable(limits);
-
-        // Cancellation: the slot is released when the cancelled investigation exits.
-        using var cts = new CancellationTokenSource();
-        var cancelled = Task.Run(async () =>
+        // Success: the admitted investigations finish through the endpoint and release their slots.
+        chat.Gate.SetResult();
+        foreach (var pending in admitted)
         {
-            using var slot = limits.TryAdmitInvestigation() ?? throw new InvalidOperationException("slot refused");
-            await Task.Delay(Timeout.Infinite, cts.Token);
-        });
+            using var done = await pending;
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, done.StatusCode);
+        }
+
+        await WaitUntilAsync(() => TwoSlotsFree(limits));
+
+        // Cancellation: the endpoint holds its slot until the cancelled investigation exits, then releases it.
+        chat.Gate = NewGate();
+        using var cts = new CancellationTokenSource();
+        var cancelled = PostPackageAsync(client, presenter, bytes: TextPdf(4), ct: cts.Token);
+        await WaitUntilAsync(() => chat.Entered == 3);
+        Assert.False(TwoSlotsFree(limits));
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
-        AssertBothInvestigationSlotsAvailable(limits);
+        await WaitUntilAsync(() => TwoSlotsFree(limits));
 
-        // Exception: the slot is released when the investigation throws.
-        var faulted = Task.Run(() =>
-        {
-            using var slot = limits.TryAdmitInvestigation() ?? throw new InvalidOperationException("slot refused");
-            throw new InvalidOperationException("boom");
-        });
-        await Assert.ThrowsAsync<InvalidOperationException>(() => faulted);
-        AssertBothInvestigationSlotsAvailable(limits);
+        // Exception: the endpoint releases its slot when the investigation throws.
+        chat.Gate = NewGate();
+        var faulted = PostPackageAsync(client, presenter, bytes: TextPdf(5));
+        await WaitUntilAsync(() => chat.Entered == 4);
+        chat.Gate.SetException(new InvalidOperationException("boom"));
+        await Assert.ThrowsAnyAsync<Exception>(() => faulted);
+        await WaitUntilAsync(() => TwoSlotsFree(limits));
 
         // After every release the endpoint is admitted again.
         using var admittedAgain = await PostPackageAsync(client, presenter, size: 2048);
