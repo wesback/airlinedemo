@@ -204,7 +204,8 @@ public sealed class AssessmentEndpointsTests
 
         using var response = await SendAsync(h.Client, HttpMethod.Get, RequestsPath, reviewer);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        using var json = JsonDocument.Parse(responseBody);
         var item = Assert.Single(json.RootElement.EnumerateArray());
         Assert.Equal(first.RequestId, item.GetProperty("requestId").GetString());
         Assert.Equal(CaseId, item.GetProperty("caseId").GetString());
@@ -214,6 +215,8 @@ public sealed class AssessmentEndpointsTests
         Assert.Equal(MockRequestTemplate.Version, item.GetProperty("templateVersion").GetString());
         Assert.Equal(first.Body, item.GetProperty("body").GetString());
         Assert.Equal("delivered", item.GetProperty("state").GetString());
+        foreach (var sentinel in new[] { QuoteSentinel, DocumentSentinel, PromptSentinel })
+            Assert.DoesNotContain(sentinel, responseBody, StringComparison.Ordinal);
 
         using var outOfScope = await SendAsync(h.Client, HttpMethod.Get, $"/api/cases/{OtherCaseId}/requests", reviewer);
         Assert.Equal(HttpStatusCode.NotFound, outOfScope.StatusCode);
@@ -249,12 +252,7 @@ public sealed class AssessmentEndpointsTests
             await AssertDeniedAndUnchanged(h, method, path, reviewer, HttpStatusCode.Forbidden, seededId, token: "invalid-token");
 
             var outOfScopePath = path.Replace(CaseId, OtherCaseId, StringComparison.Ordinal);
-            using var outOfScope = await SendAsync(h.Client, method, outOfScopePath, reviewer);
-            Assert.Equal(HttpStatusCode.NotFound, outOfScope.StatusCode);
-            var body = await outOfScope.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-            Assert.DoesNotContain(seededId, body, StringComparison.Ordinal);
-            Assert.DoesNotContain(receipt.RequestId, body, StringComparison.Ordinal);
-            Assert.DoesNotContain(receipt.Body, body, StringComparison.Ordinal);
+            await AssertDeniedAndUnchanged(h, method, outOfScopePath, reviewer, HttpStatusCode.NotFound, seededId);
         }
 
         using var presenterAllowed = await SendAsync(h.Client, HttpMethod.Get, RequestsPath, presenter);
@@ -272,9 +270,12 @@ public sealed class AssessmentEndpointsTests
         string? token = null)
     {
         var assessments = JsonSerializer.Serialize(h.Assessments.List(CaseId));
+        var otherAssessments = JsonSerializer.Serialize(h.Assessments.List(OtherCaseId));
         var receipts = JsonSerializer.Serialize(h.Inbox.Requests);
         var scope = h.Scope();
+        var otherScope = h.Scope(OtherCaseId);
         var workItems = JsonSerializer.Serialize(h.Cases.Read(scope).WorkItems);
+        var otherWorkItems = JsonSerializer.Serialize(h.Cases.Read(otherScope).WorkItems);
         using var response = await SendAsync(h.Client, method, path, session, withToken, token);
         Assert.Equal(expected, response.StatusCode);
         var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -286,7 +287,9 @@ public sealed class AssessmentEndpointsTests
             Assert.DoesNotContain(receipt.Body, responseBody, StringComparison.Ordinal);
         }
         Assert.Equal(assessments, JsonSerializer.Serialize(h.Assessments.List(CaseId)));
+        Assert.Equal(otherAssessments, JsonSerializer.Serialize(h.Assessments.List(OtherCaseId)));
         Assert.Equal(receipts, JsonSerializer.Serialize(h.Inbox.Requests));
         Assert.Equal(workItems, JsonSerializer.Serialize(h.Cases.Read(scope).WorkItems));
+        Assert.Equal(otherWorkItems, JsonSerializer.Serialize(h.Cases.Read(otherScope).WorkItems));
     }
 }
