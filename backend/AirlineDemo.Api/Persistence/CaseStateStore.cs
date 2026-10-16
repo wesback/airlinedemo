@@ -168,7 +168,8 @@ public sealed record CaseCommit(
     string? ReceiptId,
     string Actor,
     string Action,
-    string Detail);
+    string Detail,
+    DateTimeOffset? At = null);
 
 public sealed record CommitResult(CaseState State, bool Replayed);
 
@@ -472,7 +473,7 @@ public sealed class CaseStateStore : ICaseStateStore
 
             var revision = current.Revision + 1;
             var audit = current.Audit.ToList();
-            audit.Add(new AuditEvent(audit.Count + 1, revision, commit.Actor, commit.Action, commit.Detail, DateTimeOffset.UtcNow));
+            audit.Add(new AuditEvent(audit.Count + 1, revision, commit.Actor, commit.Action, commit.Detail, commit.At ?? DateTimeOffset.UtcNow));
 
             var updated = Freeze(current with
             {

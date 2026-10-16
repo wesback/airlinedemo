@@ -22,6 +22,7 @@ builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddCaseStateStore(builder.Configuration);
 builder.Services.AddEvidenceBlobStore(builder.Configuration);
 builder.Services.AddSingleton<DemoRunReset>();
+builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
@@ -43,6 +44,7 @@ app.MapTechnicalReviewEndpoints();
 app.MapEvidenceEndpoints();
 app.MapFinanceEndpoints();
 app.MapDemoRunReset();
+app.MapSourceModeEndpoints();
 app.MapStaticClient();
 
 app.Run();
