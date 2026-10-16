@@ -141,7 +141,7 @@ Following ARR's label table: the source stubs and their reads are `Simulated`; t
 - Per-domain agents or agent-to-agent messaging.
 - Streaming, change feeds or polling of sources; sources are read on demand and pinned in the basis.
 - Airworthiness determination, invoice issuance, formal notices, or aircraft release.
-- Any determination or claim of regulatory compliance or applicability (EASA Part-M, FAA 91.417/121.380, Cape Town Convention, IFRS 16, GDPR, sanctions, EU AI Act, DORA/NIS2). Regime tags and flags label fixture scenarios only. Applicability is recorded in a separate compliance claims register, not in this PRD.
+- Any determination or claim of regulatory compliance or applicability (EASA Part-M, FAA 91.417/121.380, Cape Town Convention, IFRS 16, GDPR, EU/US/UK sanctions). Regime tags and flags label fixture scenarios only. Applicability is recorded in a separate compliance claims register, not in this PRD.
 - Any real sanctions screening, Cape Town registry search, lease classification, impairment calculation or data-subject request handling, or legal conclusion.
 - Changes to the frozen 40-case evaluation suite (ARR:DD-033). Any evaluation use of source records is a separate PRD decision.
 - Rendering or client behavior beyond the contract (the dashboard and HG consume the summary).

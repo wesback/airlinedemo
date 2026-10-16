@@ -38,4 +38,4 @@ We do not certify compliance, and the AI never does. When someone asks for compl
 - Requirements, regimes and amounts in the fixtures label scenarios. They are not legal conclusions.
 - Which rules apply depends on the actual lease, registration, operator, jurisdiction and state declarations, none of which the demonstrator has.
 - Sanctions lists, current legislation and licence conditions must be checked at the time of action.
-- Regulatory dates and scope claims (for example EU AI Act timing, DORA/NIS2 applicability) come from the research briefing and need confirming against official sources before they appear on a slide.
+- Regulatory citations (EASA Part-M, FAA 91.417 and 121.380, Cape Town, IFRS 16, GDPR, EU/US/UK sanctions) come from the research briefing and need confirming against current official texts before they appear on a slide.
