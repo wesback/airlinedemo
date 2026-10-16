@@ -35,6 +35,8 @@ if (!string.IsNullOrEmpty(approvedModelManifestPath))
 {
     builder.Services.AddSingleton(ApprovedModelManifest.Load(approvedModelManifestPath));
 }
+// The only place a DefaultAzureCredential is constructed; it runs on the first token request, never while registering the client.
+builder.Services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () => new Azure.Identity.DefaultAzureCredential());
 // Resolved lazily: constructing the client makes no network request and fetches no token.
 // The model gate still refuses any request while the manifest is unapproved.
 builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
@@ -45,7 +47,17 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
         ?? throw new InvalidOperationException("No approved model manifest is configured; accepted evidence cannot be investigated.");
     var deployment = manifest.DeploymentName
         ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
-    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), new Azure.Identity.DefaultAzureCredential())
+    // The credential is created on the first token request, not here. Every creation goes through the registered factory, so a test can observe them all.
+    var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
+    var credential = new LazyTokenCredential(createCredential);
+    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions();
+    // Tests register a fake HTTP handler so the first request can be observed without a socket; production registers none.
+    var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
+    if (handler is not null)
+    {
+        options.Transport = new System.ClientModel.Primitives.HttpClientPipelineTransport(new System.Net.Http.HttpClient(handler));
+    }
+    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential, options)
         .GetChatClient(deployment)
         .AsIChatClient();
 });
