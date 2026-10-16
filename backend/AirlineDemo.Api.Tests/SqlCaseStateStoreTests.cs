@@ -645,6 +645,13 @@ public sealed class SqlCaseStateStoreTests
         Assert.Throws<ArgumentException>(() => store.AppendTrace(scope, NewTrace("case-1", "run-3", atLimit + "bc")));
         Assert.Equal(1, CountTraceRows(options));
         Assert.Null(store.FindTrace(scope, "case-1", "run-2", new string('a', 129)));
+
+        // CaseId is limited too: a scope for the overlong case id reaches the length check and is rejected by name.
+        var longCaseId = new string('c', 129);
+        var longScope = store.CreateCase(longCaseId, "owner-a");
+        var caseIdError = Assert.Throws<ArgumentException>(() => store.AppendTrace(longScope, NewTrace(longCaseId, "run-4", "inv-1")));
+        Assert.Equal("CaseId", caseIdError.ParamName);
+        Assert.Equal(1, CountTraceRows(options));
     }
 
     [Fact]
