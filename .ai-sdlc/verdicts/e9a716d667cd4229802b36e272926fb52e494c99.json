@@ -1,0 +1,242 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 183,
+  "branch": "ai-sdlc/issue-183",
+  "commitSha": "e9a716d667cd4229802b36e272926fb52e494c99",
+  "round": 1,
+  "pipelineVersion": "5711d2b",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new ID/version check blocks bases with different identifiers, but a same-identity basis with altered content can still reach request creation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 76,
+          "message": "The current-basis check still trusts supplied basis content when its ID and version match; validate claims and route using the stored current basis.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Assess checks only the supplied basis ID and version against the current basis, then validates claims and routes using the supplied basis's documents and coverage.",
+            "failureScenario": "If a caller supplies altered documents or complete coverage with the same ID and version as the current basis, the check passes and a claim unsupported by the accepted basis can create a request."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds assertions for the request basis and rejects a basis with a different version. However, matching ID and version still lets Assess route claims using different supplied evidence contents.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 76,
+          "message": "Assess accepts substituted basis contents when the supplied basis reuses the current basis ID and version, so claims are not necessarily validated against the current accepted evidence.",
+          "confidence": 0.92,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Assess checks only BasisId and BasisVersion against AssessmentStore.CurrentBasis, then validates claims and routes them using the supplied basis's Documents and Coverage.",
+            "failureScenario": "If the accepted basis has no page supporting a claim, a caller can supply a different basis with the same ID and version but self-consistent pages that support it. The identity check passes, ClaimValidator accepts the claim against those supplied pages, and Route can submit a request."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two changes add a current-basis identity/version check, but assessment still routes and validates against the caller-supplied basis. Matching metadata does not establish that its evidence and coverage match the accepted basis.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 76,
+          "message": "The current-basis check trusts caller-supplied basis contents after matching only ID and version, allowing altered evidence or coverage to authorize a request (OWASP A08:2025).",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Assess checks only the supplied basis's BasisId and BasisVersion against CurrentBasis, then passes the supplied basis to Route and uses its documents, coverage, and identity state.",
+            "failureScenario": "A caller supplies a basis with the current ID and version but altered documents or complete coverage. A claim supported by those altered documents can pass validation and create a request even though the current accepted basis does not support it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AssessmentExecutionServiceTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 135,
+      "total": 142,
+      "percent": 95.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "covered": 103,
+          "total": 110,
+          "missed": [
+            103,
+            105,
+            106,
+            107,
+            150,
+            151,
+            158
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/AssessmentStore.cs",
+          "covered": 32,
+          "total": 32,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
