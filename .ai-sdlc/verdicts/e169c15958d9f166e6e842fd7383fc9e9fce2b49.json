@@ -1,0 +1,277 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 159,
+  "branch": "ai-sdlc/issue-159",
+  "commitSha": "e169c15958d9f166e6e842fd7383fc9e9fce2b49",
+  "round": 0,
+  "pipelineVersion": "d02ea07",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The response flow has two reachable AC: RESPONSE-02 failures: reassessment can mutate state before acceptance is committed, and a replay cannot recover reassessment work that fails after commit.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Requests/MockResponseEndpoints.cs",
+          "line": 120,
+          "message": "The no-witness path writes reassessment state before the response commit and commits against a freshly read revision. A failed or raced commit can leave orphan reassessment state or accept against changed case state, contrary to AC: RESPONSE-02.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When no independent witness supports the response, Accept sets the next assessment basis and calls Assess before committing. Assess can write an assessment and review work item. The code then reads the latest case revision and uses it for Commit instead of the revision captured before reassessment.",
+            "failureScenario": "If the case commit fails, reassessment writes remain even though the response was not accepted. If another case operation advances the revision during reassessment, Accept reads that new revision and may commit the response against changed case state instead of rejecting the stale expected revision. This violates AC: RESPONSE-02."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Requests/MockResponseEndpoints.cs",
+          "line": 45,
+          "message": "Exact replay returns immediately without completing post-commit reassessment work. A failure after the response commit therefore leaves accepted state incomplete even after replay.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When an event already exists, Accept immediately returns Replayed with its receipt. In the independently supported response path, the case commit happens before setting the new assessment basis and calling Assess.",
+            "failureScenario": "If Assess fails after the case commit, the response remains accepted but its reassessment is incomplete. Retrying the same event takes the early replay return and never retries Assess, so the missing assessment or generated work item is not completed. This violates AC: RESPONSE-02."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several response and reassessment paths, but the no-witness path writes reassessment state before the case commit. A commit failure can therefore leave orphan side effects.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Requests/MockResponseEndpoints.cs",
+          "line": 100,
+          "message": "AC: RESPONSE-02 is violated: reassessment writes occur before the response commit, so a failed commit can leave assessment state or a work item without an accepted response.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When the response has no independent witness, Accept sets the current assessment basis and calls Assess before committing the case. Assess can write an assessment and work item; the case commit happens afterward at line 110.",
+            "failureScenario": "If the case commit then fails or hits a revision conflict, Accept fails after assessment state and possibly a work item have been written. The response has no committed receipt, but those side effects remain, violating AC: RESPONSE-02's requirement that failures before or during commit leave state unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The unauthenticated response paths are guarded, but a reachable commit failure can leave reassessment state behind without an accepted response.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Requests/MockResponseEndpoints.cs",
+          "line": 120,
+          "message": "Reassessment writes state before the response commit. A failed commit can leave an orphan assessment and review work item, violating AC: RESPONSE-02.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When no independent witness supports the response, the service sets the next assessment basis and calls Assess before committing the case state. Assess can persist an assessment and review work item. The subsequent case commit can fail, and the finally block restores the old basis only when Assess itself fails.",
+            "failureScenario": "A concurrent case update advances the revision after the read at line 119, or the commit fails for another persistence reason. Accept then fails after the assessment and review work item were written, leaving them without an accepted response or matching case basis. This violates AC: RESPONSE-02 and creates inconsistent trusted assessment state (OWASP A08:2025 — Software or Data Integrity Failures)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/MockResponseReassessmentTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 177,
+      "total": 195,
+      "percent": 90.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Requests/MockResponseEndpoints.cs",
+          "covered": 173,
+          "total": 191,
+          "missed": [
+            131,
+            133,
+            134,
+            135,
+            136,
+            137,
+            138,
+            139,
+            140,
+            141,
+            144,
+            146,
+            147,
+            148,
+            160,
+            234,
+            248,
+            254
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
