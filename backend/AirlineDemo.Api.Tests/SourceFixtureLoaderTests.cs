@@ -183,6 +183,17 @@ public sealed class SourceFixtureLoaderTests
         AssertRefused(dir.Path, key);
     }
 
+    // AC-004: a signed fixture set whose sourceFixtureVersion is empty is refused, even though its signature verifies.
+    [Fact]
+    public void UnsupportedSourceFixtureVersionIsRefused()
+    {
+        using var key = RSA.Create(2048);
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path, key, sourceFixtureVersion: string.Empty);
+
+        AssertRefused(dir.Path, key);
+    }
+
     private static void AssertRefused(string directory, RSA trustKey) =>
         Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(directory, trustKey.ExportSubjectPublicKeyInfo()));
 
@@ -193,7 +204,8 @@ public sealed class SourceFixtureLoaderTests
         string scenarioDate = "2026-10-01",
         string? digest = null,
         int declaredCount = 4,
-        string[]? recordCaseIds = null)
+        string[]? recordCaseIds = null,
+        string sourceFixtureVersion = "2026.10.1")
     {
         var caseIds = recordCaseIds ?? OwningCaseIds;
         foreach (var source in Sources)
@@ -203,7 +215,7 @@ public sealed class SourceFixtureLoaderTests
                 sourceId = source,
                 records = caseIds.Select(caseId => new { caseId }),
             }));
-            var manifest = ManifestBytes(fixture, schemaVersion, scenarioDate, digest, declaredCount);
+            var manifest = ManifestBytes(fixture, schemaVersion, scenarioDate, digest, declaredCount, sourceFixtureVersion);
 
             File.WriteAllBytes(Path.Combine(directory, $"{source}.json"), fixture);
             File.WriteAllBytes(Path.Combine(directory, $"{source}.manifest.json"), manifest);
@@ -218,10 +230,11 @@ public sealed class SourceFixtureLoaderTests
         string schemaVersion = "1",
         string scenarioDate = "2026-10-01",
         string? digest = null,
-        int declaredCount = 4) => JsonSerializer.SerializeToUtf8Bytes(new
+        int declaredCount = 4,
+        string sourceFixtureVersion = "2026.10.1") => JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion,
-            sourceFixtureVersion = "2026.10.1",
+            sourceFixtureVersion,
             scenarioDate,
             owningCaseIds = OwningCaseIds,
             sha256 = digest ?? Convert.ToHexString(SHA256.HashData(fixture)).ToLowerInvariant(),
