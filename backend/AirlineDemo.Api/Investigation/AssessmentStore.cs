@@ -7,14 +7,28 @@ public sealed class AssessmentStore
     private readonly Dictionary<string, List<AssessmentRecord>> _byCase = new(StringComparer.Ordinal);
     private readonly Dictionary<string, AssessmentBasis> _currentByCase = new(StringComparer.Ordinal);
 
-    /// <summary>Records the case's current accepted evidence basis. An assessment against any other basis is not current.</summary>
+    /// <summary>
+    /// Records the case's current accepted evidence basis. An assessment against any other basis is not current.
+    /// The stored basis is an immutable deep copy, so the caller changing the dictionary or page lists it passed in
+    /// cannot change the evidence a later assessment validates against.
+    /// </summary>
     public void SetCurrentBasis(string caseId, AssessmentBasis basis)
     {
         ArgumentNullException.ThrowIfNull(basis);
+        var snapshot = Snapshot(basis);
         lock (_gate)
         {
-            _currentByCase[caseId] = basis;
+            _currentByCase[caseId] = snapshot;
         }
+    }
+
+    private static AssessmentBasis Snapshot(AssessmentBasis basis)
+    {
+        var documents = basis.Documents.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value with { Pages = Array.AsReadOnly(pair.Value.Pages.ToArray()) },
+            StringComparer.Ordinal);
+        return basis with { Documents = new System.Collections.ObjectModel.ReadOnlyDictionary<string, BasisDocument>(documents) };
     }
 
     /// <summary>

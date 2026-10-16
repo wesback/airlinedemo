@@ -106,6 +106,30 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         Assert.NotEqual("Baseline", missing.Outcome);
     }
 
+    // The stored basis is a copy: the caller changing the evidence it passed in does not change what is validated.
+    [Fact]
+    public void Stored_basis_is_not_changed_by_later_edits_to_the_supplied_evidence()
+    {
+        var pages = new List<string> { Quote, "Page two text." };
+        var documents = new Dictionary<string, BasisDocument> { ["return-status"] = BasisDocument.Create("return-status", pages) };
+        var basis = CurrentBasis(documents: documents);
+        _assessments.SetCurrentBasis("case-1", basis);
+
+        pages[0] = "Return readiness is pending";
+        documents["return-status"] = BasisDocument.Create("return-status", ["Replaced text."]);
+        documents["other"] = BasisDocument.Create("other", ["Extra."]);
+
+        var stored = _assessments.CurrentBasis("case-1")!;
+        Assert.Equal([Quote, "Page two text."], stored.Documents["return-status"].Pages);
+        Assert.False(stored.Documents.ContainsKey("other"));
+
+        var original = _service.Assess(_scope, basis, [Missing()]);
+        Assert.Equal("Request", original.Outcome);
+        var edited = _service.Assess(_scope, basis, [Missing(quote: "Return readiness is pending")]);
+        Assert.Equal("Review", edited.Outcome);
+        Assert.Null(edited.RequestId);
+    }
+
     // AC-03: ambiguity, conflict, incomplete coverage and a downgraded witness each open one review item and no request.
     [Fact]
     public void Ambiguous_or_unsupported_claim_creates_review_item_not_request()
