@@ -86,6 +86,7 @@ app.UseTransportSecurityHeaders();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();
 app.MapCaseEndpoints();
+app.MapDashboardEndpoints();
 app.MapTechnicalReviewEndpoints();
 app.MapEvidenceEndpoints();
 app.MapAssessmentEndpoints();
