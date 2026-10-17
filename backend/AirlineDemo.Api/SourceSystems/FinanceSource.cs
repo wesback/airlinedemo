@@ -9,8 +9,8 @@ public sealed record FinancePayload(IReadOnlyDictionary<string, string> Fields);
 public static class FinanceRecordValidator
 {
     private static readonly string[] CommonFields = ["recordedAmount", "collectedAmount", "currency", "period", "dueDate"];
-    private static readonly Regex DecimalPattern = new(@"^\d+(?:\.\d+)?$", RegexOptions.CultureInvariant);
-    private static readonly Regex CurrencyPattern = new(@"^[A-Z]{3}$", RegexOptions.CultureInvariant);
+    private static readonly Regex DecimalPattern = new(@"\A\d+(?:\.\d+)?\z", RegexOptions.CultureInvariant);
+    private static readonly Regex CurrencyPattern = new(@"\A[A-Z]{3}\z", RegexOptions.CultureInvariant);
 
     public static IReadOnlyList<string> Validate(SourceRecord<FinancePayload> record)
     {
@@ -18,6 +18,7 @@ public static class FinanceRecordValidator
         var fields = record.Payload?.Fields;
         if (fields is null)
         {
+            problems.Add("Finance payload fields are required.");
             return problems;
         }
 

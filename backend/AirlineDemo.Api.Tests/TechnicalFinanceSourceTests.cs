@@ -157,6 +157,14 @@ public sealed class TechnicalFinanceSourceTests
         var malformed = FinanceFields("rent");
         malformed["currency"] = "usd";
         Assert.NotEmpty(FinanceRecordValidator.Validate(FinanceRecord("rent", malformed)));
+        var trailingNewlineCurrency = FinanceFields("rent");
+        trailingNewlineCurrency["currency"] = "USD\n";
+        Assert.Equal(
+            new[] { "Currency must be three uppercase letters." },
+            FinanceRecordValidator.Validate(FinanceRecord("rent", trailingNewlineCurrency)));
+        Assert.Equal(
+            new[] { "Finance payload fields are required." },
+            FinanceRecordValidator.Validate(FinanceRecord("rent") with { Payload = new FinancePayload(null!) }));
         var extra = FinanceFields("rent");
         extra["leaseId"] = "lease-001";
         Assert.NotEmpty(FinanceRecordValidator.Validate(FinanceRecord("rent", extra)));
