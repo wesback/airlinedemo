@@ -27,8 +27,9 @@ public sealed class EvaluationCostCalculatorTests
         var missingArm = Calculate(new Dictionary<string, EvaluationArmCostMeasurement?>());
         AssertNotMeasured(missingArm.Arms[0].CostPerProcessedPageEur);
         AssertNotMeasured(missingArm.Arms[0].CostPerCompletedCaseEur);
-        AssertNotMeasured(Calculate(new Dictionary<string, EvaluationArmCostMeasurement?> { ["A"] = new(null, 2m, 4m) })
-            .Arms[0].CostPerProcessedPageEur);
+        var missingTotalCost = Calculate(new Dictionary<string, EvaluationArmCostMeasurement?> { ["A"] = new(null, 2m, 4m) });
+        AssertNotMeasured(missingTotalCost.Arms[0].CostPerProcessedPageEur);
+        AssertNotMeasured(missingTotalCost.Arms[0].CostPerCompletedCaseEur);
         var missingPageCount = Calculate(new Dictionary<string, EvaluationArmCostMeasurement?> { ["A"] = new(10m, null, 4m) });
         AssertNotMeasured(missingPageCount.Arms[0].CostPerProcessedPageEur);
         var missingCaseCount = Calculate(new Dictionary<string, EvaluationArmCostMeasurement?> { ["A"] = new(10m, 2m, null) });
