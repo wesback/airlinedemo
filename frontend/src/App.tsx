@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
-<<<<<<< HEAD
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
-=======
 import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTraceView } from './InvestigationTrace';
->>>>>>> origin/main
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
