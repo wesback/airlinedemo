@@ -2,7 +2,7 @@
 prd_id: "aircraft-return-readiness"
 title: "Aircraft Return Readiness Demonstrator"
 status: "draft"
-version: "0.9.1"
+version: "0.9.2"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.9.1 | Last Updated: 2026-10-16
+> **aircraft-return-readiness** | Status: Draft | Version: 0.9.2 | Last Updated: 2026-10-16
 
 ## Executive Summary
 
@@ -105,6 +105,8 @@ These source design positions are carried forward as draft product decisions, no
 | DD-042 | The dashboard shows a completed investigation's real correlated trace as an ordered list of steps: each tool the investigator called, each citation check with its outcome (and any correction it made), and the point where deterministic policy took over. It reads the stored trace; it shows no prompt, response or document text (DD-029). The recorded 30-second trace in the demonstration is a capture of this view from a real run. |
 | DD-043 | The evaluation and cost documentation supports the presentation's numbers and labels every one. Per arm: gap-detection precision and recall, citation validity rate, forbidden-action rate, latency p50 and p95 per package, cost per page processed and per case. The cost disclosure also shows the value of a recovered day (the case's EUR250,000 per idle aircraft-month, about EUR8,200 per day) and the number of recovered days that pay for the platform per transition prepared. Each figure carries one label: case-study stipulation, external evidence, scenario assumption, architectural decision, synthetic demonstration result, unvalidated target, or derived (a figure computed from other labelled figures, such as the break-even days). A figure that has not been measured is shown as "not measured", never as an estimate. |
 | DD-044 | Arm D is the single-call comparator for Arm B and uses the same approved model deployment configuration as Arm B, without iterative tool use or agent citation reflection. |
+| DD-045 | The reference demonstrator uses GitHub, Azure, and meaningful Microsoft Agent Framework investigation (moved from CON-002: a design decision, not an externally imposed constraint). AC-013/AC-018/AC-019 apply; an adapter or scripted trace is not a passing Agent Framework demonstration. A change is a PRD change approved by the engineering-pipeline owner. |
+| DD-046 | Keep the demonstrator bounded; when prioritizing work, protect the required safety, evaluation, and rehearsal checks (moved from CON-005: a scope and prioritization decision). Optional visual polish is lower priority than security boundaries, required journeys, evaluation, and rehearsal. The accountable decision owner is the engineering-pipeline owner. |
 
 ## Product Goals
 
@@ -239,12 +241,12 @@ Other environment, identity, network, service availability, model capacity, and 
 
 | ID | Constraint | Category / affected boundary | Non-negotiability | Acceptance impact |
 |---|---|---|---|---|
-| CON-001 | Synthetic data and mock delivery only. | Operational / data and actions. | Required for this fictional demonstrator. | No real data, invoices, notices, customer access, aircraft release, airworthiness certification, or sanctions decision. |
-| CON-002 | The reference demonstrator uses GitHub, Azure, and meaningful Microsoft Agent Framework investigation. | Technical / delivery platform. | Core product scope; changes require scope review. | AC-013/AC-018/AC-019 apply; an adapter or scripted trace is not a passing Agent Framework demonstration. |
-| CON-003 | Keep the specified .NET 10/ASP.NET Core application in Container Apps; Azure SQL and Blob Storage; governed Azure AI Foundry/Azure OpenAI; one bounded investigator; and same-application React/TypeScript client architecture. | Technical / architecture and authority boundaries. | Do not silently substitute the agreed design positions. | No second orchestrator, Functions host, multi-agent chat, separate client host, or model dispatch authority; server remains authoritative. |
-| CON-004 | Environment, region, service/model availability, identity, network, policy, and cost are external prerequisites requiring organization approval. | Operational / environment, access, and cost. | Outside this PRD's deployment-owned resource scope. | Verify prerequisites before later deployment; keep them outside the Terraform deployment-owned inventory. No spending authority or numerical cost ceiling is implied. |
-| CON-005 | Keep the demonstrator bounded; protect required safety, evaluation, and rehearsal checks when prioritizing work. | Schedule / scope and delivery capacity. | Required to preserve the demonstrator boundary. | Optional visual polish is lower priority than security boundaries, required journeys, evaluation, and rehearsal. |
-| CON-006 | Provisioning, expenditure, external access, and any release decision require applicable explicit authorization. | Organizational / permission and governance. | Authorization cannot be inferred from this draft. | This draft authorizes none of those actions and does not claim publication approval. |
+| CON-001 | Synthetic data and mock delivery only. | Operational / data and actions. | Required for this fictional demonstrator; imposed by the demonstrator boundary the product owner set for this PRD. Exceptions are approved by the engineering-pipeline owner through a PRD change. | No real data, invoices, notices, customer access, aircraft release, airworthiness certification, or sanctions decision. |
+| CON-002 | Retired in v0.9.2: moved to DD-045 (a design decision). | — | — | — |
+| CON-003 | Retired in v0.9.2: duplicated DD-006 through DD-013, which hold the architecture and authority boundaries. | — | — | — |
+| CON-004 | Environment, region, service/model availability, identity, network, policy, and cost are external prerequisites requiring organization approval; the approving authority is the owner of the target Azure environment, and exceptions are granted or denied by the engineering-pipeline owner through a PRD change. | Operational / environment, access, and cost. | Outside this PRD's deployment-owned resource scope. | Verify prerequisites before later deployment; keep them outside the Terraform deployment-owned inventory. No spending authority or numerical cost ceiling is implied. |
+| CON-005 | Retired in v0.9.2: a scope and prioritization decision, moved to DD-046. | — | — | — |
+| CON-006 | Provisioning, expenditure, external access, and any release decision require applicable explicit authorization from the owner of the target environment (provisioning, expenditure, external access) or the engineering-pipeline owner (release). | Organizational / permission and governance. | Authorization cannot be inferred from this draft. | This draft authorizes none of those actions and does not claim publication approval. |
 
 ## Process Models
 
@@ -459,7 +461,7 @@ Approval date: Not set.
 
 ### Waivers
 
-No waivers are requested or approved. All 13 functional requirements have documented acceptance and goal links; the 100% structural coverage targets are met in this matrix only. No execution or quality result is implied.
+No waivers are requested or approved. All 14 functional requirements have documented acceptance and goal links; the 100% structural coverage targets are met in this matrix only. No execution or quality result is implied.
 
 ### Handoff Readiness
 
