@@ -44,6 +44,14 @@ public sealed class EvidencePackageStore
             return _packages.TryGetValue(packageId, out var record) && record.CaseId == caseId ? record : null;
         }
     }
+
+    public IReadOnlyList<EvidencePackageRecord> ListForCase(string caseId)
+    {
+        lock (_gate)
+        {
+            return _packages.Values.Where(record => record.CaseId == caseId).ToArray();
+        }
+    }
 }
 
 public static class EvidenceEndpoints
