@@ -64,6 +64,47 @@ public sealed class FourArmEvaluationRunnerTests
         }
         public void Dispose() => Disposed = true;
     }
+    private sealed class BoundedAgentChatClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public int ToolCalls { get; private set; }
+        public int ToolResults { get; private set; }
+        public int AgentFinalCalls { get; private set; }
+        public int DirectCalls { get; private set; }
+        public List<string[]> DeclaredToolSets { get; } = [];
+        public ChatClientMetadata Metadata { get; } = new("bounded-agent-test");
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            var request = messages.ToList();
+            if (request.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Any())
+            {
+                ToolResults++;
+                AgentFinalCalls++;
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "bounded-answer")));
+            }
+
+            if (options?.Tools is { Count: > 0 } tools)
+            {
+                DeclaredToolSets.Add(tools.Select(tool => tool.Name).Order(StringComparer.Ordinal).ToArray());
+                ToolCalls++;
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("evaluation-tool-call", tools[0].Name, new Dictionary<string, object?>())])));
+            }
+
+            DirectCalls++;
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "production-answer")));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
     private static FakeExecutor[] Fakes() => Enum.GetValues<EvaluationArm>().Select(a => new FakeExecutor(a)).ToArray();
     private static FourArmEvaluationRunner Runner(FakeExecutor[] fakes) => new(fakes);
     private static string Cases() => File.ReadAllText(Fixture("cases.jsonl"));
@@ -263,7 +304,7 @@ public sealed class FourArmEvaluationRunnerTests
     public async Task Production_command_resolves_and_dispatches_registered_arm_executors()
     {
         using var files = new Inputs();
-        var chat = new CountingChatClient("production-answer");
+        var chat = new BoundedAgentChatClient();
         var services = new ServiceCollection();
         services.AddSingleton<Func<ApprovedModelManifest, IChatClient>>(_ => _ => chat);
         Program.RegisterProductionEvaluationExecutors(services);
@@ -275,13 +316,35 @@ public sealed class FourArmEvaluationRunnerTests
         Assert.Equal(0, await Program.RunEvaluationCommandAsync(
             Args(files.Options), provider.GetRequiredService<FourArmEvaluationRunner>(),
             output, error, TestContext.Current.CancellationToken));
-        Assert.Equal(120, chat.Calls);
+        Assert.Equal(200, chat.Calls);
+        Assert.Equal(80, chat.ToolCalls);
+        Assert.Equal(80, chat.ToolResults);
+        Assert.Equal(80, chat.AgentFinalCalls);
+        Assert.Equal(40, chat.DirectCalls);
+        var expectedTools = new[]
+        {
+            "evaluation_get_case_overview",
+            "evaluation_get_document_page",
+            "evaluation_list_case_documents"
+        };
+        Assert.Equal(80, chat.DeclaredToolSets.Count);
+        Assert.All(chat.DeclaredToolSets, tools => Assert.Equal(expectedTools, tools));
         Assert.Empty(error.ToString());
         using var result = JsonDocument.Parse(output.ToString());
         Assert.Equal(FourArmEvaluationRunner.FrozenV2Sha256, result.RootElement.GetProperty("SuiteSha256").GetString());
         Assert.Equal(40, result.RootElement.GetProperty("Cases").GetArrayLength());
-        Assert.Equal("production-answer", result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[1]
+        Assert.Equal("bounded-answer", result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[1]
+            .GetProperty("Answer").GetString());
+        Assert.Equal(2, result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[1]
+            .GetProperty("ModelCalls").GetArrayLength());
+        Assert.Equal("bounded-answer", result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[2]
+            .GetProperty("Answer").GetString());
+        Assert.Equal(2, result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[2]
+            .GetProperty("ModelCalls").GetArrayLength());
+        Assert.Equal("production-answer", result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[3]
             .GetProperty("ModelCalls")[0].GetProperty("Response").GetString());
+        Assert.Equal(1, result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[3]
+            .GetProperty("ModelCalls").GetArrayLength());
     }
 
     [Fact]
