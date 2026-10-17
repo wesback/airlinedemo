@@ -8,12 +8,12 @@ const decisions = [{ id: 'accept', label: 'Accept finding' }, { id: 'reject', la
 
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
 
-function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = decisions) {
+function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = decisions, traces: { label: string; url: string }[] = []) {
   return {
     allowedDecisions: allowed,
     capabilities: [{
       id: 'records-investigation', name: 'Records investigation', label: 'AI agent', designOnly: false,
-      openItems: 0, nextDecisionOwner: null, evidence: [], design: null,
+      openItems: 0, nextDecisionOwner: null, evidence: traces, design: null,
       caseStudyAutonomy: 'L4, autonomous', demoAutonomy: 'L3 demo',
     }],
     queue,
@@ -21,7 +21,15 @@ function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = de
   };
 }
 
-function setupApi(options: { healthStatus?: number; dashboardStatus?: number; decisionStatus?: number; allowed?: typeof decisions } = {}) {
+function setupApi(options: {
+  healthStatus?: number;
+  dashboardStatus?: number;
+  decisionStatus?: number;
+  allowed?: typeof decisions;
+  traces?: { label: string; url: string }[];
+  traceStatus?: number;
+  trace?: unknown;
+} = {}) {
   const calls: { url: string; init?: RequestInit }[] = [];
   let dashboardRequests = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -41,13 +49,14 @@ function setupApi(options: { healthStatus?: number; dashboardStatus?: number; de
       dashboardRequests += 1;
       if (options.dashboardStatus) return json({ error: 'not allowed' }, options.dashboardStatus);
       return json(dashboardRequests === 1
-        ? dashboard([], [], options.allowed)
+        ? dashboard([], [], options.allowed, options.traces)
         : dashboard(
           [{ itemId: 'finding-2', label: 'Human decision' }],
           [{ sequence: 1, actor: 'Ada Reviewer', label: 'Human decision', outcome: 'technical-review.decided' }],
-          options.allowed,
+          options.allowed, options.traces,
         ));
     }
+    if (url.includes('/dashboard/traces/')) return json(options.trace ?? {}, options.traceStatus ?? 200);
     if (url === '/api/cases/case-001/technical-reviews' && method === 'GET')
       return json({ basisVersion: 4, decisions: dashboardRequests > 1 ? [{ decision: 'accept', current: true }] : [] });
     if (url === '/api/cases/case-001/technical-reviews' && method === 'POST')
@@ -78,6 +87,46 @@ afterEach(() => {
 });
 
 describe('reviewer workspace', () => {
+  it('shows no trace when the dashboard has no stored trace links', async () => {
+    setupApi();
+    render(<App />);
+    await signIn();
+
+    expect(screen.getByText('No trace recorded')).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'Investigation trace steps' })).toBeNull();
+  });
+
+  it('fetches a selected trace URL and shows no trace for a missing record', async () => {
+    const url = '/api/cases/case-001/dashboard/traces/run-1/investigation-1';
+    const calls = setupApi({ traces: [{ label: 'Investigation trace', url }], traceStatus: 404 });
+    render(<App />);
+    await signIn();
+
+    fireEvent.click(screen.getByRole('link', { name: 'Investigation trace' }));
+    expect(await screen.findByText('No trace recorded')).toBeTruthy();
+    expect(calls.some((call) => call.url === url && (call.init?.method ?? 'GET') === 'GET')).toBe(true);
+    expect(screen.queryByRole('list', { name: 'Investigation trace steps' })).toBeNull();
+  });
+
+  it('renders the selected stored trace returned by the same-origin endpoint', async () => {
+    const url = '/api/cases/case-001/dashboard/traces/run-1/investigation-1';
+    const calls = setupApi({
+      traces: [{ label: 'Investigation trace', url }],
+      trace: { steps: [
+        { sequence: 2, toolName: 'search-manual', documentId: 'doc-b', page: 2, citationCheckOutcome: 'requested', correctionCode: 'None', policyHandover: 'None' },
+        { sequence: 1, toolName: 'citation-check', documentId: 'doc-a', page: 1, citationCheckOutcome: 'verified', correctionCode: 'None', policyHandover: 'None' },
+      ] },
+    });
+    render(<App />);
+    await signIn();
+
+    fireEvent.click(screen.getByRole('link', { name: 'Investigation trace' }));
+    const list = await screen.findByRole('list', { name: 'Investigation trace steps' });
+    expect(calls.some((call) => call.url === url && (call.init?.method ?? 'GET') === 'GET')).toBe(true);
+    expect(Array.from(list.querySelectorAll('li')).map((item) => item.textContent))
+      .toEqual(['Citation check — Outcome: verified', 'Tool call — search-manual — Outcome: requested']);
+  });
+
   it('Dashboard_waits_for_authorized_server_state', async () => {
     const calls = setupApi();
     render(<App />);

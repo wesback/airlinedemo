@@ -52,9 +52,10 @@ function displayValue(value: unknown): string {
 type Props = {
   data: DashboardData;
   onDecision?: (capabilityId: string, decisionId: string) => void;
+  onTraceSelect?: (url: string) => void;
 };
 
-export default function CapabilityDashboard({ data, onDecision }: Props) {
+export default function CapabilityDashboard({ data, onDecision, onTraceSelect }: Props) {
   const allowedDecisions = data.allowedDecisions.filter(
     (action) => (action.id === 'accept' || action.id === 'reject') && typeof action.label === 'string',
   );
@@ -75,6 +76,12 @@ export default function CapabilityDashboard({ data, onDecision }: Props) {
         <h2 id="capabilities-heading">Capabilities</h2>
         {data.capabilities.map((capability) => {
           const label = safeLabel(capability.label);
+          const traces = capability.id === 'records-investigation'
+            ? capability.evidence.flatMap((link) => {
+              const href = safeHref(link.url);
+              return href ? [{ link, href }] : [];
+            })
+            : [];
           if (capability.designOnly) {
             return (
               <article key={capability.id} aria-labelledby={`cap-${capability.id}`} data-design-only="true">
@@ -99,10 +106,16 @@ export default function CapabilityDashboard({ data, onDecision }: Props) {
               <p>Demo: {displayValue(capability.demoAutonomy)}</p>
               {capability.openItems !== null && <p>Open items: {capability.openItems}</p>}
               {capability.nextDecisionOwner && <p>Next decision owner: {capability.nextDecisionOwner}</p>}
-              {capability.id === 'records-investigation' && capability.evidence.map((link) => {
-                const href = safeHref(link.url);
-                return href ? <p key={link.label}><a href={href}>{link.label}</a></p> : null;
-              })}
+              {capability.id === 'records-investigation' && (traces.length > 0
+                ? traces.map(({ link, href }) => (
+                  <p key={href}>
+                    <a href={href} onClick={onTraceSelect ? (event) => {
+                      event.preventDefault();
+                      onTraceSelect(href);
+                    } : undefined}>{link.label}</a>
+                  </p>
+                ))
+                : <p>No trace recorded</p>)}
               {decisionControls(capability.id)}
             </article>
           );
