@@ -56,7 +56,7 @@ public sealed class DashboardProjectionEndpointTests
         Assert.Equal(new[] { "open-old", "open-new", "open-tie-z", "open-tie-a", "open-contract", "future" },
             queue.Select(item => item.GetProperty("itemId").GetString()));
         Assert.Equal(new long[] { 150, 20, 30, 30, 12, 0 }, queue.Select(item => item.GetProperty("ageSeconds").GetInt64()));
-        Assert.Equal(new[] { "AI agent", "AI agent", "Deterministic workflow", "Deterministic workflow", "Deterministic workflow", "Unknown" },
+        Assert.Equal(new[] { "AI agent", "AI agent", "Rules-based", "Rules-based", "Rules-based", "Unknown" },
             queue.Select(item => item.GetProperty("label").GetString()));
         var projectedQueue = JsonSerializer.Deserialize<DashboardQueueItem[]>(
             root.GetProperty("queue").GetRawText(), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
@@ -82,7 +82,7 @@ public sealed class DashboardProjectionEndpointTests
         var activity = root.GetProperty("activity").EnumerateArray().ToArray();
         Assert.Equal(Enumerable.Range(1, 7), activity.Select(item => item.GetProperty("sequence").GetInt32()));
         Assert.Equal(
-            new[] { "Human decision", "Human decision", "Human decision", "Deterministic workflow", "Deterministic workflow", "Deterministic workflow", "Unknown" },
+            new[] { "Simulated", "Simulated", "Simulated", "Simulated", "Rules-based", "Rules-based", "Unknown" },
             activity.Select(item => item.GetProperty("label").GetString()));
         Assert.Equal(Enumerable.Range(1, 7).Select(sequence => "actor-" + sequence),
             activity.Select(item => item.GetProperty("actor").GetString()));
@@ -124,7 +124,7 @@ public sealed class DashboardProjectionEndpointTests
             "records-investigation", "utilisation-reserves", "contract-compliance",
             "transition-planning", "credit-sanctions-monitoring", "portfolio-supervisor",
         }, cards.Select(card => card.GetProperty("id").GetString()));
-        Assert.Equal(new[] { "AI agent", "Deterministic workflow", "Deterministic workflow", "Design only", "Design only", "Design only" },
+        Assert.Equal(new[] { "AI agent", "Rules-based", "Rules-based", "Design-only", "Design-only", "Design-only" },
             cards.Select(card => card.GetProperty("label").GetString()));
         Assert.Equal(new[]
         {
@@ -133,15 +133,11 @@ public sealed class DashboardProjectionEndpointTests
         }, cards.Select(card => card.GetProperty("name").GetString()));
         Assert.Equal(new[]
         {
-            "L4, autonomous", "L3, acts (invoices) with finance review", "L3, acts (notices) with legal sign-off",
-            "L2, recommend", "L2, recommend", "not in the case-study table",
+            "L4", "L3", "L3", "L2", "L2", "Unknown",
         }, cards.Select(card => card.GetProperty("caseStudyAutonomy").GetString()));
         Assert.Equal(new[]
         {
-            "L3: acts only on routine evidence requests within policy to the mock inbox; a person decides ambiguous cases and technical acceptance",
-            "L2: drafts a reserve calculation; a simulated finance review decides; no invoice",
-            "L2: drafts an obligation status and notice; a simulated legal review decides; no notice sent",
-            "design-only: not implemented in this demo", "design-only: not implemented in this demo", "design-only: not implemented in this demo",
+            "L3", "L2", "L2", "design-only", "design-only", "design-only",
         }, cards.Select(card => card.GetProperty("demoAutonomy").GetString()));
 
         var evidence = cards[0].GetProperty("evidence").EnumerateArray().Single();
@@ -198,25 +194,52 @@ public sealed class DashboardProjectionEndpointTests
         Assert.Equal(new[]
         {
             ("records-investigation", "Records investigation (records digitisation)",
-                "L4, autonomous",
-                "L3: acts only on routine evidence requests within policy to the mock inbox; a person decides ambiguous cases and technical acceptance"),
-            ("utilisation-reserves", "Utilisation and reserves",
-                "L3, acts (invoices) with finance review",
-                "L2: drafts a reserve calculation; a simulated finance review decides; no invoice"),
-            ("contract-compliance", "Contract compliance",
-                "L3, acts (notices) with legal sign-off",
-                "L2: drafts an obligation status and notice; a simulated legal review decides; no notice sent"),
+                "L4", "L3"),
+            ("utilisation-reserves", "Utilisation and reserves", "L3", "L2"),
+            ("contract-compliance", "Contract compliance", "L3", "L2"),
             ("transition-planning", "Transition planning",
-                "L2, recommend", "design-only: not implemented in this demo"),
+                "L2", "design-only"),
             ("credit-sanctions-monitoring", "Credit and sanctions monitoring",
-                "L2, recommend", "design-only: not implemented in this demo"),
+                "L2", "design-only"),
             ("portfolio-supervisor", "Portfolio supervisor",
-                "not in the case-study table", "design-only: not implemented in this demo"),
+                "Unknown", "design-only"),
         }, capabilities.Select(capability =>
             (capability.GetProperty("id").GetString(),
                 capability.GetProperty("name").GetString(),
                 capability.GetProperty("caseStudyAutonomy").GetString(),
                 capability.GetProperty("demoAutonomy").GetString())));
+    }
+
+    [Fact]
+    public async Task AC022_SerializesServerCapabilityTable()
+    {
+        var store = NewStore();
+        store.Set("case-a", State("case-a", []));
+        using var factory = CreateFactory(store);
+        using var client = factory.CreateClient();
+        var cookie = AddSession(factory, "presenter", ["case-a"]);
+
+        using var response = await GetAsync(client,
+            "/api/cases/case-a/dashboard?label=AI+agent&caseStudyAutonomy=L999&demoAutonomy=caller-value", cookie);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var capabilities = json.RootElement.GetProperty("capabilities").EnumerateArray().ToArray();
+
+        Assert.Equal(new[]
+        {
+            ("records-investigation", "AI agent", "L4", "L3"),
+            ("utilisation-reserves", "Rules-based", "L3", "L2"),
+            ("contract-compliance", "Rules-based", "L3", "L2"),
+            ("transition-planning", "Design-only", "L2", "design-only"),
+            ("credit-sanctions-monitoring", "Design-only", "L2", "design-only"),
+            ("portfolio-supervisor", "Design-only", "Unknown", "design-only"),
+        }, capabilities.Select(capability =>
+            (capability.GetProperty("id").GetString(),
+                capability.GetProperty("label").GetString(),
+                capability.GetProperty("caseStudyAutonomy").GetString(),
+                capability.GetProperty("demoAutonomy").GetString())));
+        Assert.DoesNotContain(capabilities, capability =>
+            capability.GetProperty("id").GetString() is "technical-review" or "invoice-issuance" or "formal-notice-dispatch");
     }
 
     [Theory]
