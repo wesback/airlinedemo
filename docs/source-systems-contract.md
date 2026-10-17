@@ -59,7 +59,7 @@ The new finance records use the typed kind `maintenance_reserve` with the common
 
 ### Signing
 
-The detached signature is RSA-PSS over the bytes of `<source>.manifest.json`, hash SHA-256, salt length 32 bytes, verified against the public key pinned in `SourceFixtureLoader`. The private key is held by the release owner and is never in the repository. After any change to a fixture or manifest, the release owner re-signs all five manifests:
+The detached signature is RSA-PSS over the bytes of `<source>.manifest.json`, hash SHA-256, salt length 32 bytes, verified against the public key pinned in `SourceFixtureLoader`. The private key is held by the release owner and is never in the repository. It is kept on the maintainer's machine at `~/release-keys/airlinedemo-fixtures.pem` (mode 600, backed up by the owner). If it is lost, generate a new key pair, pin its public key (SubjectPublicKeyInfo DER, base64) in `SourceFixtureLoader` and re-sign all five manifests. After any change to a fixture or manifest, the release owner re-signs all five manifests:
 
 ```
 openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
