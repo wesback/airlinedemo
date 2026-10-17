@@ -539,7 +539,10 @@ public sealed class CaseStateStore : ICaseStateStore
                     throw new BasisIntegrityException("Basis content or chain digest does not match.");
                 }
 
-                ValidateSourceBasisContent(next.Content, requirePinDocument: commit.Action == "source-basis.gathered");
+                if (commit.Action == "source-basis.gathered")
+                {
+                    ValidateSourceBasisContent(next.Content);
+                }
                 basis.Add(next);
             }
 
@@ -745,7 +748,6 @@ public sealed class CaseStateStore : ICaseStateStore
                 throw new InvalidDataException("Basis version chain is invalid.");
             }
 
-            ValidateSourceBasisContent(basis.Content);
             previousDigest = basis.BasisDigest;
         }
 
@@ -812,7 +814,7 @@ public sealed class CaseStateStore : ICaseStateStore
     private static string Digest(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    private static void ValidateSourceBasisContent(string content, bool requirePinDocument = false)
+    private static void ValidateSourceBasisContent(string content)
     {
         const string formatName = "source-record-pins-v1";
         JsonDocument document;
@@ -820,21 +822,15 @@ public sealed class CaseStateStore : ICaseStateStore
         {
             document = JsonDocument.Parse(content);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            if (requirePinDocument || HasSourcePinFormatMarker(content))
-                throw new BasisIntegrityException("A source basis pin document is malformed.");
-            return;
+            throw new BasisIntegrityException($"A gathered source basis pin document is malformed: {ex.Message}");
         }
         using (document)
         {
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object || Text(root, "format") != formatName)
-            {
-                if (requirePinDocument)
-                    throw new BasisIntegrityException("A gathered source basis must use the source-record-pins-v1 format.");
-                return;
-            }
+                throw new BasisIntegrityException("A gathered source basis must use the source-record-pins-v1 format.");
             if (!root.TryGetProperty("pins", out var pins) || pins.ValueKind != JsonValueKind.Array || pins.GetArrayLength() == 0)
                 throw new BasisIntegrityException("A source basis must contain at least one immutable source pin.");
             var identities = new HashSet<(string SourceId, string RecordId, int Version)>();
@@ -850,124 +846,31 @@ public sealed class CaseStateStore : ICaseStateStore
                     || !string.Equals(digest, Digest(snapshot).ToLowerInvariant(), StringComparison.Ordinal)
                     || !identities.Add((sourceId, recordId, version)))
                     throw new BasisIntegrityException("A source basis contains an invalid or duplicate source pin.");
-                using var record = JsonDocument.Parse(snapshot);
-                var envelope = record.RootElement;
-                if (Text(envelope, "sourceId") != sourceId || Text(envelope, "recordId") != recordId
-                    || !envelope.TryGetProperty("recordVersion", out var recordVersion)
-                    || !recordVersion.TryGetInt32(out var envelopeVersion) || envelopeVersion != version
-                    || Text(envelope, "asOf") is null || Text(envelope, "caseId") is null || Text(envelope, "kind") is null
-                    || !envelope.TryGetProperty("stale", out var stale) || stale.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
-                    || !envelope.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object
-                    || !envelope.TryGetProperty("synthetic", out var synthetic) || synthetic.ValueKind != JsonValueKind.True)
-                    throw new BasisIntegrityException("A source pin does not contain a complete synthetic source-record envelope.");
-            }
-        }
-    }
-
-    private static bool HasSourcePinFormatMarker(string content)
-    {
-        const string formatName = "source-record-pins-v1";
-        var start = SkipWhitespace(content, 0);
-        if (start >= content.Length || content[start] != '{') return false;
-
-        var objectDepth = 0;
-        var arrayDepth = 0;
-        var hasFormatMarker = false;
-        var hasPinsProperty = false;
-        for (var index = start; index < content.Length;)
-        {
-            var current = content[index];
-            if (current == '"')
-            {
-                if (!TryReadJsonString(content, index, out var property, out var afterProperty))
+                JsonDocument record;
+                try
                 {
-                    index++;
-                    continue;
+                    record = JsonDocument.Parse(snapshot);
                 }
-
-                var previous = index - 1;
-                while (previous >= 0 && char.IsWhiteSpace(content[previous])) previous--;
-                if (objectDepth == 1 && arrayDepth == 0
-                    && previous >= 0 && content[previous] is '{' or ','
-                    && (string.Equals(property, "format", StringComparison.Ordinal)
-                        || string.Equals(property, "pins", StringComparison.Ordinal)))
+                catch (JsonException ex)
                 {
-                    var separator = SkipWhitespace(content, afterProperty);
-                    if (separator < content.Length && content[separator] == ':')
-                    {
-                        if (string.Equals(property, "pins", StringComparison.Ordinal))
-                        {
-                            hasPinsProperty = true;
-                        }
-                        else
-                        {
-                            var valueStart = SkipWhitespace(content, separator + 1);
-                            if (valueStart < content.Length
-                                && TryReadJsonString(content, valueStart, out var value, out _)
-                                && string.Equals(value, formatName, StringComparison.Ordinal))
-                                hasFormatMarker = true;
-                        }
-                    }
+                    throw new BasisIntegrityException($"A source pin record envelope is malformed: {ex.Message}");
                 }
-
-                index = afterProperty;
-                continue;
-            }
-
-            switch (current)
-            {
-                case '{':
-                    objectDepth++;
-                    break;
-                case '}':
-                    if (objectDepth > 0) objectDepth--;
-                    break;
-                case '[':
-                    arrayDepth++;
-                    break;
-                case ']':
-                    if (arrayDepth > 0) arrayDepth--;
-                    break;
-            }
-
-            index++;
-        }
-
-        return hasFormatMarker && hasPinsProperty;
-    }
-
-    private static bool TryReadJsonString(string content, int start, out string? value, out int end)
-    {
-        value = null;
-        end = start;
-        for (var index = start + 1; index < content.Length; index++)
-        {
-            if (content[index] == '\\')
-            {
-                index++;
-                continue;
-            }
-
-            if (content[index] != '"') continue;
-            try
-            {
-                value = JsonSerializer.Deserialize<string>(content[start..(index + 1)]);
-                end = index + 1;
-                return value is not null;
-            }
-            catch (JsonException)
-            {
-                return false;
+                using (record)
+                {
+                    var envelope = record.RootElement;
+                    if (envelope.ValueKind != JsonValueKind.Object
+                        || Text(envelope, "sourceId") != sourceId || Text(envelope, "recordId") != recordId
+                        || !envelope.TryGetProperty("recordVersion", out var recordVersion)
+                        || !recordVersion.TryGetInt32(out var envelopeVersion) || envelopeVersion != version
+                        || Text(envelope, "asOf") is null || Text(envelope, "caseId") is null || Text(envelope, "kind") is null
+                        || !envelope.TryGetProperty("stale", out var stale) || stale.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                        || !envelope.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object
+                        || !payload.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object
+                        || !envelope.TryGetProperty("synthetic", out var synthetic) || synthetic.ValueKind != JsonValueKind.True)
+                        throw new BasisIntegrityException("A source pin does not contain a complete synthetic source-record envelope.");
+                }
             }
         }
-
-        return false;
-    }
-
-    private static int SkipWhitespace(string content, int index)
-    {
-        while (index < content.Length && char.IsWhiteSpace(content[index])) index++;
-        return index;
     }
 
     private static string? Text(JsonElement element, string name) =>

@@ -136,6 +136,7 @@ public sealed class SourceBasisPinningTests
                 "{\"format\": \"source-record-pins-v1\"} is an example, not a pin document.",
                 "This evidence quotes {\"format\": \"source-record-pins-v1\"} as an example.",
                 "{\"example\": {\"format\": \"source-record-pins-v1\"}} with following evidence text.",
+                $"This evidence quotes {PinDocument()} as a complete example, not a pin document.",
             };
             for (var index = 0; index < ordinaryEvidenceExamples.Length; index++)
             {
@@ -156,7 +157,9 @@ public sealed class SourceBasisPinningTests
     [InlineData("{\"format\" : \"source-record-pins-v1\", \"pins\": [")]
     [InlineData("{\"f\\u006Frmat\":\"source-record-pins-v1\",\"pins\":[")]
     [InlineData("{\"pins\":],\"format\":\"source-record-pins-v1\"}")]
-    public void MalformedSourcePinJsonIsRejectedWithoutChangingState(string malformedPins)
+    [InlineData("Evidence before malformed syntax { \"format\":\"source-record-pins-v1\",\"pins\":[]")]
+    [InlineData("{\"format\":\"source-record-pins-v1\",\"pins\":[} malformed syntax after marker")]
+    public void MalformedSourcePinJsonIsPreservedForOrdinaryEvidence(string malformedPins)
     {
         var path = StatePath();
         try
@@ -164,16 +167,13 @@ public sealed class SourceBasisPinningTests
             var store = new CaseStateStore(path);
             var scope = store.CreateCase(CaseId, "presenter");
             var basis = CaseStateStore.CreateBasisVersion(1, malformedPins, string.Empty);
-            var before = store.Read(scope);
 
-            Assert.Throws<BasisIntegrityException>(() => store.Commit(
-                scope, before.Revision,
-                new CaseCommit(basis, null, "presenter", "submit-evidence", "malformed pins")));
+            store.Commit(scope, 0, new CaseCommit(basis, null, "presenter", "submit-evidence", "ordinary evidence"));
 
             var after = store.Read(scope);
-            Assert.Equal(before.Basis, after.Basis);
-            Assert.Equal(before.Audit, after.Audit);
-            Assert.Equal(before.Revision, after.Revision);
+            Assert.Equal(malformedPins, Assert.Single(after.Basis).Content);
+            Assert.Equal(1, after.Revision);
+            Assert.Equal(1, after.Audit.Count);
         }
         finally
         {
@@ -185,6 +185,9 @@ public sealed class SourceBasisPinningTests
     [InlineData("")]
     [InlineData("{\"format\":\"source-record-pins-v2\",\"pins\":[]}")]
     [InlineData("{malformed source basis")]
+    [InlineData("{\"pins\":],\"format\":\"source-record-pins-v1\"}")]
+    [InlineData("{\"format\":\"source-record-pins-v1\",\"pins\":[}")]
+    [InlineData("{\"f\\u006Frmat\":\"source-record-pins-v1\",\"pins\":[}")]
     public void GatheredBasisRejectsMissingOrUnmarkedPinDocuments(string content)
     {
         var path = StatePath();
@@ -224,6 +227,7 @@ public sealed class SourceBasisPinningTests
             {
                 "tuple" => PinDocument(recordVersion: 0),
                 "digest" => PinDocument(contentDigest: "invalid-digest"),
+                "payload-fields" => PinDocument(includePayloadFields: false),
                 _ => throw new ArgumentOutOfRangeException(nameof(invalidPin)),
             };
             var basis = CaseStateStore.CreateBasisVersion(1, content, string.Empty);
@@ -235,6 +239,32 @@ public sealed class SourceBasisPinningTests
 
             var after = store.Read(scope);
             Assert.Equal(before.Basis, after.Basis);
+            Assert.Equal(before.Audit, after.Audit);
+            Assert.Equal(before.Revision, after.Revision);
+        }
+        finally
+        {
+            DeleteState(path);
+        }
+    }
+
+    [Fact]
+    public void GatheredBasisRejectsSourceRecordEnvelopeWithoutPayloadFields()
+    {
+        var path = StatePath();
+        try
+        {
+            var store = new CaseStateStore(path);
+            var scope = store.CreateCase(CaseId, "presenter");
+            var basis = CaseStateStore.CreateBasisVersion(1, PinDocument(includePayloadFields: false), string.Empty);
+            var before = store.Read(scope);
+
+            Assert.Throws<BasisIntegrityException>(() => store.Commit(
+                scope, before.Revision,
+                new CaseCommit(basis, null, "assessment-service", "source-basis.gathered", "incomplete source record")));
+
+            var after = store.Read(scope);
+            Assert.Empty(after.Basis);
             Assert.Equal(before.Audit, after.Audit);
             Assert.Equal(before.Revision, after.Revision);
         }
@@ -363,10 +393,14 @@ public sealed class SourceBasisPinningTests
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static string PinDocument(
         int recordVersion = 1,
-        string? contentDigest = null)
+        string? contentDigest = null,
+        bool includePayloadFields = true)
     {
-        const string content =
-            "{\"asOf\":\"2026-10-01\",\"caseId\":\"source-pin-case\",\"kind\":\"component\",\"payload\":{\"fields\":{\"serialNumber\":\"engine-serial-123\"}},\"recordId\":\"engine-record-1\",\"recordVersion\":1,\"sourceId\":\"technical\",\"stale\":false,\"synthetic\":true}";
+        var payload = includePayloadFields
+            ? "{\"fields\":{\"serialNumber\":\"engine-serial-123\"}}"
+            : "{}";
+        var content =
+            $"{{\"asOf\":\"2026-10-01\",\"caseId\":\"source-pin-case\",\"kind\":\"component\",\"payload\":{payload},\"recordId\":\"engine-record-1\",\"recordVersion\":1,\"sourceId\":\"technical\",\"stale\":false,\"synthetic\":true}}";
         return JsonSerializer.Serialize(new
         {
             format = EvidenceIntake.SourceBasisFormat,
