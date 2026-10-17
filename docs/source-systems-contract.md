@@ -82,6 +82,47 @@ Each outcome is a distinct type.
 
 `source_unavailable` is never represented as an empty successful list. Callers must handle each outcome separately.
 
+## Source-mode command
+
+`POST /api/v1/cases/{caseId}/sources/{sourceId}/mode` changes the simulated mode of one of the five sources. The command requires an authenticated `presenter` session, a case scope, a valid anti-forgery token, and a JSON body with `commandId`, `expectedRevision` and `mode`. The server derives the actor, timestamp and audit reason; client-supplied attribution is ignored.
+
+Validation order is authentication, presenter role, case scope, anti-forgery token, required command fields and command ID length, source and mode values, then replay lookup. The command ID is bound to its original actor, case, source, mode and expected revision. An exact authorized replay returns the original receipt; a different actor or payload conflicts. Accepted changes use `ICaseStateStore.Commit(scope, expectedRevision, ...)` so a concurrent revision change is rejected atomically. Only an accepted change appends a source-mode audit event.
+
+Every response body uses `contractVersion: 1`. A successful change or exact replay returns exactly this receipt shape:
+
+```json
+{
+  "contractVersion": 1,
+  "commandId": "cmd-1",
+  "caseId": "case-001",
+  "sourceId": "technical",
+  "priorMode": "available",
+  "newMode": "unavailable",
+  "priorRevision": 1,
+  "newRevision": 2,
+  "auditEventId": "audit-4"
+}
+```
+
+Every error response contains exactly `contractVersion` and `error`; the error contains exactly `code` and `message`. Error responses do not include case data or a receipt.
+
+| Status | Code | Message |
+|---|---|---|
+| 401 | `unauthenticated` | `Not signed in.` |
+| 403 | `forbidden` | `Only a presenter can change source modes.` |
+| 404 | `not_found` | `Case not found.` |
+| 403 | `anti_forgery_failed` | `Anti-forgery validation failed.` |
+| 400 | `invalid_request` | `commandId, expectedRevision and mode are required.` |
+| 400 | `invalid_request` | `commandId must be at most 64 characters.` |
+| 400 | `invalid_request` | `Request body must be a valid source-mode command.` |
+| 422 | `unknown_source` | `Source is not one of the five case sources.` |
+| 422 | `invalid_mode` | `Mode must be available, unavailable, stale or conflicting.` |
+| 409 | `command_id_conflict` | `This command ID was already used for a different command.` |
+| 409 | `stale_revision` | `The case revision has changed; reload and retry.` |
+| 422 | `mode_unchanged` | `The source already has this mode.` |
+
+`backend/AirlineDemo.Api.Tests/SourceModeCommandTests.cs` verifies complete response envelopes and the authorization, validation-order, replay, audit and expected-revision protections.
+
 ## Tests
 
 `backend/AirlineDemo.Api.Tests/SourcePortContractTests.cs` covers AC-001 (`PortExposesCaseScopedReadOperationsOnly`), AC-002 (`RecordRequiresCompleteProvenanceAndSyntheticFlag`) and AC-003 (`UnavailableAndUnknownSourcesHaveDistinctTypedResults`).

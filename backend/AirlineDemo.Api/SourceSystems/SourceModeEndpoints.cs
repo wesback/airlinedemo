@@ -1,6 +1,9 @@
+using System.Net.Http.Json;
+using System.Text.Json;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace AirlineDemo.Api.SourceSystems;
 
@@ -18,20 +21,44 @@ public static class SourceModeEndpoints
     }
 
     // Actor and time come from the session and server clock; any actor, time or reason in the body is ignored.
-    private static IResult SetMode(string caseId, string sourceId, SourceModeRequest? body, HttpContext http,
+    private static async Task<IResult> SetMode(string caseId, string sourceId, HttpContext http,
         DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
-        if (session is null) return DemoAuthEndpoints.Unauthenticated();
+        if (session is null) return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in.");
         if (!string.Equals(session.User.Role, PresenterRole, StringComparison.Ordinal))
         {
             return Error(StatusCodes.Status403Forbidden, "forbidden", "Only a presenter can change source modes.");
         }
 
-        if (!DemoAuthEndpoints.HasValidAntiForgery(http, session)) return DemoAuthEndpoints.AntiForgeryFailed();
-
         var scope = TechnicalReviewPolicy.ScopeFor(cases, session.User.CaseScopes, caseId);
-        if (scope is null) return Results.NotFound();
+        if (scope is null) return Error(StatusCodes.Status404NotFound, "not_found", "Case not found.");
+
+        if (!DemoAuthEndpoints.HasValidAntiForgery(http, session))
+        {
+            return Error(StatusCodes.Status403Forbidden, "anti_forgery_failed", "Anti-forgery validation failed.");
+        }
+
+        SourceModeRequest? body;
+        if (http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == false || http.Request.ContentLength == 0)
+        {
+            body = null;
+        }
+        else if (!http.Request.HasJsonContentType())
+        {
+            return Error(StatusCodes.Status400BadRequest, "invalid_request", "Request body must be a valid source-mode command.");
+        }
+        else
+        {
+            try
+            {
+                body = await http.Request.ReadFromJsonAsync<SourceModeRequest>(cancellationToken: http.RequestAborted);
+            }
+            catch (JsonException)
+            {
+                return Error(StatusCodes.Status400BadRequest, "invalid_request", "Request body must be a valid source-mode command.");
+            }
+        }
 
         if (body is null || string.IsNullOrWhiteSpace(body.CommandId) || body.ExpectedRevision is null || body.Mode is null)
         {
@@ -41,6 +68,16 @@ public static class SourceModeEndpoints
         if (body.CommandId.Length > MaxCommandIdLength)
         {
             return Error(StatusCodes.Status400BadRequest, "invalid_request", $"commandId must be at most {MaxCommandIdLength} characters.");
+        }
+
+        if (!SourceModes.Sources.Contains(sourceId, StringComparer.Ordinal))
+        {
+            return Error(StatusCodes.Status422UnprocessableEntity, "unknown_source", "Source is not one of the five case sources.");
+        }
+
+        if (!SourceModes.Modes.Contains(body.Mode, StringComparer.Ordinal))
+        {
+            return Error(StatusCodes.Status422UnprocessableEntity, "invalid_mode", "Mode must be available, unavailable, stale or conflicting.");
         }
 
         var result = modes.Set(scope, session.User.Id, body.CommandId, body.ExpectedRevision.Value, sourceId, body.Mode);
@@ -56,5 +93,5 @@ public static class SourceModeEndpoints
     }
 
     private static IResult Error(int status, string code, string message) =>
-        Results.Json(new { error = new { code, message } }, statusCode: status);
+        Results.Json(new { contractVersion = 1, error = new { code, message } }, statusCode: status);
 }
