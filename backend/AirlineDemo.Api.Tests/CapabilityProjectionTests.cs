@@ -22,7 +22,7 @@ public sealed class CapabilityProjectionTests
     [Fact]
     public void KnownLabelsPassThroughUnchanged()
     {
-        Assert.Equal(CapabilityLabels.Human, CapabilityLabels.Normalize(CapabilityLabels.Human));
+        Assert.Equal(CapabilityLabels.Simulated, CapabilityLabels.Normalize(CapabilityLabels.Simulated));
     }
 
     [Fact]
@@ -35,9 +35,9 @@ public sealed class CapabilityProjectionTests
 
         Assert.Equal(CapabilityLabels.AiAgent, investigation.Label);
         Assert.Equal(TraceUrl, investigation.TraceUrl);
-        Assert.Equal(CapabilityLabels.Human, review.Label);
+        Assert.Equal(CapabilityLabels.Simulated, review.Label);
         Assert.Null(review.TraceUrl);
-        Assert.Equal(CapabilityLabels.Deterministic, intake.Label);
+        Assert.Equal(CapabilityLabels.Unknown, intake.Label);
         Assert.Null(intake.TraceUrl);
         Assert.Equal(CapabilityLabels.Unknown, unknown.Label);
         Assert.Null(unknown.TraceUrl);
@@ -52,24 +52,39 @@ public sealed class CapabilityProjectionTests
     }
 
     [Fact]
-    public void EveryCapabilityCarriesExactlyOneKnownLabel()
+    public void AC022_ProjectsExactlySixCanonicalCapabilities()
     {
-        var cards = CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 2, TraceUrl);
-        Assert.All(cards, card => Assert.Contains(card.Label, CapabilityLabels.Known));
-        Assert.Equal(CapabilityLabels.AiAgent, Find(cards, "records-investigation").Label);
+        var legacyCards = CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 2, TraceUrl);
+        var stateCards = CapabilityProjection.Build("case-a", CapabilityProjection.ReviewerRole, EmptyState(),
+            DateTimeOffset.UnixEpoch).Capabilities;
+        var expected = new[]
+        {
+            ("records-investigation", CapabilityLabels.AiAgent, "L4", "L3"),
+            ("utilisation-reserves", CapabilityLabels.RulesBased, "L3", "L2"),
+            ("contract-compliance", CapabilityLabels.RulesBased, "L3", "L2"),
+            ("transition-planning", CapabilityLabels.DesignOnly, "L2", "design-only"),
+            ("credit-sanctions-monitoring", CapabilityLabels.DesignOnly, "L2", "design-only"),
+            ("portfolio-supervisor", CapabilityLabels.DesignOnly, CapabilityLabels.Unknown, "design-only"),
+        };
+
+        AssertCanonicalTable(legacyCards, expected);
+        AssertCanonicalTable(stateCards, expected);
     }
 
     [Fact]
-    public void DesignOnlyCardsExposeNoItemsCountsOrActions()
+    public void AC020_DesignOnlyCardsHaveNoWorkflowState()
     {
-        var designCards = CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 5, TraceUrl)
-            .Where(card => card.DesignOnly)
-            .ToList();
+        var cards = CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 5, TraceUrl)
+            .Concat(CapabilityProjection.Build("case-a", CapabilityProjection.ReviewerRole, EmptyState(),
+                DateTimeOffset.UnixEpoch).Capabilities);
+        var designCards = cards.Where(card => card.DesignOnly).ToArray();
+        Assert.Equal(6, designCards.Length);
 
-        Assert.NotEmpty(designCards);
         foreach (var card in designCards)
         {
+            Assert.Contains(card.Id, new[] { "transition-planning", "credit-sanctions-monitoring", "portfolio-supervisor" });
             Assert.Equal(CapabilityLabels.DesignOnly, card.Label);
+            Assert.True(card.DesignOnly);
             Assert.Null(card.OpenItems);
             Assert.Null(card.NextDecisionOwner);
             Assert.Empty(card.Actions);
@@ -78,22 +93,73 @@ public sealed class CapabilityProjectionTests
             Assert.False(string.IsNullOrWhiteSpace(card.Design!.Purpose));
             Assert.False(string.IsNullOrWhiteSpace(card.Design.IntendedAutonomy));
             Assert.False(string.IsNullOrWhiteSpace(card.Design.HumanAuthority));
-            Assert.Equal(CapabilityProjection.NotImplemented, card.Design.Notice);
+            Assert.Equal("Not implemented in this demo", card.Design.Notice);
         }
     }
 
     [Fact]
-    public void ReviewerRoleGetsOnlyItsPermittedDecisions()
+    public void AC020_UsesExactLabelsAndUnknownFallback()
     {
-        var card = Find(CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 2, TraceUrl), "technical-review");
+        var capabilityLabels = new[]
+        {
+            ("records-investigation", CapabilityLabels.AiAgent),
+            ("records-policy", CapabilityLabels.RulesBased),
+            ("evidence-request-dispatch", CapabilityLabels.RulesBased),
+            ("reserves-calculation", CapabilityLabels.RulesBased),
+            ("reserve-calculation", CapabilityLabels.RulesBased),
+            ("obligation-status", CapabilityLabels.RulesBased),
+            ("notice-drafting", CapabilityLabels.RulesBased),
+            ("create-work-item", CapabilityLabels.RulesBased),
+            ("work-item-creation", CapabilityLabels.RulesBased),
+            ("change-work-item-state", CapabilityLabels.RulesBased),
+            ("work-item-state-change", CapabilityLabels.RulesBased),
+            ("mock-partner-inbox", CapabilityLabels.Simulated),
+            ("mock-partner-response", CapabilityLabels.Simulated),
+            ("technical-review", CapabilityLabels.Simulated),
+            ("finance-review", CapabilityLabels.Simulated),
+            ("legal-review", CapabilityLabels.Simulated),
+            ("transition-planning", CapabilityLabels.DesignOnly),
+            ("credit-sanctions-monitoring", CapabilityLabels.DesignOnly),
+            ("portfolio-supervisor", CapabilityLabels.DesignOnly),
+            ("invoice-issuance", CapabilityLabels.DesignOnly),
+            ("formal-notice-dispatch", CapabilityLabels.DesignOnly),
+            ("not-a-capability", CapabilityLabels.Unknown),
+        };
+        foreach (var (input, expected) in capabilityLabels)
+        {
+            Assert.Equal(expected, CapabilityProjection.LabelForCapability(input));
+            Assert.Equal(expected, CapabilityProjection.Activity(1, input, "reviewer-1", "accepted", null).Label);
+        }
 
-        Assert.Equal(new[] { "accept", "reject" }, card.Actions.Select(a => a.Id));
-        Assert.Equal(2, card.OpenItems);
+        var auditLabels = new[]
+        {
+            ("technical-review.decided", CapabilityLabels.Simulated),
+            ("reserve.decided", CapabilityLabels.Simulated),
+            ("obligation.legal-decided", CapabilityLabels.Simulated),
+            ("mock-response.accepted", CapabilityLabels.Simulated),
+            ("create-work-item", CapabilityLabels.RulesBased),
+            ("change-work-item-state", CapabilityLabels.RulesBased),
+            ("unlisted.action", CapabilityLabels.Unknown),
+        };
+        foreach (var (input, expected) in auditLabels)
+        {
+            Assert.Equal(expected, CapabilityProjection.LabelForAuditAction(input));
+        }
+
+        var overrideAttempt = CapabilityProjection.Activity(2, "unknown-source", "human-reviewer", "AI agent", null);
+        Assert.Equal(CapabilityLabels.Unknown, overrideAttempt.Label);
+        Assert.Equal("human-reviewer", overrideAttempt.Actor);
     }
 
     [Fact]
-    public void ForgedDecisionFromNonReviewerRoleIsRejectedByBackend()
+    public void TechnicalReviewDecisionsRemainSeparateFromCapabilities()
     {
+        var cards = CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 2, TraceUrl);
+        Assert.DoesNotContain(cards, card => card.Id == "technical-review");
+        Assert.Equal(new[] { "accept", "reject" },
+            CapabilityProjection.PermittedDecisions(CapabilityProjection.ReviewerRole).Select(action => action.Id));
+        Assert.Empty(CapabilityProjection.PermittedDecisions("records-analyst"));
+
         var path = Path.Combine(Path.GetTempPath(), $"capability-{Guid.NewGuid():N}.json");
         try
         {
@@ -116,7 +182,7 @@ public sealed class CapabilityProjectionTests
         foreach (var role in new[] { "presenter", "unknown-role", "" })
         {
             var cards = CapabilityProjection.Build(role, 2, TraceUrl);
-            Assert.Empty(Find(cards, "technical-review").Actions);
+            Assert.DoesNotContain(cards, card => card.Actions.Count > 0);
         }
         Assert.Empty(CapabilityProjection.PermittedDecisions(null));
     }
@@ -134,4 +200,18 @@ public sealed class CapabilityProjectionTests
 
     private static CapabilityCard Find(IEnumerable<CapabilityCard> cards, string id) =>
         cards.Single(card => card.Id == id);
+
+    private static CaseState EmptyState() =>
+        new("case-a", "owner", 0, [], [], [], new Dictionary<string, string>(), [], []);
+
+    private static void AssertCanonicalTable(
+        IReadOnlyList<CapabilityCard> cards,
+        IReadOnlyList<(string Id, string Label, string CaseStudy, string Demo)> expected)
+    {
+        Assert.Equal(expected.Select(row => row.Id), cards.Select(card => card.Id));
+        Assert.Equal(expected.Select(row => row.Label), cards.Select(card => card.Label));
+        Assert.Equal(expected.Select(row => row.CaseStudy), cards.Select(card => card.CaseStudyAutonomy));
+        Assert.Equal(expected.Select(row => row.Demo), cards.Select(card => card.DemoAutonomy));
+        Assert.DoesNotContain(cards, card => card.Id is "technical-review" or "invoice-issuance" or "formal-notice-dispatch");
+    }
 }
