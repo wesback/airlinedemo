@@ -1,0 +1,218 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 270,
+  "branch": "ai-sdlc/issue-270",
+  "commitSha": "01fc250afeafa5d989bab9cf14e568bf34e566b0",
+  "round": 2,
+  "pipelineVersion": "28549a2",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest test change still does not cover the previously identified page-text authorization gap: it tests the gate method and request spy as separate operations, not the adapter path that must enforce authorization before a model request.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvaluationFixtureModelGateTests.cs",
+          "line": 69,
+          "message": "AC-016's page-text rejection is still not tested at the model-request boundary. Exercise the adapter with otherwise verified inputs and a request spy so removing the authorization check in FixtureGatedClient causes the test to fail.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test calls AuthorizePageText directly, then invokes RequestSpy directly. It never sends a request through FixtureGatedClient, where the production page-text authorization check occurs.",
+            "failureScenario": "If FixtureGatedClient stops calling AuthorizePageText before forwarding a request, this test still passes because its separate direct gate call rejects the altered text before the spy is invoked."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds a direct page-text rejection check, but its model request spy is never reached and the adapter case fails earlier at input authorization. The previous major test finding is therefore unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvaluationFixtureModelGateTests.cs",
+          "line": 69,
+          "message": "The prior AC-016 finding remains: the zero-request assertion is disconnected from the page-text rejection path. Exercise the rejection through the adapter with otherwise verified inputs and assert the model request spy remains at zero.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test calls AuthorizePageText directly; when it rejects the changed text, execution stops before RequestSpy.GetResponseAsync. The adapter case with changed page text is rejected earlier by AuthorizeInputs because its inputs JSON differs from the verified fixture.",
+            "failureScenario": "If the adapter's page-text authorization check is removed, this test still passes: its zero-request assertion only observes that a direct gate call threw before the spy was called, and the adapter case still fails at input authorization. A page-text rejection therefore could fail to prevent a model request without this test detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior page-text test finding remains unresolved: the added spy assertion tests a manually ordered gate call rather than the adapter path.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvaluationFixtureModelGateTests.cs",
+          "line": 64,
+          "message": "AC-016's page-text rejection is still not proven on the adapter request path. Add a request-spy case that reaches page-text authorization with otherwise verified inputs.",
+          "confidence": 0.93,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new request-spy case calls AuthorizePageText directly, then would call the spy only if authorization succeeds. It does not exercise the adapter's request path. The changed-page adapter case is rejected earlier by AuthorizeInputs.",
+            "failureScenario": "If the adapter stops checking page text before sending a request, these assertions still pass: the direct gate check rejects the altered text, and the adapter case fails at input authorization first."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvaluationFixtureModelGateTests.cs",
+      "backend/AirlineDemo.Api.Tests/FourArmModelAdaptersTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
