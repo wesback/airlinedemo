@@ -146,15 +146,16 @@ public sealed class SourceBasisPinningTests
         }
     }
 
-    [Fact]
-    public void MalformedSourcePinJsonIsRejectedWithoutChangingState()
+    [Theory]
+    [InlineData("{\"format\" : \"source-record-pins-v1\", \"pins\": [")]
+    [InlineData("{\"f\\u006Frmat\":\"source-record-pins-v1\",\"pins\":[")]
+    public void MalformedSourcePinJsonIsRejectedWithoutChangingState(string malformedPins)
     {
         var path = StatePath();
         try
         {
             var store = new CaseStateStore(path);
             var scope = store.CreateCase(CaseId, "presenter");
-            const string malformedPins = "{\"format\" : \"source-record-pins-v1\", \"pins\": [";
             var basis = CaseStateStore.CreateBasisVersion(1, malformedPins, string.Empty);
             var before = store.Read(scope);
 

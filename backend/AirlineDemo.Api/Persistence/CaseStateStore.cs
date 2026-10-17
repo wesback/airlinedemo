@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Requests;
 
@@ -823,7 +822,7 @@ public sealed class CaseStateStore : ICaseStateStore
         }
         catch (JsonException)
         {
-            if (Regex.IsMatch(content, "\"format\"\\s*:\\s*\"source-record-pins-v1\"", RegexOptions.CultureInvariant))
+            if (HasSourcePinFormatMarker(content))
                 throw new BasisIntegrityException("A source basis pin document is malformed.");
             return;
         }
@@ -859,6 +858,39 @@ public sealed class CaseStateStore : ICaseStateStore
             }
         }
     }
+
+    private static bool HasSourcePinFormatMarker(string content)
+    {
+        const string formatName = "source-record-pins-v1";
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(content));
+        var formatProperty = false;
+        try
+        {
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.PropertyName && reader.CurrentDepth == 1)
+                {
+                    formatProperty = string.Equals(reader.GetString(), "format", StringComparison.Ordinal);
+                    continue;
+                }
+
+                if (formatProperty)
+                {
+                    formatProperty = false;
+                    if (reader.TokenType == JsonTokenType.String
+                        && string.Equals(reader.GetString(), formatName, StringComparison.Ordinal))
+                        return true;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
     private static string? Text(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
             && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
