@@ -100,6 +100,7 @@ public sealed class ProductionEvaluationArmExecutor(
                 ],
                 new ChatOptions { MaxOutputTokens = MaximumOutputTokens },
                 cancellationToken);
+            EnsureAllowedFunctionCalls(response, allowReadTools: false);
             var answer = response.Text ?? string.Empty;
             request.Calls.RecordResponse(prompt, answer);
             var usage = response.Usage?.InputTokenCount is { } inputTokens &&
@@ -130,7 +131,7 @@ public sealed class ProductionEvaluationArmExecutor(
             MaxOutputTokensPerCall = MaximumBoundedOutputTokens
         });
         var tools = new EvaluationCaseTools(request.Case, limits);
-        var recordingClient = new EvaluationRecordingChatClient(client, request.Calls, limits);
+        var recordingClient = new EvaluationRecordingChatClient(client, request.Calls, limits, allowReadTools: true);
         IChatClient pipeline = new FunctionInvokingChatClient(recordingClient);
         var agent = new ChatClientAgent(
             pipeline, instructions: BoundedAgentInstructions, name: "evaluation-case-agent", tools: [.. tools.Functions]);
@@ -175,12 +176,16 @@ public sealed class ProductionEvaluationArmExecutor(
         public IReadOnlyList<AIFunction> Functions =>
         [
             AIFunctionFactory.Create(GetOverviewAsync,
-                new AIFunctionFactoryOptions { Name = "evaluation_get_case_overview", Description = "Read the case aircraft, component, and required history." }),
+                new AIFunctionFactoryOptions { Name = OverviewToolName, Description = "Read the case aircraft, component, and required history." }),
             AIFunctionFactory.Create(ListDocumentsAsync,
-                new AIFunctionFactoryOptions { Name = "evaluation_list_case_documents", Description = "List document ids, types, subjects, pages, and parse status in this case." }),
+                new AIFunctionFactoryOptions { Name = ListDocumentsToolName, Description = "List document ids, types, subjects, pages, and parse status in this case." }),
             AIFunctionFactory.Create(GetDocumentPageAsync,
-                new AIFunctionFactoryOptions { Name = "evaluation_get_document_page", Description = "Read one page of a document in this case by document id and page number." })
+                new AIFunctionFactoryOptions { Name = GetDocumentPageToolName, Description = "Read one page of a document in this case by document id and page number." })
         ];
+
+        public const string OverviewToolName = "evaluation_get_case_overview";
+        public const string ListDocumentsToolName = "evaluation_list_case_documents";
+        public const string GetDocumentPageToolName = "evaluation_get_document_page";
 
         private async Task<string> GetOverviewAsync(CancellationToken cancellationToken)
         {
@@ -226,7 +231,7 @@ public sealed class ProductionEvaluationArmExecutor(
     }
 
     private sealed class EvaluationRecordingChatClient(
-        IChatClient inner, EvaluationCallRecorder calls, InvestigationLimits limits) : DelegatingChatClient(inner)
+        IChatClient inner, EvaluationCallRecorder calls, InvestigationLimits limits, bool allowReadTools) : DelegatingChatClient(inner)
     {
         public int ModelCallCount { get; private set; }
         public long TokenUsage { get; private set; }
@@ -247,6 +252,7 @@ public sealed class ProductionEvaluationArmExecutor(
             try
             {
                 var response = await base.GetResponseAsync(request, options, cancellationToken);
+                EnsureAllowedFunctionCalls(response, allowReadTools);
                 await limits.AfterModelCallAsync(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, cancellationToken);
                 var usage = response.Usage?.InputTokenCount is { } input &&
                             response.Usage.OutputTokenCount is { } output
@@ -271,6 +277,20 @@ public sealed class ProductionEvaluationArmExecutor(
             TextContent text => text.Text ?? string.Empty,
             _ => JsonSerializer.Serialize(content, content.GetType(), AIJsonUtilities.DefaultOptions)
         };
+    }
+
+    private static void EnsureAllowedFunctionCalls(ChatResponse response, bool allowReadTools)
+    {
+        foreach (var call in response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>())
+        {
+            if (!allowReadTools || call.Name is not (
+                    EvaluationCaseTools.OverviewToolName or
+                    EvaluationCaseTools.ListDocumentsToolName or
+                    EvaluationCaseTools.GetDocumentPageToolName))
+            {
+                throw new InvalidOperationException("model requested an operation outside the evaluation read-tool set");
+            }
+        }
     }
 
     private static string EvaluateRules(EvaluationCase evaluationCase)
