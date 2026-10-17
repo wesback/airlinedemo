@@ -3,6 +3,8 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Requests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -94,18 +96,56 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         return Load(db, scope.CaseId).Audit;
     }
 
+    public IReadOnlyList<CaseAssessment> ListAssessments(CaseScope scope)
+    {
+        using var db = NewContext();
+        return Load(db, scope.CaseId).Assessments ?? Array.Empty<CaseAssessment>();
+    }
+
+    public CaseAssessment? FindAssessment(CaseScope scope, string assessmentId)
+    {
+        using var db = NewContext();
+        return Load(db, scope.CaseId).Assessments!
+            .FirstOrDefault(record => Same(record.AssessmentId, assessmentId));
+    }
+
+    public IReadOnlyList<DeliveryReceipt> ListRequestReceipts(CaseScope scope)
+    {
+        using var db = NewContext();
+        return Load(db, scope.CaseId).RequestReceipts ?? Array.Empty<DeliveryReceipt>();
+    }
+
     /// <summary>
     /// The only mutation path. Runs in one serializable transaction: rejects a stale revision and an invalid basis,
-    /// replays an exact receipt without a new revision, and otherwise inserts basis, decision, and one audit event.
+    /// replays an exact receipt without a new revision, and otherwise inserts basis, assessment and receipt history,
+    /// decision, and one audit event.
     /// </summary>
     public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
     {
+        if (commit.Assessment is { } assessment)
+        {
+            AssessmentPersistenceRules.Validate(assessment);
+            if (!Same(assessment.CaseId, scope.CaseId))
+            {
+                throw new ArgumentException("Assessment case id must match the authorized case.", nameof(commit));
+            }
+        }
+
+        if (commit.RequestReceipt is { } requestReceipt)
+        {
+            AssessmentPersistenceRules.Validate(requestReceipt);
+            if (!Same(requestReceipt.CaseId, scope.CaseId))
+            {
+                throw new ArgumentException("Request receipt case id must match the authorized case.", nameof(commit));
+            }
+        }
+
         using var db = NewContext();
         using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
 
         var row = FindCase(db, scope.CaseId) ?? throw new CaseAccessDeniedException();
         var current = Load(db, row.CaseId);
-        var fingerprint = Fingerprint(commit);
+        var fingerprint = CaseStateStore.CommitFingerprint(commit);
 
         if (commit.ReceiptId is { } receiptId)
         {
@@ -152,6 +192,47 @@ public sealed class SqlCaseStateStore : ICaseStateStore
                 ContentDigest = next.ContentDigest,
                 BasisDigest = next.BasisDigest,
                 CreatedAt = next.CreatedAt,
+            });
+        }
+
+        if (commit.Assessment is { } newAssessment)
+        {
+            if (FindAssessmentRow(db, row.CaseId, newAssessment.AssessmentId) is not null)
+            {
+                throw new InvalidOperationException("Assessment id already exists in this case.");
+            }
+
+            db.CaseAssessments.Add(new CaseAssessmentRow
+            {
+                CaseId = row.CaseId,
+                AssessmentId = newAssessment.AssessmentId,
+                BasisId = newAssessment.BasisId,
+                BasisVersion = newAssessment.BasisVersion,
+                Outcome = newAssessment.Outcome,
+                Reason = newAssessment.Reason,
+                RequestId = newAssessment.RequestId,
+                WorkItemId = newAssessment.WorkItemId,
+                ClaimsJson = JsonSerializer.Serialize(newAssessment.Claims),
+            });
+        }
+
+        if (commit.RequestReceipt is { } newRequestReceipt)
+        {
+            if (FindRequestReceiptRow(db, row.CaseId, newRequestReceipt.EventId) is not null)
+            {
+                throw new InvalidOperationException("Request receipt event already exists in this case.");
+            }
+
+            db.CaseRequestReceipts.Add(new CaseRequestReceiptRow
+            {
+                CaseId = row.CaseId,
+                EventId = newRequestReceipt.EventId,
+                RequestId = newRequestReceipt.RequestId,
+                ReportId = newRequestReceipt.ReportId,
+                BasisId = newRequestReceipt.BasisId,
+                BasisVersion = newRequestReceipt.BasisVersion,
+                TemplateVersion = newRequestReceipt.TemplateVersion,
+                Body = newRequestReceipt.Body,
             });
         }
 
@@ -441,6 +522,18 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             .AsEnumerable()
             .FirstOrDefault(w => Same(w.CaseId, caseId) && Same(w.ItemId, itemId));
 
+    private static CaseAssessmentRow? FindAssessmentRow(CaseStateDbContext db, string caseId, string assessmentId) =>
+        db.CaseAssessments
+            .Where(a => a.CaseId == caseId && a.AssessmentId == assessmentId)
+            .AsEnumerable()
+            .FirstOrDefault(a => Same(a.CaseId, caseId) && Same(a.AssessmentId, assessmentId));
+
+    private static CaseRequestReceiptRow? FindRequestReceiptRow(CaseStateDbContext db, string caseId, string eventId) =>
+        db.CaseRequestReceipts
+            .Where(r => r.CaseId == caseId && r.EventId == eventId)
+            .AsEnumerable()
+            .FirstOrDefault(r => Same(r.CaseId, caseId) && Same(r.EventId, eventId));
+
     private CaseStateDbContext NewContext() => new(_options);
 
     /// <summary>Finds a case by key, then applies an ordinal check so the database collation cannot widen a match.</summary>
@@ -491,6 +584,35 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             .Select(w => new WorkItem(w.CaseId, w.ItemId, w.CapabilityId, w.State, w.Owner, w.CreatedAt))
             .ToList();
 
+        var assessments = db.CaseAssessments
+            .Where(a => a.CaseId == caseId)
+            .AsEnumerable()
+            .Where(a => Same(a.CaseId, caseId))
+            .OrderBy(a => a.AssessmentId, StringComparer.Ordinal)
+            .Select(a => new CaseAssessment(
+                a.AssessmentId,
+                a.CaseId,
+                a.BasisId,
+                a.BasisVersion,
+                a.Outcome,
+                a.Reason,
+                JsonSerializer.Deserialize<IReadOnlyList<AssessedClaim>>(a.ClaimsJson)
+                    ?? throw new InvalidDataException("Assessment claims are unreadable."),
+                a.RequestId,
+                a.WorkItemId))
+            .Select(CaseStateStore.SnapshotAssessment)
+            .ToList();
+
+        var requestReceipts = db.CaseRequestReceipts
+            .Where(r => r.CaseId == caseId)
+            .AsEnumerable()
+            .Where(r => Same(r.CaseId, caseId))
+            .OrderBy(r => r.EventId, StringComparer.Ordinal)
+            .Select(r => new DeliveryReceipt(
+                r.EventId, r.RequestId, r.CaseId, r.ReportId, r.BasisId,
+                r.BasisVersion, r.TemplateVersion, r.Body))
+            .ToList();
+
         var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var decision in decisions)
         {
@@ -505,23 +627,14 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             decisions.Select(d => d.ReceiptId).ToList().AsReadOnly(),
             audit.AsReadOnly(),
             new ReadOnlyDictionary<string, string>(fingerprints),
-            items.AsReadOnly());
+            items.AsReadOnly(),
+            Assessments: assessments.AsReadOnly(),
+            RequestReceipts: requestReceipts.AsReadOnly());
     }
 
     private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.Ordinal);
 
     /// <summary>Digest of the commit payload, used to tell a true replay from a reused receipt ID.</summary>
-    private static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
-    {
-        basisVersion = commit.NewBasis?.Version,
-        content = commit.NewBasis?.Content,
-        contentDigest = commit.NewBasis?.ContentDigest,
-        basisDigest = commit.NewBasis?.BasisDigest,
-        commit.Actor,
-        commit.Action,
-        commit.Detail,
-    }));
-
     private static string Digest(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

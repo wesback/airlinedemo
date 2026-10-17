@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Requests;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -63,7 +65,45 @@ public sealed record CaseState(
     IReadOnlyList<AuditEvent> Audit,
     IReadOnlyDictionary<string, string> ReceiptFingerprints,
     IReadOnlyList<WorkItem>? WorkItems = null,
-    IReadOnlyList<InvestigationTrace>? Traces = null);
+    IReadOnlyList<InvestigationTrace>? Traces = null,
+    IReadOnlyList<CaseAssessment>? Assessments = null,
+    IReadOnlyList<DeliveryReceipt>? RequestReceipts = null);
+
+public sealed record CaseAssessment(
+    string AssessmentId,
+    string CaseId,
+    string BasisId,
+    int BasisVersion,
+    string Outcome,
+    string Reason,
+    IReadOnlyList<AssessedClaim> Claims,
+    string? RequestId,
+    string? WorkItemId);
+
+internal static class AssessmentPersistenceRules
+{
+    public static void Validate(CaseAssessment assessment)
+    {
+        if (string.IsNullOrWhiteSpace(assessment.AssessmentId) || string.IsNullOrWhiteSpace(assessment.CaseId)
+            || string.IsNullOrEmpty(assessment.BasisId) || assessment.BasisVersion <= 0
+            || string.IsNullOrWhiteSpace(assessment.Outcome) || string.IsNullOrWhiteSpace(assessment.Reason) || assessment.Claims is null)
+            throw new ArgumentException("Assessment identity, basis, result and claims are required.", nameof(assessment));
+
+        foreach (var claim in assessment.Claims)
+            if (claim is null || string.IsNullOrWhiteSpace(claim.Kind) || claim.Value is null || claim.Component is null
+                || claim.SerialNumber is null || claim.Witnesses is null || claim.Witnesses.Any(w => w is null || w.DocumentId is null))
+                throw new ArgumentException("Assessment claims and witnesses are invalid.", nameof(assessment));
+    }
+
+    public static void Validate(DeliveryReceipt receipt)
+    {
+        if (string.IsNullOrWhiteSpace(receipt.EventId) || string.IsNullOrWhiteSpace(receipt.RequestId)
+            || string.IsNullOrWhiteSpace(receipt.CaseId) || string.IsNullOrWhiteSpace(receipt.ReportId)
+            || string.IsNullOrWhiteSpace(receipt.BasisId) || receipt.BasisVersion <= 0 || string.IsNullOrWhiteSpace(receipt.TemplateVersion)
+            || receipt.Body is null)
+            throw new ArgumentException("Request receipt fields are required.", nameof(receipt));
+    }
+}
 
 /// <summary>Required-field rules shared by both case-state stores.</summary>
 internal static class WorkItemRules
@@ -172,7 +212,9 @@ public sealed record CaseCommit(
     string Actor,
     string Action,
     string Detail,
-    DateTimeOffset? At = null);
+    DateTimeOffset? At = null,
+    CaseAssessment? Assessment = null,
+    DeliveryReceipt? RequestReceipt = null);
 
 public sealed record CommitResult(CaseState State, bool Replayed);
 
@@ -290,6 +332,22 @@ public sealed class CaseStateStore : ICaseStateStore
         {
             return Current(scope).Audit;
         }
+    }
+
+    public IReadOnlyList<CaseAssessment> ListAssessments(CaseScope scope)
+    {
+        lock (_gate) return Current(scope).Assessments ?? Array.Empty<CaseAssessment>();
+    }
+
+    public CaseAssessment? FindAssessment(CaseScope scope, string assessmentId)
+    {
+        lock (_gate) return Current(scope).Assessments?
+            .FirstOrDefault(record => string.Equals(record.AssessmentId, assessmentId, StringComparison.Ordinal));
+    }
+
+    public IReadOnlyList<DeliveryReceipt> ListRequestReceipts(CaseScope scope)
+    {
+        lock (_gate) return Current(scope).RequestReceipts ?? Array.Empty<DeliveryReceipt>();
     }
 
     public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
@@ -426,12 +484,30 @@ public sealed class CaseStateStore : ICaseStateStore
     /// </summary>
     public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
     {
+        if (commit.Assessment is { } assessment)
+        {
+            AssessmentPersistenceRules.Validate(assessment);
+            if (!string.Equals(assessment.CaseId, scope.CaseId, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Assessment case id must match the authorized case.", nameof(commit));
+            }
+        }
+
+        if (commit.RequestReceipt is { } requestReceipt)
+        {
+            AssessmentPersistenceRules.Validate(requestReceipt);
+            if (!string.Equals(requestReceipt.CaseId, scope.CaseId, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Request receipt case id must match the authorized case.", nameof(commit));
+            }
+        }
+
         lock (_gate)
         {
             using var fileLock = AcquireFileLock();
             _cases = Load(_path);
             var current = Current(scope);
-            var fingerprint = Fingerprint(commit);
+            var fingerprint = CommitFingerprint(commit);
 
             if (commit.ReceiptId is not null && current.ReceiptFingerprints.TryGetValue(commit.ReceiptId, out var recorded))
             {
@@ -466,6 +542,28 @@ public sealed class CaseStateStore : ICaseStateStore
                 basis.Add(next);
             }
 
+            var assessments = (current.Assessments ?? Array.Empty<CaseAssessment>()).ToList();
+            if (commit.Assessment is { } newAssessment)
+            {
+                if (assessments.Any(record => string.Equals(record.AssessmentId, newAssessment.AssessmentId, StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException("Assessment id already exists in this case.");
+                }
+
+                assessments.Add(SnapshotAssessment(newAssessment));
+            }
+
+            var requestReceipts = (current.RequestReceipts ?? Array.Empty<DeliveryReceipt>()).ToList();
+            if (commit.RequestReceipt is { } newRequestReceipt)
+            {
+                if (requestReceipts.Any(receipt => string.Equals(receipt.EventId, newRequestReceipt.EventId, StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException("Request receipt event already exists in this case.");
+                }
+
+                requestReceipts.Add(newRequestReceipt);
+            }
+
             var receipts = current.ReceiptIds.ToList();
             var fingerprints = new Dictionary<string, string>(current.ReceiptFingerprints, StringComparer.Ordinal);
             if (commit.ReceiptId is not null)
@@ -485,6 +583,8 @@ public sealed class CaseStateStore : ICaseStateStore
                 ReceiptIds = receipts,
                 Audit = audit,
                 ReceiptFingerprints = fingerprints,
+                Assessments = assessments,
+                RequestReceipts = requestReceipts,
             });
             var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
             Persist(snapshot);
@@ -581,6 +681,8 @@ public sealed class CaseStateStore : ICaseStateStore
         Audit = Wrap(state.Audit),
         WorkItems = Wrap(state.WorkItems ?? Array.Empty<WorkItem>()),
         Traces = Wrap((state.Traces ?? Array.Empty<InvestigationTrace>()).Select(SnapshotTrace)),
+        Assessments = Wrap((state.Assessments ?? Array.Empty<CaseAssessment>()).Select(SnapshotAssessment)),
+        RequestReceipts = Wrap(state.RequestReceipts ?? Array.Empty<DeliveryReceipt>()),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
@@ -589,19 +691,32 @@ public sealed class CaseStateStore : ICaseStateStore
     private static InvestigationTrace SnapshotTrace(InvestigationTrace trace) =>
         trace with { Steps = Wrap(trace.Steps) };
 
+    internal static CaseAssessment SnapshotAssessment(CaseAssessment assessment) =>
+        assessment with
+        {
+            Claims = Wrap(assessment.Claims.Select(claim =>
+                claim with { Witnesses = Wrap(claim.Witnesses) })),
+        };
+
     private static ReadOnlyCollection<T> Wrap<T>(IEnumerable<T> items) => new(items.ToList());
 
     /// <summary>Digest of the commit payload, used to tell a true replay from a reused receipt ID.</summary>
-    private static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
+    internal static string CommitFingerprint(CaseCommit commit)
     {
-        basisVersion = commit.NewBasis?.Version,
-        content = commit.NewBasis?.Content,
-        contentDigest = commit.NewBasis?.ContentDigest,
-        basisDigest = commit.NewBasis?.BasisDigest,
-        commit.Actor,
-        commit.Action,
-        commit.Detail,
-    }));
+        var digest = Digest(JsonSerializer.Serialize(new
+        {
+            basisVersion = commit.NewBasis?.Version,
+            content = commit.NewBasis?.Content,
+            contentDigest = commit.NewBasis?.ContentDigest,
+            basisDigest = commit.NewBasis?.BasisDigest,
+            commit.Actor,
+            commit.Action,
+            commit.Detail,
+        }));
+        return commit.Assessment is null && commit.RequestReceipt is null
+            ? digest
+            : Digest(digest + JsonSerializer.Serialize(new { commit.Assessment, commit.RequestReceipt }));
+    }
 
     private static void Validate(CaseState state)
     {
@@ -660,6 +775,25 @@ public sealed class CaseStateStore : ICaseStateStore
             catch (ArgumentException ex)
             {
                 throw new InvalidDataException("Investigation traces are invalid.", ex);
+            }
+        }
+
+        var assessments = state.Assessments ?? Array.Empty<CaseAssessment>();
+        if (assessments.Select(a => a.AssessmentId).Distinct(StringComparer.Ordinal).Count() != assessments.Count
+            || assessments.Any(a => a.CaseId != state.CaseId))
+        {
+            throw new InvalidDataException("Case assessments are invalid.");
+        }
+
+        foreach (var assessment in assessments)
+        {
+            try
+            {
+                AssessmentPersistenceRules.Validate(assessment);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Case assessments are invalid.", ex);
             }
         }
 

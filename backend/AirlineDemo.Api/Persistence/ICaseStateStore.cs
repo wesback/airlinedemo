@@ -1,3 +1,5 @@
+using AirlineDemo.Api.Requests;
+
 namespace AirlineDemo.Api.Persistence;
 
 /// <summary>
@@ -18,6 +20,9 @@ public interface ICaseStateStore
 
     IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope);
 
+    IReadOnlyList<CaseAssessment> ListAssessments(CaseScope scope) => throw new NotSupportedException("Assessment history is not supported by this store.");
+    CaseAssessment? FindAssessment(CaseScope scope, string assessmentId) => throw new NotSupportedException("Assessment history is not supported by this store.");
+    IReadOnlyList<DeliveryReceipt> ListRequestReceipts(CaseScope scope) => throw new NotSupportedException("Request receipts are not supported by this store.");
     CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit);
 
     IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope);
