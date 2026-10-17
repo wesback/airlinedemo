@@ -47,6 +47,6 @@ The case-study input is EUR250,000 per idle aircraft-month (case-study stipulati
 
 Divide by 30.4 days per month (case-study stipulation) to obtain approximately EUR8,200 per recovered idle-aircraft-day (derived).
 
-Platform cost per transition prepared is derived from the active, idle, and residual component costs above: allocate shared lifecycle charges across transitions prepared, then sum the component allocations. It remains `STUB` while any component price is unapproved or usage and transition counts are unmeasured.
+Platform cost per transition prepared is derived from the rows above. For each component/lifecycle row, multiply its approved unit price by measured units for that row; sum the resulting lifecycle costs and divide by the number of transitions prepared in the same measured period. It remains `STUB` while any component price is unapproved or usage and transition counts are unmeasured.
 
 Break-even days equal platform cost per transition prepared divided by recovered idle-aircraft-day value. While platform cost per transition prepared is `STUB`, break-even days are exactly not calculated.

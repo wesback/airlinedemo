@@ -119,6 +119,19 @@ public sealed class ReadinessDocumentationTests
         var ceiling = Regex.Match(CostModel, @"(?m)^Spending ceiling:\s*(.+)$");
         Assert.True(ceiling.Success);
         Assert.Equal("not set", ceiling.Groups[1].Value.Trim());
+        Assert.True(UnapprovedCostsAreStubbedAndCeilingIsUnset(CostModel));
+
+        var numericUnapprovedPrice = CostModel.Replace(
+            "| Azure compute | active | STUB |",
+            "| Azure compute | active | 1.00 |",
+            StringComparison.Ordinal);
+        Assert.False(UnapprovedCostsAreStubbedAndCeilingIsUnset(numericUnapprovedPrice));
+
+        var numericSpendingCeiling = CostModel.Replace(
+            "Spending ceiling: not set",
+            "Spending ceiling: EUR100 (scenario assumption)",
+            StringComparison.Ordinal);
+        Assert.False(UnapprovedCostsAreStubbedAndCeilingIsUnset(numericSpendingCeiling));
     }
 
     [Fact]
@@ -159,8 +172,11 @@ public sealed class ReadinessDocumentationTests
         Assert.Contains("EUR250,000 per idle aircraft-month (case-study stipulation)", section);
         Assert.Contains("30.4 days per month (case-study stipulation)", section);
         Assert.Contains("approximately EUR8,200 per recovered idle-aircraft-day (derived)", section);
-        Assert.Contains("Platform cost per transition prepared", section);
-        Assert.Contains("remains `STUB` while any component price is unapproved", section);
+        var platformCostDerivation = section.Split('\n')
+            .Single(line => line.StartsWith("Platform cost per transition prepared is derived", StringComparison.Ordinal));
+        Assert.Equal(
+            "Platform cost per transition prepared is derived from the rows above. For each component/lifecycle row, multiply its approved unit price by measured units for that row; sum the resulting lifecycle costs and divide by the number of transitions prepared in the same measured period. It remains `STUB` while any component price is unapproved or usage and transition counts are unmeasured.",
+            platformCostDerivation);
         Assert.Contains("break-even days are exactly not calculated", section);
         Assert.Contains("No value below is validated customer savings.", section);
 
@@ -218,6 +234,14 @@ public sealed class ReadinessDocumentationTests
             .Select(line => line.Split('|').Skip(1).Take(8).Select(cell => cell.Trim()).ToArray())
             .Where(row => row.Length == 8 && CostComponents.Contains(row[0]) && LifecycleStates.Contains(row[1]))
             .ToArray();
+    }
+
+    private static bool UnapprovedCostsAreStubbedAndCeilingIsUnset(string content)
+    {
+        var ceiling = Regex.Match(content, @"(?m)^Spending ceiling:\s*(.+)$");
+        return CostRows(content).All(row => row[7] != "unapproved" || row[2] == "STUB") &&
+            ceiling.Success &&
+            ceiling.Groups[1].Value.Trim() == "not set";
     }
 
     private static Dictionary<string, string> ApprovalFields(string content)
