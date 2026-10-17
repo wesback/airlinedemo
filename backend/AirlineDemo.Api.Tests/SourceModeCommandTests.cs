@@ -456,7 +456,15 @@ public sealed class SourceModeCommandTests
                 new { commandId = "scope-first", expectedRevision = before.Revision, mode = "unavailable" }, null))
                 await AssertErrorAsync(outOfScope, HttpStatusCode.NotFound, "not_found", "Case not found.");
 
-            var acceptedBody = new { commandId = "m03-accepted", expectedRevision = before.Revision, mode = "unavailable" };
+            var acceptedBody = new
+            {
+                commandId = "m03-accepted",
+                expectedRevision = before.Revision,
+                mode = "unavailable",
+                actor = "forged-actor",
+                at = "2000-01-01T00:00:00Z",
+                reason = "forged-reason",
+            };
             using (var accepted = await PostModeAsync(client, presenter, "technical", acceptedBody, presenter.CsrfToken))
             {
                 Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
@@ -467,6 +475,21 @@ public sealed class SourceModeCommandTests
                 Assert.Equal(before.Audit.Count + 1, afterAccepted.Audit.Count);
                 Assert.Equal(before.Audit.Count(a => a.Action == SourceModes.Action) + 1,
                     afterAccepted.Audit.Count(a => a.Action == SourceModes.Action));
+
+                var acceptedEvent = Assert.Single(afterAccepted.Audit.Where(a => a.Action == SourceModes.Action));
+                Assert.Equal(Presenter.Id, acceptedEvent.Actor);
+                Assert.Equal(SourceModes.Action, acceptedEvent.Action);
+                Assert.Equal(Now, acceptedEvent.At);
+                Assert.Equal(JsonSerializer.Serialize(new
+                {
+                    commandId = "m03-accepted",
+                    caseId = Case,
+                    sourceId = "technical",
+                    priorMode = "available",
+                    newMode = "unavailable",
+                    priorRevision = before.Revision,
+                    newRevision = before.Revision + 1,
+                }), acceptedEvent.Detail);
             }
 
             var acceptedState = cases.Read(scope);
@@ -480,6 +503,14 @@ public sealed class SourceModeCommandTests
             using (var otherPayload = await PostModeAsync(client, presenter, "technical",
                 new { commandId = "m03-accepted", expectedRevision = before.Revision, mode = "stale" }, presenter.CsrfToken))
                 await AssertErrorAsync(otherPayload, HttpStatusCode.Conflict, "command_id_conflict",
+                    "This command ID was already used for a different command.");
+            using (var otherSource = await PostModeAsync(client, presenter, "finance",
+                new { commandId = "m03-accepted", expectedRevision = before.Revision, mode = "unavailable" }, presenter.CsrfToken))
+                await AssertErrorAsync(otherSource, HttpStatusCode.Conflict, "command_id_conflict",
+                    "This command ID was already used for a different command.");
+            using (var otherRevision = await PostModeAsync(client, presenter, "technical",
+                new { commandId = "m03-accepted", expectedRevision = before.Revision + 1, mode = "unavailable" }, presenter.CsrfToken))
+                await AssertErrorAsync(otherRevision, HttpStatusCode.Conflict, "command_id_conflict",
                     "This command ID was already used for a different command.");
             using (var unknownSource = await PostModeAsync(client, presenter, "unknown",
                 new { commandId = "m03-accepted", expectedRevision = before.Revision, mode = "unavailable" }, presenter.CsrfToken))
@@ -516,6 +547,31 @@ public sealed class SourceModeCommandTests
             Assert.Equal(1, afterRace.Audit.Count(a => a.Action == SourceModes.Action));
             Assert.Equal(acceptedModes, ModeText(modeStore, afterRace));
             Assert.DoesNotContain(afterRace.Audit, a => a.Action == SourceModes.Action && a.Detail.Contains("m03-race", StringComparison.Ordinal));
+
+            var caseBoundCommandId = "m03-case-bound";
+            var mismatchedCaseDetail = JsonSerializer.Serialize(new
+            {
+                commandId = caseBoundCommandId,
+                caseId = "case-002",
+                sourceId = "technical",
+                priorMode = "available",
+                newMode = "unavailable",
+                priorRevision = afterRace.Revision,
+                newRevision = afterRace.Revision + 1,
+            });
+            // Seed a different persisted case identity to verify it cannot replay this command.
+            cases.Commit(scope, afterRace.Revision, new CaseCommit(null, SourceModes.ReceiptPrefix + caseBoundCommandId,
+                Presenter.Id, SourceModes.Action, mismatchedCaseDetail, Now));
+            var beforeCaseMismatch = cases.Read(scope);
+            using (var otherCase = await PostModeAsync(client, presenter, "technical",
+                new { commandId = caseBoundCommandId, expectedRevision = beforeCaseMismatch.Revision, mode = "unavailable" },
+                presenter.CsrfToken))
+                await AssertErrorAsync(otherCase, HttpStatusCode.Conflict, "command_id_conflict",
+                    "This command ID was already used for a different command.");
+
+            var afterCaseMismatch = cases.Read(scope);
+            Assert.Equal(beforeCaseMismatch.Revision, afterCaseMismatch.Revision);
+            Assert.Equal(beforeCaseMismatch.Audit.Count, afterCaseMismatch.Audit.Count);
         }
         finally
         {
