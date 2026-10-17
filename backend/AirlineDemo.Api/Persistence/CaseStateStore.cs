@@ -862,33 +862,62 @@ public sealed class CaseStateStore : ICaseStateStore
     private static bool HasSourcePinFormatMarker(string content)
     {
         const string formatName = "source-record-pins-v1";
-        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(content));
-        var formatProperty = false;
-        try
+        for (var index = 0; index < content.Length;)
         {
-            while (reader.Read())
+            var propertyStart = content.IndexOf('"', index);
+            if (propertyStart < 0) return false;
+            if (!TryReadJsonString(content, propertyStart, out var property, out var afterProperty))
             {
-                if (reader.TokenType == JsonTokenType.PropertyName && reader.CurrentDepth == 1)
-                {
-                    formatProperty = string.Equals(reader.GetString(), "format", StringComparison.Ordinal);
-                    continue;
-                }
-
-                if (formatProperty)
-                {
-                    formatProperty = false;
-                    if (reader.TokenType == JsonTokenType.String
-                        && string.Equals(reader.GetString(), formatName, StringComparison.Ordinal))
-                        return true;
-                }
+                index = propertyStart + 1;
+                continue;
             }
-        }
-        catch (JsonException)
-        {
-            return false;
+
+            index = afterProperty;
+            if (!string.Equals(property, "format", StringComparison.Ordinal)) continue;
+            var separator = SkipWhitespace(content, afterProperty);
+            if (separator >= content.Length || content[separator] != ':') continue;
+            var valueStart = SkipWhitespace(content, separator + 1);
+            if (valueStart < content.Length
+                && TryReadJsonString(content, valueStart, out var value, out _)
+                && string.Equals(value, formatName, StringComparison.Ordinal))
+                return true;
         }
 
         return false;
+    }
+
+    private static bool TryReadJsonString(string content, int start, out string? value, out int end)
+    {
+        value = null;
+        end = start;
+        for (var index = start + 1; index < content.Length; index++)
+        {
+            if (content[index] == '\\')
+            {
+                index++;
+                continue;
+            }
+
+            if (content[index] != '"') continue;
+            try
+            {
+                value = JsonSerializer.Deserialize<string>(content[start..(index + 1)]);
+                end = index + 1;
+                return value is not null;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static int SkipWhitespace(string content, int index)
+    {
+        while (index < content.Length && char.IsWhiteSpace(content[index])) index++;
+        return index;
     }
 
     private static string? Text(JsonElement element, string name) =>

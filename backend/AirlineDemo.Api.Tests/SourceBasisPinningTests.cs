@@ -149,6 +149,7 @@ public sealed class SourceBasisPinningTests
     [Theory]
     [InlineData("{\"format\" : \"source-record-pins-v1\", \"pins\": [")]
     [InlineData("{\"f\\u006Frmat\":\"source-record-pins-v1\",\"pins\":[")]
+    [InlineData("{\"pins\":],\"format\":\"source-record-pins-v1\"}")]
     public void MalformedSourcePinJsonIsRejectedWithoutChangingState(string malformedPins)
     {
         var path = StatePath();
