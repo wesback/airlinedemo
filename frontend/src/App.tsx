@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
+import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTraceView } from './InvestigationTrace';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -25,6 +26,8 @@ export default function App() {
   const [reason, setReason] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [traceView, setTraceView] = useState<InvestigationTraceView | null>(null);
+  const traceRequestId = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -40,10 +43,12 @@ export default function App() {
 
   useEffect(() => {
     if (!session) {
+      traceRequestId.current += 1;
       setData(null);
       setCaseError('');
       setLoadingCase(false);
       setReason('');
+      setTraceView(null);
       return;
     }
     let active = true;
@@ -66,6 +71,20 @@ export default function App() {
     })();
     return () => { active = false; };
   }, [session, refresh]);
+
+  async function showTrace(url: string) {
+    const requestId = ++traceRequestId.current;
+    setTraceView({ status: 'loading' });
+    try {
+      const trace = await getProjection<InvestigationTraceRecord>(url);
+      if (requestId === traceRequestId.current) setTraceView({ status: 'loaded', trace });
+    } catch (error) {
+      if (requestId !== traceRequestId.current) return;
+      setTraceView(error instanceof RequestError && error.status === 404
+        ? { status: 'not-found' }
+        : { status: 'error' });
+    }
+  }
 
   async function submitDecision(capabilityId: string, decision: string) {
     if (
@@ -134,9 +153,10 @@ export default function App() {
               {hasDecision && (
                 <label>Reason for decision<textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
               )}
-              <CapabilityDashboard data={data.dashboard} onDecision={(capabilityId, decision) => {
+              <CapabilityDashboard data={data.dashboard} onTraceSelect={(url) => { void showTrace(url); }} onDecision={(capabilityId, decision) => {
                 if (!decisionBusy) void submitDecision(capabilityId, decision);
               }} />
+              {traceView && <InvestigationTrace view={traceView} />}
             </>
           )}
         </section>
