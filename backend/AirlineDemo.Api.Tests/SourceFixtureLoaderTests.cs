@@ -292,6 +292,12 @@ public sealed class SourceFixtureLoaderTests
             Assert.Equal(records.Count, manifest.RootElement.GetProperty("recordCounts").GetProperty(source).GetInt32());
         }
 
+        foreach (var record in CommittedRecords("records"))
+        {
+            var payload = record.GetProperty("payload");
+            Assert.True(payload.GetProperty("containsPersonalData").ValueKind is JsonValueKind.True or JsonValueKind.False);
+        }
+
         // Case A: a maintenance history record that explains the missing-history finding.
         Assert.Contains(CommittedRecords("maintenance"), record =>
             record.GetProperty("caseId").GetString() == "case-a" && record.GetProperty("kind").GetString() == "maintenance_history");
@@ -407,10 +413,22 @@ public sealed class SourceFixtureLoaderTests
         var caseIds = recordCaseIds ?? OwningCaseIds;
         foreach (var source in Sources)
         {
+            var records = caseIds.Select(caseId => new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["caseId"] = caseId,
+            }).ToArray();
+            if (source == "records")
+            {
+                foreach (var record in records)
+                {
+                    record["payload"] = new { containsPersonalData = false };
+                }
+            }
+
             var fixture = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
             {
                 sourceId = source,
-                records = caseIds.Select(caseId => new { caseId }),
+                records,
             }));
             var manifest = ManifestBytes(fixture, schemaVersion, scenarioDate, digest, declaredCount, sourceFixtureVersion);
 

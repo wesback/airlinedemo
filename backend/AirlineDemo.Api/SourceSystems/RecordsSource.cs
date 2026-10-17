@@ -1,7 +1,29 @@
+using System.Collections.ObjectModel;
+using System.Text.Json.Serialization;
+
 namespace AirlineDemo.Api.SourceSystems;
 
 // Typed payload for records-index entries: document metadata only, never document content.
-public sealed record RecordsPayload(IReadOnlyDictionary<string, string> Fields);
+public sealed record RecordsPayload
+{
+    public RecordsPayload(IReadOnlyDictionary<string, string> fields)
+    {
+        Fields = new ReadOnlyDictionary<string, string>(
+            fields.ToDictionary(field => field.Key, field => field.Value, StringComparer.Ordinal));
+        DocumentId = Fields.GetValueOrDefault("documentId") ?? string.Empty;
+        DocumentVersion = Fields.GetValueOrDefault("documentVersion") ?? string.Empty;
+        ContainsPersonalData = bool.TryParse(Fields.GetValueOrDefault("containsPersonalData"), out var marker) && marker;
+    }
+
+    public string DocumentId { get; }
+
+    public string DocumentVersion { get; }
+
+    public bool ContainsPersonalData { get; }
+
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, string> Fields { get; }
+}
 
 // Synthetic document index over the case's evidence metadata (PRD FR-002, DD-003).
 public sealed class RecordsSource()
@@ -9,7 +31,12 @@ public sealed class RecordsSource()
         "records",
         "AirlineDemo.Api.Fixtures.sources.records.json",
         CoreManifest,
-        fields => new RecordsPayload(fields))
+        fields => new RecordsPayload(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["documentId"] = fields["documentId"],
+            ["documentVersion"] = fields["documentVersion"],
+            ["containsPersonalData"] = fields["containsPersonalData"],
+        }))
 {
     // Signed manifest for records.json: its SHA-256 digest and declared record counts (AC-004).
     internal static readonly SourceFixtureManifest CoreManifest = new()
@@ -17,7 +44,7 @@ public sealed class RecordsSource()
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
         SourceFixtureVersion = "2026.10.1",
         ScenarioDate = "2026-10-01",
-        Sha256 = "b5b6aca6a3379dddf2d0149b6be64779be313d172e958422b5b7b561fedc1ad4",
+        Sha256 = "f51625cb1206f0ca90b56a75d8f24ba57534a8ccb3ebe37b3e9490632820e275",
         RecordCounts = new Dictionary<string, int>
         {
             ["technical"] = 0,

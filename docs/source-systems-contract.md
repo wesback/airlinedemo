@@ -92,6 +92,11 @@ Each outcome is a distinct type.
 `GET /api/v1/cases/{caseId}/sources/{sourceId}/records/{recordId}` returns exactly
 `contractVersion`, `caseId`, `sourceId` and `record`, whose value has the same
 record shape. Both successful envelopes use the integer `contractVersion: 1`.
+For the `records` source, each fixture payload must contain
+`containsPersonalData` as a JSON boolean. A returned records payload contains
+exactly `documentId`, `documentVersion` and `containsPersonalData`; fixture-only
+fields, including synthetic personal-data fields, are not serialized in either
+the list or get response.
 The endpoint uses the case-scoped read-only `ISourceSystem<TPayload>` port and
 bounded source-read admission service. Identity, role and requested-case scope
 are checked before admission or source access; a returned record for another
