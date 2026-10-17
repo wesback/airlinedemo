@@ -95,12 +95,12 @@ public sealed class FinanceSource()
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
         SourceFixtureVersion = "2026.10.1",
         ScenarioDate = "2026-10-01",
-        Sha256 = "caa09f0c177f382232301dc65e50740bf24e45ceffc4831795ff8ca770d294b1",
+        Sha256 = "9858a0828bedbcb9e33e6ced062f2582abfdad452df4dc76b500202d338a8743",
         RecordCounts = new Dictionary<string, int>
         {
             ["technical"] = 0,
             ["maintenance"] = 0,
-            ["finance"] = 4,
+            ["finance"] = 7,
             ["records"] = 0,
             ["contracts"] = 0,
         },

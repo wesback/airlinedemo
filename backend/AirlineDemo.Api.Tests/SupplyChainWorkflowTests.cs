@@ -143,7 +143,7 @@ public sealed class SupplyChainWorkflowTests
         var job = JobBody(ReadWorkflow(), "publish-image");
 
         Assert.Contains("\n    needs: build-and-gate\n", job);
-        Assert.Contains("\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n", job);
+        Assert.Contains("\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH_IMAGE == 'true'\n", job);
         Assert.DoesNotContain("pull_request", job);
         Assert.DoesNotContain("workflow_dispatch", job);
         Assert.DoesNotContain("refs/heads/release", job);

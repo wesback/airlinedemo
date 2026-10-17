@@ -45,6 +45,78 @@
       "kind": "applicability",
       "synthetic": true,
       "payload": { "requirement": "SYN-AD-2026-014", "regime": "EASA", "responsibleParty": "lessee-operator" }
+    },
+    {
+      "recordId": "tech-a-airworthiness-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-a",
+      "kind": "airworthiness_status",
+      "synthetic": true,
+      "payload": { "status": "airworthy", "directive": "SYN-AD-2026-021", "directiveStatus": "complied" }
+    },
+    {
+      "recordId": "tech-a-component-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-a",
+      "kind": "component_identity",
+      "synthetic": true,
+      "payload": { "partNumber": "SYN-ENG-7000-A", "serialNumber": "SYN-SN-61105", "position": "engine_1" }
+    },
+    {
+      "recordId": "tech-a-utilization-2026-09",
+      "recordVersion": 1,
+      "asOf": "2026-09-30",
+      "caseId": "case-a",
+      "kind": "utilization",
+      "synthetic": true,
+      "payload": { "periodStart": "2026-09-01", "periodEnd": "2026-09-30", "hours": "187.0", "cycles": "139" }
+    },
+    {
+      "recordId": "tech-b-airworthiness-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-b",
+      "kind": "airworthiness_status",
+      "synthetic": true,
+      "payload": { "status": "airworthy", "directive": "SYN-AD-2026-014", "directiveStatus": "complied" }
+    },
+    {
+      "recordId": "tech-b-component-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-b",
+      "kind": "component_identity",
+      "synthetic": true,
+      "payload": { "partNumber": "SYN-ENG-7000-A", "serialNumber": "SYN-SN-77201", "position": "engine_1" }
+    },
+    {
+      "recordId": "tech-b-utilization-2026-09",
+      "recordVersion": 1,
+      "asOf": "2026-09-30",
+      "caseId": "case-b",
+      "kind": "utilization",
+      "synthetic": true,
+      "payload": { "periodStart": "2026-09-01", "periodEnd": "2026-09-30", "hours": "205.5", "cycles": "158" }
+    },
+    {
+      "recordId": "tech-c-airworthiness-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-c",
+      "kind": "airworthiness_status",
+      "synthetic": true,
+      "payload": { "status": "airworthy", "directive": "SYN-AD-2026-009", "directiveStatus": "complied" }
+    },
+    {
+      "recordId": "tech-c-component-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-c",
+      "kind": "component_identity",
+      "synthetic": true,
+      "payload": { "partNumber": "SYN-ENG-7000-A", "serialNumber": "SYN-SN-30977", "position": "engine_1" }
     }
   ]
 }

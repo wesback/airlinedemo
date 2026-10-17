@@ -17,14 +17,14 @@ public sealed class ContractsSource()
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
         SourceFixtureVersion = "2026.10.1",
         ScenarioDate = "2026-10-01",
-        Sha256 = "2010ebf2580c49a8b5e35ed3513b1a17027681cd8124682359b2238db94df150",
+        Sha256 = "6a40c37f1e410b9635bc4266ea526ba2d7405bc946ec4a3460c02d0e961953f0",
         RecordCounts = new Dictionary<string, int>
         {
             ["technical"] = 0,
             ["maintenance"] = 0,
             ["finance"] = 0,
             ["records"] = 0,
-            ["contracts"] = 1,
+            ["contracts"] = 4,
         },
     };
 }

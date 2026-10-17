@@ -199,7 +199,8 @@ jobs:
 
   publish-image:
     needs: build-and-gate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Off until the private runner, ACR and Azure variables exist: set the repo variable PUBLISH_IMAGE to 'true' to enable.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH_IMAGE == 'true'
     runs-on: [self-hosted, linux, x64, private-acr]
     timeout-minutes: 30
     permissions:

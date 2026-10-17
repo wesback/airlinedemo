@@ -2,7 +2,7 @@
   "schemaVersion": "1",
   "sourceFixtureVersion": "2026.10.1",
   "scenarioDate": "2026-10-01",
-  "owningCaseIds": ["case-001"],
-  "sha256": "a80a96dfc3764a4b30c6888123f78eead97e9e87c23fd84e26246757a16d4ba9",
-  "recordCounts": { "technical": 5, "maintenance": 2, "finance": 4, "records": 3, "contracts": 1 }
+  "owningCaseIds": ["case-001", "case-a", "case-b", "case-c"],
+  "sha256": "757f3eb44b5dd835577c661257e60c3605d10e7d39cf8668f985b362e4e92604",
+  "recordCounts": { "technical": 13, "maintenance": 6, "finance": 7, "records": 10, "contracts": 4 }
 }
