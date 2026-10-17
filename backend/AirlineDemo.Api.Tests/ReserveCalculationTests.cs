@@ -1,5 +1,6 @@
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Finance;
+using AirlineDemo.Api.SourceSystems;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -42,6 +43,21 @@ public class ReserveCalculationTests
     private static ReserveDraft Calc(UsageReport? usage, RateReport? rates, int version = 1) =>
         ReserveCalculator.Calculate("DRAFT-1", version, Period, usage, rates);
 
+    private static SourceRecord<FinancePayload> FinanceRecord(string id, string kind, params (string Key, string Value)[] additional)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["recordedAmount"] = "100.00", ["collectedAmount"] = "70.00", ["currency"] = "USD",
+            ["period"] = Period, ["dueDate"] = "2026-09-20",
+        };
+        foreach (var (key, value) in additional) fields[key] = value;
+        return new SourceRecord<FinancePayload>
+        {
+            SourceId = "finance", RecordId = id, RecordVersion = 1, AsOf = new DateOnly(2026, 9, 1),
+            CaseId = "case-001", Kind = kind, Payload = new FinancePayload(fields), Synthetic = true,
+        };
+    }
+
     [Fact]
     public void Lines_round_before_totals_with_midpoints_away_from_zero()
     {
@@ -62,6 +78,45 @@ public class ReserveCalculationTests
         Assert.Equal(12.35m, draft.Lines[0].Amount);
         Assert.Equal(0.50m, draft.Lines[1].Amount);
         Assert.Equal(12.85m, draft.PayableTotal);
+    }
+
+    [Fact]
+    public void Finance_reserve_draft_uses_only_reserves_and_reports_exact_amounts()
+    {
+        var reserve = FinanceRecord("reserve-1", "maintenance_reserve",
+            ("rateBasis", "per_flight_hour"), ("rate", "0.10"));
+        var reimbursement = FinanceRecord("claim-1", "reserve_reimbursement",
+            ("claimId", "claim-1"), ("status", "approved"), ("recordedAmount", "25.00"),
+            ("collectedAmount", "5.00"), ("dueDate", "2026-09-30"));
+        var baseDraft = ReserveCalculator.CalculateFinanceRecords("DRAFT-F", 1, Period, [reserve, reimbursement]);
+        var withUnrelated = ReserveCalculator.CalculateFinanceRecords("DRAFT-F", 1, Period,
+            [reserve, reimbursement, FinanceRecord("rent-1", "rent"), FinanceRecord("deposit-1", "security_deposit")]);
+
+        Assert.Equal(ReserveDraftStatus.ReadyForReview, baseDraft.Status);
+        Assert.Equal(new FinanceReserveLine("reserve-1", "maintenance_reserve", "USD", 100m, 70m, 30m, 30m, 0m), baseDraft.Lines[0]);
+        Assert.Equal(new FinanceReserveLine("claim-1", "reserve_reimbursement", "USD", 25m, 5m, 20m, 0m, 25m), baseDraft.Lines[1]);
+        Assert.Equal(50m, baseDraft.Total);
+        Assert.Equal(baseDraft.Lines, withUnrelated.Lines);
+        Assert.Equal(baseDraft.Total, withUnrelated.Total);
+        Assert.Equal(
+            "Finance lines report billed, collected, underbilled, overdue and reimbursable amounts; total = sum of underbilled amounts. This draft makes no profit, revenue, or cash-recognition claim.",
+            baseDraft.CalculationBasis);
+    }
+
+    [Fact]
+    public void Finance_reserve_draft_blocks_when_rate_is_missing_or_deposit_is_misclassified()
+    {
+        foreach (var record in new[]
+        {
+            FinanceRecord("reserve-1", "maintenance_reserve", ("rateBasis", "per_flight_hour")),
+            FinanceRecord("deposit-1", "maintenance_reserve"),
+        })
+        {
+            var draft = ReserveCalculator.CalculateFinanceRecords("DRAFT-F", 1, Period, [record]);
+            Assert.Equal(ReserveDraftStatus.Blocked, draft.Status);
+            Assert.Empty(draft.Lines);
+            Assert.Null(draft.Total);
+        }
     }
 
     [Fact]
