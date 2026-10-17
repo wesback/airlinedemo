@@ -31,6 +31,10 @@ public sealed class EvaluationJsonExporterTests
         Assert.Equal(2, root.GetProperty("suiteVersion").GetInt32());
         Assert.Equal(new[] { "A", "B", "C", "D" },
             root.GetProperty("arms").EnumerateArray().Select(arm => arm.GetProperty("armId").GetString()));
+        Assert.Equal(new[]
+        {
+            null, "BoundedAgent", "BoundedAgent", "SingleCallWithoutToolsOrCitationReflection"
+        }, root.GetProperty("arms").EnumerateArray().Select(arm => arm.GetProperty("mode").GetString()));
         Assert.All(root.GetProperty("arms").EnumerateArray(), arm =>
         {
             AssertProperties(arm, "armId", "deployment", "mode", "completedCases", "metrics", "passed");
@@ -48,6 +52,25 @@ public sealed class EvaluationJsonExporterTests
         Assert.Equal("demo-b", root.GetProperty("arms")[1].GetProperty("deployment").GetString());
         Assert.Equal("BoundedAgent", root.GetProperty("arms")[1].GetProperty("mode").GetString());
         EvaluationJsonExporter.ValidateJson(bytes);
+
+        foreach (var selectedArmId in new string?[] { "A", "B", "C", "D", null })
+        {
+            var input = Inputs();
+            using var output = new MemoryStream();
+            EvaluationJsonExporter.Write(output, input.Run,
+                input.Scoring with { SelectedArmId = selectedArmId }, input.Costs);
+            using var selectedJson = JsonDocument.Parse(output.ToArray());
+            Assert.Equal(selectedArmId,
+                selectedJson.RootElement.GetProperty("selectedArmId").GetString());
+        }
+        foreach (var selectedArmId in new[] { "", "E", "customer-id-canary" })
+        {
+            var input = Inputs();
+            var output = new MemoryStream();
+            Assert.Throws<ArgumentException>(() => EvaluationJsonExporter.Write(output, input.Run,
+                input.Scoring with { SelectedArmId = selectedArmId }, input.Costs));
+            Assert.Equal(0, output.Length);
+        }
 
         var inputs = Inputs();
         foreach (var version in new[] { 0, 2 })
@@ -128,7 +151,10 @@ public sealed class EvaluationJsonExporterTests
         var invalidInputs = new[]
         {
             Inputs(metricName: "prompt-canary"),
+            Inputs(caseId: "case-input-canary"),
             Inputs(caseId: "customer-id-canary"),
+            Inputs(caseCategory: "case-input-canary"),
+            Inputs(deploymentName: "customer-id-canary"),
             Inputs(deploymentName: "credential-canary!"),
             Inputs(costArm: "request-payload-canary"),
             Inputs(incomplete: true, stopCaseId: "source-document-canary")
@@ -140,7 +166,55 @@ public sealed class EvaluationJsonExporterTests
                 EvaluationJsonExporter.Write(output, input.Run, input.Scoring, input.Costs));
             Assert.Equal(0, output.Length);
         }
+
         var clean = Inputs();
+        var contentCanaries = new[]
+        {
+            clean.Run with
+            {
+                Cases = clean.Run.Cases.Select(item => item with
+                {
+                    Arms = item.Arms.Select(dispatch => dispatch with { Answer = "completion-canary" }).ToArray()
+                }).ToArray()
+            },
+            clean.Run with
+            {
+                Cases = clean.Run.Cases.Select(item => item with
+                {
+                    Arms = item.Arms.Select(dispatch => dispatch with
+                    {
+                        ModelCalls = [new("prompt-canary", null, null)]
+                    }).ToArray()
+                }).ToArray()
+            },
+            clean.Run with
+            {
+                Cases = clean.Run.Cases.Select(item => item with
+                {
+                    Arms = item.Arms.Select(dispatch => dispatch with
+                    {
+                        ModelCalls = [new("", "completion-canary", null)]
+                    }).ToArray()
+                }).ToArray()
+            },
+            clean.Run with
+            {
+                Cases = clean.Run.Cases.Select(item => item with
+                {
+                    Arms = item.Arms.Select(dispatch => dispatch with
+                    {
+                        ModelCalls = [new("", null, "request-payload-canary")]
+                    }).ToArray()
+                }).ToArray()
+            }
+        };
+        foreach (var run in contentCanaries)
+        {
+            var output = new MemoryStream();
+            Assert.Throws<ArgumentException>(() =>
+                EvaluationJsonExporter.Write(output, run, clean.Scoring, clean.Costs));
+            Assert.Equal(0, output.Length);
+        }
         var cleanBytes = Export(clean);
         var text = Encoding.UTF8.GetString(cleanBytes);
         foreach (var canary in new[] { "case-input-canary", "source-document-canary", "prompt-canary",
@@ -172,7 +246,8 @@ public sealed class EvaluationJsonExporterTests
 
     private static (FourArmEvaluationResult Run, EvaluationScoringReport Scoring, EvaluationCostReport Costs) Inputs(
         bool reverse = false, bool qualified = false, bool incomplete = false, string? label = "derived",
-        string? metricName = null, string caseId = "EVAL-V2-01", string deploymentName = "demo-b",
+        string? metricName = null, string caseId = "EVAL-V2-01", string caseCategory = "baseline-complete",
+        string deploymentName = "demo-b",
         string costArm = "A", string stopCaseId = "EVAL-V2-02")
     {
         var configurations = new Dictionary<EvaluationArm, EvaluationEffectiveConfiguration?>
@@ -183,8 +258,11 @@ public sealed class EvaluationJsonExporterTests
             [EvaluationArm.D] = new("v1", "D", "demo-b", "model-b", "2025-01", "west", "standard")
         };
         EvaluationCaseResult Case(params EvaluationArm[] arms) =>
-            new(caseId, arms.Select(arm => new EvaluationDispatch(arm, "case-input-canary", 1,
-                [new("source-document-canary prompt-canary", "completion-canary", "request-payload-canary")], null)).ToArray());
+            new(caseId, arms.Select(arm => new EvaluationDispatch(arm, null, 1, [], null)).ToArray())
+            {
+                Category = caseCategory,
+                ExpectedState = "request"
+            };
         var cases = incomplete
             ? new[] { Case(EvaluationArm.A, EvaluationArm.B), Case(EvaluationArm.A) }
             : new[] { Case(EvaluationArm.A, EvaluationArm.B, EvaluationArm.C, EvaluationArm.D) };

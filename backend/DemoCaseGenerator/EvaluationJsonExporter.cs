@@ -9,6 +9,10 @@ public static class EvaluationJsonExporter
     public const int SchemaVersion = 1;
     public const int FrozenSuiteVersion = 2;
     private static readonly string[] ArmIds = ["A", "B", "C", "D"];
+    private static readonly string[] SafeDeploymentNames = ["demo-a", "demo-b", "demo-c", "demo-d"];
+    private static readonly string[] CaseCategories =
+        ["baseline-complete", "missing-required-history", "ambiguous-identity", "blocked-or-unprocessed-evidence"];
+    private static readonly string[] ExpectedStates = ["request", "review", "blocked"];
     private static readonly IReadOnlyDictionary<string, string> MetricUnits =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -42,6 +46,7 @@ public static class EvaluationJsonExporter
             : scoring.BudgetStop is not null)
             throw new ArgumentException("runner and scorer must agree on the budget stop");
         ValidateCaseIds(run, scoring);
+        ValidateNoModelContent(run);
 
         var scores = scoring.Arms.ToDictionary(score => ParseArm(score.Arm));
         if (scores.Count != ArmIds.Length) throw new ArgumentException("exactly one score for each arm is required", nameof(scoring));
@@ -110,10 +115,21 @@ public static class EvaluationJsonExporter
     {
         if (config is null) return null;
         var name = config.DeploymentName;
-        if (name.Length is 0 or > 128 || !char.IsAsciiLetterOrDigit(name[0]) ||
-            name.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '-' or '_')))
-            throw new ArgumentException("deployment name contains unsupported characters");
+        if (!SafeDeploymentNames.Contains(name, StringComparer.Ordinal))
+            throw new ArgumentException("deployment name is not an approved non-identifying alias");
         return name;
+    }
+
+    private static void ValidateNoModelContent(FourArmEvaluationResult run)
+    {
+        if (run.Cases.Any(item => item.Arms.Any(dispatch =>
+                !string.IsNullOrEmpty(dispatch.Answer) ||
+                dispatch.ModelCalls.Any(call =>
+                    !string.IsNullOrEmpty(call.Prompt) ||
+                    !string.IsNullOrEmpty(call.Response) ||
+                    !string.IsNullOrEmpty(call.Error))))
+        )
+            throw new ArgumentException("evaluation results containing model content cannot be exported");
     }
 
     private static void ValidateCaseIds(FourArmEvaluationResult run, EvaluationScoringReport scoring)
@@ -124,6 +140,10 @@ public static class EvaluationJsonExporter
             scoring.Arms.SelectMany(arm => arm.Failures).Any(failure => !IsFrozenCase(failure.CaseId)) ||
             scoring.BudgetStop is { } scoredStop && !IsFrozenCase(scoredStop.CaseId))
             throw new ArgumentException("evaluation results must contain only frozen suite case identifiers");
+        if (run.Cases.Any(item =>
+                !CaseCategories.Contains(item.Category, StringComparer.Ordinal) ||
+                !ExpectedStates.Contains(item.ExpectedState, StringComparer.Ordinal)))
+            throw new ArgumentException("evaluation results must contain only frozen case metadata");
     }
 
     private static string? ExecutionMode(EvaluationArm arm) => arm switch
