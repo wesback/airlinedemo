@@ -1,0 +1,237 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 294,
+  "branch": "ai-sdlc/issue-294",
+  "commitSha": "1ad60cb05ad4aa85129b551fe13e16ab37c2dd5f",
+  "round": 0,
+  "pipelineVersion": "4dcb233-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reserve calculation follows the specified selection and amount rules. Finance validation can throw for a present amount field with a null value instead of rejecting it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/FinanceSource.cs",
+          "line": 80,
+          "message": "Reject null finance field values instead of throwing during validation. A null amount is malformed input under AC-030, but IsDecimal throws before the validator can return a rejection.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "FinanceRecordValidator.Validate passes a present recordedAmount or collectedAmount value to IsDecimal, which calls Regex.IsMatch without checking for null.",
+            "failureScenario": "A finance record whose fields dictionary contains recordedAmount with a null value causes validation to throw ArgumentNullException instead of rejecting the malformed value."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reserve calculation assertions cover the reported amounts and the unrelated-kind invariance. The finance validation tests do not cover all enumerated valid values required by AC-030.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TechnicalFinanceSourceTests.cs",
+          "line": 29,
+          "message": "Add constructed-record acceptance cases for rateBasis per_cycle and reimbursement statuses claimed and paid. AC-030 requires tests to cover the listed valid values; the current fixtures exercise only per_flight_hour and approved.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "FinanceFields constructs the valid maintenance_reserve fixture with only per_flight_hour; the reimbursement fixture uses only approved. The acceptance test validates those fixtures but never constructs the other listed valid enum values.",
+            "failureScenario": "If validation regresses to reject per_cycle, claimed, or paid, the current tests still pass, although AC-030 requires accepting each listed value."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability with a concrete, reachable attack scenario was found in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/FinanceContractTests.cs",
+      "backend/AirlineDemo.Api.Tests/ReserveCalculationTests.cs",
+      "backend/AirlineDemo.Api.Tests/TechnicalFinanceSourceTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 104,
+      "total": 115,
+      "percent": 90.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Finance/ReserveCalculator.cs",
+          "covered": 54,
+          "total": 56,
+          "missed": [
+            102,
+            103
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/FinanceSource.cs",
+          "covered": 50,
+          "total": 59,
+          "missed": [
+            50,
+            51,
+            52,
+            56,
+            59,
+            63,
+            65,
+            70,
+            72
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
