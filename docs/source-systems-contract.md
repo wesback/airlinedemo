@@ -31,6 +31,19 @@ The port is read-only. It has no write, update or delete members, and it has no 
 
 `SourceRecord<TPayload>.Validate(requestedCaseId)` returns every violation. An empty list means the record is valid. A record whose `caseId` differs from `requestedCaseId` is rejected and must never be returned.
 
+## Finance payloads
+
+`FinancePayload` is shared by exactly four finance kinds. Every value is a string; a payload must contain exactly the fields listed for its kind.
+
+| Kind | Required payload fields |
+|---|---|
+| `rent` | `recordedAmount` (non-negative decimal string), `collectedAmount` (non-negative decimal string), `currency` (three uppercase letters), `period` (string, `YYYY-MM`), `dueDate` (string, `YYYY-MM-DD`) |
+| `maintenance_reserve` | `recordedAmount` (non-negative decimal string), `collectedAmount` (non-negative decimal string), `currency` (three uppercase letters), `period` (string, `YYYY-MM`), `dueDate` (string, `YYYY-MM-DD`), `rateBasis` (`per_flight_hour` or `per_cycle`), `rate` (non-negative decimal string) |
+| `security_deposit` | `recordedAmount` (non-negative decimal string), `collectedAmount` (non-negative decimal string), `currency` (three uppercase letters), `period` (string, `YYYY-MM`), `dueDate` (string, `YYYY-MM-DD`) |
+| `reserve_reimbursement` | `recordedAmount` (non-negative decimal string), `collectedAmount` (non-negative decimal string), `currency` (three uppercase letters), `period` (string, `YYYY-MM`), `dueDate` (string, `YYYY-MM-DD`), `claimId` (string), `status` (`claimed`, `approved` or `paid`) |
+
+`FinanceRecordValidator` rejects unknown kinds, missing fields and fields not listed for that kind. Reserve drafts consume only `maintenance_reserve` and `reserve_reimbursement`: billed is `recordedAmount`, collected is `collectedAmount`, underbilled is the non-negative difference, and overdue is underbilled when `dueDate` is before the draft period's last calendar day. Reimbursable is `recordedAmount` only for an approved or paid reimbursement. The draft total is the sum of underbilled amounts; it makes no profit, revenue or cash-recognition claim.
+
 ## Read outcomes: `SourceReadResult<TSuccess>`
 
 Each outcome is a distinct type.
