@@ -51,23 +51,39 @@ function displayValue(value: unknown): string {
 
 type Props = {
   data: DashboardData;
+  decisionReason?: string;
+  onDecisionReasonChange?: (reason: string) => void;
   onDecision?: (capabilityId: string, decisionId: string) => void;
   onTraceSelect?: (url: string) => void;
 };
 
-export default function CapabilityDashboard({ data, onDecision, onTraceSelect }: Props) {
+export default function CapabilityDashboard({
+  data, decisionReason, onDecisionReasonChange, onDecision, onTraceSelect,
+}: Props) {
   const allowedDecisions = data.allowedDecisions.filter(
     (action) => (action.id === 'accept' || action.id === 'reject') && typeof action.label === 'string',
   );
   const hasTechnicalReview = data.capabilities.some((capability) => capability.id === 'technical-review');
   const decisionControls = (capabilityId: string) => capabilityId === 'technical-review' && allowedDecisions.length > 0 && (
-    <div role="group" aria-label="Technical review decisions">
-      {allowedDecisions.map((action) => (
-        <button key={action.id} type="button" onClick={() => onDecision?.(capabilityId, action.id)}>
-          {action.label}
-        </button>
-      ))}
-    </div>
+    <>
+      {typeof decisionReason === 'string' && onDecisionReasonChange && (
+        <>
+          <label htmlFor="decision-reason">Reason for decision</label>
+          <textarea
+            id="decision-reason"
+            value={decisionReason}
+            onChange={(event) => onDecisionReasonChange(event.target.value)}
+          />
+        </>
+      )}
+      <div role="group" aria-label="Technical review decisions">
+        {allowedDecisions.map((action) => (
+          <button key={action.id} type="button" onClick={() => onDecision?.(capabilityId, action.id)}>
+            {action.label}
+          </button>
+        ))}
+      </div>
+    </>
   );
 
   return (
@@ -130,26 +146,30 @@ export default function CapabilityDashboard({ data, onDecision, onTraceSelect }:
 
       <section aria-labelledby="queue-heading">
         <h2 id="queue-heading">Queue</h2>
-        <ul>
-          {data.queue.map((item) => (
-            <li key={item.itemId}>
-              <span>{safeLabel(item.label)}</span> {item.itemId}
-            </li>
-          ))}
-        </ul>
+        <div role="status" aria-label="Queue updates">
+          <ul>
+            {data.queue.map((item) => (
+              <li key={item.itemId}>
+                <span>{safeLabel(item.label)}</span> {item.itemId}
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
 
       <section aria-labelledby="activity-heading">
         <h2 id="activity-heading">Activity</h2>
-        <ol>
-          {[...data.activity]
-            .sort((a, b) => a.sequence - b.sequence)
-            .map((event) => (
-              <li key={event.sequence}>
-                <span>{safeLabel(event.label)}</span> {event.actor}: {event.outcome}
-              </li>
-            ))}
-        </ol>
+        <div role="status" aria-label="Activity updates">
+          <ol>
+            {[...data.activity]
+              .sort((a, b) => a.sequence - b.sequence)
+              .map((event) => (
+                <li key={event.sequence}>
+                  <span>{safeLabel(event.label)}</span> {event.actor}: {event.outcome}
+                </li>
+              ))}
+          </ol>
+        </div>
       </section>
     </div>
   );

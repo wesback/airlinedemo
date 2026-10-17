@@ -129,7 +129,6 @@ export default function App() {
   }
 
   const currentDecision = data?.review.decisions.filter((item) => item.current).at(-1)?.decision;
-  const hasDecision = data?.dashboard.allowedDecisions.some((action) => action.id === 'accept' || action.id === 'reject');
   const healthMessage = {
     checking: 'Checking service connection…',
     ready: 'Service connected',
@@ -153,12 +152,15 @@ export default function App() {
               <p>Revision: {data.caseState.revision}</p>
               <p>Evidence basis: {data.caseState.basis.length}</p>
               <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
-              {hasDecision && (
-                <label>Reason for decision<textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-              )}
-              <CapabilityDashboard data={data.dashboard} onTraceSelect={(url) => { void showTrace(url); }} onDecision={(capabilityId, decision) => {
-                if (!decisionBusy) void submitDecision(capabilityId, decision);
-              }} />
+              <CapabilityDashboard
+                data={data.dashboard}
+                decisionReason={reason}
+                onDecisionReasonChange={setReason}
+                onTraceSelect={(url) => { void showTrace(url); }}
+                onDecision={(capabilityId, decision) => {
+                  if (!decisionBusy) void submitDecision(capabilityId, decision);
+                }}
+              />
               {traceView && <InvestigationTrace view={traceView} />}
             </>
           )}

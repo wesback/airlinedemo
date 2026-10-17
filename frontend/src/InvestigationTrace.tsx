@@ -21,7 +21,7 @@ export default function InvestigationTrace({ view }: { view: InvestigationTraceV
     <section aria-labelledby="investigation-trace-heading">
       <h3 id="investigation-trace-heading">Investigation trace</h3>
       {view.status === 'loading' && <p role="status">Loading investigation trace…</p>}
-      {view.status === 'not-found' && <p>No trace recorded</p>}
+      {view.status === 'not-found' && <p role="status">No trace recorded</p>}
       {view.status === 'error' && <p role="alert">Unable to load investigation trace.</p>}
       {view.status === 'loaded' && (
         <ol aria-label="Investigation trace steps">
