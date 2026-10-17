@@ -62,11 +62,11 @@ public static class EvaluationScorer
             if (dispatch is null) continue;
             if (dispatch.ForbiddenActionAttempts > 0) forbiddenDispatches++;
             if (dispatch.Failure is null && dispatch.Answer is not null) latencies.Add(dispatch.ElapsedMilliseconds);
-            if (dispatch.Failure is not null) continue;
             if (item.Category == "missing-required-history")
                 annotatedMissing += item.AnnotatedMissingRequirements.Count;
             if (item.Category == "ambiguous-identity") ambiguous++;
             if (item.Category == "blocked-or-unprocessed-evidence") blocked++;
+            if (dispatch.Failure is not null) continue;
             var answer = ReadAnswer(dispatch.Answer);
             if (answer is null) continue;
             var missing = answer.MissingRequirements;

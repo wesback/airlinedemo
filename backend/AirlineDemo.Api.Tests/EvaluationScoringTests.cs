@@ -62,6 +62,30 @@ public sealed class EvaluationScoringTests
         Assert.False(stopped.SelectedArmQualified);
     }
     [Fact]
+    public void FailedDispatchesRemainInAnnotationBasedDenominators()
+    {
+        EvaluationDispatch Failed(string id) => new(EvaluationArm.A, null, 0, [], new("A", id, "E.TestFailure"));
+        var missing = new EvaluationCaseResult("missing", [Failed("missing")])
+        {
+            Category = "missing-required-history",
+            AnnotatedMissingRequirements = ["release-certificate"]
+        };
+        var ambiguous = new EvaluationCaseResult("ambiguous", [Failed("ambiguous")])
+        {
+            Category = "ambiguous-identity"
+        };
+        var blocked = new EvaluationCaseResult("blocked", [Failed("blocked")])
+        {
+            Category = "blocked-or-unprocessed-evidence"
+        };
+
+        var arm = EvaluationScorer.Score(Run([missing, ambiguous, blocked]), null, Label).Arms[0];
+
+        Assert.Equal((0m, 1m), (arm.Metrics["gapDetectionRecall"].Numerator.Value, arm.Metrics["gapDetectionRecall"].Denominator.Value));
+        Assert.Equal((0m, 1m), (arm.Metrics["ambiguityRoutingRecall"].Numerator.Value, arm.Metrics["ambiguityRoutingRecall"].Denominator.Value));
+        Assert.Equal((0m, 1m), (arm.Metrics["blockedVsMissingCorrectness"].Numerator.Value, arm.Metrics["blockedVsMissingCorrectness"].Denominator.Value));
+    }
+    [Fact]
     public void ScoresUnsupportedCitationsAndBlockedCases()
     {
         var blocked = Case("block", "blocked-or-unprocessed-evidence", "blocked", [
