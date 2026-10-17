@@ -1,0 +1,283 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 353,
+  "branch": "ai-sdlc/issue-353",
+  "commitSha": "7f34e3258f03e213f34aba2cd60d4b2578961589",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The pin validator can accept malformed source-pin JSON when its syntax error occurs before the format marker. This is an explicitly required AC1 rejection case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 865,
+          "message": "Reject malformed pin JSON even when a syntax error precedes the format marker. The current marker scan returns false on that parse error, allowing the invalid basis to be committed.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When JSON parsing fails, ValidateSourceBasisContent calls HasSourcePinFormatMarker. If Utf8JsonReader throws before reaching the format property, the helper catches the exception and returns false, so validation returns without rejecting the content.",
+            "failureScenario": "A caller commits malformed content such as `{, \"format\":\"source-record-pins-v1\",\"pins\":[]`. The reader fails at the comma before seeing the marker; the store accepts and persists the malformed pin document, contrary to AC1."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "AC1’s malformed JSON requirement is not fully tested, and the missing case exposes a reachable validator bypass. The other acceptance criteria have corresponding tests in the diff.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceBasisPinningTests.cs",
+          "line": 153,
+          "message": "AC1’s malformed JSON case with a syntax error before the marker is missing from `MalformedSourcePinJsonIsRejectedWithoutChangingState`. Add that case and assert the commit leaves basis, audit history, and revision unchanged; the current validator accepts it.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC1 requires rejecting malformed pin JSON even when the syntax error comes before the format marker. The malformed JSON theory tests cases where the marker appears before the syntax error, but not the required syntax-error-before-marker case. In CaseStateStore.ValidateSourceBasisContent, HasSourcePinFormatMarker returns false when Utf8JsonReader throws before reaching the marker, so the validator accepts that content.",
+            "failureScenario": "A caller commits malformed pin content such as `{, \"format\":\"source-record-pins-v1\",\"pins\":[]`. The reader throws at the comma, the marker check returns false, and the basis is stored instead of rejected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The store’s malformed-pin detection can be bypassed by placing a JSON syntax error before the format marker, allowing invalid basis content to be committed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 865,
+          "message": "Malformed source-pin content can bypass integrity validation when a syntax error precedes the format marker. Reject malformed pin documents even when the marker cannot be reached. OWASP A08:2025 (Software or Data Integrity Failures).",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When parsing basis content fails, ValidateSourceBasisContent calls HasSourcePinFormatMarker. The helper returns false if Utf8JsonReader throws before reaching the format property, so the store accepts the content without validating its pins.",
+            "failureScenario": "A caller commits malformed pin content such as `{, \"format\":\"source-record-pins-v1\",\"pins\":[]`. The reader fails before reaching the marker, and the malformed basis is stored despite the requirement to reject malformed pin content."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceBasisPinningTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 195,
+      "total": 222,
+      "percent": 87.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 88,
+          "total": 109,
+          "missed": [
+            147,
+            148,
+            151,
+            152,
+            153,
+            165,
+            166,
+            169,
+            170,
+            187,
+            189,
+            190,
+            201,
+            202,
+            206,
+            207,
+            223,
+            224,
+            225,
+            226,
+            227
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "covered": 41,
+          "total": 42,
+          "missed": [
+            258
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 66,
+          "total": 71,
+          "missed": [
+            847,
+            857,
+            883,
+            885,
+            891
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
