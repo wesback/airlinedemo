@@ -144,6 +144,18 @@ public sealed class TechnicalFinanceSourceTests
         Assert.Empty(FinanceRecordValidator.Validate(FinanceRecord(kind)));
     }
 
+    [Theory]
+    [InlineData("maintenance_reserve", "rateBasis", "per_cycle")]
+    [InlineData("reserve_reimbursement", "status", "claimed")]
+    [InlineData("reserve_reimbursement", "status", "paid")]
+    public void Finance_records_accept_each_additional_enumerated_value(string kind, string field, string value)
+    {
+        var fields = FinanceFields(kind);
+        fields[field] = value;
+
+        Assert.Empty(FinanceRecordValidator.Validate(FinanceRecord(kind, fields)));
+    }
+
     [Fact]
     public void Finance_records_reject_unknown_kinds_missing_fields_bad_values_and_extra_fields()
     {
@@ -170,6 +182,17 @@ public sealed class TechnicalFinanceSourceTests
         Assert.NotEmpty(FinanceRecordValidator.Validate(FinanceRecord("rent", extra)));
         Assert.NotEmpty(FinanceRecordValidator.Validate(
             FinanceRecord("maintenance_reserve", FinanceFields("security_deposit"))));
+    }
+
+    [Fact]
+    public void Finance_records_reject_null_field_values_without_throwing()
+    {
+        var fields = FinanceFields("rent");
+        fields["recordedAmount"] = null!;
+
+        Assert.Equal(
+            new[] { "Finance amounts must be non-negative decimal strings." },
+            FinanceRecordValidator.Validate(FinanceRecord("rent", fields)));
     }
 
     [Fact]

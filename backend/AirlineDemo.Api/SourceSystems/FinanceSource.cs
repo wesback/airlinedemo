@@ -50,12 +50,12 @@ public static class FinanceRecordValidator
         {
             problems.Add("Finance amounts must be non-negative decimal strings.");
         }
-        if (fields.TryGetValue("currency", out var currency) && !CurrencyPattern.IsMatch(currency)) problems.Add("Currency must be three uppercase letters.");
+        if (fields.TryGetValue("currency", out var currency) && (currency is null || !CurrencyPattern.IsMatch(currency))) problems.Add("Currency must be three uppercase letters.");
         if (fields.TryGetValue("period", out var period)
-            && !DateOnly.TryParseExact(period + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            && (period is null || !DateOnly.TryParseExact(period + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
             problems.Add("Period must use YYYY-MM.");
         if (fields.TryGetValue("dueDate", out var dueDate)
-            && !DateOnly.TryParseExact(dueDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            && (dueDate is null || !DateOnly.TryParseExact(dueDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
             problems.Add("Due date must use YYYY-MM-DD.");
         if (record.Kind == "maintenance_reserve")
         {
@@ -74,8 +74,10 @@ public static class FinanceRecordValidator
         return problems;
     }
 
-    private static bool IsDecimal(string value) =>
-        DecimalPattern.IsMatch(value) && decimal.TryParse(value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out _);
+    private static bool IsDecimal(string? value) =>
+        value is not null
+        && DecimalPattern.IsMatch(value)
+        && decimal.TryParse(value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out _);
 }
 
 // Synthetic lease and rate source for the core case (PRD FR-002, DD-019).
