@@ -257,6 +257,81 @@ run "M-14_app_identity_grants_are_exact" {
   }
 }
 
+run "source_read_windows_app_grant_is_exact" {
+  command = plan
+
+  assert {
+    condition = output.app_sql_grant_statements == [
+      "IF DATABASE_PRINCIPAL_ID('id-airline-app') IS NULL CREATE USER [id-airline-app] FROM EXTERNAL PROVIDER;",
+      "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON SCHEMA::dbo TO [id-airline-app];",
+    ]
+    error_message = "App SQL grants must equal the exact ordered grant set, including only SELECT, INSERT and UPDATE on dbo.source_read_windows."
+  }
+
+  assert {
+    condition = alltrue([
+      for p in ["DELETE", "ALTER", "CONTROL"] :
+      !contains(output.app_sql_grant_statements, "GRANT ${p} ON OBJECT::dbo.source_read_windows TO [id-airline-app];")
+      ]) && length([
+      for s in output.app_sql_grant_statements : s
+      if startswith(s, "GRANT") && strcontains(s, "ON SCHEMA::")
+    ]) == 0
+    error_message = "The app identity must receive no DELETE, ALTER, CONTROL or schema-wide grant on source-read data."
+  }
+
+  assert {
+    condition = length([
+      for s in concat(output.app_sql_grant_statements, output.migration_sql_grant_statements) : s
+      if startswith(s, "GRANT ALTER ON SCHEMA::")
+      ]) == 2 && alltrue([
+      for s in concat(output.app_sql_grant_statements, output.migration_sql_grant_statements) :
+      !startswith(s, "GRANT ALTER ON SCHEMA::") || s == "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];" || s == "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];"
+      ]) && output.migration_sql_grant_statements == [
+      "IF DATABASE_PRINCIPAL_ID('id-airline-migration') IS NULL CREATE USER [id-airline-migration] FROM EXTERNAL PROVIDER;",
+      "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];",
+      "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];",
+    ]
+    error_message = "Only the migration identity may receive schema ALTER, and only on dbo and audit."
+  }
+}
+
+run "audit_table_remains_append_only_after_source_read_grant" {
+  command = plan
+
+  assert {
+    condition = [
+      for s in output.app_sql_grant_statements : s
+      if(startswith(s, "GRANT") || startswith(s, "DENY")) && strcontains(s, "OBJECT::audit.case_events")
+      ] == [
+      "GRANT SELECT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];",
+    ]
+    error_message = "Audit case_events grants must remain exactly SELECT and INSERT, with UPDATE, DELETE, ALTER and CONTROL denied."
+  }
+}
+
 run "M-14_evidence_scope_is_exact_container" {
   command = apply
 
@@ -290,8 +365,8 @@ run "M-14_app_role_scopes_are_exact_literals" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 9 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
-    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE on the three case tables, never the whole schema."
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 12 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
+    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE on the case tables and source-read ledger, never the whole schema."
   }
 }
 

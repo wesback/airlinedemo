@@ -48,16 +48,20 @@ resource "azurerm_role_assignment" "app_telemetry" {
 locals {
   app_sql_grants = {
     operational = ["SELECT", "INSERT", "UPDATE"]
+    source_read = ["SELECT", "INSERT", "UPDATE"]
     audit       = ["SELECT", "INSERT"]
   }
   # Case tables the app may read and write. The SQL adapter story (#179) owns the schema and keeps this list in step.
   app_case_tables = ["cases", "case_documents", "case_decisions"]
+  # Shared ledger keeps source-read limits atomic across app instances.
+  app_source_read_table = "dbo.source_read_windows"
   # The one audit table the app may append to and read. Never the whole audit schema.
   app_audit_table = "audit.case_events"
   app_sql_user    = azurerm_user_assigned_identity.app.name
   app_sql_grant_statements = concat(
     ["IF DATABASE_PRINCIPAL_ID('${local.app_sql_user}') IS NULL CREATE USER [${local.app_sql_user}] FROM EXTERNAL PROVIDER;"],
     flatten([for t in local.app_case_tables : [for p in local.app_sql_grants.operational : "GRANT ${p} ON OBJECT::dbo.${t} TO [${local.app_sql_user}];"]]),
+    [for p in local.app_sql_grants.source_read : "GRANT ${p} ON OBJECT::${local.app_source_read_table} TO [${local.app_sql_user}];"],
     [for p in local.app_sql_grants.audit : "GRANT ${p} ON OBJECT::${local.app_audit_table} TO [${local.app_sql_user}];"],
     [for p in ["UPDATE", "DELETE", "ALTER", "CONTROL"] : "DENY ${p} ON OBJECT::${local.app_audit_table} TO [${local.app_sql_user}];"],
     ["DENY ALTER ON SCHEMA::dbo TO [${local.app_sql_user}];"],
