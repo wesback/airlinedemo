@@ -25,10 +25,13 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
 
     public Task<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>> ListAsync(
         string caseId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? maxRecords = null)
     {
+        if (maxRecords is <= 0) throw new ArgumentOutOfRangeException(nameof(maxRecords));
+        var limit = maxRecords ?? int.MaxValue;
         cancellationToken.ThrowIfCancellationRequested();
-        IReadOnlyList<SourceRecord<TPayload>> scoped = _records.Where(r => r.CaseId == caseId).ToList();
+        IReadOnlyList<SourceRecord<TPayload>> scoped = _records.Where(r => r.CaseId == caseId).Take(limit).ToList();
         return Task.FromResult<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>>(
             new SourceReadSucceeded<IReadOnlyList<SourceRecord<TPayload>>>(scoped));
     }

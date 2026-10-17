@@ -7,7 +7,8 @@ public interface ISourceSystem<TPayload> where TPayload : class
 {
     Task<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>> ListAsync(
         string caseId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int? maxRecords = null);
 
     Task<SourceReadResult<SourceRecord<TPayload>>> GetAsync(
         string caseId,
