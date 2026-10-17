@@ -22,13 +22,16 @@ public sealed class EvaluationJsonExporterTests
     [Fact]
     public void WritesExactVersionedReportShape()
     {
-        var bytes = Export(Inputs());
+        var typedInputs = Inputs();
+        var bytes = Export(typedInputs);
         using var json = JsonDocument.Parse(bytes);
         var root = json.RootElement;
         AssertProperties(root, "schemaVersion", "suiteVersion", "suiteSha256", "incomplete", "stopReason",
             "selectedArmId", "selectedArmQualified", "arms", "costFigures");
         Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(2, root.GetProperty("suiteVersion").GetInt32());
+        Assert.Equal(typedInputs.Run.SuiteSha256, root.GetProperty("suiteSha256").GetString());
+        Assert.Equal(typedInputs.Scoring.SuiteSha256, root.GetProperty("suiteSha256").GetString());
         Assert.Equal(new[] { "A", "B", "C", "D" },
             root.GetProperty("arms").EnumerateArray().Select(arm => arm.GetProperty("armId").GetString()));
         Assert.Equal(new[]
@@ -44,6 +47,20 @@ public sealed class EvaluationJsonExporterTests
         Assert.All(root.GetProperty("costFigures").EnumerateArray(), figure =>
             AssertProperties(figure, "name", "value", "unit", "evidenceLabel"));
         Assert.Equal(9, root.GetProperty("costFigures").GetArrayLength());
+        Assert.Equal(new Dictionary<string, decimal>
+        {
+            ["A.costPerCompletedCaseEur"] = 11m,
+            ["A.costPerProcessedPageEur"] = 1m,
+            ["B.costPerCompletedCaseEur"] = 12m,
+            ["B.costPerProcessedPageEur"] = 2m,
+            ["C.costPerCompletedCaseEur"] = 13m,
+            ["C.costPerProcessedPageEur"] = 3m,
+            ["D.costPerCompletedCaseEur"] = 14m,
+            ["D.costPerProcessedPageEur"] = 4m,
+            ["breakEvenDaysPerTransition"] = 99m
+        }, root.GetProperty("costFigures").EnumerateArray().ToDictionary(
+            figure => figure.GetProperty("name").GetString()!,
+            figure => figure.GetProperty("value").GetDecimal()));
         var firstMetric = root.GetProperty("arms")[0].GetProperty("metrics")[0];
         Assert.Equal(JsonValueKind.Null, firstMetric.GetProperty("value").ValueKind);
         Assert.Equal(1, firstMetric.GetProperty("eligibleCount").GetInt32());
@@ -301,9 +318,20 @@ public sealed class EvaluationJsonExporterTests
         var scoring = new EvaluationScoringReport(run.SuiteSha256, scores,
             incomplete ? new("C", stopCaseId, new(10, null, label!), new(20, null, label!)) : null, "A", qualified);
         var costs = new EvaluationCostReport(
-            Enum.GetValues<EvaluationArm>().Reverse().Select(arm => new EvaluationArmCostReport(arm == EvaluationArm.A ? costArm : arm.ToString(),
-                new(1m, null, label!), new(2m, null, label!))).ToArray(),
-            new(3m, null, "derived"));
+            Enum.GetValues<EvaluationArm>().Reverse().Select(arm =>
+            {
+                var amount = arm switch
+                {
+                    EvaluationArm.A => 1m,
+                    EvaluationArm.B => 2m,
+                    EvaluationArm.C => 3m,
+                    EvaluationArm.D => 4m,
+                    _ => throw new ArgumentOutOfRangeException(nameof(arm))
+                };
+                return new EvaluationArmCostReport(arm == EvaluationArm.A ? costArm : arm.ToString(),
+                    new(amount, null, label!), new(amount + 10m, null, label!));
+            }).ToArray(),
+            new(99m, null, "derived"));
         return (run, scoring, costs);
     }
 }
