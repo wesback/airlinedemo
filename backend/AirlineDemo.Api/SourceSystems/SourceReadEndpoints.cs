@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace AirlineDemo.Api.SourceSystems;
 public static class SourceReadEndpoints
 {
+    private const int MaxListReadRecords = 101;
     private sealed record ReadOutcome(object? Value, int Count, string? ErrorCode);
     public static IEndpointRouteBuilder MapSourceReadEndpoints(this IEndpointRouteBuilder app)
     {
@@ -101,7 +102,7 @@ public static class SourceReadEndpoints
         };
     private static async Task<ReadOutcome> List<T>(ISourceSystem<T> source, string caseId, CancellationToken cancellationToken) where T : class
     {
-        var result = await source.ListAsync(caseId, cancellationToken);
+        var result = await source.ListAsync(caseId, cancellationToken, MaxListReadRecords);
         return result switch
         {
             SourceReadSucceeded<IReadOnlyList<SourceRecord<T>>> success =>

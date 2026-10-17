@@ -31,16 +31,20 @@ public sealed class SourceReadBoundsTests
     {
         public IReadOnlyList<SourceRecord<T>> Records { get; set; } = records;
         public int Calls;
+        public int? MaxListRecordsRequested { get; private set; }
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public SourceReadResult<IReadOnlyList<SourceRecord<T>>>? ListResult { get; set; }
         public SourceReadResult<SourceRecord<T>>? GetResult { get; set; }
-        public async Task<SourceReadResult<IReadOnlyList<SourceRecord<T>>>> ListAsync(string caseId, CancellationToken cancellationToken = default)
+        public async Task<SourceReadResult<IReadOnlyList<SourceRecord<T>>>> ListAsync(
+            string caseId, CancellationToken cancellationToken = default, int? maxRecords = null)
         {
+            MaxListRecordsRequested = maxRecords;
             Interlocked.Increment(ref Calls);
             Started.TrySetResult();
             if (wait is not null) await wait.WaitAsync(cancellationToken);
             return ListResult ?? new SourceReadSucceeded<IReadOnlyList<SourceRecord<T>>>(
-                Records.Where(record => string.Equals(record.CaseId, caseId, StringComparison.Ordinal)).ToArray());
+                Records.Where(record => string.Equals(record.CaseId, caseId, StringComparison.Ordinal))
+                    .Take(maxRecords ?? int.MaxValue).ToArray());
         }
         public async Task<SourceReadResult<SourceRecord<T>>> GetAsync(string caseId, string recordId, CancellationToken cancellationToken = default)
         {
@@ -197,6 +201,7 @@ public sealed class SourceReadBoundsTests
         var session = Session(factory);
         using var ok = await Get(client, session, $"/api/v1/cases/{Case}/sources/technical/records");
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        Assert.Equal(101, source.MaxListRecordsRequested);
         using var body = JsonDocument.Parse(await ok.Content.ReadAsStringAsync());
         Assert.Equal(new[] { "contractVersion", "caseId", "sourceId", "records" }, body.RootElement.EnumerateObject().Select(x => x.Name));
         Assert.Equal(100, body.RootElement.GetProperty("records").GetArrayLength());
@@ -213,6 +218,9 @@ public sealed class SourceReadBoundsTests
         using var tooMany = await Get(client, session, $"/api/v1/cases/{Case}/sources/technical/records");
         Assert.Equal(HttpStatusCode.UnprocessableEntity, tooMany.StatusCode);
         Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"source_record_limit\"}}", await tooMany.Content.ReadAsStringAsync());
+        Assert.Equal(101, source.MaxListRecordsRequested);
+        using var tooManyBody = JsonDocument.Parse(await tooMany.Content.ReadAsStringAsync());
+        Assert.Equal(new[] { "contractVersion", "error" }, tooManyBody.RootElement.EnumerateObject().Select(x => x.Name));
     }
     [Fact]
     public async Task AuthenticationRoleScopeAndRequestBudgetAreEnforcedBeforeSourceCalls()
@@ -336,6 +344,30 @@ public sealed class SourceReadBoundsTests
         Assert.False(await first.ReleaseAsync(admitted[0], Now));
         Assert.Equal(1, store.ActiveCount("race-case", Now));
         Assert.Equal(0, store.ActiveCount("race-case", Now.AddSeconds(1)));
+    }
+
+    [Fact]
+    public async Task ConcurrentReleaseRaceReleasesOnlyTheMatchingActiveLease()
+    {
+        var store = new InMemorySourceReadAdmissionStore();
+        var budget = new SourceReadBudget(store);
+        var firstLease = await budget.TryAcquireAsync("first-session", "shared-case", Now);
+        var otherLease = await budget.TryAcquireAsync("second-session", "shared-case", Now);
+        Assert.NotNull(firstLease);
+        Assert.NotNull(otherLease);
+        Assert.NotEqual(firstLease, otherLease);
+        Assert.Equal(2, store.ActiveCount("shared-case", Now));
+
+        var releases = await Task.WhenAll(
+            budget.ReleaseAsync(firstLease.Value, Now),
+            budget.ReleaseAsync(firstLease.Value, Now));
+
+        Assert.Equal(1, releases.Count(released => released));
+        Assert.Equal(1, releases.Count(released => !released));
+        Assert.False(await budget.ReleaseAsync(firstLease.Value, Now));
+        Assert.Equal(1, store.ActiveCount("shared-case", Now));
+        Assert.True(await budget.ReleaseAsync(otherLease.Value, Now));
+        Assert.Equal(0, store.ActiveCount("shared-case", Now));
     }
 
     [Fact]
@@ -546,7 +578,21 @@ public sealed class SourceReadBoundsTests
             Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"source_read_limit\"}}", await rejected.Content.ReadAsStringAsync());
         }
 
-        using var independentSession = await Get(firstClient, technicalSession, $"/api/v1/cases/{Case}/sources/technical/records");
+        var technicalSources = roleSources["technical-reviewer"];
+        for (var request = 0; request < SourceReadBudget.MaxRequests; request++)
+        {
+            var client = request % 2 == 0 ? firstClient : secondClient;
+            var source = technicalSources[request % technicalSources.Length];
+            using var response = await Get(client, technicalSession, $"/api/v1/cases/{Case}/sources/{source}/records");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        using var exhausted = await Get(firstClient, technicalSession,
+            $"/api/v1/cases/{Case}/sources/{technicalSources[0]}/records");
+        Assert.Equal(HttpStatusCode.TooManyRequests, exhausted.StatusCode);
+        Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"source_read_limit\"}}", await exhausted.Content.ReadAsStringAsync());
+
+        var secondSession = Session(firstFactory, "technical-reviewer", [Case, OtherCase]);
+        using var independentSession = await Get(firstClient, secondSession, $"/api/v1/cases/{Case}/sources/technical/records");
         Assert.Equal(HttpStatusCode.OK, independentSession.StatusCode);
         using var independentCase = await Get(secondClient, technicalSession, $"/api/v1/cases/{OtherCase}/sources/technical/records");
         Assert.Equal(HttpStatusCode.OK, independentCase.StatusCode);
