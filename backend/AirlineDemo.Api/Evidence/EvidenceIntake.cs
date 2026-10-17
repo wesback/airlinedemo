@@ -101,7 +101,10 @@ public static class EvidenceIntake
 {
     public const string SourceBasisFormat = "source-record-pins-v1";
 
-    private static readonly JsonSerializerOptions SourceRecordJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SourceRecordJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DictionaryKeyPolicy = null,
+    };
 
     public const int MaxDocuments = 12;
     public const long MaxDocumentBytes = 10L * 1024 * 1024;

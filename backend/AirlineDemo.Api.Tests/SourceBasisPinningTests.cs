@@ -105,7 +105,7 @@ public sealed class SourceBasisPinningTests
                 Assert.Equal(pin.Content, storedPin.GetProperty("content").GetString());
             }
             Assert.Equal(
-                "{\"asOf\":\"2026-10-01\",\"caseId\":\"source-pin-case\",\"kind\":\"component\",\"payload\":{\"fields\":{\"component\":\"engine\",\"serialNumber\":\"engine-serial-123\"}},\"recordId\":\"engine-record-1\",\"recordVersion\":1,\"sourceId\":\"technical\",\"stale\":false,\"synthetic\":true}",
+                "{\"asOf\":\"2026-10-01\",\"caseId\":\"source-pin-case\",\"kind\":\"component\",\"payload\":{\"fields\":{\"SerialNumber\":\"exact-case-key\",\"component\":\"engine\",\"serialNumber\":\"engine-serial-123\"}},\"recordId\":\"engine-record-1\",\"recordVersion\":1,\"sourceId\":\"technical\",\"stale\":false,\"synthetic\":true}",
                 pin.Content);
             Assert.Throws<ArgumentException>(() => EvidenceIntake.CreateSourceBasis([]));
             var emptyStore = new CaseStateStore(emptyPath);
@@ -121,6 +121,28 @@ public sealed class SourceBasisPinningTests
         {
             DeleteState(path);
             DeleteState(emptyPath);
+        }
+    }
+
+    [Fact]
+    public void BasisContainingFormatNameAsOrdinaryTextIsNotParsedAsPins()
+    {
+        var path = StatePath();
+        try
+        {
+            var store = new CaseStateStore(path);
+            var scope = store.CreateCase(CaseId, "presenter");
+            const string ordinaryEvidence = "This evidence discusses source-record-pins-v1 but is not a pin document.";
+            var basis = CaseStateStore.CreateBasisVersion(1, ordinaryEvidence, string.Empty);
+
+            store.Commit(scope, 0, new CaseCommit(basis, null, "presenter", "submit-evidence", "ordinary evidence"));
+
+            var stored = Assert.Single(store.Read(scope).Basis);
+            Assert.Equal(ordinaryEvidence, stored.Content);
+        }
+        finally
+        {
+            DeleteState(path);
         }
     }
 
@@ -228,6 +250,7 @@ public sealed class SourceBasisPinningTests
             Stale = false,
             Payload = new TechnicalPayload(new Dictionary<string, string>
             {
+                ["SerialNumber"] = "exact-case-key",
                 ["serialNumber"] = serialNumber,
                 ["component"] = "engine",
             }),

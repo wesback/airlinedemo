@@ -815,15 +815,14 @@ public sealed class CaseStateStore : ICaseStateStore
     private static void ValidateSourceBasisContent(string content)
     {
         const string formatName = "source-record-pins-v1";
-        if (!content.Contains(formatName, StringComparison.Ordinal)) return;
         JsonDocument document;
         try
         {
             document = JsonDocument.Parse(content);
         }
-        catch (JsonException exception)
+        catch (JsonException)
         {
-            throw new BasisIntegrityException($"Source basis content is invalid: {exception.Message}");
+            return;
         }
         using (document)
         {
