@@ -1,0 +1,300 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 352,
+  "branch": "ai-sdlc/issue-352",
+  "commitSha": "45fb9d59e9bacb2831eaf2f1d28c5a3ddb2eda70",
+  "round": 1,
+  "pipelineVersion": "79c540d",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added SQL race, cross-host budget, and role-matrix tests address the prior test findings. The duplicate-release race remains unproven, and the previously raised resource exhaustion risk remains in the endpoint.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceReadBoundsTests.cs",
+          "line": 592,
+          "message": "AC 3's duplicate-release race is not tested: race two releases of an active lease and assert exactly one succeeds while the other lease remains active.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "ConcurrentRequestsHoldCaseLeasesAndTimeoutReleasesOnlyItsOwnLease waits for the timeout path to release firstLease, then calls ReleaseAsync twice and expects both calls to return false.",
+            "failureScenario": "If concurrent duplicate releases both succeed for an active lease, this test still passes because both calls happen after the lease is already released. The test does not prove the acceptance criterion that a duplicate release race releases the matching lease once and never releases the other lease."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs",
+          "line": 59,
+          "message": "The 100-record limit is checked after the source has materialized its full list, so an authorized request can still trigger unbounded allocation (OWASP A06:2025).",
+          "confidence": 0.82,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Read awaits ListSource before checking outcome.Count; List<T> calls the source's ListAsync, which returns a fully materialized IReadOnlyList.",
+            "failureScenario": "An authorized request to a case with a very large source list can allocate the entire list before the 100-record check returns 422, allowing memory exhaustion through one request (OWASP A06:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The HTTP budget test still does not prove the exact rolling-window boundary or independent budgets after exhaustion. The list endpoint also materializes an unbounded source result before enforcing its response limit (OWASP A06:2025).",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceReadBoundsTests.cs",
+          "line": 549,
+          "message": "AC 2's exact 60-second boundary and exhausted-budget independence cases remain unproven. Fill the session's case budget before advancing exactly 60 seconds, and verify another case and session remain independently admitted.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "HttpBudgetIsSharedAcrossAuthorizedSourcesAndHosts advances the clock after technicalSession has made only one request for the case. The per-role 20-request loops use different sessions.",
+            "failureScenario": "If the rolling-window check retains a request exactly 60 seconds old, the boundary assertion still passes because technicalSession is far below its 20-request limit. The test also does not show that another case gets an independent budget when the session's first case budget is exhausted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs",
+          "line": 104,
+          "message": "The 100-record response limit is applied after the full source list is materialized. Enforce a bounded read before materialization so a large source cannot exhaust memory.",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The list route awaits ListAsync, which returns a materialized IReadOnlyList; only after it returns does Read check whether the count exceeds 100.",
+            "failureScenario": "An authorized request for a case with an extremely large source list materializes the entire list before returning the 422 limit response, allowing one request to consume excessive server memory (OWASP A06:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous resource-exhaustion finding remains: the response cap does not bound the source read or its allocation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs",
+          "line": 59,
+          "message": "The 100-record limit is checked after the source has materialized its full list, so an authorized request can still cause unbounded allocation.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The list route calls ListSource, which awaits ListAsync and receives a fully materialized list; only afterward does this line check whether its count exceeds 100.",
+            "failureScenario": "An authenticated user authorized for a case with a very large source list can make one request that materializes the entire list before receiving the record-limit error, potentially exhausting server memory. This is OWASP A06:2025, Insecure Design."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceReadBoundsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 237,
+      "total": 245,
+      "percent": 96.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261017120000_SourceReadWindows.cs",
+          "covered": 21,
+          "total": 22,
+          "missed": [
+            32
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceReadAdmissionStore.cs",
+          "covered": 103,
+          "total": 108,
+          "missed": [
+            32,
+            33,
+            34,
+            35,
+            36
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceReadBudget.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs",
+          "covered": 96,
+          "total": 98,
+          "missed": [
+            89,
+            100
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
