@@ -59,6 +59,20 @@ public sealed class EvaluationFixtureModelGateTests
         gate.AuthorizePageText(id, page);
         Assert.Throws<EvaluationFixtureAuthorizationException>(() => gate.AuthorizePageText(id, page + " changed"));
 
+        var verifiedCase = Case();
+        using var verifiedRow = JsonDocument.Parse(verifiedCase.Content);
+        var inputsJson = verifiedRow.RootElement.GetProperty("inputs").GetRawText();
+        var inputsSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(inputsJson))).ToLowerInvariant();
+        var verifiedInputs = gate.AuthorizeInputs(id, 2, inputsJson, inputsSha256);
+        Assert.Equal(inputsJson, verifiedInputs.InputsJson);
+        var pageTextClient = new RequestSpy();
+        await Assert.ThrowsAsync<EvaluationFixtureAuthorizationException>(async () =>
+        {
+            gate.AuthorizePageText(id, page + " changed");
+            await pageTextClient.GetResponseAsync([new ChatMessage(ChatRole.User, inputsJson)]);
+        });
+        Assert.Equal(0, pageTextClient.Requests);
+
         var client = new RequestSpy();
         var adapter = new FourArmModelAdapters(gate, _ => client);
         var changedPageCase = Case(Case().Content.Replace("\"pageText\":\"", "\"pageText\":\"changed ", StringComparison.Ordinal));
