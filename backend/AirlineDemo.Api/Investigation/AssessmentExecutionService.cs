@@ -37,7 +37,8 @@ public sealed record AssessmentRecord(
     string Reason,
     IReadOnlyList<AssessedClaim> Claims,
     string? RequestId,
-    string? WorkItemId);
+    string? WorkItemId,
+    string? AssessmentId = null);
 
 /// <summary>
 /// Validates typed claims against the current basis and applies the deterministic policy. A single supported
@@ -62,6 +63,7 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
         ArgumentNullException.ThrowIfNull(basis);
         ArgumentNullException.ThrowIfNull(claims);
 
+        var expectedRevision = store.Read(scope).Revision;
         var current = assessments.CurrentBasis(scope.CaseId);
         var isCurrent = current is not null && current.BasisId == basis.BasisId && current.BasisVersion == basis.BasisVersion;
         // Evidence, coverage and identity come only from the stored accepted basis; the supplied basis is matched by identity.
@@ -84,6 +86,12 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
             : (Review, "supplied basis is not the current accepted basis");
         string? requestId = null;
         string? workItemId = null;
+        var assessmentId = outcome == Request
+            ? $"assessment-delivery-{current!.BasisVersion}"
+            : $"assessment-{Guid.NewGuid():N}";
+        var record = new AssessmentRecord(
+            scope.CaseId, basis.BasisId, basis.BasisVersion, outcome, reason, assessed, requestId, workItemId, assessmentId);
+        var assessmentCommitted = false;
 
         if (outcome == Request)
         {
@@ -103,7 +111,34 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
             DeliveryResult? delivery = null;
             // The basis check and the submission share one lock, so a superseding basis cannot land between them.
             var submitted = assessments.RunIfCurrent(scope.CaseId, active, () =>
-                delivery = inbox.Submit(envelope, finding, active.ScenarioTime));
+            {
+                delivery = inbox.Prepare(envelope, finding, active.ScenarioTime);
+                if (delivery.Outcome == DeliveryOutcome.Delivered && delivery.Receipt is { } receipt)
+                {
+                    requestId = receipt.RequestId;
+                    record = record with { RequestId = requestId };
+                    var committed = store.Commit(scope, expectedRevision, new CaseCommit(
+                        null,
+                        receipt.EventId,
+                        Actor,
+                        "assessment-delivered",
+                        $"assessment {assessmentId} delivered request {receipt.RequestId} on basis {receipt.BasisId} v{receipt.BasisVersion}",
+                        Assessment: ToCaseAssessment(record),
+                        RequestReceipt: receipt));
+                    if (committed.Replayed)
+                    {
+                        var existing = store.ListAssessments(scope).FirstOrDefault(item => item.RequestId == receipt.RequestId);
+                        if (existing is null)
+                            throw new InvalidOperationException("Delivered request has no persisted assessment.");
+                        record = ToAssessmentRecord(existing);
+                    }
+                    else
+                    {
+                        inbox.RecordPrepared(envelope, receipt);
+                        assessmentCommitted = true;
+                    }
+                }
+            });
             if (!submitted)
             {
                 outcome = Review;
@@ -112,6 +147,33 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
             else if (delivery!.Outcome == DeliveryOutcome.Delivered && delivery.Receipt is not null)
             {
                 requestId = delivery.Receipt.RequestId;
+                if (!assessmentCommitted)
+                {
+                    var existing = store.ListAssessments(scope)
+                        .FirstOrDefault(item => item.RequestId == requestId);
+                    if (existing is null)
+                    {
+                        throw new InvalidOperationException("Delivered request has no persisted assessment.");
+                    }
+
+                    record = ToAssessmentRecord(existing);
+                    assessments.Append(record);
+                    return record;
+                }
+            }
+            else if (delivery.Outcome == DeliveryOutcome.Replayed && delivery.Receipt is not null)
+            {
+                var existing = store.ListAssessments(scope)
+                    .FirstOrDefault(item => item.RequestId == delivery.Receipt.RequestId);
+                if (existing is not null)
+                {
+                    record = ToAssessmentRecord(existing);
+                    if (!assessments.HasPersistentHistory) assessments.Append(record);
+                    return record;
+                }
+
+                outcome = Review;
+                reason = "inbox replay has no persisted assessment";
             }
             else
             {
@@ -124,18 +186,54 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
         if (outcome == Review)
         {
             workItemId = $"assessment-{Guid.NewGuid():N}";
-            store.CreateWorkItem(
+            var workItemCommit = store.CreateWorkItem(
                 scope,
-                store.Read(scope).Revision,
+                expectedRevision,
                 new WorkItemDraft(workItemId, ReviewCapability, "open", ReviewOwner),
                 Actor);
+            record = record with { Outcome = outcome, Reason = reason, WorkItemId = workItemId };
+            expectedRevision = workItemCommit.State.Revision;
         }
 
-        var record = new AssessmentRecord(
-            scope.CaseId, basis.BasisId, basis.BasisVersion, outcome, reason, assessed, requestId, workItemId);
-        assessments.Append(record);
+        if (!assessmentCommitted)
+        {
+            record = record with { Outcome = outcome, Reason = reason, RequestId = requestId, WorkItemId = workItemId };
+            store.Commit(scope, expectedRevision, new CaseCommit(
+                null,
+                null,
+                Actor,
+                "assessment",
+                $"assessment {assessmentId} recorded with outcome {outcome} on basis {basis.BasisId} v{basis.BasisVersion}",
+                Assessment: ToCaseAssessment(record)));
+        }
+
+        if (!assessments.HasPersistentHistory) assessments.Append(record);
         return record;
     }
+
+    private static CaseAssessment ToCaseAssessment(AssessmentRecord record) =>
+        new(
+            record.AssessmentId!,
+            record.CaseId,
+            record.BasisId,
+            record.BasisVersion,
+            record.Outcome,
+            record.Reason,
+            record.Claims,
+            record.RequestId,
+            record.WorkItemId);
+
+    private static AssessmentRecord ToAssessmentRecord(CaseAssessment assessment) =>
+        new(
+            assessment.CaseId,
+            assessment.BasisId,
+            assessment.BasisVersion,
+            assessment.Outcome,
+            assessment.Reason,
+            assessment.Claims,
+            assessment.RequestId,
+            assessment.WorkItemId,
+            assessment.AssessmentId);
 
     private static (string Outcome, string Reason) Route(AssessmentBasis basis, IReadOnlyList<ValidatedClaim> validated)
     {

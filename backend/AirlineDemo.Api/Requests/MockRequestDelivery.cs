@@ -145,8 +145,8 @@ public sealed record DeliveryReceipt(
 public sealed record DeliveryResult(DeliveryOutcome Outcome, int HttpStatus, string Reason, DeliveryReceipt? Receipt);
 
 /// <summary>
-/// Internal mock inbox. It holds state only in memory and has no network dependency, so no path contacts an external
-/// party. Each submission is decided and committed under one lock. A failure before commit leaves no partial state.
+/// Internal mock inbox. It has no network dependency, so no path contacts an external party. Assessments persist
+/// receipts before recording them here; this in-memory state supports replay checks within the current process.
 /// </summary>
 public sealed class MockRequestInbox
 {
@@ -170,6 +170,40 @@ public sealed class MockRequestInbox
     }
 
     public DeliveryResult Submit(DeliveryEnvelope envelope, DeliveryFinding finding, string expectedScenarioTime)
+        => Evaluate(envelope, finding, expectedScenarioTime, record: true);
+
+    public DeliveryResult Prepare(
+        DeliveryEnvelope envelope,
+        DeliveryFinding finding,
+        string expectedScenarioTime)
+        => Evaluate(envelope, finding, expectedScenarioTime, record: false);
+
+    public void RecordPrepared(DeliveryEnvelope envelope, DeliveryReceipt receipt)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(receipt);
+        lock (_gate)
+        {
+            var fingerprint = Fingerprint(envelope);
+            if (_byEvent.TryGetValue(envelope.EventId, out var existing))
+            {
+                if (existing.Fingerprint != fingerprint)
+                    throw new InvalidOperationException("Prepared delivery conflicts with an existing event.");
+                return;
+            }
+
+            if (_reportEvent.ContainsKey((envelope.CaseId, envelope.ReportId)))
+                throw new InvalidOperationException("Prepared delivery conflicts with an existing report.");
+
+            RecordLocked(envelope, receipt, fingerprint);
+        }
+    }
+
+    private DeliveryResult Evaluate(
+        DeliveryEnvelope envelope,
+        DeliveryFinding finding,
+        string expectedScenarioTime,
+        bool record)
     {
         ArgumentNullException.ThrowIfNull(envelope);
         ArgumentNullException.ThrowIfNull(finding);
@@ -222,12 +256,17 @@ public sealed class MockRequestInbox
                 throw new InvalidOperationException("injected write failure");
             }
 
-            _byEvent[envelope.EventId] = (fingerprint, receipt);
-            _reportEvent[(envelope.CaseId, envelope.ReportId)] = envelope.EventId;
-            _requests.Add(receipt);
-            _audit.Add($"delivered {requestId} for event {envelope.EventId} on basis {envelope.BasisId} v{envelope.BasisVersion}");
+            if (record) RecordLocked(envelope, receipt, fingerprint);
             return new DeliveryResult(DeliveryOutcome.Delivered, 201, "delivered", receipt);
         }
+    }
+
+    private void RecordLocked(DeliveryEnvelope envelope, DeliveryReceipt receipt, string fingerprint)
+    {
+        _byEvent[envelope.EventId] = (fingerprint, receipt);
+        _reportEvent[(envelope.CaseId, envelope.ReportId)] = envelope.EventId;
+        _requests.Add(receipt);
+        _audit.Add($"delivered {receipt.RequestId} for event {envelope.EventId} on basis {envelope.BasisId} v{envelope.BasisVersion}");
     }
 
     private static string RequestIdFor(DeliveryEnvelope envelope) =>

@@ -1,11 +1,17 @@
+using AirlineDemo.Api.Persistence;
+
 namespace AirlineDemo.Api.Investigation;
 
-/// <summary>Retains assessment records per case. Records are append-only and returned as copies.</summary>
+/// <summary>Stores current basis snapshots and supplemental records; committed assessment history is read from the case store.</summary>
 public sealed class AssessmentStore
 {
     private readonly object _gate = new();
-    private readonly Dictionary<string, List<AssessmentRecord>> _byCase = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<AssessmentRecord>> _supplementalByCase = new(StringComparer.Ordinal);
     private readonly Dictionary<string, AssessmentBasis> _currentByCase = new(StringComparer.Ordinal);
+    private readonly ICaseStateStore? _caseStates;
+
+    public AssessmentStore(ICaseStateStore? caseStates = null) => _caseStates = caseStates;
+    internal bool HasPersistentHistory => _caseStates is not null;
 
     /// <summary>
     /// Records the case's current accepted evidence basis. An assessment against any other basis is not current.
@@ -65,10 +71,10 @@ public sealed class AssessmentStore
         ArgumentNullException.ThrowIfNull(record);
         lock (_gate)
         {
-            if (!_byCase.TryGetValue(record.CaseId, out var records))
+            if (!_supplementalByCase.TryGetValue(record.CaseId, out var records))
             {
                 records = [];
-                _byCase[record.CaseId] = records;
+                _supplementalByCase[record.CaseId] = records;
             }
 
             records.Add(record);
@@ -77,9 +83,34 @@ public sealed class AssessmentStore
 
     public IReadOnlyList<AssessmentRecord> List(string caseId)
     {
+        if (_caseStates is not null)
+        {
+            var owner = _caseStates.OwnerOf(caseId);
+            if (owner is null) return Array.Empty<AssessmentRecord>();
+            var scope = _caseStates.AuthorizeCase(caseId, owner);
+            var persisted = _caseStates.ListAssessments(scope).Select(ToAssessmentRecord).ToList();
+            lock (_gate)
+            {
+                if (_supplementalByCase.TryGetValue(caseId, out var supplemental)) persisted.AddRange(supplemental);
+            }
+            return persisted;
+        }
+
         lock (_gate)
         {
-            return _byCase.TryGetValue(caseId, out var records) ? records.ToArray() : Array.Empty<AssessmentRecord>();
+            return _supplementalByCase.TryGetValue(caseId, out var records) ? records.ToArray() : Array.Empty<AssessmentRecord>();
         }
     }
+
+    private static AssessmentRecord ToAssessmentRecord(CaseAssessment assessment) =>
+        new(
+            assessment.CaseId,
+            assessment.BasisId,
+            assessment.BasisVersion,
+            assessment.Outcome,
+            assessment.Reason,
+            assessment.Claims,
+            assessment.RequestId,
+            assessment.WorkItemId,
+            assessment.AssessmentId);
 }
