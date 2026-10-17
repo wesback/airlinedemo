@@ -28,9 +28,12 @@ public sealed class SqlSourceReadAdmissionStore(DbContextOptions<CaseStateDbCont
         var now = requestedAt.UtcDateTime.Ticks;
         await using var db = new CaseStateDbContext(options);
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT [LeaseId] FROM [dbo].[source_read_windows] WITH (UPDLOCK, HOLDLOCK, ROWLOCK) WHERE [LeaseId] = {Guid.Empty}",
-            cancellationToken);
+        if (!string.Equals(db.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT [LeaseId] FROM [dbo].[source_read_windows] WITH (UPDLOCK, HOLDLOCK, ROWLOCK) WHERE [LeaseId] = {Guid.Empty}",
+                cancellationToken);
+        }
         var caseHash = Hash(caseId);
         var sessionHash = Hash(sessionId);
         var rows = db.SourceReadWindows.Where(row => row.CaseHash == caseHash);
