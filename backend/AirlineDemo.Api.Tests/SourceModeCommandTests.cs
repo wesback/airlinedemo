@@ -549,6 +549,7 @@ public sealed class SourceModeCommandTests
             Assert.DoesNotContain(afterRace.Audit, a => a.Action == SourceModes.Action && a.Detail.Contains("m03-race", StringComparison.Ordinal));
 
             var caseBoundCommandId = "m03-case-bound";
+            var caseBoundExpectedRevision = afterRace.Revision + 1;
             var mismatchedCaseDetail = JsonSerializer.Serialize(new
             {
                 commandId = caseBoundCommandId,
@@ -556,15 +557,16 @@ public sealed class SourceModeCommandTests
                 sourceId = "technical",
                 priorMode = "available",
                 newMode = "unavailable",
-                priorRevision = afterRace.Revision,
-                newRevision = afterRace.Revision + 1,
+                priorRevision = caseBoundExpectedRevision,
+                newRevision = caseBoundExpectedRevision + 1,
             });
             // Seed a different persisted case identity to verify it cannot replay this command.
             cases.Commit(scope, afterRace.Revision, new CaseCommit(null, SourceModes.ReceiptPrefix + caseBoundCommandId,
                 Presenter.Id, SourceModes.Action, mismatchedCaseDetail, Now));
             var beforeCaseMismatch = cases.Read(scope);
+            Assert.Equal(caseBoundExpectedRevision, beforeCaseMismatch.Revision);
             using (var otherCase = await PostModeAsync(client, presenter, "technical",
-                new { commandId = caseBoundCommandId, expectedRevision = beforeCaseMismatch.Revision, mode = "unavailable" },
+                new { commandId = caseBoundCommandId, expectedRevision = caseBoundExpectedRevision, mode = "unavailable" },
                 presenter.CsrfToken))
                 await AssertErrorAsync(otherCase, HttpStatusCode.Conflict, "command_id_conflict",
                     "This command ID was already used for a different command.");
