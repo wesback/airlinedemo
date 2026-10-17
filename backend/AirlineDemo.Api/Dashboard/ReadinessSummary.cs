@@ -15,9 +15,9 @@ public static class ReadinessSummaryProjection
 
     public static ReadinessSummary Build(CaseState state, IReadOnlyList<EvidencePackageRecord> packages)
     {
-        var gaps = (state.Assessments ?? []).Count(assessment =>
-            assessment.Outcome == "Request" &&
-            assessment.Claims.Count(claim => claim.Kind == "MissingRequirement") == 1);
+        var gaps = (state.Assessments ?? [])
+            .Where(assessment => assessment.Outcome == "Request")
+            .Sum(assessment => assessment.Claims.Count(claim => claim.Kind == "MissingRequirement"));
         var requests = state.RequestReceipts?.Count ?? 0;
         var held = (state.WorkItems ?? []).Count(item =>
             item.State == "open" && item.Owner == CaseEndpoints.ReviewerRole);
