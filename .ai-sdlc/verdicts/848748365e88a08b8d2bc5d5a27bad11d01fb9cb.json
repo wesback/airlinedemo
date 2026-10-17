@@ -1,0 +1,316 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 353,
+  "branch": "ai-sdlc/issue-353",
+  "commitSha": "848748365e88a08b8d2bc5d5a27bad11d01fb9cb",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The store’s pin validation is not fully scoped to gathered-basis commits, so marked ordinary evidence can be rejected. It also accepts gathered pins whose payload lacks the source record’s fields.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 820,
+          "message": "Apply pin-document validation based on the commit action. The marker scan rejects malformed ordinary evidence even though the criterion requires submit-evidence commits to preserve it.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Commit calls ValidateSourceBasisContent for every basis, including submit-evidence commits. When JSON parsing fails, the validator scans the text and rejects it if it finds the pin format marker and a pins property.",
+            "failureScenario": "A presenter submits ordinary evidence containing malformed JSON text with the source pin format marker and a pins property. The commit action is submit-evidence, but the scan identifies the text as a pin document and throws BasisIntegrityException instead of preserving the evidence content."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 859,
+          "message": "Validate the payload shape as part of the complete source-record envelope. A payload object without its fields object currently passes gathered-basis validation.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "For a gathered pin, ValidateSourceBasisContent checks that the envelope's payload is an object but does not validate the required fields object inside the payload.",
+            "failureScenario": "A caller commits a source-basis.gathered document with a valid tuple and digest but an envelope containing `\"payload\": {}`. The validator accepts and stores it although the pin does not contain the source payload fields needed to reproduce the source record."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "AC1 has two uncovered validation gaps: ordinary malformed evidence can be rejected by the marker scan, and gathered pins can contain incomplete payload envelopes. Both scenarios are reachable through CaseStateStore.Commit.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 822,
+          "message": "The parse-error path can reject ordinary evidence based on pin-like text. Apply pin-document validation based on the commit action, as AC1 requires, and cover malformed marker text in an ordinary submit-evidence test.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When JSON parsing fails, ValidateSourceBasisContent calls HasSourcePinFormatMarker even for commits that do not require a pin document. The helper recognizes root-level format and pins properties.",
+            "failureScenario": "A presenter submits ordinary evidence containing malformed text such as {\"format\":\"source-record-pins-v1\",\"pins\":[. Parsing fails, the marker helper matches, and the submit-evidence commit is rejected with BasisIntegrityException. This also leaves AC1's required ordinary-evidence malformed-text case untested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 849,
+          "message": "The validator accepts incomplete source-record envelopes because it checks only that payload is an object. Require the payload fields object produced by source-record serialization, and test rejection of an envelope missing it.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The pin validator checks that the envelope's payload is an object, but does not require its fields object. GatherSourceBasisAsync serializes payloads with a fields property.",
+            "failureScenario": "A source-basis.gathered commit supplies a pin with a matching digest and tuple whose content has \"payload\": {}. The envelope passes the current checks and the incomplete snapshot is stored, though it is not a complete source-record envelope as AC1 requires."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no security vulnerability in the changed application code. The changed source pinning paths validate case-scoped records and verify pin identities and digests before committing them.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceBasisPinningTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 248,
+      "total": 279,
+      "percent": 88.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 88,
+          "total": 109,
+          "missed": [
+            147,
+            148,
+            151,
+            152,
+            153,
+            165,
+            166,
+            169,
+            170,
+            187,
+            189,
+            190,
+            201,
+            202,
+            206,
+            207,
+            223,
+            224,
+            225,
+            226,
+            227
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "covered": 41,
+          "total": 42,
+          "missed": [
+            258
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 119,
+          "total": 128,
+          "missed": [
+            836,
+            862,
+            883,
+            884,
+            885,
+            958,
+            959,
+            960,
+            964
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
