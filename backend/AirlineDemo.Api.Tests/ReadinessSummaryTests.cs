@@ -46,7 +46,7 @@ public sealed class ReadinessSummaryTests
         Assert.DoesNotContain("sentence", await unauthenticated.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.OrdinalIgnoreCase);
 
         using var outOfScope = await harness.Get(
-            "/api/cases/case-002/readiness?role=finance-reviewer&caseId=case-002", CaseId);
+            "/api/cases/case-002/readiness?role=finance-reviewer&caseId=case-001", CaseId);
         Assert.Equal(HttpStatusCode.NotFound, outOfScope.StatusCode);
         Assert.DoesNotContain("sentence", await outOfScope.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.OrdinalIgnoreCase);
     }
