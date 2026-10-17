@@ -10,12 +10,28 @@ namespace AirlineDemo.Api.Evaluation;
 
 public enum EvaluationArm { A, B, C, D }
 public enum EvaluationExecutionMode { RulesBaseline, BoundedAgent, SingleCallWithoutToolsOrCitationReflection }
-public sealed record EvaluationCase(string CaseId, string Category, string Content, string Sha256);
+public sealed record EvaluationCase(string CaseId, string Category, string Content, string Sha256)
+{
+    public string ExpectedState { get; init; } = "";
+    public IReadOnlyList<string> AnnotatedMissingRequirements { get; init; } = [];
+    public IReadOnlyList<EvaluationExpectedCitation> AnnotatedCitations { get; init; } = [];
+}
 public sealed record EvaluationEffectiveConfiguration(string ManifestVersion, string Arm, string DeploymentName, string Model, string ApiVersion, string Region, string ContentFilter);
 public sealed record EvaluationModelCall(string Prompt, string? Response, string? Error);
 public sealed record EvaluationArmFailure(string Arm, string CaseId, string ErrorType);
-public sealed record EvaluationDispatch(EvaluationArm Arm, string? Answer, long TokenUsage, IReadOnlyList<EvaluationModelCall> ModelCalls, EvaluationArmFailure? Failure);
-public sealed record EvaluationCaseResult(string CaseId, IReadOnlyList<EvaluationDispatch> Arms);
+public sealed record EvaluationDispatch(EvaluationArm Arm, string? Answer, long TokenUsage, IReadOnlyList<EvaluationModelCall> ModelCalls, EvaluationArmFailure? Failure)
+{
+    public long ElapsedMilliseconds { get; init; }
+    public int ForbiddenActionAttempts { get; init; }
+}
+public sealed record EvaluationExpectedCitation(string Claim, string DocumentId, int PageNumber, string SupportLabel, string ExpectedResult);
+public sealed record EvaluationCaseResult(string CaseId, IReadOnlyList<EvaluationDispatch> Arms)
+{
+    public string Category { get; init; } = "";
+    public string ExpectedState { get; init; } = "";
+    public IReadOnlyList<string> AnnotatedMissingRequirements { get; init; } = [];
+    public IReadOnlyList<EvaluationExpectedCitation> AnnotatedCitations { get; init; } = [];
+}
 public sealed record EvaluationBudgetStop(EvaluationArm Arm, string CaseId, long RequestedReservation, long MaximumTokens);
 public sealed record FourArmEvaluationResult(string SuiteSha256, IReadOnlyDictionary<EvaluationArm, EvaluationEffectiveConfiguration?> EffectiveConfigurations,
     IReadOnlyList<EvaluationCaseResult> Cases, long TokenUsage, EvaluationBudgetStop? BudgetStop);
@@ -31,9 +47,12 @@ public interface IEvaluationArmExecutor : IDisposable
 public sealed class EvaluationCallRecorder
 {
     private readonly List<EvaluationModelCall> _calls = [];
+    private int _forbiddenActionAttempts;
     public void RecordResponse(string prompt, string response) => _calls.Add(new(prompt, response, null));
     public void RecordFailure(string prompt, string error) => _calls.Add(new(prompt, null, error));
+    public void RecordForbiddenActionAttempt() => Interlocked.Increment(ref _forbiddenActionAttempts);
     internal IReadOnlyList<EvaluationModelCall> Snapshot() => Array.AsReadOnly(_calls.ToArray());
+    internal int ForbiddenActionAttempts => Volatile.Read(ref _forbiddenActionAttempts);
 }
 public sealed class EvaluationInputException(string message) : Exception(message);
 
@@ -100,7 +119,7 @@ public sealed class ProductionEvaluationArmExecutor(
                 ],
                 new ChatOptions { MaxOutputTokens = MaximumOutputTokens },
                 cancellationToken);
-            EnsureAllowedFunctionCalls(response, allowReadTools: false);
+            EnsureAllowedFunctionCalls(response, allowReadTools: false, request.Calls);
             var answer = response.Text ?? string.Empty;
             request.Calls.RecordResponse(prompt, answer);
             var usage = response.Usage?.InputTokenCount is { } inputTokens &&
@@ -252,7 +271,7 @@ public sealed class ProductionEvaluationArmExecutor(
             try
             {
                 var response = await base.GetResponseAsync(request, options, cancellationToken);
-                EnsureAllowedFunctionCalls(response, allowReadTools);
+                EnsureAllowedFunctionCalls(response, allowReadTools, calls);
                 await limits.AfterModelCallAsync(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, cancellationToken);
                 var usage = response.Usage?.InputTokenCount is { } input &&
                             response.Usage.OutputTokenCount is { } output
@@ -279,8 +298,9 @@ public sealed class ProductionEvaluationArmExecutor(
         };
     }
 
-    private static void EnsureAllowedFunctionCalls(ChatResponse response, bool allowReadTools)
+    private static void EnsureAllowedFunctionCalls(ChatResponse response, bool allowReadTools, EvaluationCallRecorder calls)
     {
+        var forbidden = false;
         foreach (var call in response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>())
         {
             if (!allowReadTools || call.Name is not (
@@ -288,9 +308,11 @@ public sealed class ProductionEvaluationArmExecutor(
                     EvaluationCaseTools.ListDocumentsToolName or
                     EvaluationCaseTools.GetDocumentPageToolName))
             {
-                throw new InvalidOperationException("model requested an operation outside the evaluation read-tool set");
+                calls.RecordForbiddenActionAttempt();
+                forbidden = true;
             }
         }
+        if (forbidden) throw new InvalidOperationException("model requested an operation outside the evaluation read-tool set");
     }
 
     private static string EvaluateRules(EvaluationCase evaluationCase)
@@ -320,7 +342,7 @@ public sealed class ProductionEvaluationArmExecutor(
 }
 
 /// <summary>Runs the verified frozen suite in process. Injected executors are owned and disposed by this run.</summary>
-public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> executors, ILogger<FourArmEvaluationRunner>? logger = null)
+public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> executors, ILogger<FourArmEvaluationRunner>? logger = null, TimeProvider? timeProvider = null)
 {
     public const string FrozenV2Sha256 = "7318583ee0bdc540fdeabd85833d288843c2a1bc429b1f85c9709eac8443a049";
     private static readonly string[] Categories =
@@ -328,6 +350,7 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
     private readonly IEvaluationArmExecutor[] _executors = executors.ToArray();
     private readonly object _budgetGate = new();
     private readonly ILogger<FourArmEvaluationRunner>? _logger = logger;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private static readonly ActivitySource ActivitySource = new("AirlineDemo.Api.Evaluation");
     public async Task<FourArmEvaluationResult> RunAsync(EvaluationRunOptions options, CancellationToken cancellationToken = default)
     {
@@ -369,6 +392,7 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
 
                     var calls = new EvaluationCallRecorder();
                     var reservationHeld = true;
+                    var started = _timeProvider.GetTimestamp();
                     using var activity = ActivitySource.StartActivity("evaluation.arm");
                     activity?.SetTag("evaluation.arm", arm.ToString());
                     activity?.SetTag("evaluation.case_id", input.CaseId);
@@ -386,21 +410,35 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
                             throw new InvalidOperationException("arm D must make one call without tools or citation reflection");
                         lock (_budgetGate) { reserved -= maximum; used += execution.TokenUsage; }
                         reservationHeld = false;
-                        dispatches.Add(new(arm, execution.Answer, execution.TokenUsage, calls.Snapshot(), null));
+                        dispatches.Add(new EvaluationDispatch(arm, execution.Answer, execution.TokenUsage, calls.Snapshot(), null)
+                        {
+                            ElapsedMilliseconds = (long)_timeProvider.GetElapsedTime(started).TotalMilliseconds,
+                            ForbiddenActionAttempts = calls.ForbiddenActionAttempts
+                        });
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
                         _logger?.LogWarning("Evaluation dispatch failed for {Arm} {CaseId}: {ErrorType}",
                             arm, input.CaseId, ex.GetType().FullName ?? ex.GetType().Name);
-                        dispatches.Add(new(arm, null, 0, calls.Snapshot(),
-                            new EvaluationArmFailure(arm.ToString(), input.CaseId, ex.GetType().FullName ?? ex.GetType().Name)));
+                        dispatches.Add(new EvaluationDispatch(arm, null, 0, calls.Snapshot(),
+                            new EvaluationArmFailure(arm.ToString(), input.CaseId, ex.GetType().FullName ?? ex.GetType().Name))
+                        {
+                            ElapsedMilliseconds = (long)_timeProvider.GetElapsedTime(started).TotalMilliseconds,
+                            ForbiddenActionAttempts = calls.ForbiddenActionAttempts
+                        });
                     }
                     finally
                     {
                         if (reservationHeld) lock (_budgetGate) reserved -= maximum;
                     }
                 }
-                results.Add(new EvaluationCaseResult(input.CaseId, dispatches.AsReadOnly()));
+                results.Add(new EvaluationCaseResult(input.CaseId, dispatches.AsReadOnly())
+                {
+                    Category = input.Category,
+                    ExpectedState = input.ExpectedState,
+                    AnnotatedMissingRequirements = input.AnnotatedMissingRequirements,
+                    AnnotatedCitations = input.AnnotatedCitations
+                });
                 if (stop is not null) break;
             }
             return new FourArmEvaluationResult(suiteHash, configs, results.AsReadOnly(), used, stop);
@@ -445,12 +483,43 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
             if (item.GetProperty("inputVersion").GetInt32() != 2 || !seen.Add(id) || !counts.ContainsKey(category))
                 throw new EvaluationInputException("suite contains an invalid, duplicate, or unsupported case");
             counts[category]++;
-            cases.Add(new(id, category, line, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(line))).ToLowerInvariant()));
+            var annotations = item.GetProperty("annotations");
+            var expectedState = annotations.GetProperty("expectedOutcomes")[0].GetProperty("expectedState").GetString() ?? "";
+            var expectedCitations = annotations.GetProperty("claimCitations").EnumerateArray()
+                .Select(citation => new EvaluationExpectedCitation(
+                    citation.GetProperty("claim").GetString() ?? "",
+                    citation.GetProperty("documentId").GetString() ?? "",
+                    citation.GetProperty("pageNumber").GetInt32(),
+                    citation.GetProperty("supportLabel").GetString() ?? "",
+                    citation.GetProperty("expectedResult").GetString() ?? ""))
+                .ToArray();
+            var annotatedMissing = category == "missing-required-history"
+                ? GetMissingRequirements(item.GetProperty("inputs"))
+                : [];
+            cases.Add(new EvaluationCase(id, category, line, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(line))).ToLowerInvariant())
+            {
+                ExpectedState = expectedState,
+                AnnotatedMissingRequirements = annotatedMissing,
+                AnnotatedCitations = expectedCitations
+            });
         }
         var manifestCounts = root.GetProperty("categoryCounts");
         if (Categories.Any(c => counts[c] != 10 || manifestCounts.GetProperty(c).GetInt32() != 10) ||
             manifestCounts.EnumerateObject().Count() != Categories.Length || hash != FrozenV2Sha256)
             throw new EvaluationInputException("suite is not the verified frozen v2 case mix");
         return (hash, cases);
+    }
+    private static string[] GetMissingRequirements(JsonElement inputs)
+    {
+        var aircraftId = inputs.GetProperty("aircraftId").GetString();
+        var completeTypes = inputs.GetProperty("documents").EnumerateArray()
+            .Where(document => document.GetProperty("parseStatus").GetString() == "complete" &&
+                               document.GetProperty("subjectId").GetString() == aircraftId)
+            .Select(document => document.GetProperty("documentType").GetString())
+            .ToHashSet(StringComparer.Ordinal);
+        return inputs.GetProperty("requiredHistory").EnumerateArray()
+            .Select(requirement => requirement.GetString() ?? "")
+            .Where(requirement => !completeTypes.Contains(requirement))
+            .ToArray();
     }
 }
