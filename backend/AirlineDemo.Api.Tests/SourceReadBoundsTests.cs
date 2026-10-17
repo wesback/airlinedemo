@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Persistence;
@@ -16,8 +18,15 @@ namespace AirlineDemo.Api.Tests;
 public sealed class SourceReadBoundsTests
 {
     private const string Case = "source-case";
+    private const string OtherCase = "other-source-case";
     private static readonly DateTimeOffset Now = new(2026, 10, 17, 12, 0, 0, TimeSpan.Zero);
     private sealed class FixedTime : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
+    private sealed class AdjustableTime : TimeProvider
+    {
+        public DateTimeOffset Current { get; private set; } = Now;
+        public override DateTimeOffset GetUtcNow() => Current;
+        public void Advance(TimeSpan amount) => Current += amount;
+    }
     private sealed class FakeSource<T>(IReadOnlyList<SourceRecord<T>> records, Task? wait = null) : ISourceSystem<T> where T : class
     {
         public IReadOnlyList<SourceRecord<T>> Records { get; set; } = records;
@@ -30,7 +39,8 @@ public sealed class SourceReadBoundsTests
             Interlocked.Increment(ref Calls);
             Started.TrySetResult();
             if (wait is not null) await wait.WaitAsync(cancellationToken);
-            return ListResult ?? new SourceReadSucceeded<IReadOnlyList<SourceRecord<T>>>(Records);
+            return ListResult ?? new SourceReadSucceeded<IReadOnlyList<SourceRecord<T>>>(
+                Records.Where(record => string.Equals(record.CaseId, caseId, StringComparison.Ordinal)).ToArray());
         }
         public async Task<SourceReadResult<SourceRecord<T>>> GetAsync(string caseId, string recordId, CancellationToken cancellationToken = default)
         {
@@ -54,12 +64,20 @@ public sealed class SourceReadBoundsTests
     private sealed class TrackingAdmissionStore(ISourceReadAdmissionStore inner) : ISourceReadAdmissionStore
     {
         public List<Guid> Acquired { get; } = [];
+        public Dictionary<string, Guid> AcquiredBySession { get; } = new(StringComparer.Ordinal);
         public List<Guid> Released { get; } = [];
         public int ActiveCount => ((InMemorySourceReadAdmissionStore)inner).ActiveCount(Case, Now);
         public async Task<Guid?> TryAcquireAsync(string sessionId, string caseId, DateTimeOffset requestedAt, CancellationToken cancellationToken)
         {
             var id = await inner.TryAcquireAsync(sessionId, caseId, requestedAt, cancellationToken);
-            if (id is not null) lock (Acquired) Acquired.Add(id.Value);
+            if (id is not null)
+            {
+                lock (Acquired)
+                {
+                    Acquired.Add(id.Value);
+                    AcquiredBySession.Add(sessionId, id.Value);
+                }
+            }
             return id;
         }
         public async Task<bool> ReleaseAsync(Guid leaseId, DateTimeOffset releasedAt, CancellationToken cancellationToken)
@@ -123,14 +141,15 @@ public sealed class SourceReadBoundsTests
         FakeSource<MaintenancePayload>? maintenance = null,
         FakeSource<FinancePayload>? finance = null,
         FakeSource<RecordsPayload>? records = null,
-        FakeSource<ContractsPayload>? contracts = null) =>
+        FakeSource<ContractsPayload>? contracts = null,
+        TimeProvider? timeProvider = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["CaseState:Path"] = path, ["Demo:Passcode"] = "test-passcode" }));
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<TimeProvider>();
-                services.AddSingleton<TimeProvider>(new FixedTime());
+                services.AddSingleton(timeProvider ?? new FixedTime());
                 services.RemoveAll<ISourceSystem<TechnicalPayload>>();
                 services.AddSingleton<ISourceSystem<TechnicalPayload>>(technical);
                 services.RemoveAll<ISourceSystem<MaintenancePayload>>();
@@ -165,7 +184,7 @@ public sealed class SourceReadBoundsTests
         return client.SendAsync(request);
     }
 
-    private static void EnsureCase(WebApplicationFactory<Program> factory) { var cases = factory.Services.GetRequiredService<ICaseStateStore>(); if (cases.OwnerOf(Case) is null) cases.CreateCase(Case, "test-owner"); }
+    private static void EnsureCase(WebApplicationFactory<Program> factory, string caseId = Case) { var cases = factory.Services.GetRequiredService<ICaseStateStore>(); if (cases.OwnerOf(caseId) is null) cases.CreateCase(caseId, "test-owner"); }
     private static string TempPath() => Path.Combine(Path.GetTempPath(), $"source-read-{Guid.NewGuid():N}.json");
 
     [Fact]
@@ -204,12 +223,17 @@ public sealed class SourceReadBoundsTests
         using var client = factory.CreateClient();
         using var anonymous = await Get(client, null, $"/api/v1/cases/{Case}/sources/technical/records");
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"unauthenticated\"}}", await anonymous.Content.ReadAsStringAsync());
         using var roleDenied = await Get(client, Session(factory, "legal-reviewer"), $"/api/v1/cases/{Case}/sources/technical/records");
         Assert.Equal(HttpStatusCode.Forbidden, roleDenied.StatusCode);
         Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"forbidden\"}}", await roleDenied.Content.ReadAsStringAsync());
         using var scopeDenied = await Get(client, Session(factory, scopes: ["other-case"]), $"/api/v1/cases/{Case}/sources/technical/records");
         Assert.Equal(HttpStatusCode.NotFound, scopeDenied.StatusCode);
         Assert.Equal(string.Empty, await scopeDenied.Content.ReadAsStringAsync());
+        var nonexistentSession = Session(factory, scopes: ["not-created"]);
+        using var nonexistent = await Get(client, nonexistentSession, "/api/v1/cases/not-created/sources/technical/records");
+        Assert.Equal(HttpStatusCode.NotFound, nonexistent.StatusCode);
+        Assert.Equal(await scopeDenied.Content.ReadAsStringAsync(), await nonexistent.Content.ReadAsStringAsync());
         using var paged = await Get(client, Session(factory), $"/api/v1/cases/{Case}/sources/technical/records?offset=0");
         Assert.Equal(HttpStatusCode.BadRequest, paged.StatusCode);
         Assert.Equal(0, source.Calls);
@@ -359,6 +383,55 @@ public sealed class SourceReadBoundsTests
         Assert.True((await secondInstance.TryAcquireAsync("shared-session", Case, Now.AddSeconds(60))).HasValue);
     }
 
+    [Fact]
+    public async Task SqlAdmissionStoreSerializesCompetingRequestsAtRollingBudgetBoundary()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"source-read-race-{Guid.NewGuid():N}.db");
+        try
+        {
+            var options = new DbContextOptionsBuilder<CaseStateDbContext>()
+                .UseSqlite($"Data Source={databasePath};Pooling=False")
+                .Options;
+            var caseHash = SHA256.HashData(Encoding.UTF8.GetBytes(Case));
+            var sessionHash = SHA256.HashData(Encoding.UTF8.GetBytes("shared-session"));
+            await using (var db = new CaseStateDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                db.SourceReadWindows.AddRange(Enumerable.Range(0, SourceReadBudget.MaxRequests - 1)
+                    .Select(_ => new SourceReadWindowRow
+                    {
+                        LeaseId = Guid.NewGuid(),
+                        CaseHash = caseHash,
+                        SessionHash = sessionHash,
+                        RequestedAtTicks = Now.UtcDateTime.Ticks,
+                        ExpiresAtTicks = Now.UtcDateTime.Ticks + SourceReadBudget.ReadDeadline.Ticks,
+                        ReleasedAtTicks = Now.UtcDateTime.Ticks,
+                    }));
+                await db.SaveChangesAsync();
+            }
+
+            var first = new SqlSourceReadAdmissionStore(options);
+            var second = new SqlSourceReadAdmissionStore(options);
+            var results = await Task.WhenAll(
+                Task.Run(() => first.TryAcquireAsync("shared-session", Case, Now, CancellationToken.None)),
+                Task.Run(() => second.TryAcquireAsync("shared-session", Case, Now, CancellationToken.None)));
+
+            Assert.Single(results, result => result.HasValue);
+            Assert.Single(results, result => result is null);
+            await using var verification = new CaseStateDbContext(options);
+            Assert.Equal(SourceReadBudget.MaxRequests, await verification.SourceReadWindows.CountAsync());
+            var admittedRows = await verification.SourceReadWindows
+                .Where(row => row.SessionHash == sessionHash && row.RequestedAtTicks == Now.UtcDateTime.Ticks
+                    && row.ReleasedAtTicks == null)
+                .ToListAsync();
+            Assert.Single(admittedRows, row => row.LeaseId != Guid.Empty);
+        }
+        finally
+        {
+            if (File.Exists(databasePath)) File.Delete(databasePath);
+        }
+    }
+
     [Theory]
     [InlineData("technical-reviewer", "technical", true)]
     [InlineData("technical-reviewer", "maintenance", true)]
@@ -376,11 +449,29 @@ public sealed class SourceReadBoundsTests
     [InlineData("legal-reviewer", "maintenance", false)]
     [InlineData("legal-reviewer", "finance", false)]
     [InlineData("presenter", "technical", false)]
+    [InlineData("presenter", "maintenance", false)]
+    [InlineData("presenter", "finance", false)]
+    [InlineData("presenter", "records", false)]
+    [InlineData("presenter", "contracts", false)]
+    [InlineData("executive", "technical", false)]
+    [InlineData("executive", "maintenance", false)]
+    [InlineData("executive", "finance", false)]
+    [InlineData("executive", "records", false)]
     [InlineData("executive", "contracts", false)]
+    [InlineData("unrecognized-role", "technical", false)]
+    [InlineData("unrecognized-role", "maintenance", false)]
+    [InlineData("unrecognized-role", "finance", false)]
     [InlineData("unrecognized-role", "records", false)]
-    public async Task DirectListAndGetUseExactRoleToSourceMapping(string role, string source, bool allowed)
+    [InlineData("unrecognized-role", "contracts", false)]
+    public async Task DirectListAndGetEnforceCompleteRoleSourceMatrix(string role, string source, bool allowed)
     {
-        await using var factory = Factory(TempPath(), Source(1));
+        var technical = Source(1);
+        var maintenance = TypedSource<MaintenancePayload>(1);
+        var finance = TypedSource<FinancePayload>(1);
+        var records = TypedSource<RecordsPayload>(1);
+        var contracts = TypedSource<ContractsPayload>(1);
+        await using var factory = Factory(TempPath(), technical, maintenance: maintenance, finance: finance,
+            records: records, contracts: contracts);
         EnsureCase(factory);
         using var client = factory.CreateClient();
         var session = Session(factory, role);
@@ -395,6 +486,7 @@ public sealed class SourceReadBoundsTests
             {
                 Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
                 Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"forbidden\"}}", await response.Content.ReadAsStringAsync());
+                Assert.Equal(0, technical.Calls + maintenance.Calls + finance.Calls + records.Calls + contracts.Calls);
                 continue;
             }
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -410,36 +502,57 @@ public sealed class SourceReadBoundsTests
     }
 
     [Fact]
-    public async Task HttpBudgetIsSharedAcrossServiceInstancesAndAccessibleSources()
+    public async Task HttpBudgetIsSharedAcrossAuthorizedSourcesAndHosts()
     {
         var admission = new InMemorySourceReadAdmissionStore();
-        var sessions = new DemoSessionStore(new FixedTime());
-        var firstSource = Source(1);
-        var secondSource = Source(1);
-        var firstMaintenance = TypedSource<MaintenancePayload>(1);
-        var secondMaintenance = TypedSource<MaintenancePayload>(1);
-        var firstRecords = TypedSource<RecordsPayload>(1);
-        var secondRecords = TypedSource<RecordsPayload>(1);
-        await using var firstFactory = Factory(TempPath(), firstSource, admission, sessions, firstMaintenance, records: firstRecords);
-        await using var secondFactory = Factory(TempPath(), secondSource, admission, sessions, secondMaintenance, records: secondRecords);
+        var clock = new AdjustableTime();
+        var sessions = new DemoSessionStore(clock);
+        var firstSources = (Technical: Source(1), Maintenance: TypedSource<MaintenancePayload>(1),
+            Finance: TypedSource<FinancePayload>(1), Records: TypedSource<RecordsPayload>(1),
+            Contracts: TypedSource<ContractsPayload>(1));
+        var secondSources = (Technical: Source(1), Maintenance: TypedSource<MaintenancePayload>(1),
+            Finance: TypedSource<FinancePayload>(1), Records: TypedSource<RecordsPayload>(1),
+            Contracts: TypedSource<ContractsPayload>(1));
+        await using var firstFactory = Factory(TempPath(), firstSources.Technical, admission, sessions,
+            firstSources.Maintenance, firstSources.Finance, firstSources.Records, firstSources.Contracts, clock);
+        await using var secondFactory = Factory(TempPath(), secondSources.Technical, admission, sessions,
+            secondSources.Maintenance, secondSources.Finance, secondSources.Records, secondSources.Contracts, clock);
         EnsureCase(firstFactory);
         EnsureCase(secondFactory);
+        EnsureCase(firstFactory, OtherCase);
+        EnsureCase(secondFactory, OtherCase);
         using var firstClient = firstFactory.CreateClient();
         using var secondClient = secondFactory.CreateClient();
-        var session = Session(firstFactory);
-        var sources = new[] { "technical", "maintenance", "records" };
-        for (var i = 0; i < SourceReadBudget.MaxRequests; i++)
+        var roleSources = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            var client = i % 2 == 0 ? firstClient : secondClient;
-            var source = sources[i % sources.Length];
-            using var response = await Get(client, session, $"/api/v1/cases/{Case}/sources/{source}/records");
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            ["technical-reviewer"] = ["technical", "maintenance", "records"],
+            ["finance-reviewer"] = ["technical", "finance"],
+            ["legal-reviewer"] = ["contracts", "records"],
+        };
+        var technicalSession = Session(firstFactory, "technical-reviewer", [Case, OtherCase]);
+        foreach (var (role, allowedSources) in roleSources)
+        {
+            var session = Session(firstFactory, role, [Case, OtherCase]);
+            for (var request = 0; request < SourceReadBudget.MaxRequests; request++)
+            {
+                var client = request % 2 == 0 ? firstClient : secondClient;
+                var source = allowedSources[request % allowedSources.Length];
+                using var response = await Get(client, session, $"/api/v1/cases/{Case}/sources/{source}/records");
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+            using var rejected = await Get(secondClient, session,
+                $"/api/v1/cases/{Case}/sources/{allowedSources[0]}/records");
+            Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+            Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"source_read_limit\"}}", await rejected.Content.ReadAsStringAsync());
         }
-        using var rejected = await Get(secondClient, session, $"/api/v1/cases/{Case}/sources/technical/records");
-        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
-        Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"source_read_limit\"}}", await rejected.Content.ReadAsStringAsync());
-        Assert.Equal(SourceReadBudget.MaxRequests,
-            firstSource.Calls + secondSource.Calls + firstMaintenance.Calls + secondMaintenance.Calls + firstRecords.Calls + secondRecords.Calls);
+
+        using var independentSession = await Get(firstClient, technicalSession, $"/api/v1/cases/{Case}/sources/technical/records");
+        Assert.Equal(HttpStatusCode.OK, independentSession.StatusCode);
+        using var independentCase = await Get(secondClient, technicalSession, $"/api/v1/cases/{OtherCase}/sources/technical/records");
+        Assert.Equal(HttpStatusCode.OK, independentCase.StatusCode);
+        clock.Advance(SourceReadBudget.RollingWindow);
+        using var boundary = await Get(firstClient, technicalSession, $"/api/v1/cases/{Case}/sources/technical/records");
+        Assert.Equal(HttpStatusCode.OK, boundary.StatusCode);
     }
 
     [Fact]
@@ -453,10 +566,12 @@ public sealed class SourceReadBoundsTests
         await using var factory = Factory(TempPath(), technical, tracked, maintenance: maintenance);
         EnsureCase(factory);
         using var client = factory.CreateClient();
-        var first = Get(client, Session(factory, "technical-reviewer"), $"/api/v1/cases/{Case}/sources/technical/records");
+        var firstSession = Session(factory, "technical-reviewer");
+        var secondSession = Session(factory, "technical-reviewer");
+        var first = Get(client, firstSession, $"/api/v1/cases/{Case}/sources/technical/records");
         await technical.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await Task.Delay(TimeSpan.FromMilliseconds(500));
-        var second = Get(client, Session(factory, "technical-reviewer"), $"/api/v1/cases/{Case}/sources/maintenance/records");
+        var second = Get(client, secondSession, $"/api/v1/cases/{Case}/sources/maintenance/records");
         await maintenance.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(2, tracked.ActiveCount);
         using var rejected = await Get(client, Session(factory), $"/api/v1/cases/{Case}/sources/records/records");
@@ -468,8 +583,18 @@ public sealed class SourceReadBoundsTests
         Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"source_read_timeout\"}}", await timedOut.Content.ReadAsStringAsync());
         Assert.Equal(1, tracked.ActiveCount);
         Assert.Equal(2, tracked.Acquired.Count);
+        Assert.Equal(2, tracked.AcquiredBySession.Count);
+        var firstLease = tracked.AcquiredBySession[firstSession.Id];
+        var secondLease = tracked.AcquiredBySession[secondSession.Id];
+        Assert.NotEqual(firstLease, secondLease);
         Assert.Single(tracked.Released);
-        Assert.Equal(tracked.Acquired[0], tracked.Released[0]);
+        Assert.Equal(firstLease, tracked.Released[0]);
+        var duplicateRelease = await Task.WhenAll(
+            tracked.ReleaseAsync(firstLease, Now, CancellationToken.None),
+            tracked.ReleaseAsync(firstLease, Now, CancellationToken.None));
+        Assert.Equal(new[] { false, false }, duplicateRelease);
+        Assert.Equal(new[] { firstLease }, tracked.Released);
+        Assert.Equal(1, tracked.ActiveCount);
 
         maintenanceGate.TrySetResult();
         using var completed = await second.WaitAsync(TimeSpan.FromSeconds(2));
@@ -477,7 +602,7 @@ public sealed class SourceReadBoundsTests
         Assert.Equal(0, tracked.ActiveCount);
         Assert.Equal(2, tracked.Acquired.Count);
         Assert.Equal(2, tracked.Released.Count);
-        Assert.Equal(tracked.Acquired.Order(), tracked.Released.Order());
+        Assert.Equal(new[] { firstLease, secondLease }, tracked.Released);
     }
 
     [Fact]
