@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Runtime.CompilerServices;
 using AirlineDemo.Api.Evaluation;
 using AirlineDemo.Api.Investigation;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -256,6 +257,31 @@ public sealed class FourArmEvaluationRunnerTests
         var invalid = Fakes();
         Assert.Equal(2, await Program.RunEvaluationCommandAsync(args[..^2], Runner(invalid), new StringWriter(), error, TestContext.Current.CancellationToken));
         Assert.Equal(0, invalid.Sum(f => f.Requests.Count));
+    }
+
+    [Fact]
+    public async Task Production_command_resolves_and_dispatches_registered_arm_executors()
+    {
+        using var files = new Inputs();
+        var chat = new CountingChatClient("production-answer");
+        var services = new ServiceCollection();
+        services.AddSingleton<Func<ApprovedModelManifest, IChatClient>>(_ => _ => chat);
+        Program.RegisterProductionEvaluationExecutors(services);
+        services.AddTransient<FourArmEvaluationRunner>();
+        using var provider = services.BuildServiceProvider();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        Assert.Equal(0, await Program.RunEvaluationCommandAsync(
+            Args(files.Options), provider.GetRequiredService<FourArmEvaluationRunner>(),
+            output, error, TestContext.Current.CancellationToken));
+        Assert.Equal(120, chat.Calls);
+        Assert.Empty(error.ToString());
+        using var result = JsonDocument.Parse(output.ToString());
+        Assert.Equal(FourArmEvaluationRunner.FrozenV2Sha256, result.RootElement.GetProperty("SuiteSha256").GetString());
+        Assert.Equal(40, result.RootElement.GetProperty("Cases").GetArrayLength());
+        Assert.Equal("production-answer", result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[1]
+            .GetProperty("ModelCalls")[0].GetProperty("Response").GetString());
     }
 
     [Fact]

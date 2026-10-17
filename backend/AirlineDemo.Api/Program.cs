@@ -41,6 +41,24 @@ builder.Services.AddSingleton<WorkloadAdmissionLimits>();
 builder.Services.AddTransient<FourArmEvaluationRunner>();
 builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
 builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
+builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>(sp => manifest =>
+{
+    var endpoint = builder.Configuration["AzureOpenAI:Endpoint"]
+        ?? throw new InvalidOperationException("AzureOpenAI:Endpoint is not configured; accepted evidence cannot be investigated.");
+    var deployment = manifest.DeploymentName
+        ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
+    var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
+    var credential = new LazyTokenCredential(createCredential);
+    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions();
+    var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
+    if (handler is not null)
+    {
+        options.Transport = new System.ClientModel.Primitives.HttpClientPipelineTransport(new System.Net.Http.HttpClient(handler));
+    }
+    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential, options)
+        .GetChatClient(deployment)
+        .AsIChatClient();
+});
 var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
 if (!string.IsNullOrEmpty(approvedModelManifestPath))
 {
@@ -52,26 +70,11 @@ builder.Services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () => new A
 // The model gate still refuses any request while the manifest is unapproved.
 builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
 {
-    var endpoint = builder.Configuration["AzureOpenAI:Endpoint"]
-        ?? throw new InvalidOperationException("AzureOpenAI:Endpoint is not configured; accepted evidence cannot be investigated.");
     var manifest = sp.GetService<ApprovedModelManifest>()
         ?? throw new InvalidOperationException("No approved model manifest is configured; accepted evidence cannot be investigated.");
-    var deployment = manifest.DeploymentName
-        ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
-    // The credential is created on the first token request, not here. Every creation goes through the registered factory, so a test can observe them all.
-    var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
-    var credential = new LazyTokenCredential(createCredential);
-    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions();
-    // Tests register a fake HTTP handler so the first request can be observed without a socket; production registers none.
-    var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
-    if (handler is not null)
-    {
-        options.Transport = new System.ClientModel.Primitives.HttpClientPipelineTransport(new System.Net.Http.HttpClient(handler));
-    }
-    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential, options)
-        .GetChatClient(deployment)
-        .AsIChatClient();
+    return sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>()(manifest);
 });
+Program.RegisterProductionEvaluationExecutors(builder.Services);
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 // Sources register only after the complete signed fixture set verifies; any refusal stops startup.
 SourceFixtureLoader.LoadPinned(System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"));
@@ -105,6 +108,15 @@ app.Run();
 
 public partial class Program
 {
+    internal static void RegisterProductionEvaluationExecutors(IServiceCollection services)
+    {
+        foreach (var arm in Enum.GetValues<EvaluationArm>())
+        {
+            services.AddTransient<IEvaluationArmExecutor>(sp => new ProductionEvaluationArmExecutor(
+                arm, sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>()));
+        }
+    }
+
     internal static async Task<int> RunEvaluationCommandAsync(
         string[] args, FourArmEvaluationRunner runner, TextWriter output, TextWriter error, CancellationToken cancellationToken = default)
     {
