@@ -102,6 +102,129 @@ public sealed class AssessmentPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void Assessment_commit_replay_returns_the_persisted_snapshot()
+    {
+        var store = new CaseStateStore(PathFor);
+        var scope = store.CreateCase("case-1", "owner");
+        var firstAssessments = new AssessmentStore();
+        firstAssessments.SetCurrentBasis(scope.CaseId, Basis());
+        var firstInbox = new MockRequestInbox();
+        var firstExecution = new AssessmentExecutionService(store, firstInbox, firstAssessments);
+        var first = firstExecution.Assess(scope, Basis(), [Claim()]);
+
+        var replayAssessments = new AssessmentStore();
+        replayAssessments.SetCurrentBasis(scope.CaseId, Basis());
+        var replayInbox = new MockRequestInbox();
+        var replayExecution = new AssessmentExecutionService(store, replayInbox, replayAssessments);
+        var replayed = replayExecution.Assess(scope, Basis(), [Claim()]);
+
+        Assert.Equal((first.AssessmentId, first.CaseId, first.BasisId, first.BasisVersion, first.Outcome,
+            first.Reason, first.RequestId, first.WorkItemId),
+            (replayed.AssessmentId, replayed.CaseId, replayed.BasisId, replayed.BasisVersion, replayed.Outcome,
+                replayed.Reason, replayed.RequestId, replayed.WorkItemId));
+        var claim = Assert.Single(replayed.Claims);
+        Assert.Equal(("MissingRequirement", "pending reserve approval", "Engine", "ENG-123"),
+            (claim.Kind, claim.Value, claim.Component, claim.SerialNumber));
+        Assert.Equal(("doc-1", 1), (Assert.Single(claim.Witnesses).DocumentId, claim.Witnesses[0].Page));
+        Assert.Equal(1, store.Read(scope).Revision);
+        Assert.Equal(1, Assert.Single(store.ReadAudit(scope)).Revision);
+        Assert.Single(store.ListAssessments(scope));
+        Assert.Single(store.ListRequestReceipts(scope));
+        Assert.Empty(replayInbox.Requests);
+        var supplemental = Assert.Single(replayAssessments.List(scope.CaseId));
+        Assert.Equal((replayed.AssessmentId, replayed.RequestId), (supplemental.AssessmentId, supplemental.RequestId));
+    }
+
+    [Fact]
+    public void Inbox_replay_returns_the_existing_persisted_assessment()
+    {
+        var store = new CaseStateStore(PathFor);
+        var scope = store.CreateCase("case-1", "owner");
+        var assessments = new AssessmentStore();
+        assessments.SetCurrentBasis(scope.CaseId, Basis());
+        var inbox = new MockRequestInbox();
+        var execution = new AssessmentExecutionService(store, inbox, assessments);
+        var first = execution.Assess(scope, Basis(), [Claim()]);
+
+        var replayed = execution.Assess(scope, Basis(), [Claim()]);
+
+        Assert.Equal((first.AssessmentId, first.CaseId, first.BasisId, first.BasisVersion, first.Outcome,
+            first.Reason, first.RequestId, first.WorkItemId),
+            (replayed.AssessmentId, replayed.CaseId, replayed.BasisId, replayed.BasisVersion, replayed.Outcome,
+                replayed.Reason, replayed.RequestId, replayed.WorkItemId));
+        Assert.Equal(1, store.Read(scope).Revision);
+        Assert.Equal(1, Assert.Single(store.ReadAudit(scope)).Revision);
+        Assert.Single(store.ListAssessments(scope));
+        Assert.Single(store.ListRequestReceipts(scope));
+        Assert.Single(inbox.Requests);
+    }
+
+    [Fact]
+    public void Inbox_replay_without_a_persisted_assessment_creates_a_review_item()
+    {
+        var sourceStore = new CaseStateStore(Path.Combine(_directory, "source.json"));
+        var sourceScope = sourceStore.CreateCase("case-1", "owner");
+        var sourceAssessments = new AssessmentStore();
+        sourceAssessments.SetCurrentBasis(sourceScope.CaseId, Basis());
+        var inbox = new MockRequestInbox();
+        var sourceExecution = new AssessmentExecutionService(sourceStore, inbox, sourceAssessments);
+        sourceExecution.Assess(sourceScope, Basis(), [Claim()]);
+
+        var replayStore = new CaseStateStore(Path.Combine(_directory, "replay.json"));
+        var replayScope = replayStore.CreateCase("case-1", "owner");
+        var replayAssessments = new AssessmentStore();
+        replayAssessments.SetCurrentBasis(replayScope.CaseId, Basis());
+        var replayExecution = new AssessmentExecutionService(replayStore, inbox, replayAssessments);
+
+        var record = replayExecution.Assess(replayScope, Basis(), [Claim()]);
+
+        Assert.Equal(("Review", "inbox replay has no persisted assessment", (string?)null),
+            (record.Outcome, record.Reason, record.RequestId));
+        Assert.NotNull(record.WorkItemId);
+        Assert.Equal(2, replayStore.Read(replayScope).Revision);
+        Assert.Equal([1L, 2L], replayStore.ReadAudit(replayScope).Select(item => item.Revision));
+        var assessment = Assert.Single(replayStore.ListAssessments(replayScope));
+        Assert.Equal((record.AssessmentId, "case-1", "basis-7", 1, "Review", record.Reason, (string?)null, record.WorkItemId),
+            (assessment.AssessmentId, assessment.CaseId, assessment.BasisId, assessment.BasisVersion, assessment.Outcome,
+                assessment.Reason, assessment.RequestId, assessment.WorkItemId));
+        var workItem = Assert.Single(replayStore.ListWorkItems(replayScope));
+        Assert.Equal((record.WorkItemId, "records-investigation", "open", "technical-reviewer"),
+            (workItem.ItemId, workItem.CapabilityId, workItem.State, workItem.Owner));
+        Assert.Single(inbox.Requests);
+    }
+
+    [Fact]
+    public void Record_prepared_delivery_is_idempotent_and_rejects_event_or_report_conflicts()
+    {
+        var (scope, execution, inbox) = Prepare(new CaseStateStore(PathFor), "case-1");
+        execution.Assess(scope, Basis(), [Claim()]);
+        var receipt = Assert.Single(inbox.Requests);
+        var envelope = new DeliveryEnvelope(
+            receipt.EventId,
+            receipt.CaseId,
+            receipt.ReportId,
+            receipt.BasisId,
+            receipt.BasisVersion,
+            Basis().ScenarioTime,
+            "Engine",
+            "ENG-123",
+            "pending reserve approval");
+
+        inbox.RecordPrepared(envelope, receipt);
+        Assert.Equal(1, inbox.Requests.Count);
+        Assert.Equal(1, inbox.Audit.Count);
+
+        var changedEvent = envelope with { Component = "Changed engine" };
+        var eventConflict = Assert.Throws<InvalidOperationException>(() => inbox.RecordPrepared(changedEvent, receipt));
+        Assert.Equal("Prepared delivery conflicts with an existing event.", eventConflict.Message);
+        var reportConflict = envelope with { EventId = "different-event" };
+        var reportError = Assert.Throws<InvalidOperationException>(() => inbox.RecordPrepared(reportConflict, receipt));
+        Assert.Equal("Prepared delivery conflicts with an existing report.", reportError.Message);
+        Assert.Equal(1, inbox.Requests.Count);
+        Assert.Equal(1, inbox.Audit.Count);
+    }
+
+    [Fact]
     public void AC007_StoredAssessmentIsAnImmutableSnapshot()
     {
         var store = new CaseStateStore(PathFor);
