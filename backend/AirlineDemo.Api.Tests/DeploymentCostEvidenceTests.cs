@@ -86,6 +86,11 @@ public sealed class DeploymentCostEvidenceTests
             Observations = [observation with { ObservedEvidenceLabel = "synthetic demonstration result" }]
         };
         Assert.Throws<ArgumentException>(() => wrongObservedLabel.Validate());
+        var wrongVarianceLabel = evidence with
+        {
+            Observations = [observation with { VarianceEvidenceLabel = "external evidence" }]
+        };
+        Assert.Throws<ArgumentException>(() => wrongVarianceLabel.Validate());
         var missingPlannedReference = evidence with
         {
             Observations = [observation with { PlannedEvidenceReference = "" }]
