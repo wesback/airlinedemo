@@ -48,7 +48,7 @@ export default function InvestigationTrace({ view }: { view: InvestigationTraceV
                 <>
                   <span>Tool call</span>
                   {' — '}<span>{step.toolName}</span>
-                  {' — '}<span>Outcome: {step.citationCheckOutcome}</span>
+                  {' — '}<span>Outcome: requested</span>
                 </>
               )}
             </li>

@@ -7,7 +7,7 @@ afterEach(() => cleanup());
 describe('stored investigation trace steps', () => {
   it('renders every supported step mapping in ascending sequence order', () => {
     const steps: InvestigationTraceStep[] = [
-      { sequence: 7, toolName: '<img src=x onerror="sentinel">', documentId: 'SENSITIVE-DOCUMENT-ID', page: 919191, citationCheckOutcome: 'requested', correctionCode: 'None', policyHandover: 'None' },
+      { sequence: 7, toolName: '<img src=x onerror="sentinel">', documentId: 'SENSITIVE-DOCUMENT-ID', page: 919191, citationCheckOutcome: 'verified', correctionCode: 'None', policyHandover: 'None' },
       { sequence: 5, toolName: 'claim-validation', documentId: 'SENSITIVE-DOCUMENT-ID', page: 919191, citationCheckOutcome: 'None', correctionCode: 'None', policyHandover: 'None' },
       { sequence: 3, toolName: 'citation-check', documentId: 'SENSITIVE-DOCUMENT-ID', page: 919191, citationCheckOutcome: 'quote-not-on-page', correctionCode: 'None', policyHandover: 'None' },
       { sequence: 6, toolName: 'policy-handover', documentId: 'SENSITIVE-DOCUMENT-ID', page: 919191, citationCheckOutcome: 'None', correctionCode: 'None', policyHandover: 'deterministic-policy' },
