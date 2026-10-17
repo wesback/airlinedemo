@@ -3,6 +3,7 @@ using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Evidence;
+using AirlineDemo.Api.Evaluation;
 using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Security;
@@ -18,7 +19,8 @@ if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEn
     Environment.Exit(AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEntry.Run());
 }
 
-var builder = WebApplication.CreateBuilder(args);
+var evaluationCommand = args.Length > 0 && args[0] == "--evaluate-v2";
+var builder = WebApplication.CreateBuilder(evaluationCommand ? [] : args);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddAirlineDiagnostics(builder.Configuration);
 builder.Services.AddSingleton<DemoSessionStore>();
@@ -36,6 +38,7 @@ builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
 builder.Services.AddSingleton<WorkloadAdmissionLimits>();
+builder.Services.AddTransient<FourArmEvaluationRunner>();
 builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
 builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
 var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
@@ -79,7 +82,9 @@ builder.Services.AddSingleton<ISourceSystem<RecordsPayload>, RecordsSource>();
 builder.Services.AddSingleton<ISourceSystem<ContractsPayload>, ContractsSource>();
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();
-var app = builder.Build();
+await using var app = builder.Build();
+if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error); return; }
+
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
 app.UseTransportSecurityHeaders();
 
@@ -98,4 +103,25 @@ app.MapStaticClient();
 
 app.Run();
 
-public partial class Program { }
+public partial class Program
+{
+    internal static async Task<int> RunEvaluationCommandAsync(
+        string[] args, FourArmEvaluationRunner runner, TextWriter output, TextWriter error, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (args.Length != 8) throw new EvaluationInputException("four explicit suite and arm inputs are required");
+            var values = args.Chunk(2).ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
+            if (!values.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(
+                    ["--suite-manifest", "--cases", "--arm-b-manifest", "--arm-c-manifest"]) ||
+                values.Values.Any(string.IsNullOrWhiteSpace))
+                throw new EvaluationInputException("evaluation arguments are invalid");
+            var options = new EvaluationRunOptions(values["--suite-manifest"], values["--cases"], values["--arm-b-manifest"], values["--arm-c-manifest"]);
+            var result = await runner.RunAsync(options, cancellationToken);
+            await output.WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(result));
+            return 0;
+        }
+        catch (Exception ex) when (ex is EvaluationInputException or AirlineDemo.Api.Investigation.ModelGateException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException or ArgumentException)
+        { await error.WriteLineAsync("evaluation rejected: " + ex.GetType().Name); return 2; }
+    }
+}
