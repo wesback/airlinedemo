@@ -1,0 +1,295 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 353,
+  "branch": "ai-sdlc/issue-353",
+  "commitSha": "2e871e49097f5a43635bf1490716b50f697df105",
+  "round": 1,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix catches malformed pin JSON when syntax fails before the marker, but its marker scan also misclassifies ordinary prose that quotes the format fragment. This violates AC1’s ordinary-evidence acceptance requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 883,
+          "message": "The malformed-pin marker scan rejects ordinary evidence that quotes the pin format fragment. Preserve acceptance of non-pin evidence containing that text while detecting malformed pin documents.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When JSON parsing fails, ValidateSourceBasisContent calls HasSourcePinFormatMarker, which scans for the quoted format property and value and returns true when it finds them.",
+            "failureScenario": "A presenter submits ordinary prose that quotes the fragment \"format\": \"source-record-pins-v1\". The prose is not a pin document, but the scan matches the fragment and the store rejects the evidence with BasisIntegrityException."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added case covers a syntax error before the marker, but the new scanner can still misclassify ordinary evidence containing a quoted format example as malformed pin content.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 877,
+          "message": "The malformed-pin marker scan rejects ordinary evidence that quotes the format fragment. Restrict marker detection so prose examples remain acceptable outside the source-gathering path.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When basis content is invalid JSON, ValidateSourceBasisContent calls HasSourcePinFormatMarker. The scanner treats any quoted `format` property followed by the marker string as a pin document, without checking whether it is a JSON property.",
+            "failureScenario": "A presenter submits ordinary evidence prose that quotes `\"format\": \"source-record-pins-v1\"`. Since the prose is not valid JSON, the scanner finds the fragment and the store rejects the evidence with BasisIntegrityException."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated scan catches malformed pin documents whose syntax error precedes the marker, but it can also misclassify ordinary prose quoting the marker and reject the evidence submission.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 851,
+          "message": "The malformed-pin marker scan can reject ordinary evidence that quotes the pin format property. Restrict marker detection to JSON structure so evidence text cannot trigger a pin-validation failure.",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When basis content is invalid JSON, ValidateSourceBasisContent calls HasSourcePinFormatMarker, which scans quoted text for a `format` property and pin-format value without checking whether they are JSON structure.",
+            "failureScenario": "A presenter submits ordinary evidence containing the quoted example `\"format\": \"source-record-pins-v1\"`. JSON parsing fails, the scan treats the prose as a pin document, and the store rejects the evidence with BasisIntegrityException. This makes valid evidence submissions fail based on document text. OWASP A10:2025 (Mishandling of Exceptional Conditions)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceBasisPinningTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 209,
+      "total": 242,
+      "percent": 86.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 88,
+          "total": 109,
+          "missed": [
+            147,
+            148,
+            151,
+            152,
+            153,
+            165,
+            166,
+            169,
+            170,
+            187,
+            189,
+            190,
+            201,
+            202,
+            206,
+            207,
+            223,
+            224,
+            225,
+            226,
+            227
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "covered": 41,
+          "total": 42,
+          "missed": [
+            258
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 80,
+          "total": 91,
+          "missed": [
+            847,
+            857,
+            870,
+            871,
+            872,
+            884,
+            886,
+            908,
+            909,
+            910,
+            914
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

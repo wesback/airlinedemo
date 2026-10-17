@@ -1,7 +1,10 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Tokens;
+using AirlineDemo.Api.SourceSystems;
 
 namespace AirlineDemo.Api.Evidence;
 
@@ -16,6 +19,8 @@ public sealed record EvidenceDocument(string FileName, byte[] Content);
 
 public sealed record EvidenceBasisVersion(string Key, int Version, string Digest, string Text);
 
+public sealed record SourceBasisPin(string SourceId, string RecordId, int RecordVersion, string Content, string ContentDigest);
+public sealed record GatheredSourceBasis(IReadOnlyList<SourceBasisPin> Pins, string Content);
 public sealed record EvidenceIntakeResult(
     EvidenceProcessingState State,
     string Reason,
@@ -94,6 +99,13 @@ public sealed class EvidenceBasisStore
 
 public static class EvidenceIntake
 {
+    public const string SourceBasisFormat = "source-record-pins-v1";
+
+    private static readonly JsonSerializerOptions SourceRecordJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DictionaryKeyPolicy = null,
+    };
+
     public const int MaxDocuments = 12;
     public const long MaxDocumentBytes = 10L * 1024 * 1024;
     public const long MaxPackageBytes = 50L * 1024 * 1024;
@@ -101,6 +113,137 @@ public static class EvidenceIntake
 
     /// <summary>Separates the pages of a stored document text.</summary>
     public const char PageSeparator = '\f';
+
+    /// <summary>Reads and pins the current records from all five case-scoped source systems.</summary>
+    public static async Task<GatheredSourceBasis> GatherSourceBasisAsync(
+        string caseId,
+        ISourceSystem<TechnicalPayload> technical,
+        ISourceSystem<MaintenancePayload> maintenance,
+        ISourceSystem<FinancePayload> finance,
+        ISourceSystem<RecordsPayload> records,
+        ISourceSystem<ContractsPayload> contracts,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(caseId);
+        ArgumentNullException.ThrowIfNull(technical);
+        ArgumentNullException.ThrowIfNull(maintenance);
+        ArgumentNullException.ThrowIfNull(finance);
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(contracts);
+        var pins = new List<SourceBasisPin>();
+        pins.AddRange(CreatePins("technical", caseId, await ReadAsync(technical, caseId, cancellationToken)));
+        pins.AddRange(CreatePins("maintenance", caseId, await ReadAsync(maintenance, caseId, cancellationToken)));
+        pins.AddRange(CreatePins("finance", caseId, await ReadAsync(finance, caseId, cancellationToken)));
+        pins.AddRange(CreatePins("records", caseId, await ReadAsync(records, caseId, cancellationToken)));
+        pins.AddRange(CreatePins("contracts", caseId, await ReadAsync(contracts, caseId, cancellationToken)));
+        return CreateSourceBasis(pins);
+    }
+    /// <summary>Builds a deterministic source-basis payload, rejecting empty or duplicate pin sets.</summary>
+    public static GatheredSourceBasis CreateSourceBasis(IEnumerable<SourceBasisPin> sourcePins)
+    {
+        ArgumentNullException.ThrowIfNull(sourcePins);
+        var suppliedPins = sourcePins.ToArray();
+        if (suppliedPins.Any(pin => pin is null))
+        {
+            throw new ArgumentException("A gathered source basis cannot contain null pins.", nameof(sourcePins));
+        }
+        var pins = suppliedPins
+            .OrderBy(pin => pin.SourceId, StringComparer.Ordinal)
+            .ThenBy(pin => pin.RecordId, StringComparer.Ordinal)
+            .ThenBy(pin => pin.RecordVersion)
+            .ToArray();
+        if (pins.Length == 0)
+        {
+            throw new ArgumentException("A gathered source basis must contain at least one source pin.", nameof(sourcePins));
+        }
+        var identities = new HashSet<(string SourceId, string RecordId, int RecordVersion)>();
+        foreach (var pin in pins)
+        {
+            if (pin is null || string.IsNullOrWhiteSpace(pin.SourceId) || string.IsNullOrWhiteSpace(pin.RecordId)
+                || pin.RecordVersion < 1 || string.IsNullOrEmpty(pin.Content) || string.IsNullOrWhiteSpace(pin.ContentDigest)
+                || !string.Equals(pin.ContentDigest, Digest(pin.Content), StringComparison.Ordinal))
+            {
+                throw new ArgumentException("A source pin must contain a valid identity, snapshot and content digest.", nameof(sourcePins));
+            }
+            if (!identities.Add((pin.SourceId, pin.RecordId, pin.RecordVersion)))
+            {
+                throw new ArgumentException("A gathered source basis cannot contain duplicate source record pins.", nameof(sourcePins));
+            }
+        }
+        var readOnlyPins = Array.AsReadOnly(pins);
+        var content = JsonSerializer.Serialize(new SourceBasisSnapshot(SourceBasisFormat, pins), SourceRecordJsonOptions);
+        return new GatheredSourceBasis(readOnlyPins, content);
+    }
+    private static async Task<IReadOnlyList<SourceRecord<TPayload>>> ReadAsync<TPayload>(
+        ISourceSystem<TPayload> source,
+        string caseId,
+        CancellationToken cancellationToken) where TPayload : class
+    {
+        var result = await source.ListAsync(caseId, cancellationToken);
+        return result switch
+        {
+            SourceReadSucceeded<IReadOnlyList<SourceRecord<TPayload>>> succeeded => succeeded.Value,
+            SourceUnavailable<IReadOnlyList<SourceRecord<TPayload>>> unavailable =>
+                throw new InvalidOperationException($"Source '{unavailable.SourceId}' is unavailable; its records cannot be pinned."),
+            UnknownSource<IReadOnlyList<SourceRecord<TPayload>>> unknown =>
+                throw new InvalidOperationException($"Source '{unknown.SourceId}' is not registered; its records cannot be pinned."),
+            _ => throw new InvalidOperationException("Source read did not return a successful record list."),
+        };
+    }
+    private static IEnumerable<SourceBasisPin> CreatePins<TPayload>(
+        string expectedSourceId,
+        string caseId,
+        IReadOnlyList<SourceRecord<TPayload>> records) where TPayload : class
+    {
+        foreach (var record in records)
+        {
+            if (record is null || !string.Equals(record.SourceId, expectedSourceId, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"Source '{expectedSourceId}' returned an invalid record envelope.");
+            }
+            var problems = record.Validate(caseId);
+            if (problems.Count > 0)
+            {
+                throw new InvalidDataException($"Source '{expectedSourceId}' returned an invalid record envelope: {string.Join(" ", problems)}");
+            }
+            var content = SerializeRecord(record);
+            yield return new SourceBasisPin(
+                record.SourceId,
+                record.RecordId,
+                record.RecordVersion,
+                content,
+                Digest(content));
+        }
+    }
+    private static string SerializeRecord<TPayload>(SourceRecord<TPayload> record) where TPayload : class
+    {
+        var fields = record.Payload switch
+        {
+            TechnicalPayload payload => payload.Fields,
+            MaintenancePayload payload => payload.Fields,
+            FinancePayload payload => payload.Fields,
+            RecordsPayload payload => payload.Fields,
+            ContractsPayload payload => payload.Fields,
+            _ => throw new InvalidDataException("Source payload type is not supported for basis pinning."),
+        };
+        var orderedFields = fields.OrderBy(field => field.Key, StringComparer.Ordinal)
+            .ToDictionary(field => field.Key, field => field.Value, StringComparer.Ordinal);
+        return JsonSerializer.Serialize(new
+        {
+            asOf = record.AsOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            caseId = record.CaseId,
+            kind = record.Kind,
+            payload = new { fields = orderedFields },
+            recordId = record.RecordId,
+            recordVersion = record.RecordVersion,
+            sourceId = record.SourceId,
+            stale = record.Stale,
+            synthetic = record.Synthetic,
+        }, SourceRecordJsonOptions);
+    }
+    private static string Digest(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    private sealed record SourceBasisSnapshot(string Format, IReadOnlyList<SourceBasisPin> Pins);
 
     /// <summary>
     /// Validates a package and commits extracted text as new basis versions only when every document is accepted.

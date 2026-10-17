@@ -1,6 +1,8 @@
+using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Policy;
 using AirlineDemo.Api.Requests;
+using AirlineDemo.Api.SourceSystems;
 
 namespace AirlineDemo.Api.Investigation;
 
@@ -19,7 +21,8 @@ public sealed record AssessmentBasis(
     string ScenarioTime,
     ProcessingCoverage Coverage,
     bool IdentityAmbiguous,
-    IReadOnlyDictionary<string, BasisDocument> Documents);
+    IReadOnlyDictionary<string, BasisDocument> Documents,
+    IReadOnlyList<SourceBasisPin>? SourcePins = null);
 
 public sealed record AssessedWitness(string DocumentId, int Page);
 
@@ -45,7 +48,15 @@ public sealed record AssessmentRecord(
 /// missing requirement on complete coverage creates one request through the mock inbox. A supported baseline creates
 /// nothing. Every other case creates one open <c>records-investigation</c> item owned by <c>technical-reviewer</c>.
 /// </summary>
-public sealed class AssessmentExecutionService(ICaseStateStore store, MockRequestInbox inbox, AssessmentStore assessments)
+public sealed class AssessmentExecutionService(
+    ICaseStateStore store,
+    MockRequestInbox inbox,
+    AssessmentStore assessments,
+    ISourceSystem<TechnicalPayload>? technical = null,
+    ISourceSystem<MaintenancePayload>? maintenance = null,
+    ISourceSystem<FinancePayload>? finance = null,
+    ISourceSystem<RecordsPayload>? records = null,
+    ISourceSystem<ContractsPayload>? contracts = null)
 {
     public const string Baseline = "Baseline";
     public const string Request = "Request";
@@ -62,6 +73,16 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(basis);
         ArgumentNullException.ThrowIfNull(claims);
+
+        if (HasAnySourceSystem)
+        {
+            EnsureSourceSystemsConfigured();
+            var persisted = store.Read(scope);
+            if (persisted.Basis.Count == basis.BasisVersion)
+            {
+                basis = RefreshSourceBasis(scope, basis, persisted);
+            }
+        }
 
         var expectedRevision = store.Read(scope).Revision;
         var current = assessments.CurrentBasis(scope.CaseId);
@@ -209,6 +230,32 @@ public sealed class AssessmentExecutionService(ICaseStateStore store, MockReques
 
         if (!assessments.HasPersistentHistory) assessments.Append(record);
         return record;
+    }
+
+    private bool HasAnySourceSystem =>
+        technical is not null || maintenance is not null || finance is not null || records is not null || contracts is not null;
+    private AssessmentBasis RefreshSourceBasis(CaseScope scope, AssessmentBasis basis, CaseState state)
+    {
+        var gathered = EvidenceIntake.GatherSourceBasisAsync(
+            scope.CaseId, technical!, maintenance!, finance!, records!, contracts!).GetAwaiter().GetResult();
+        var latest = state.Basis.LastOrDefault();
+        if (latest?.Content != gathered.Content)
+        {
+            var next = CaseStateStore.CreateBasisVersion(
+                checked(state.Basis.Count + 1), gathered.Content, latest?.BasisDigest ?? string.Empty);
+            store.Commit(scope, state.Revision, new CaseCommit(
+                next, null, Actor, "source-basis.gathered",
+                $"Pinned {gathered.Pins.Count} source records with content digest {next.ContentDigest}"));
+            latest = next;
+        }
+        var refreshed = basis with { BasisVersion = latest!.Version, SourcePins = gathered.Pins };
+        assessments.SetCurrentBasis(scope.CaseId, refreshed);
+        return refreshed;
+    }
+    private void EnsureSourceSystemsConfigured()
+    {
+        if (technical is null || maintenance is null || finance is null || records is null || contracts is null)
+            throw new InvalidOperationException("All five source systems must be configured before gathering a source basis.");
     }
 
     private static CaseAssessment ToCaseAssessment(AssessmentRecord record) =>
