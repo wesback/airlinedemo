@@ -81,6 +81,10 @@ Each rule comes from a story that stopped for a person because it was missing (D
 - **No automated pixel or contrast measurement in a browser.** A criterion never asks for a Chromium test that samples rendered
   pixels or measures contrast ratios (butlercompass removed that suite on 2026-10-16: slow, fragile, a personal application).
   State the requirement as a CSS or markup contract a unit test can read (a token, a rule, an attribute), or as `Verified by review`.
+- **A test input that looks like a link is not written as a link.** The Definition-of-Ready gate fetches every `http://` or
+  `https://` address in the story and refuses it when one does not resolve (fluxion #84: `https://evil.example` in an
+  injection test). Write the address as parts (the URL formed by `https:` followed by `//evil.example`) or without the scheme,
+  and let the test build the string.
 
 ### Before you finish (the implementing and fixing agent)
 
