@@ -862,25 +862,60 @@ public sealed class CaseStateStore : ICaseStateStore
     private static bool HasSourcePinFormatMarker(string content)
     {
         const string formatName = "source-record-pins-v1";
-        for (var index = 0; index < content.Length;)
+        var start = SkipWhitespace(content, 0);
+        if (start >= content.Length || content[start] != '{') return false;
+
+        var objectDepth = 0;
+        var arrayDepth = 0;
+        for (var index = start; index < content.Length;)
         {
-            var propertyStart = content.IndexOf('"', index);
-            if (propertyStart < 0) return false;
-            if (!TryReadJsonString(content, propertyStart, out var property, out var afterProperty))
+            var current = content[index];
+            if (current == '"')
             {
-                index = propertyStart + 1;
+                if (!TryReadJsonString(content, index, out var property, out var afterProperty))
+                {
+                    index++;
+                    continue;
+                }
+
+                var previous = index - 1;
+                while (previous >= 0 && char.IsWhiteSpace(content[previous])) previous--;
+                if (objectDepth == 1 && arrayDepth == 0
+                    && previous >= 0 && content[previous] is '{' or ','
+                    && string.Equals(property, "format", StringComparison.Ordinal))
+                {
+                    var separator = SkipWhitespace(content, afterProperty);
+                    if (separator < content.Length && content[separator] == ':')
+                    {
+                        var valueStart = SkipWhitespace(content, separator + 1);
+                        if (valueStart < content.Length
+                            && TryReadJsonString(content, valueStart, out var value, out _)
+                            && string.Equals(value, formatName, StringComparison.Ordinal))
+                            return true;
+                    }
+                }
+
+                index = afterProperty;
                 continue;
             }
 
-            index = afterProperty;
-            if (!string.Equals(property, "format", StringComparison.Ordinal)) continue;
-            var separator = SkipWhitespace(content, afterProperty);
-            if (separator >= content.Length || content[separator] != ':') continue;
-            var valueStart = SkipWhitespace(content, separator + 1);
-            if (valueStart < content.Length
-                && TryReadJsonString(content, valueStart, out var value, out _)
-                && string.Equals(value, formatName, StringComparison.Ordinal))
-                return true;
+            switch (current)
+            {
+                case '{':
+                    objectDepth++;
+                    break;
+                case '}':
+                    if (objectDepth > 0) objectDepth--;
+                    break;
+                case '[':
+                    arrayDepth++;
+                    break;
+                case ']':
+                    if (arrayDepth > 0) arrayDepth--;
+                    break;
+            }
+
+            index++;
         }
 
         return false;

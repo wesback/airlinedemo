@@ -132,7 +132,8 @@ public sealed class SourceBasisPinningTests
         {
             var store = new CaseStateStore(path);
             var scope = store.CreateCase(CaseId, "presenter");
-            const string ordinaryEvidence = "This evidence discusses source-record-pins-v1 but is not a pin document.";
+            const string ordinaryEvidence =
+                "This evidence discusses source-record-pins-v1 and quotes the example {\"format\": \"source-record-pins-v1\"} but is not a pin document.";
             var basis = CaseStateStore.CreateBasisVersion(1, ordinaryEvidence, string.Empty);
 
             store.Commit(scope, 0, new CaseCommit(basis, null, "presenter", "submit-evidence", "ordinary evidence"));
