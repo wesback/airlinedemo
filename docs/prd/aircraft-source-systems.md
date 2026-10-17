@@ -2,7 +2,7 @@
 prd_id: "aircraft-source-systems"
 title: "Synthetic Source-System Stubs and Read-Only Source Port"
 status: "draft"
-version: "0.4.0"
+version: "0.5.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-16"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Synthetic Source-System Stubs and Read-Only Source Port
 
-> **aircraft-source-systems** | Status: Draft | Version: 0.4.0 | Last Updated: 2026-10-16
+> **aircraft-source-systems** | Status: Draft | Version: 0.5.0 | Last Updated: 2026-10-16
 
 ## Executive Summary
 
@@ -83,6 +83,8 @@ All systems, records, actors and decisions are synthetic or simulated.
 | DD-020 | `contracts` carries a record kind `specialist_flag` with a `topic` (`sanctions`, `cape_town`, `ifrs16`, `gdpr` or `other`) and a `result` that may only be `specialist_review_required` or `not_assessed`. A `sanctions` flag also carries a required `regime` of `EU`, `US` or `UK`; one flag covers one regime, and a flag for one regime says nothing about another. No value reads as cleared, compliant, recoverable, classified or recognized; fixture validation rejects any other value. A flag routes the related finding to internal review (ARR:FR-003). |
 | DD-021 | `contracts` carries a record kind `cape_town_interest` with `internationalInterestRef`, `registrationRef`, `idera` (`present`, `absent` or `not_recorded`) and `stateDeclarationNoted` (boolean). It is evidence for counsel. It has no field for priority, remedy, outcome or recoverability, and fixture validation rejects a record that carries one. A finding that relies on it still needs a `cape_town` specialist flag. |
 | DD-022 | Every `records` entry carries `containsPersonalData` (boolean) and fixtures are rejected without it. Source summaries, dossiers and diagnostics carry identifiers, versions and hashes only, never a field flagged as personal data. Retention, erasure and data-subject request handling are design-only and described in `docs/compliance-request-handling.md`; no request-handling feature is built. |
+| DD-023 | Source authorization is role- and case-scoped: technical-reviewer may read technical, maintenance, and records sources; finance-reviewer may read technical and finance sources; legal-reviewer may read contracts and records sources; presenter and executive may read the source summary only; a decision dossier is readable only by a case-scoped reviewer whose role matches the recorded decision. Unknown roles are denied. Source-mode changes remain presenter-only. |
+| DD-024 | Direct source-record reads are limited to 20 requests per authenticated session and case per minute, with at most 2 in-flight reads per case, no pagination, and at most 100 records in one response. A limit breach returns 429 with error.code source_read_limit; a source response exceeding 100 records returns 422 with error.code source_record_limit and no partial records; a read exceeding the 1-second request deadline returns 504 with error.code source_read_timeout. |
 
 ## Product Goals
 
