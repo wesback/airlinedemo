@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 type SeededUser = { id: string; displayName: string; role: string };
-type Session = { displayName: string; csrfToken: string };
+export type SignedInSession = { id: string; displayName: string; role: string; caseScopes: string[]; csrfToken: string };
 
 const GENERIC_FAILURE = 'Sign-in failed. Check your details and try again.';
 const THROTTLED = 'Too many attempts. Wait a few minutes before you try again.';
 const SIGN_OUT_FIRST = 'Sign out before switching users.';
 const UNAVAILABLE = 'Service unavailable. Try again later.';
 
-export default function SignIn() {
+export default function SignIn({ onSessionChange }: { onSessionChange?: (session: SignedInSession | null) => void }) {
   const [step, setStep] = useState<'passcode' | 'picker'>('passcode');
   const [passcode, setPasscode] = useState('');
   const [users, setUsers] = useState<SeededUser[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<SignedInSession | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const alertRef = useRef<HTMLParagraphElement>(null);
@@ -69,8 +69,9 @@ export default function SignIn() {
         body: JSON.stringify({ userId: selectedId, passcode }),
       });
       if (response.ok) {
-        const body = await response.json();
-        setSession({ displayName: body.displayName, csrfToken: body.csrfToken });
+        const body: SignedInSession = await response.json();
+        setSession(body);
+        onSessionChange?.(body);
         setPasscode('');
         setMessage('');
         return;
@@ -100,6 +101,7 @@ export default function SignIn() {
         return;
       }
       setSession(null);
+      onSessionChange?.(null);
       setStep('passcode');
       setUsers([]);
       setSelectedId('');
