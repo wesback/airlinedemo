@@ -49,6 +49,11 @@ public sealed class ReadinessSummaryTests
             "/api/cases/case-002/readiness?role=finance-reviewer&caseId=case-001", CaseId);
         Assert.Equal(HttpStatusCode.NotFound, outOfScope.StatusCode);
         Assert.DoesNotContain("sentence", await outOfScope.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.OrdinalIgnoreCase);
+
+        using var outOfScopeQuery = await harness.Get(
+            "/api/cases/case-002/readiness?role=finance-reviewer&caseId=case-002", CaseId);
+        Assert.Equal(HttpStatusCode.NotFound, outOfScopeQuery.StatusCode);
+        Assert.DoesNotContain("sentence", await outOfScopeQuery.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
