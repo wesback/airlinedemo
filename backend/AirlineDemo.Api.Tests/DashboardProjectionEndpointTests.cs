@@ -180,6 +180,44 @@ public sealed class DashboardProjectionEndpointTests
         Assert.Empty(emptyJson.RootElement.GetProperty("capabilities")[0].GetProperty("evidence").EnumerateArray());
     }
 
+    [Fact]
+    public async Task AC022_CapabilitiesCarryCaseStudyAndDemoAutonomy()
+    {
+        var store = NewStore();
+        store.Set("case-a", State("case-a", []));
+        using var factory = CreateFactory(store);
+        using var client = factory.CreateClient();
+        var cookie = AddSession(factory, "presenter", ["case-a"]);
+
+        using var response = await GetAsync(client, "/api/cases/case-a/dashboard", cookie);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var capabilities = json.RootElement.GetProperty("capabilities").EnumerateArray().ToArray();
+
+        Assert.Equal(new[]
+        {
+            ("records-investigation", "Records investigation (records digitisation)",
+                "L4, autonomous",
+                "L3: acts only on routine evidence requests within policy to the mock inbox; a person decides ambiguous cases and technical acceptance"),
+            ("utilisation-reserves", "Utilisation and reserves",
+                "L3, acts (invoices) with finance review",
+                "L2: drafts a reserve calculation; a simulated finance review decides; no invoice"),
+            ("contract-compliance", "Contract compliance",
+                "L3, acts (notices) with legal sign-off",
+                "L2: drafts an obligation status and notice; a simulated legal review decides; no notice sent"),
+            ("transition-planning", "Transition planning",
+                "L2, recommend", "design-only: not implemented in this demo"),
+            ("credit-sanctions-monitoring", "Credit and sanctions monitoring",
+                "L2, recommend", "design-only: not implemented in this demo"),
+            ("portfolio-supervisor", "Portfolio supervisor",
+                "not in the case-study table", "design-only: not implemented in this demo"),
+        }, capabilities.Select(capability =>
+            (capability.GetProperty("id").GetString(),
+                capability.GetProperty("name").GetString(),
+                capability.GetProperty("caseStudyAutonomy").GetString(),
+                capability.GetProperty("demoAutonomy").GetString())));
+    }
+
     [Theory]
     [InlineData("technical-reviewer", "accept,reject")]
     [InlineData("presenter", "")]
