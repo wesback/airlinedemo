@@ -27,6 +27,69 @@
       "kind": "document_index",
       "synthetic": true,
       "payload": { "documentId": "SYN-DOC0013", "documentVersion": "1", "documentType": "shop-visit-record", "parseStatus": "complete" }
+    },
+    {
+      "recordId": "rec-a-doc-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-a",
+      "kind": "document_index",
+      "synthetic": true,
+      "payload": { "documentId": "SYN-DOCA001", "documentVersion": "1", "documentType": "release-to-service", "parseStatus": "complete" }
+    },
+    {
+      "recordId": "rec-a-doc-002",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-a",
+      "kind": "document_index",
+      "synthetic": true,
+      "payload": { "documentId": "SYN-DOCA002", "documentVersion": "1", "documentType": "shop-visit-record", "parseStatus": "complete" }
+    },
+    {
+      "recordId": "rec-b-doc-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-b",
+      "kind": "document_index",
+      "synthetic": true,
+      "payload": { "documentId": "SYN-DOCB001", "documentVersion": "1", "documentType": "release-to-service", "parseStatus": "complete" }
+    },
+    {
+      "recordId": "rec-b-doc-002",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-b",
+      "kind": "document_index",
+      "synthetic": true,
+      "payload": { "documentId": "SYN-DOCB002", "documentVersion": "1", "documentType": "component-release", "parseStatus": "complete" }
+    },
+    {
+      "recordId": "rec-c-doc-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-c",
+      "kind": "document_index",
+      "synthetic": true,
+      "payload": { "documentId": "SYN-DOCC001", "documentVersion": "1", "documentType": "release-to-service", "parseStatus": "complete" }
+    },
+    {
+      "recordId": "rec-c-doc-002",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-c",
+      "kind": "document_index",
+      "synthetic": true,
+      "payload": { "documentId": "SYN-DOCC002", "documentVersion": "1", "documentType": "shop-visit-record", "parseStatus": "complete" }
+    },
+    {
+      "recordId": "rec-c-doc-003",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-c",
+      "kind": "document_index",
+      "synthetic": true,
+      "payload": { "documentId": "SYN-DOCC003", "documentVersion": "1", "documentType": "component-release", "parseStatus": "blocked" }
     }
   ]
 }

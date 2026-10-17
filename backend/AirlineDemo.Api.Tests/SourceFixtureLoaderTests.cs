@@ -259,6 +259,124 @@ public sealed class SourceFixtureLoaderTests
         AssertSnapshot(before, store.State);
     }
 
+    private static string CommittedSources() => Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources");
+
+    private static void CopyDirectory(string from, string to)
+    {
+        foreach (var file in Directory.GetFiles(from)) File.Copy(file, Path.Combine(to, Path.GetFileName(file)));
+    }
+
+    private static List<JsonElement> CommittedRecords(string source)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.json")));
+        return document.RootElement.GetProperty("records").EnumerateArray().Select(record => record.Clone()).ToList();
+    }
+
+    // AC-004: the core case and Cases A, B and C each have records in all five sources, with the scenario each case exists to show.
+    [Fact]
+    public void AC004_signed_fixtures_cover_core_and_three_scenarios_in_every_source()
+    {
+        string[] expectedCases = ["case-001", "case-a", "case-b", "case-c"];
+        foreach (var source in Sources)
+        {
+            var records = CommittedRecords(source);
+            Assert.Equal(expectedCases, records.Select(record => record.GetProperty("caseId").GetString()!).Distinct().Order().ToArray()
+                .Select(id => id).OrderBy(id => Array.IndexOf(expectedCases, id)).ToArray());
+            foreach (var caseId in expectedCases)
+            {
+                Assert.Contains(records, record => record.GetProperty("caseId").GetString() == caseId);
+            }
+
+            using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.manifest.json")));
+            Assert.Equal(expectedCases, manifest.RootElement.GetProperty("owningCaseIds").EnumerateArray().Select(id => id.GetString()!).ToArray());
+            Assert.Equal(records.Count, manifest.RootElement.GetProperty("recordCounts").GetProperty(source).GetInt32());
+        }
+
+        // Case A: a maintenance history record that explains the missing-history finding.
+        Assert.Contains(CommittedRecords("maintenance"), record =>
+            record.GetProperty("caseId").GetString() == "case-a" && record.GetProperty("kind").GetString() == "maintenance_history");
+        // Case B: the technical engine identity (serial SYN-SN-77201) that the case-b release document contradicts (it states SYN-SN-77210).
+        Assert.Contains(CommittedRecords("technical"), record =>
+            record.GetProperty("caseId").GetString() == "case-b" && record.GetProperty("kind").GetString() == "component_identity"
+            && record.GetProperty("payload").GetProperty("serialNumber").GetString() == "SYN-SN-77201");
+        Assert.Contains(CommittedRecords("records"), record =>
+            record.GetProperty("caseId").GetString() == "case-b" && record.GetProperty("payload").GetProperty("documentType").GetString() == "component-release");
+        // Case C: a baseline in every source and a records entry for the blocked document.
+        Assert.Contains(CommittedRecords("records"), record =>
+            record.GetProperty("caseId").GetString() == "case-c" && record.GetProperty("payload").GetProperty("parseStatus").GetString() == "blocked");
+
+        // A record whose case ID is outside the manifest's owning IDs is refused.
+        using var key = RSA.Create(2048);
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path, key, recordCaseIds: ["arr-core", "case-a", "case-b", "case-x"]);
+        AssertRefused(dir.Path, key);
+    }
+
+    // AC-005, M-05: a changed fixture whose co-located digest is updated while its detached signature stays unchanged is refused, and
+    // the published state (all five collections, including unrelated case data) is exactly what it was.
+    [Fact]
+    public void AC005_signed_fixture_mismatch_refuses_publication_without_state_change()
+    {
+        using var key = RSA.Create(2048);
+        var spki = key.ExportSubjectPublicKeyInfo();
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path, key);
+
+        var fixturePath = Path.Combine(dir.Path, "technical.json");
+        var changed = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(File.ReadAllBytes(fixturePath)).Replace("\"records\":[", "\"records\":[{\"caseId\":\"arr-core\"},"));
+        File.WriteAllBytes(fixturePath, changed);
+        var manifestPath = Path.Combine(dir.Path, "technical.manifest.json");
+        var manifest = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllBytes(manifestPath))!;
+        manifest["sha256"] = JsonSerializer.SerializeToElement(Convert.ToHexString(SHA256.HashData(changed)).ToLowerInvariant());
+        File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(manifest));   // digest updated, signature untouched
+
+        var seed = new PublishedFixtureState(
+            [new StoredFixturePack("2026.09.1", "aa")],
+            [new StoredSourceRecord("technical", "2026.09.1", 0, "arr-core")],
+            [new StoredBasisPin("technical", "2026.09.1", "aa")],
+            [new StoredAuditEvent(1, "source-fixtures.published", "2026.09.1")],
+            [new StoredCaseDatum("arr-core", "unrelated case data"), new StoredCaseDatum("case-a", "another case")]);
+        var store = new SourceFixtureStore(seed);
+        var before = Snapshot(store.State);
+
+        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(dir.Path, spki, store));
+        AssertSnapshot(before, store.State);
+        Assert.Equal(seed.Packs, store.State.Packs);
+        Assert.Equal(seed.SourceRecords, store.State.SourceRecords);
+        Assert.Equal(seed.BasisPins, store.State.BasisPins);
+        Assert.Equal(seed.AuditEvents, store.State.AuditEvents);
+        Assert.Equal(seed.CaseData, store.State.CaseData);
+    }
+
+    // M-05: all five committed signatures verify against the production pinned key; removing or corrupting any one refuses the set;
+    // fixtures signed with the existing test key remain accepted through the test-key seam.
+    [Fact]
+    public void M05_all_five_fixture_signatures_are_required()
+    {
+        Assert.Equal(5, SourceFixtureLoader.LoadPinned(CommittedSources()).Count);
+
+        foreach (var source in Sources)
+        {
+            using var removed = new TempDirectory();
+            CopyDirectory(CommittedSources(), removed.Path);
+            File.Delete(Path.Combine(removed.Path, $"{source}.manifest.sig"));
+            Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadPinned(removed.Path));
+
+            using var corrupted = new TempDirectory();
+            CopyDirectory(CommittedSources(), corrupted.Path);
+            var signaturePath = Path.Combine(corrupted.Path, $"{source}.manifest.sig");
+            var signature = File.ReadAllBytes(signaturePath);
+            signature[0] ^= 0xFF;
+            File.WriteAllBytes(signaturePath, signature);
+            Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadPinned(corrupted.Path));
+        }
+
+        using var testKey = RSA.Create(2048);
+        using var testDir = new TempDirectory();
+        WriteSet(testDir.Path, testKey);
+        Assert.Equal(5, SourceFixtureLoader.Load(testDir.Path, testKey.ExportSubjectPublicKeyInfo()).Count);
+    }
+
     private static (IReadOnlyList<StoredFixturePack> Packs, IReadOnlyList<StoredSourceRecord> Records, IReadOnlyList<StoredBasisPin> Pins, IReadOnlyList<StoredAuditEvent> Audits, IReadOnlyList<StoredCaseDatum> Cases) Snapshot(PublishedFixtureState state) =>
         (state.Packs.ToList(), state.SourceRecords.ToList(), state.BasisPins.ToList(), state.AuditEvents.ToList(), state.CaseData.ToList());
 
