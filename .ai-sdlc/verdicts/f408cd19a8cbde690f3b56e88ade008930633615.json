@@ -1,0 +1,270 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 352,
+  "branch": "ai-sdlc/issue-352",
+  "commitSha": "f408cd19a8cbde690f3b56e88ade008930633615",
+  "round": 1,
+  "pipelineVersion": "6201282",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The follow-up adds endpoint concurrency, lease-release, and role-mapping tests. The cross-source HTTP budget criterion remains unproven, and its same-session five-source requirement conflicts with the role restrictions.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceReadBoundsTests.cs",
+          "line": 430,
+          "message": "NEEDS-PERSON: Resolve the conflict between AC 1's same-session, five-source sequence and AC 3's role/source restrictions, then specify a testable HTTP sequence. The added endpoint test covers only three sources, leaving the previously raised AC 1 test gap unresolved.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HttpBudgetIsSharedAcrossServiceInstancesAndAccessibleSources sends requests only to technical, maintenance, and records. The SQL test exercises the store directly, not the HTTP routes.",
+            "failureScenario": "If finance or contracts route wiring uses separate rate accounting, these tests still pass without proving the required cross-source HTTP budget. AC 1 calls for the same session to use all five sources, but AC 3 allows each reviewer role to access only a subset, so that test cannot be written under the current criteria."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover endpoint concurrency and role mapping, but the SQL admission test is sequential and cannot detect a race in the shared ledger.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceReadBoundsTests.cs",
+          "line": 346,
+          "message": "AC 1's SQL ledger atomicity is not tested under competing admissions. Add a SQL-store concurrency test that races two service instances at the budget boundary and asserts the exact admitted count.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "SqlAdmissionStoreUsesOneSerializableTransactionForCrossSourceRollingBudget calls SqlSourceReadAdmissionStore sequentially; the source name is discarded at line 348. The competing-attempt race test exercises only InMemorySourceReadAdmissionStore.",
+            "failureScenario": "If concurrent SQL admissions from two app instances can both pass the rolling-rate check before either records its lease, these sequential SQL assertions still pass while both requests are admitted at the limit."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new tests cover the changing-occupancy race, concurrent endpoint leases, lease release, and role mapping. The required cross-source HTTP budget test still omits finance and contracts; I found no separate security vulnerability.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceReadBoundsTests.cs",
+          "line": 413,
+          "message": "The prior AC 1 test finding remains: exercise the 20-request HTTP sequence across all five sources and two service instances, and assert that request 21 returns source_read_limit.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The endpoint budget test sends requests across two service instances, but cycles through only technical, maintenance, and records. The SQL test at line 344 names all five sources but discards each source value and calls the admission budget directly.",
+            "failureScenario": "If finance or contracts endpoint wiring bypasses the shared rolling budget, the tests still pass. They do not prove that requests 1–20 across all five source endpoints succeed and request 21 returns source_read_limit, as required by AC 1 and the prior-round finding."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceReadBoundsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 237,
+      "total": 245,
+      "percent": 96.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261017120000_SourceReadWindows.cs",
+          "covered": 21,
+          "total": 22,
+          "missed": [
+            32
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceReadAdmissionStore.cs",
+          "covered": 103,
+          "total": 108,
+          "missed": [
+            32,
+            33,
+            34,
+            35,
+            36
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceReadBudget.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs",
+          "covered": 96,
+          "total": 98,
+          "missed": [
+            89,
+            100
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
