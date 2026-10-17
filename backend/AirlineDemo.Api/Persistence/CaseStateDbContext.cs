@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using AirlineDemo.Api.SourceSystems;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -123,9 +124,20 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<InvestigationTraceStepRow> InvestigationTraceSteps => Set<InvestigationTraceStepRow>();
     public DbSet<CaseAssessmentRow> CaseAssessments => Set<CaseAssessmentRow>();
     public DbSet<CaseRequestReceiptRow> CaseRequestReceipts => Set<CaseRequestReceiptRow>();
+    public DbSet<SourceReadWindowRow> SourceReadWindows => Set<SourceReadWindowRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<SourceReadWindowRow>(e =>
+        {
+            e.ToTable("source_read_windows", "dbo");
+            e.HasKey(x => x.LeaseId);
+            e.Property(x => x.CaseHash).HasMaxLength(32).IsFixedLength();
+            e.Property(x => x.SessionHash).HasMaxLength(32).IsFixedLength();
+            e.HasIndex(x => new { x.CaseHash, x.SessionHash, x.RequestedAtTicks }).HasDatabaseName("IX_source_read_windows_session_window");
+            e.HasIndex(x => new { x.CaseHash, x.ReleasedAtTicks, x.ExpiresAtTicks }).HasDatabaseName("IX_source_read_windows_case_lease");
+        });
+
         modelBuilder.Entity<InvestigationTraceRow>(e =>
         {
             e.ToTable("investigation_traces", "dbo");
