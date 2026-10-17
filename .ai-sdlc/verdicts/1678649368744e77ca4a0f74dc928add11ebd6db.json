@@ -1,0 +1,230 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 271,
+  "branch": "ai-sdlc/issue-271",
+  "commitSha": "1678649368744e77ca4a0f74dc928add11ebd6db",
+  "round": 0,
+  "pipelineVersion": "a2ace37-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The report shape and ordering are implemented, but export does not reject runner results containing prohibited case-input or model-call content as required by acceptance criterion 5.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/DemoCaseGenerator/EvaluationJsonExporter.cs",
+          "line": 96,
+          "message": "Reject prohibited case-input and model-call content before writing the report; currently those values do not prevent export.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Write validates case identifiers and selected report fields, then serializes the report without checking the case input or model-call text in run.Cases.",
+            "failureScenario": "When a runner result contains a source-document, prompt, completion, or request-payload canary in a dispatch, Write still returns report bytes. Acceptance criterion 5 requires rejecting that typed input with zero output bytes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the main report shape, ordering, incomplete runs, labels, and rejected content. The selectedArmId constraint is not asserted, so an invalid exported ID can pass the named test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvaluationJsonExporterTests.cs",
+          "line": 19,
+          "message": "The named test does not verify the allowed selectedArmId values, leaving that part of the first acceptance criterion untested.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "WritesExactVersionedReportShape checks the root property names but never checks the serialized selectedArmId value against A, B, C, D, or null. ValidateJson also does not validate that value.",
+            "failureScenario": "If the exporter writes \"Z\" for selectedArmId while the test input selects A, the current assertions still pass, although the acceptance criterion requires the ID to be A, B, C, D, or null."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The exporter validates deployment-name syntax but still permits customer-identifying names to appear in the report. Other reviewed output fields are constrained to fixed values or frozen case identifiers.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/DemoCaseGenerator/EvaluationJsonExporter.cs",
+          "line": 106,
+          "message": "The deployment-name character check does not prevent customer-identifying values from being exported. Reject or safely map sensitive deployment names before writing the report (OWASP A04:2025).",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The runner's effective configuration supplies DeploymentName; Deployment accepts any 1–128 character value made of ASCII letters, digits, dots, hyphens, and underscores, then the exporter writes it to the report.",
+            "failureScenario": "A configuration uses a customer-identifying deployment name such as \"acme-customer-42\". It passes validation and is included in the JSON report, exposing customer-identifying data despite the acceptance criterion requiring rejection."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvaluationJsonExporterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 132,
+      "total": 138,
+      "percent": 95.7,
+      "files": [
+        {
+          "path": "backend/DemoCaseGenerator/EvaluationJsonExporter.cs",
+          "covered": 132,
+          "total": 138,
+          "missed": [
+            39,
+            43,
+            49,
+            60,
+            131,
+            134
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

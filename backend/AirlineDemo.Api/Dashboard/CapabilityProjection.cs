@@ -6,12 +6,12 @@ namespace AirlineDemo.Api.Dashboard;
 public static class CapabilityLabels
 {
     public const string AiAgent = "AI agent";
-    public const string Deterministic = "Deterministic workflow";
-    public const string Human = "Human decision";
-    public const string DesignOnly = "Design only";
+    public const string RulesBased = "Rules-based";
+    public const string Simulated = "Simulated";
+    public const string DesignOnly = "Design-only";
     public const string Unknown = "Unknown";
 
-    public static readonly IReadOnlyList<string> Known = [AiAgent, Deterministic, Human, DesignOnly];
+    public static readonly IReadOnlyList<string> Known = [AiAgent, RulesBased, Simulated, DesignOnly];
 
     public static string Normalize(string? raw) =>
         raw is not null && Known.Contains(raw, StringComparer.Ordinal) ? raw : Unknown;
@@ -60,10 +60,6 @@ public static class CapabilityProjection
     public const string ReviewerRole = "technical-reviewer";
     public const string NotImplemented = "Not implemented in this demo";
 
-    private const string InvestigationSource = "records-investigation";
-    private const string ReviewSource = "technical-review";
-    private const string IntakeSource = "intake";
-
     private static readonly DecisionAction Accept = new("accept", "Accept finding");
     private static readonly DecisionAction Reject = new("reject", "Reject finding");
 
@@ -76,26 +72,21 @@ public static class CapabilityProjection
     private static readonly CapabilityDefinition[] Definitions =
     [
         new("records-investigation", "Records investigation (records digitisation)", CapabilityLabels.AiAgent,
-            "L4, autonomous",
-            "L3: acts only on routine evidence requests within policy to the mock inbox; a person decides ambiguous cases and technical acceptance"),
-        new("utilisation-reserves", "Utilisation and reserves", CapabilityLabels.Deterministic,
-            "L3, acts (invoices) with finance review",
-            "L2: drafts a reserve calculation; a simulated finance review decides; no invoice"),
-        new("contract-compliance", "Contract compliance", CapabilityLabels.Deterministic,
-            "L3, acts (notices) with legal sign-off",
-            "L2: drafts an obligation status and notice; a simulated legal review decides; no notice sent"),
+            "L4", "L3"),
+        new("utilisation-reserves", "Utilisation and reserves", CapabilityLabels.RulesBased, "L3", "L2"),
+        new("contract-compliance", "Contract compliance", CapabilityLabels.RulesBased, "L3", "L2"),
         new("transition-planning", "Transition planning", CapabilityLabels.DesignOnly,
-            "L2, recommend", "design-only: not implemented in this demo",
+            "L2", "design-only",
             "Plan the return-to-service transition for an aircraft asset.",
             "Proposes transition steps for human review only.",
             "A named human approves every transition step."),
         new("credit-sanctions-monitoring", "Credit and sanctions monitoring", CapabilityLabels.DesignOnly,
-            "L2, recommend", "design-only: not implemented in this demo",
+            "L2", "design-only",
             "Monitor counterparties for credit and sanctions exposure.",
             "Flags exposure for human review only.",
             "A named human decides on any hold or release."),
         new("portfolio-supervisor", "Portfolio supervisor", CapabilityLabels.DesignOnly,
-            "not in the case-study table", "design-only: not implemented in this demo",
+            CapabilityLabels.Unknown, "design-only",
             "Supervise work across a portfolio of cases.",
             "Would route work between agents and reviewers only.",
             "A named human owns portfolio priorities."),
@@ -139,7 +130,17 @@ public static class CapabilityProjection
     }
 
     public static string LabelForCapability(string capabilityId) =>
-        Definitions.FirstOrDefault(definition => definition.Id == capabilityId)?.Label ?? CapabilityLabels.Unknown;
+        Definitions.FirstOrDefault(definition => definition.Id == capabilityId)?.Label ?? capabilityId switch
+        {
+            "records-policy" or "evidence-request-dispatch" or "reserves-calculation" or "reserve-calculation" or
+                "obligation-status" or "notice-drafting" or "create-work-item" or "work-item-creation" or
+                "change-work-item-state" or "work-item-state-change" =>
+                CapabilityLabels.RulesBased,
+            "mock-partner-inbox" or "mock-partner-response" or "technical-review" or "finance-review" or
+                "legal-review" => CapabilityLabels.Simulated,
+            "invoice-issuance" or "formal-notice-dispatch" => CapabilityLabels.DesignOnly,
+            _ => CapabilityLabels.Unknown,
+        };
 
     internal static DashboardQueueItem? NextDecisionItem(IEnumerable<DashboardQueueItem> items) =>
         items.OrderByDescending(item => item.AgeSeconds)
@@ -147,51 +148,22 @@ public static class CapabilityProjection
 
     public static string LabelForAuditAction(string action) => action switch
     {
-        "technical-review.decided" or "reserve.decided" or "obligation.legal-decided" => CapabilityLabels.Human,
-        "mock-response.accepted" or "create-work-item" or "change-work-item-state" => CapabilityLabels.Deterministic,
+        "technical-review.decided" or "reserve.decided" or "obligation.legal-decided" or "mock-response.accepted" =>
+            CapabilityLabels.Simulated,
+        "create-work-item" or "change-work-item-state" => CapabilityLabels.RulesBased,
         _ => CapabilityLabels.Unknown,
     };
 
     public static IReadOnlyList<CapabilityCard> Build(string? role, int openReviewItems, string? investigationTraceUrl)
     {
         var traceLinks = TraceLinks(investigationTraceUrl);
-        return
-        [
-            new("records-investigation", "Records investigation", CapabilityLabels.AiAgent, false, null, null, traceLinks, [], null),
-            new("technical-review", "Technical review", CapabilityLabels.Human, false,
-                Math.Max(0, openReviewItems), "Technical reviewer", [], PermittedDecisions(role), null),
-            DesignOnly("transition-planning", "Transition planning",
-                "Plan the return-to-service transition for an aircraft asset.",
-                "Proposes transition steps for human review only.",
-                "A named human approves every transition step."),
-            DesignOnly("credit-sanctions-monitoring", "Credit and sanctions monitoring",
-                "Monitor counterparties for credit and sanctions exposure.",
-                "Flags exposure for human review only.",
-                "A named human decides on any hold or release."),
-            DesignOnly("portfolio-supervisor", "Portfolio supervisor",
-                "Supervise work across a portfolio of cases.",
-                "Would route work between agents and reviewers only.",
-                "A named human owns portfolio priorities."),
-            DesignOnly("invoice-issuance", "Invoice issuance",
-                "Issue invoices for settled obligations.",
-                "Would draft invoices only; none are issued in this demo.",
-                "A named finance human approves each invoice."),
-            DesignOnly("formal-notice-dispatch", "Formal notice dispatch",
-                "Dispatch formal notices to counterparties.",
-                "Would prepare notices only; none are dispatched in this demo.",
-                "A named legal human approves each notice."),
-        ];
+        return Definitions.Select(definition => CreateCard(definition,
+            definition.Id == "records-investigation" ? traceLinks : [])).ToArray();
     }
 
     public static ActivityEvent Activity(int sequence, string source, string actor, string outcome, string? traceUrl)
     {
-        var label = source switch
-        {
-            InvestigationSource => CapabilityLabels.AiAgent,
-            ReviewSource => CapabilityLabels.Human,
-            IntakeSource => CapabilityLabels.Deterministic,
-            _ => CapabilityLabels.Unknown,
-        };
+        var label = LabelForCapability(source);
         var link = label == CapabilityLabels.AiAgent && !string.IsNullOrWhiteSpace(traceUrl) ? traceUrl : null;
         return new ActivityEvent(sequence, actor, label, outcome, link);
     }
@@ -199,9 +171,15 @@ public static class CapabilityProjection
     private static IReadOnlyList<EvidenceLink> TraceLinks(string? url) =>
         string.IsNullOrWhiteSpace(url) ? [] : [new EvidenceLink("Investigation trace", url)];
 
-    private static CapabilityCard DesignOnly(string id, string name, string purpose, string autonomy, string authority) =>
-        new(id, name, CapabilityLabels.DesignOnly, true, null, null, [], [],
-            new DesignOnlyDetails(purpose, autonomy, authority, NotImplemented));
+    private static CapabilityCard CreateCard(CapabilityDefinition definition, IReadOnlyList<EvidenceLink> evidence)
+    {
+        var isDesignOnly = definition.Label == CapabilityLabels.DesignOnly;
+        return new CapabilityCard(definition.Id, definition.Name, definition.Label, isDesignOnly, null, null,
+            evidence, [], isDesignOnly
+                ? new DesignOnlyDetails(definition.Purpose, definition.IntendedAutonomy, definition.HumanAuthority, NotImplemented)
+                : null,
+            definition.CaseStudyAutonomy, definition.DemoAutonomy);
+    }
 
     private static int? BasisVersion(string detail)
     {

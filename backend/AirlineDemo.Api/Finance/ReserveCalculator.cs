@@ -1,8 +1,10 @@
 using System.Collections.Frozen;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.SourceSystems;
 using Microsoft.AspNetCore.Http;
 
 namespace AirlineDemo.Api.Finance;
@@ -45,6 +47,26 @@ public sealed record ReserveDraft(
     IReadOnlyList<string> Discrepancies,
     string CalculationBasis);
 
+public sealed record FinanceReserveLine(
+    string RecordId,
+    string Kind,
+    string Currency,
+    decimal Billed,
+    decimal Collected,
+    decimal Underbilled,
+    decimal Overdue,
+    decimal Reimbursable);
+
+public sealed record FinanceReserveDraft(
+    string DraftId,
+    int Version,
+    string Period,
+    ReserveDraftStatus Status,
+    IReadOnlyList<FinanceReserveLine> Lines,
+    decimal? Total,
+    IReadOnlyList<BlockReason> Blockers,
+    string CalculationBasis);
+
 public sealed record FinanceReviewRecord(
     string DraftId,
     int DraftVersion,
@@ -61,6 +83,8 @@ public static class ReserveCalculator
 {
     public const string CalculationBasis =
         "Units x unit rate per contract line; each line rounded to cents (midpoint away from zero) before summing; total = sum of rounded lines.";
+    public const string FinanceCalculationBasis =
+        "Finance lines report billed, collected, underbilled, overdue and reimbursable amounts; total = sum of underbilled amounts. This draft makes no profit, revenue, or cash-recognition claim.";
 
     private static readonly Regex PeriodPattern = new(@"^\d{4}-(0[1-9]|1[0-2])$", RegexOptions.CultureInvariant);
 
@@ -69,6 +93,51 @@ public static class ReserveCalculator
     /// Hand-built or copied (<c>with</c>) drafts are not members; drafts whose lines or fields were edited afterwards no longer match the snapshot.
     /// </summary>
     private static readonly ConditionalWeakTable<ReserveDraft, string> IssuedDrafts = new();
+
+    public static FinanceReserveDraft CalculateFinanceRecords(
+        string draftId, int version, string period, IEnumerable<SourceRecord<FinancePayload>> records)
+    {
+        ValidateNonBlank(draftId, nameof(draftId));
+        if (version < 1)
+        {
+            throw new ArgumentException("Version must be at least 1.", nameof(version));
+        }
+        ValidatePeriod(period, nameof(period));
+        ArgumentNullException.ThrowIfNull(records);
+
+        var selected = records.Where(record => record.Kind is "maintenance_reserve" or "reserve_reimbursement").ToArray();
+        var blockers = new List<BlockReason>();
+        foreach (var record in selected)
+        {
+            var problems = FinanceRecordValidator.Validate(record);
+            if (problems.Count > 0)
+            {
+                blockers.Add(new BlockReason("finance-record-invalid", $"Record {record.RecordId}: {string.Join(" ", problems)}"));
+            }
+        }
+        if (blockers.Count > 0)
+        {
+            return new FinanceReserveDraft(draftId, version, period, ReserveDraftStatus.Blocked, [], null, blockers, FinanceCalculationBasis);
+        }
+
+        var year = int.Parse(period[..4], CultureInfo.InvariantCulture);
+        var month = int.Parse(period[5..], CultureInfo.InvariantCulture);
+        var lastDay = new DateOnly(year, month, DateTime.DaysInMonth(year, month));
+        var lines = selected.Select(record =>
+        {
+            var fields = record.Payload.Fields;
+            var billed = decimal.Parse(fields["recordedAmount"], CultureInfo.InvariantCulture);
+            var collected = decimal.Parse(fields["collectedAmount"], CultureInfo.InvariantCulture);
+            var underbilled = Math.Max(billed - collected, 0m);
+            var dueDate = DateOnly.ParseExact(fields["dueDate"], "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var reimbursable = record.Kind == "reserve_reimbursement"
+                && fields["status"] is ("approved" or "paid") ? billed : 0m;
+            return new FinanceReserveLine(record.RecordId, record.Kind, fields["currency"], billed, collected,
+                underbilled, dueDate < lastDay ? underbilled : 0m, reimbursable);
+        }).ToArray();
+        return new FinanceReserveDraft(draftId, version, period, ReserveDraftStatus.ReadyForReview,
+            lines, lines.Sum(line => line.Underbilled), [], FinanceCalculationBasis);
+    }
 
     public static ReserveDraft Calculate(string draftId, int version, string period, UsageReport? usage, RateReport? rates)
     {

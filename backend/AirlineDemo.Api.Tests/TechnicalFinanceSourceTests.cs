@@ -6,6 +6,36 @@ public sealed class TechnicalFinanceSourceTests
 {
     private const string CoreCase = "case-001";
 
+    private static readonly string[] FinanceKinds = ["rent", "maintenance_reserve", "security_deposit", "reserve_reimbursement"];
+
+    private static SourceRecord<FinancePayload> FinanceRecord(string kind, IReadOnlyDictionary<string, string>? fields = null) => new()
+    {
+        SourceId = "finance",
+        RecordId = "fin-test-001",
+        RecordVersion = 1,
+        AsOf = new DateOnly(2026, 10, 1),
+        CaseId = CoreCase,
+        Kind = kind,
+        Payload = new FinancePayload(fields ?? FinanceFields(kind)),
+        Synthetic = true,
+    };
+
+    private static Dictionary<string, string> FinanceFields(string kind)
+    {
+        var fields = new Dictionary<string, string>
+        {
+            ["recordedAmount"] = "100.00", ["collectedAmount"] = "75.00", ["currency"] = "USD",
+            ["period"] = "2026-09", ["dueDate"] = "2026-09-30",
+        };
+        if (kind == "maintenance_reserve")
+            fields["rateBasis"] = "per_flight_hour";
+        if (kind == "maintenance_reserve") fields["rate"] = "0.10";
+        if (kind == "reserve_reimbursement")
+            fields["claimId"] = "claim-001";
+        if (kind == "reserve_reimbursement") fields["status"] = "approved";
+        return fields;
+    }
+
     private static T Succeeded<T>(SourceReadResult<T> result) =>
         Assert.IsType<SourceReadSucceeded<T>>(result).Value;
 
@@ -102,6 +132,67 @@ public sealed class TechnicalFinanceSourceTests
         Assert.Equal(
             new SourceRecordNotFound<SourceRecord<TechnicalPayload>>("tech-missing-999"),
             await technical.GetAsync(CoreCase, "tech-missing-999"));
+    }
+
+    [Theory]
+    [InlineData("rent")]
+    [InlineData("maintenance_reserve")]
+    [InlineData("security_deposit")]
+    [InlineData("reserve_reimbursement")]
+    public void Finance_records_accept_each_kind_with_its_exact_payload(string kind)
+    {
+        Assert.Empty(FinanceRecordValidator.Validate(FinanceRecord(kind)));
+    }
+
+    [Theory]
+    [InlineData("maintenance_reserve", "rateBasis", "per_cycle")]
+    [InlineData("reserve_reimbursement", "status", "claimed")]
+    [InlineData("reserve_reimbursement", "status", "paid")]
+    public void Finance_records_accept_each_additional_enumerated_value(string kind, string field, string value)
+    {
+        var fields = FinanceFields(kind);
+        fields[field] = value;
+
+        Assert.Empty(FinanceRecordValidator.Validate(FinanceRecord(kind, fields)));
+    }
+
+    [Fact]
+    public void Finance_records_reject_unknown_kinds_missing_fields_bad_values_and_extra_fields()
+    {
+        Assert.NotEmpty(FinanceRecordValidator.Validate(FinanceRecord("unknown_kind")));
+        foreach (var kind in FinanceKinds)
+        {
+            var missing = FinanceFields(kind);
+            missing.Remove("recordedAmount");
+            Assert.NotEmpty(FinanceRecordValidator.Validate(FinanceRecord(kind, missing)));
+        }
+        var malformed = FinanceFields("rent");
+        malformed["currency"] = "usd";
+        Assert.NotEmpty(FinanceRecordValidator.Validate(FinanceRecord("rent", malformed)));
+        var trailingNewlineCurrency = FinanceFields("rent");
+        trailingNewlineCurrency["currency"] = "USD\n";
+        Assert.Equal(
+            new[] { "Currency must be three uppercase letters." },
+            FinanceRecordValidator.Validate(FinanceRecord("rent", trailingNewlineCurrency)));
+        Assert.Equal(
+            new[] { "Finance payload fields are required." },
+            FinanceRecordValidator.Validate(FinanceRecord("rent") with { Payload = new FinancePayload(null!) }));
+        var extra = FinanceFields("rent");
+        extra["leaseId"] = "lease-001";
+        Assert.NotEmpty(FinanceRecordValidator.Validate(FinanceRecord("rent", extra)));
+        Assert.NotEmpty(FinanceRecordValidator.Validate(
+            FinanceRecord("maintenance_reserve", FinanceFields("security_deposit"))));
+    }
+
+    [Fact]
+    public void Finance_records_reject_null_field_values_without_throwing()
+    {
+        var fields = FinanceFields("rent");
+        fields["recordedAmount"] = null!;
+
+        Assert.Equal(
+            new[] { "Finance amounts must be non-negative decimal strings." },
+            FinanceRecordValidator.Validate(FinanceRecord("rent", fields)));
     }
 
     [Fact]
