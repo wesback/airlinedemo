@@ -100,8 +100,9 @@ public sealed class SqlCaseStateStoreTests
         }
     }
 
+    // AC-005: SQL persists the complete assessment and request receipt, and fingerprints them for exact replay.
     [Fact]
-    public void AssessmentsAndRequestReceiptsRoundTripThroughSql()
+    public void AC005_AssessmentsAndRequestReceiptsRoundTripThroughSql()
     {
         using var connection = OpenMigratedSqlite(out var options);
         var store = new SqlCaseStateStore(options);
@@ -109,8 +110,9 @@ public sealed class SqlCaseStateStoreTests
         var assessment = new CaseAssessment("assessment-1", "case-1", "basis-7", 7, "Request", "reason",
             [new("MissingRequirement", "oil sample", "Engine", "ENG-123", [new("doc-1", 9)])], "request-1", "work-1");
         var receipt = new DeliveryReceipt("event-1", "request-1", "case-1", "report-1", "basis-7", 7, "template-3", "request body");
-        store.Commit(scope, 0, new CaseCommit(null, receipt.EventId, "actor", "assessment", "saved",
-            Assessment: assessment, RequestReceipt: receipt));
+        var commit = new CaseCommit(null, receipt.EventId, "actor", "assessment", "saved",
+            Assessment: assessment, RequestReceipt: receipt);
+        store.Commit(scope, 0, commit);
 
         var reloaded = new SqlCaseStateStore(options);
         var stored = Assert.Single(reloaded.ListAssessments(reloaded.AuthorizeCase("case-1", "owner-1")));
@@ -118,8 +120,24 @@ public sealed class SqlCaseStateStoreTests
             assessment.Reason, assessment.RequestId, assessment.WorkItemId),
             (stored.AssessmentId, stored.CaseId, stored.BasisId, stored.BasisVersion, stored.Outcome,
             stored.Reason, stored.RequestId, stored.WorkItemId));
+        var storedClaim = Assert.Single(stored.Claims);
+        Assert.Equal(("MissingRequirement", "oil sample", "Engine", "ENG-123"),
+            (storedClaim.Kind, storedClaim.Value, storedClaim.Component, storedClaim.SerialNumber));
+        var storedWitness = Assert.Single(storedClaim.Witnesses);
+        Assert.Equal(("doc-1", 9), (storedWitness.DocumentId, storedWitness.Page));
         Assert.Equal(receipt, Assert.Single(reloaded.ListRequestReceipts(reloaded.AuthorizeCase("case-1", "owner-1"))));
+        var replay = reloaded.Commit(scope, 0, commit);
+        Assert.True(replay.Replayed);
+        Assert.Equal(1, replay.State.Revision);
         Assert.Single(reloaded.ReadAudit(scope));
+        Assert.Throws<ReceiptConflictException>(() => reloaded.Commit(scope, 0, commit with
+        {
+            Assessment = assessment with { Claims = [assessment.Claims[0] with { Value = "different value" }] },
+        }));
+        Assert.Throws<ReceiptConflictException>(() => reloaded.Commit(scope, 0, commit with
+        {
+            RequestReceipt = receipt with { Body = "different body" },
+        }));
     }
 
     // AC1: with ConnectionStrings:CaseState set, the registered store is the SQL adapter; no store call or connection is made.
