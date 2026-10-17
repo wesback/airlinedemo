@@ -15,6 +15,7 @@ public sealed class DashboardProjectionEndpointTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
 
+    // AC-020: This projection test also asserts backend-supplied queue-item and audit-event labels.
     [Fact]
     public async Task AC021_ProjectionUsesOneSnapshotAndProjectsQueueAndActivity()
     {
