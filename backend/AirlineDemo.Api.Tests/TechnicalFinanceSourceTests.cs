@@ -218,7 +218,7 @@ public sealed class TechnicalFinanceSourceTests
     public void FixtureRecordCountThatDiffersFromManifestIsRejected()
     {
         // AC-004: the manifest's declared record count must match the fixture's records.
-        var counts = new Dictionary<string, int>(TechnicalSource.CoreManifest.RecordCounts) { ["technical"] = 4 };
+        var counts = new Dictionary<string, int>(TechnicalSource.CoreManifest.RecordCounts) { ["technical"] = 12 };
         var manifest = TechnicalSource.CoreManifest with { RecordCounts = counts };
 
         var error = Assert.Throws<InvalidOperationException>(() =>
@@ -230,7 +230,7 @@ public sealed class TechnicalFinanceSourceTests
                 fields => new TechnicalPayload(fields)));
 
         Assert.Equal(
-            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' has 5 records; manifest declares 4.",
+            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' has 13 records; manifest declares 12.",
             error.Message);
     }
 

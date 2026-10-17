@@ -44,6 +44,31 @@ The port is read-only. It has no write, update or delete members, and it has no 
 
 `FinanceRecordValidator` rejects unknown kinds, missing fields and fields not listed for that kind. Reserve drafts consume only `maintenance_reserve` and `reserve_reimbursement`: billed is `recordedAmount`, collected is `collectedAmount`, underbilled is the non-negative difference, and overdue is underbilled when `dueDate` is before the draft period's last calendar day. Reimbursable is `recordedAmount` only for an approved or paid reimbursement. The draft total is the sum of underbilled amounts; it makes no profit, revenue or cash-recognition claim.
 
+## Signed fixture cases
+
+Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `contracts`) ships one fixture file under `backend/AirlineDemo.Api/Fixtures/sources/`, with a manifest (`<source>.manifest.json`) and a detached signature (`<source>.manifest.sig`). The manifest lists `owningCaseIds` (`case-001`, `case-a`, `case-b`, `case-c`), the SHA-256 digest of the fixture file and the record count of every source. Every record's `caseId` must be one of the owning IDs, and each source holds at least one record for each case.
+
+| Case | Scenario the case exists to show | Where |
+|---|---|---|
+| `case-001` | The core return-readiness case. | all five sources |
+| `case-a` | A maintenance record that explains the missing-history finding after the mock response. | `maintenance`: kind `maintenance_history` (`SYN-MH-A-0003`) |
+| `case-b` | A technical record that disagrees with a document on engine identity: the technical record names engine serial `SYN-SN-77201`; the case-b release document in the evidence set states `SYN-SN-77210`. | `technical`: `tech-b-component-001`; `records`: component-release document `SYN-DOCB002` |
+| `case-c` | A baseline in all five sources and a records entry for the blocked document. | `records`: `SYN-DOCC003`, `parseStatus` `blocked` |
+
+The new finance records use the typed kind `maintenance_reserve` with the common fields (`recordedAmount`, `collectedAmount`, `currency`, `period`, `dueDate`, `rateBasis`, `rate`). The `case-001` finance records keep their earlier kinds.
+
+### Signing
+
+The detached signature is RSA-PSS over the bytes of `<source>.manifest.json`, hash SHA-256, salt length 32 bytes, verified against the public key pinned in `SourceFixtureLoader`. The private key is held by the release owner and is never in the repository. After any change to a fixture or manifest, the release owner re-signs all five manifests:
+
+```
+openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+  -sign <release-key.pem> -out backend/AirlineDemo.Api/Fixtures/sources/<source>.manifest.sig \
+  backend/AirlineDemo.Api/Fixtures/sources/<source>.manifest.json
+```
+
+The digests and record counts that each `*Source.cs` carries in `CoreManifest` must match the manifest and the fixture file; the tests refuse a mismatch.
+
 ## Read outcomes: `SourceReadResult<TSuccess>`
 
 Each outcome is a distinct type.
