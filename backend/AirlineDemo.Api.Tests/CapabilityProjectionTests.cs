@@ -74,26 +74,38 @@ public sealed class CapabilityProjectionTests
     [Fact]
     public void AC020_DesignOnlyCardsHaveNoWorkflowState()
     {
-        var cards = CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 5, TraceUrl)
-            .Concat(CapabilityProjection.Build("case-a", CapabilityProjection.ReviewerRole, EmptyState(),
-                DateTimeOffset.UnixEpoch).Capabilities);
-        var designCards = cards.Where(card => card.DesignOnly).ToArray();
-        Assert.Equal(6, designCards.Length);
-
-        foreach (var card in designCards)
+        var projectionPaths = new[]
         {
-            Assert.Contains(card.Id, new[] { "transition-planning", "credit-sanctions-monitoring", "portfolio-supervisor" });
-            Assert.Equal(CapabilityLabels.DesignOnly, card.Label);
-            Assert.True(card.DesignOnly);
-            Assert.Null(card.OpenItems);
-            Assert.Null(card.NextDecisionOwner);
-            Assert.Empty(card.Actions);
-            Assert.Empty(card.Evidence);
-            Assert.NotNull(card.Design);
-            Assert.False(string.IsNullOrWhiteSpace(card.Design!.Purpose));
-            Assert.False(string.IsNullOrWhiteSpace(card.Design.IntendedAutonomy));
-            Assert.False(string.IsNullOrWhiteSpace(card.Design.HumanAuthority));
-            Assert.Equal("Not implemented in this demo", card.Design.Notice);
+            CapabilityProjection.Build(CapabilityProjection.ReviewerRole, 5, TraceUrl),
+            CapabilityProjection.Build("case-a", CapabilityProjection.ReviewerRole, EmptyState(),
+                DateTimeOffset.UnixEpoch).Capabilities,
+        };
+        var expectedIds = new[]
+        {
+            "transition-planning",
+            "credit-sanctions-monitoring",
+            "portfolio-supervisor",
+        };
+
+        foreach (var cards in projectionPaths)
+        {
+            var designCards = cards.Where(card => card.DesignOnly).ToArray();
+            Assert.Equal(expectedIds, designCards.Select(card => card.Id));
+
+            foreach (var card in designCards)
+            {
+                Assert.Equal(CapabilityLabels.DesignOnly, card.Label);
+                Assert.True(card.DesignOnly);
+                Assert.Null(card.OpenItems);
+                Assert.Null(card.NextDecisionOwner);
+                Assert.Empty(card.Actions);
+                Assert.Empty(card.Evidence);
+                Assert.NotNull(card.Design);
+                Assert.False(string.IsNullOrWhiteSpace(card.Design!.Purpose));
+                Assert.False(string.IsNullOrWhiteSpace(card.Design.IntendedAutonomy));
+                Assert.False(string.IsNullOrWhiteSpace(card.Design.HumanAuthority));
+                Assert.Equal("Not implemented in this demo", card.Design.Notice);
+            }
         }
     }
 
