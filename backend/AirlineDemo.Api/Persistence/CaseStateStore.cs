@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Requests;
 
@@ -822,6 +823,8 @@ public sealed class CaseStateStore : ICaseStateStore
         }
         catch (JsonException)
         {
+            if (Regex.IsMatch(content, "\"format\"\\s*:\\s*\"source-record-pins-v1\"", RegexOptions.CultureInvariant))
+                throw new BasisIntegrityException("A source basis pin document is malformed.");
             return;
         }
         using (document)

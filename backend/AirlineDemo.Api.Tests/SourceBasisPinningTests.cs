@@ -147,6 +147,33 @@ public sealed class SourceBasisPinningTests
     }
 
     [Fact]
+    public void MalformedSourcePinJsonIsRejectedWithoutChangingState()
+    {
+        var path = StatePath();
+        try
+        {
+            var store = new CaseStateStore(path);
+            var scope = store.CreateCase(CaseId, "presenter");
+            const string malformedPins = "{\"format\" : \"source-record-pins-v1\", \"pins\": [";
+            var basis = CaseStateStore.CreateBasisVersion(1, malformedPins, string.Empty);
+            var before = store.Read(scope);
+
+            Assert.Throws<BasisIntegrityException>(() => store.Commit(
+                scope, before.Revision,
+                new CaseCommit(basis, null, "assessment-service", "source-basis.gathered", "malformed pins")));
+
+            var after = store.Read(scope);
+            Assert.Equal(before.Basis, after.Basis);
+            Assert.Equal(before.Audit, after.Audit);
+            Assert.Equal(before.Revision, after.Revision);
+        }
+        finally
+        {
+            DeleteState(path);
+        }
+    }
+
+    [Fact]
     public void AC2_ReassessmentAppendsChangedVersionAndPreservesPriorBasisIdentityAndContent()
     {
         var path = StatePath();
