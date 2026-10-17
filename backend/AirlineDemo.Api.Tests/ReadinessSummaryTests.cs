@@ -22,14 +22,14 @@ public sealed class ReadinessSummaryTests
     {
         using var harness = new Harness();
         harness.SeedHeadline();
-        harness.SeedAssessmentWithMultipleGaps();
+        harness.SeedReviewWithMultipleGaps();
 
         using var response = await harness.Get($"/api/cases/{CaseId}/readiness?role=finance-reviewer&caseId=case-002", CaseId);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         var summary = json.RootElement;
-        Assert.Equal(3, summary.GetProperty("gapsFound").GetInt32());
+        Assert.Equal(1, summary.GetProperty("gapsFound").GetInt32());
         Assert.Equal(1, summary.GetProperty("requestsSent").GetInt32());
         Assert.Equal(1, summary.GetProperty("heldForReview").GetInt32());
         Assert.Equal(2, summary.GetProperty("notProcessed").GetInt32());
@@ -115,12 +115,12 @@ public sealed class ReadinessSummaryTests
             ]));
         }
 
-        public void SeedAssessmentWithMultipleGaps()
+        public void SeedReviewWithMultipleGaps()
         {
             var scope = Store.AuthorizeCase(CaseId, "case-owner");
-            var assessment = new CaseAssessment("assessment-multiple-gaps", CaseId, "basis-1", 1, "Request", "validated missing history",
+            var assessment = new CaseAssessment("assessment-multiple-gaps", CaseId, "basis-1", 1, "Review", "multiple missing claims held for review",
                 [Claim("MissingRequirement"), Claim("MissingRequirement")], null, null);
-            Store.Commit(scope, 3, new CaseCommit(null, null, "assessment-service", "assessment", "validated missing history",
+            Store.Commit(scope, 3, new CaseCommit(null, null, "assessment-service", "assessment", "multiple missing claims held for review",
                 Assessment: assessment));
         }
 
