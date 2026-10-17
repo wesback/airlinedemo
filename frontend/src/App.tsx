@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
+import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
 import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTraceView } from './InvestigationTrace';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
-type Projections = { caseState: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection };
+type Projections = { caseState: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection; readiness: ReadinessSummaryData };
 
 class RequestError extends Error { constructor(readonly status: number) { super(`Request failed with status ${status}`); } }
 
@@ -59,8 +60,9 @@ export default function App() {
         const caseProjection = await getProjection<CaseProjection>('/api/cases/case-001');
         const dashboardProjection = await getProjection<DashboardData>('/api/cases/case-001/dashboard');
         const reviewProjection = await getProjection<TechnicalReviewProjection>('/api/cases/case-001/technical-reviews');
+        const readiness = await getProjection<ReadinessSummaryData>('/api/cases/case-001/readiness');
         if (!active) return;
-        setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection });
+        setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection, readiness });
       } catch (error) {
         if (!active) return;
         setData(null);
@@ -142,6 +144,7 @@ export default function App() {
       <SignIn onSessionChange={setSession} />
       {session && (
         <section aria-labelledby="case-heading">
+          {data && <ReadinessSummary summary={data.readiness} />}
           <h2 id="case-heading">Case case-001</h2>
           {loadingCase && <p role="status">Loading case data…</p>}
           {caseError && <p role="alert">{caseError}</p>}

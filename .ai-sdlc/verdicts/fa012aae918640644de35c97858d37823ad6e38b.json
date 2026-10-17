@@ -1,0 +1,235 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 265,
+  "branch": "ai-sdlc/issue-265",
+  "commitSha": "fa012aae918640644de35c97858d37823ad6e38b",
+  "round": 0,
+  "pipelineVersion": "360108b",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The projection’s request-only filter excludes Review assessments, but the READY-01 test does not verify the required multiple-claim Review case and uses an additional Request that changes the expected gap count.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ReadinessSummaryTests.cs",
+          "line": 22,
+          "message": "READY-01’s named test does not cover a multiple-claim Review and deviates from its required seed data and exact gap count.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Counts_come_from_case_state_and_ambiguous_items_are_not_gaps seeds a headline case and then calls SeedAssessmentWithMultipleGaps, which adds a Request assessment with two MissingRequirement claims. It does not seed the required multiple-claim Review assessment.",
+            "failureScenario": "If the projection incorrectly counted MissingRequirement claims from a multiple-claim Review, the test would not exercise that case. The required READY-01 setup has one Request with one missing claim and a multiple-claim Review, and expects gapsFound to be 1; this test instead expects 3 after adding another Request."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the main endpoint behavior and access denials, but the READY-01 test setup does not verify that a multi-claim Review contributes zero gaps.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ReadinessSummaryTests.cs",
+          "line": 24,
+          "message": "READY-01’s named test does not cover its required multi-claim Review case: it seeds the two-claim assessment as Request and asserts three gaps. Seed it as Review and assert the specified count of one.",
+          "confidence": 0.87,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Counts_come_from_case_state_and_ambiguous_items_are_not_gaps adds a second assessment through SeedAssessmentWithMultipleGaps; that helper creates an Outcome=Request assessment with two MissingRequirement claims.",
+            "failureScenario": "If the projection incorrectly counts a multi-claim Review assessment as gaps while still excluding the single-claim ambiguous Review, this test passes: it never seeds a multi-claim Review. READY-01 requires that case to contribute zero gaps and specifies the seeded test should assert counts of 1, 1, 1, and 2; this test instead expects gapsFound=3."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security defect was found in the changed code. The endpoint requires a session and validates the requested case against that session’s case scopes before returning the summary.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ReadinessSummaryTests.cs",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/ReadinessSummary.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 43,
+      "total": 43,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Dashboard/ReadinessSummary.cs",
+          "covered": 37,
+          "total": 37,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

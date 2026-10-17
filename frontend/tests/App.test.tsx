@@ -41,6 +41,10 @@ function setupApi(options: {
     if (url === '/api/auth/users') return json(users);
     if (url === '/api/auth/sign-in') return json(signedIn);
     if (url === '/api/cases/case-001' && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
+    if (url === '/api/cases/case-001/readiness' && method === 'GET') return json({
+      monthsUntilReturn: 9, gapsFound: 1, requestsSent: 1, heldForReview: 1, notProcessed: 2,
+      sentence: 'Return in 9 months. 1 records gap found, 1 routine request sent, 1 item held for internal review, 2 documents not processed.',
+    });
     if (url === '/api/cases/case-001/dashboard' && method === 'GET') {
       dashboardRequests += 1;
       if (options.dashboardStatus) return json({ error: 'not allowed' }, options.dashboardStatus);
@@ -135,7 +139,9 @@ describe('reviewer workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByText('Revision: 7')).toBeTruthy();
     expect(calls.filter(({ url }) => url.startsWith('/api/cases/')).map(({ url, init }) => `${init?.method ?? 'GET'} ${url}`))
-      .toEqual(['GET /api/cases/case-001', 'GET /api/cases/case-001/dashboard', 'GET /api/cases/case-001/technical-reviews']);
+      .toEqual(['GET /api/cases/case-001', 'GET /api/cases/case-001/dashboard', 'GET /api/cases/case-001/technical-reviews', 'GET /api/cases/case-001/readiness']);
+    const summary = screen.getByText('Return in 9 months. 1 records gap found, 1 routine request sent, 1 item held for internal review, 2 documents not processed.');
+    expect(summary.parentElement?.firstElementChild).toBe(summary);
 
     for (const status of [401, 404]) {
       cleanup();
