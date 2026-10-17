@@ -12,7 +12,18 @@ public static class EvaluationJsonExporter
     private static readonly string[] SafeDeploymentNames = ["demo-a", "demo-b", "demo-c", "demo-d"];
     private static readonly string[] CaseCategories =
         ["baseline-complete", "missing-required-history", "ambiguous-identity", "blocked-or-unprocessed-evidence"];
-    private static readonly string[] ExpectedStates = ["request", "review", "blocked"];
+    private static readonly string[] ExpectedStates = ["request", "review", "blocked", "ready"];
+    private static readonly string[] MissingRequirements =
+        ["ad-sb-compliance-report", "component-status-list", "engine-shop-visit-report",
+            "llp-trace-sheet", "release-certificate", "technical-log-extract"];
+    private static readonly string[] CitationClaims =
+        ["Component hours and cycles at return", "Component hours since new recorded",
+            "Component identity agrees across documents", "Component serial matches status list",
+            "Component status list present", "Defect deferred at return",
+            "Life-limited part trace is complete", "Release certificate issued for latest install",
+            "Release certificate reference recorded", "Repetitive inspection performed twice"];
+    private static readonly string[] CitationSupportLabels = ["supported", "unsupported", "contradicted", "not-evaluable"];
+    private static readonly string[] CitationResults = ["accept", "reject", "hold"];
     private static readonly IReadOnlyDictionary<string, string> MetricUnits =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -142,7 +153,16 @@ public static class EvaluationJsonExporter
             throw new ArgumentException("evaluation results must contain only frozen suite case identifiers");
         if (run.Cases.Any(item =>
                 !CaseCategories.Contains(item.Category, StringComparer.Ordinal) ||
-                !ExpectedStates.Contains(item.ExpectedState, StringComparer.Ordinal)))
+                !ExpectedStates.Contains(item.ExpectedState, StringComparer.Ordinal) ||
+                item.AnnotatedMissingRequirements.Any(value =>
+                    !MissingRequirements.Contains(value, StringComparer.Ordinal)) ||
+                item.AnnotatedCitations.Any(citation =>
+                    !CitationClaims.Contains(citation.Claim, StringComparer.Ordinal) ||
+                    !Regex.IsMatch(citation.DocumentId, "^SYN-C(?:0[1-9]|[1-3][0-9]|40)D(?:01|02|03|04|06)$",
+                        RegexOptions.CultureInvariant) ||
+                    citation.PageNumber is not (1 or 3) ||
+                    !CitationSupportLabels.Contains(citation.SupportLabel, StringComparer.Ordinal) ||
+                    !CitationResults.Contains(citation.ExpectedResult, StringComparer.Ordinal))))
             throw new ArgumentException("evaluation results must contain only frozen case metadata");
     }
 

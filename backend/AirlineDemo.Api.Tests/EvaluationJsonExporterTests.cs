@@ -215,6 +215,30 @@ public sealed class EvaluationJsonExporterTests
                 EvaluationJsonExporter.Write(output, run, clean.Scoring, clean.Costs));
             Assert.Equal(0, output.Length);
         }
+
+        FourArmEvaluationResult WithFirstCase(Func<EvaluationCaseResult, EvaluationCaseResult> update) =>
+            clean.Run with
+            {
+                Cases = clean.Run.Cases.Select((item, index) => index == 0 ? update(item) : item).ToArray()
+            };
+        var safeCitation = new EvaluationExpectedCitation(
+            "Component hours since new recorded", "SYN-C01D01", 1, "supported", "accept");
+        var annotationCanaries = new[]
+        {
+            WithFirstCase(item => item with { AnnotatedMissingRequirements = ["case-input-canary"] }),
+            WithFirstCase(item => item with { AnnotatedCitations = [safeCitation with { Claim = "source-document-canary" }] }),
+            WithFirstCase(item => item with { AnnotatedCitations = [safeCitation with { DocumentId = "extracted-text-canary" }] }),
+            WithFirstCase(item => item with { AnnotatedCitations = [safeCitation with { SupportLabel = "prompt-canary" }] }),
+            WithFirstCase(item => item with { AnnotatedCitations = [safeCitation with { ExpectedResult = "completion-canary" }] })
+        };
+        foreach (var run in annotationCanaries)
+        {
+            var output = new MemoryStream();
+            Assert.Throws<ArgumentException>(() =>
+                EvaluationJsonExporter.Write(output, run, clean.Scoring, clean.Costs));
+            Assert.Equal(0, output.Length);
+        }
+
         var cleanBytes = Export(clean);
         var text = Encoding.UTF8.GetString(cleanBytes);
         foreach (var canary in new[] { "case-input-canary", "source-document-canary", "prompt-canary",
