@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+    <ProjectReference Include="../AirlineDemo.Api/AirlineDemo.Api.csproj" />
   </ItemGroup>
 </Project>
