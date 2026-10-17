@@ -69,11 +69,18 @@ public sealed class WorkloadAdmissionLimitsTests
         Assert.True(condition());
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits, IChatClient? chat = null) =>
+    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits, IChatClient? chat = null, bool isolatedStore = false) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode }));
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Demo:Passcode"] = Passcode,
+                    // The default case-state file is shared by every test and every run. A package an earlier test already investigated
+                    // has a trace in it, so the endpoint skips the model and a gated submission finishes early (the concurrency test
+                    // failed on every run after the first). A test that needs the model to run asks for its own file.
+                    ["CaseState:Path"] = isolatedStore ? Path.Combine(Path.GetTempPath(), $"workload-limits-{Guid.NewGuid():N}.json") : null,
+                }));
             builder.ConfigureTestServices(services => services.AddSingleton<IChatClient>(chat ?? new CountingChatClient()));
             builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
             // The test host runs as root on Linux, so point the isolated PDF worker at this test assembly.
@@ -233,9 +240,13 @@ public sealed class WorkloadAdmissionLimitsTests
     {
         var limits = new WorkloadAdmissionLimits(TimeProvider.System);
         var chat = new GatedChatClient();
-        using var factory = CreateFactory(limits, chat);
+        using var factory = CreateFactory(limits, chat, isolatedStore: true);
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
+        // The case exists before the concurrent submissions: two first submissions would otherwise both create it. A document that is
+        // not accepted needs no investigation, so this upload does not touch the gated model.
+        using var createsCase = await PostPackageAsync(client, presenter, size: 2048);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, createsCase.StatusCode);
         // Two endpoint submissions hold both investigation slots inside the model call until the gate is released.
         var admitted = new[]
         {
