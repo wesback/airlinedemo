@@ -107,6 +107,12 @@ returns a coded 401; an out-of-scope or missing case returns the same bodyless
 404. POST to either records path returns a bodyless 405 without accessing a
 source.
 
+## Source pins in a case basis
+
+Gathered source basis content is JSON with `format: "source-record-pins-v1"` and a non-empty `pins` array. Each pin has the exact `sourceId`, `recordId`, `recordVersion` tuple, a complete source-record envelope in `content`, and `contentDigest` (lowercase SHA-256 of the UTF-8 content). Envelope JSON is compact; object properties are recursively sorted ordinally and array order is preserved. Pins are sorted by source ID, record ID, then numeric version. The store rejects empty, malformed or duplicate pins and verifies the envelope tuple and digest.
+
+Identical gathered inputs do not append a version. Changed record content or version appends a later `BasisVersion` through `ICaseStateStore.Commit(scope, expectedRevision, ...)`, which validates pins and the append-only digest chain under the store lock. Earlier content and digests are never rewritten. A stale revision rejects the whole commit without adding a basis or audit event.
+
 ## Source-mode command
 
 `POST /api/v1/cases/{caseId}/sources/{sourceId}/mode` changes the simulated mode of one of the five sources. The command requires an authenticated `presenter` session, a case scope, a valid anti-forgery token, and a JSON body with `commandId`, `expectedRevision` and `mode`. The server derives the actor, timestamp and audit reason; client-supplied attribution is ignored.
