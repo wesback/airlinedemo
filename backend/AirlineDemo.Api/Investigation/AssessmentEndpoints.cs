@@ -52,7 +52,6 @@ public static class AssessmentEndpoints
         DemoSessionStore sessions,
         ICaseStateStore cases,
         AssessmentStore assessments,
-        AssessmentApiRecordStore apiRecords,
         AssessmentExecutionService execution)
     {
         var (denial, access) = Authorize(caseId, http, sessions, cases);
@@ -92,7 +91,7 @@ public static class AssessmentEndpoints
         if (basis is null) return Results.NotFound();
 
         var record = execution.Assess(access!.Scope, basis, claims);
-        var id = apiRecords.Append(record);
+        var id = record.AssessmentId ?? throw new InvalidOperationException("Persisted assessment has no identifier.");
         return Results.Created($"/api/cases/{caseId}/assessments/{id}", View(id, record));
     }
 
@@ -101,14 +100,24 @@ public static class AssessmentEndpoints
         string id,
         HttpContext http,
         DemoSessionStore sessions,
-        ICaseStateStore cases,
-        AssessmentApiRecordStore apiRecords)
+        ICaseStateStore cases)
     {
-        var (denial, _) = Authorize(caseId, http, sessions, cases);
+        var (denial, access) = Authorize(caseId, http, sessions, cases);
         if (denial is not null) return denial;
 
-        var record = apiRecords.Find(caseId, id);
-        return record is null ? Results.NotFound() : Results.Ok(View(id, record));
+        var assessment = cases.FindAssessment(access!.Scope, id);
+        return assessment is null
+            ? Results.NotFound()
+            : Results.Ok(View(id, new AssessmentRecord(
+                assessment.CaseId,
+                assessment.BasisId,
+                assessment.BasisVersion,
+                assessment.Outcome,
+                assessment.Reason,
+                assessment.Claims,
+                assessment.RequestId,
+                assessment.WorkItemId,
+                assessment.AssessmentId)));
     }
 
     private static IResult ListRequests(
@@ -118,10 +127,14 @@ public static class AssessmentEndpoints
         ICaseStateStore cases,
         MockRequestInbox inbox)
     {
-        var (denial, _) = Authorize(caseId, http, sessions, cases);
+        var (denial, access) = Authorize(caseId, http, sessions, cases);
         if (denial is not null) return denial;
 
-        var receipts = inbox.Requests
+        var persisted = cases.ListRequestReceipts(access!.Scope);
+        var persistedEvents = persisted.Select(receipt => receipt.EventId).ToHashSet(StringComparer.Ordinal);
+        var receipts = persisted
+            .Concat(inbox.Requests.Where(receipt =>
+                receipt.CaseId == caseId && !persistedEvents.Contains(receipt.EventId)))
             .Where(receipt => receipt.CaseId == caseId)
             .Select(receipt => new
             {
