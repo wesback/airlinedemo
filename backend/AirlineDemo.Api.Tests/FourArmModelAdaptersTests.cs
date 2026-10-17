@@ -16,23 +16,46 @@ public sealed class FourArmModelAdaptersTests
         public ChatResponse Reply { get; set; } = new(new ChatMessage(ChatRole.Assistant, "[]"));
         public int Calls { get; private set; }
         public List<(string Text, string[] Tools)> Requests { get; } = [];
+        public TimeSpan? ResponseDelay { get; set; }
+        public Func<IReadOnlyList<ChatMessage>, ChatResponse>? ReplyFactory { get; set; }
         public ChatClientMetadata Metadata { get; } = new("adapter-test");
-        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        public async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
-            Calls++; Requests.Add((string.Join("\n", messages.Select(m => m.Text)), options?.Tools?.Select(t => t.Name).ToArray() ?? [])); return Task.FromResult(Reply);
+            var request = messages.ToArray();
+            Calls++; Requests.Add((string.Join("\n", request.Select(m => m.Text)), options?.Tools?.Select(t => t.Name).ToArray() ?? []));
+            if (ResponseDelay is { } delay) await Task.Delay(delay, cancellationToken);
+            return ReplyFactory?.Invoke(request) ?? Reply;
         }
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public object? GetService(Type serviceType, object? serviceKey = null) => null; public void Dispose() { }
     }
-    private static (FourArmModelAdapters Adapter, Client Client) Setup() { var client = new Client(); return (new(EvaluationFixtureModelGate.FromCommittedFixtures(), _ => client), client); }
+    private static (FourArmModelAdapters Adapter, Client Client) Setup(Func<InvestigationLimitOptions, InvestigationLimits>? limitsFactory = null)
+    {
+        var client = new Client();
+        var gate = EvaluationFixtureModelGate.FromCommittedFixtures();
+        var adapter = limitsFactory is null
+            ? new FourArmModelAdapters(gate, _ => client)
+            : new FourArmModelAdapters(gate, _ => client, limitsFactory);
+        return (adapter, client);
+    }
     [Fact]
     public async Task AC016_UsesIdenticalInputsAndRulesArmMakesNoCalls()
     {
         var (adapter, client) = Setup(); var input = Case(); var b = FakeApprovedManifest.Approved();
-        var results = new[] { await adapter.ExecuteAsync(EvaluationArm.A, input, null), await adapter.ExecuteAsync(EvaluationArm.B, input, b), await adapter.ExecuteAsync(EvaluationArm.C, input, b with { Model = "fixture-model-c" }), await adapter.ExecuteAsync(EvaluationArm.D, input, b, b) };
+        var rulesResult = await adapter.ExecuteAsync(EvaluationArm.A, input, null);
+        Assert.Equal(0, client.Calls);
+        var results = new[] { rulesResult, await adapter.ExecuteAsync(EvaluationArm.B, input, b), await adapter.ExecuteAsync(EvaluationArm.C, input, b with { Model = "fixture-model-c" }), await adapter.ExecuteAsync(EvaluationArm.D, input, b, b) };
         using var row = JsonDocument.Parse(input.Content); var raw = row.RootElement.GetProperty("inputs").GetRawText();
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
         Assert.All(results, r => Assert.Equal((input.CaseId, "evaluation-basis-" + input.CaseId, 2, raw, hash), (r.Basis.CaseId, r.Basis.EvidenceBasisId, r.Basis.Version, r.Basis.InputsJson, r.Basis.InputsSha256)));
+        Assert.Equal("""{"caseId":"EVAL-V2-01","assessment":{"state":"ready","missingRequirements":[]},"citations":[]}""", results[0].Answer);
+        Assert.Empty(results[0].Claims);
+        Assert.Equal((0, 0, 0), (results[0].ModelCalls, results[0].ToolCalls, results[0].CitationReflections));
+        var missingCase = Case(File.ReadLines(Fixture()).Skip(10).First());
+        var missingResult = await adapter.ExecuteAsync(EvaluationArm.A, missingCase, null);
+        using var assessment = JsonDocument.Parse(missingResult.Answer);
+        Assert.Equal("request", assessment.RootElement.GetProperty("assessment").GetProperty("state").GetString());
+        Assert.Equal("release-certificate", assessment.RootElement.GetProperty("assessment").GetProperty("missingRequirements")[0].GetString());
         Assert.Equal(3, client.Calls);
         await Assert.ThrowsAsync<EvaluationFixtureAuthorizationException>(() => adapter.ExecuteAsync(EvaluationArm.A, Case(input.Content.Replace("\"pageText\":\"", "\"pageText\":\"x", StringComparison.Ordinal)), null));
     }
@@ -51,6 +74,24 @@ public sealed class FourArmModelAdaptersTests
         await Assert.ThrowsAsync<EvaluationFixtureAuthorizationException>(() => adapter.ExecuteAsync(EvaluationArm.B, input, manifest));
         client.Reply = new(new ChatMessage(ChatRole.Assistant, Enumerable.Range(0, 21).Select(i => (AIContent)new FunctionCallContent(i.ToString(), FourArmModelAdapters.ReadTools[0], new Dictionary<string, object?>())).ToList()));
         await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => adapter.ExecuteAsync(EvaluationArm.B, input, manifest)); Assert.Equal(count + 2, client.Calls);
+
+        client.ReplyFactory = messages =>
+        {
+            var completedTools = messages.Sum(message => message.Contents.OfType<FunctionResultContent>().Count());
+            return new(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent($"call-{completedTools}",
+                FourArmModelAdapters.ReadTools[0], new Dictionary<string, object?>())]));
+        };
+        var modelCallsBefore = client.Calls;
+        var modelLimit = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => adapter.ExecuteAsync(EvaluationArm.C, input, manifest));
+        Assert.Equal(InvestigationBreach.ModelCalls, modelLimit.Breach);
+        Assert.Equal(FourArmModelAdapters.MaximumModelCalls, client.Calls - modelCallsBefore);
+        client.ReplyFactory = null;
+
+        var timed = Setup(options => new InvestigationLimits(options with { Timeout = TimeSpan.FromMilliseconds(50) }));
+        timed.Client.ResponseDelay = TimeSpan.FromMilliseconds(250);
+        var durationLimit = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => timed.Adapter.ExecuteAsync(EvaluationArm.B, input, manifest));
+        Assert.Equal(InvestigationBreach.Time, durationLimit.Breach);
+        Assert.Equal(1, timed.Client.Calls);
     }
     [Fact]
     public async Task AC016_ComparatorMatchesArmBAndIsSingleCall()
