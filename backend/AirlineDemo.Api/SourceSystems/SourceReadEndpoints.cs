@@ -10,20 +10,28 @@ public static class SourceReadEndpoints
     private sealed record ReadOutcome(object? Value, int Count, string? ErrorCode);
     public static IEndpointRouteBuilder MapSourceReadEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/v1/cases/{caseId}/sources/{sourceId}/records", List);
-        app.MapGet("/api/v1/cases/{caseId}/sources/{sourceId}/records/{recordId}", Get);
+        app.MapGet("/api/v{version:int}/cases/{caseId}/sources/{sourceId}/records", List);
+        app.MapGet("/api/v{version:int}/cases/{caseId}/sources/{sourceId}/records/{recordId}", Get);
+        app.MapMethods("/api/v{version:int}/cases/{caseId}/sources/{sourceId}/records", ["POST"], RejectListMutation);
+        app.MapMethods("/api/v{version:int}/cases/{caseId}/sources/{sourceId}/records/{recordId}", ["POST"], RejectGetMutation);
         return app;
     }
-    private static Task<IResult> List(string caseId, string sourceId, HttpContext http, DemoSessionStore sessions,
+    private static IResult RejectListMutation(int version, string caseId, string sourceId) =>
+        Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+    private static IResult RejectGetMutation(int version, string caseId, string sourceId, string recordId) =>
+        Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+    private static Task<IResult> List(int version, string caseId, string sourceId, HttpContext http, DemoSessionStore sessions,
         ICaseStateStore cases, SourceReadBudget budget, TimeProvider time) =>
-        Read(caseId, sourceId, null, http, sessions, cases, budget, time);
+        Read(version, caseId, sourceId, null, http, sessions, cases, budget, time);
 
-    private static Task<IResult> Get(string caseId, string sourceId, string recordId, HttpContext http,
+    private static Task<IResult> Get(int version, string caseId, string sourceId, string recordId, HttpContext http,
         DemoSessionStore sessions, ICaseStateStore cases, SourceReadBudget budget, TimeProvider time) =>
-        Read(caseId, sourceId, recordId, http, sessions, cases, budget, time);
-    private static async Task<IResult> Read(string caseId, string sourceId, string? recordId, HttpContext http,
+        Read(version, caseId, sourceId, recordId, http, sessions, cases, budget, time);
+    private static async Task<IResult> Read(int version, string caseId, string sourceId, string? recordId, HttpContext http,
         DemoSessionStore sessions, ICaseStateStore cases, SourceReadBudget budget, TimeProvider time)
     {
+        if (version != 1) return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version");
+
         var receivedAt = time.GetUtcNow();
         var remaining = receivedAt + SourceReadBudget.ReadDeadline - time.GetUtcNow();
         using var deadline = new CancellationTokenSource(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
