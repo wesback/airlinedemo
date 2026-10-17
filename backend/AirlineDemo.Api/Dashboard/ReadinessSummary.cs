@@ -6,14 +6,14 @@ using AirlineDemo.Api.Reviews;
 
 namespace AirlineDemo.Api.Dashboard;
 
-public sealed record ReadinessSummary(int MonthsUntilReturn, int GapsFound, int RequestsSent, int HeldForReview, int NotProcessed, string Sentence);
+public sealed record CaseReadinessSummary(int MonthsUntilReturn, int GapsFound, int RequestsSent, int HeldForReview, int NotProcessed, string Sentence);
 
-public static class ReadinessSummaryProjection
+public static class CaseReadinessSummaryProjection
 {
     private static readonly DateOnly ScenarioNow = new(2025, 1, 10);
     private static readonly DateOnly ReturnDate = new(2025, 10, 10);
 
-    public static ReadinessSummary Build(CaseState state, IReadOnlyList<EvidencePackageRecord> packages)
+    public static CaseReadinessSummary Build(CaseState state, IReadOnlyList<EvidencePackageRecord> packages)
     {
         var gaps = (state.Assessments ?? [])
             .Where(assessment => assessment.Outcome == "Request")
@@ -28,7 +28,7 @@ public static class ReadinessSummaryProjection
             $"{Count(requests, "routine request", "routine requests")} sent, " +
             $"{Count(held, "item", "items")} held for internal review, " +
             $"{Count(notProcessed, "document", "documents")} not processed.";
-        return new ReadinessSummary(months, gaps, requests, held, notProcessed, sentence);
+        return new CaseReadinessSummary(months, gaps, requests, held, notProcessed, sentence);
     }
 
     public static int WholeMonthsUntil(DateOnly scenarioNow, DateOnly returnDate)
@@ -64,6 +64,6 @@ public static class ReadinessSummaryEndpoints
         if (scope is null) return Results.NotFound();
 
         var state = cases.Read(scope);
-        return Results.Ok(ReadinessSummaryProjection.Build(state, packages.ListForCase(caseId)));
+        return Results.Ok(CaseReadinessSummaryProjection.Build(state, packages.ListForCase(caseId)));
     }
 }
