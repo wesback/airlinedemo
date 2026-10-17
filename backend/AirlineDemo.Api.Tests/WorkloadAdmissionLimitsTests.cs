@@ -69,17 +69,17 @@ public sealed class WorkloadAdmissionLimitsTests
         Assert.True(condition());
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits, IChatClient? chat = null, bool isolatedStore = false) =>
+    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits, IChatClient? chat = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Demo:Passcode"] = Passcode,
-                    // The default case-state file is shared by every test and every run. A package an earlier test already investigated
-                    // has a trace in it, so the endpoint skips the model and a gated submission finishes early (the concurrency test
-                    // failed on every run after the first). A test that needs the model to run asks for its own file.
-                    ["CaseState:Path"] = isolatedStore ? Path.Combine(Path.GetTempPath(), $"workload-limits-{Guid.NewGuid():N}.json") : null,
+                    // Every factory has its own case-state file. The default is one file shared by every test and every run: a package an
+                    // earlier test already investigated has a trace in it, so the endpoint skips the model and a gated submission finishes
+                    // early, and a test that reads a case another test created passes or fails with the order the tests run in.
+                    ["CaseState:Path"] = Path.Combine(Path.GetTempPath(), $"workload-limits-{Guid.NewGuid():N}.json"),
                 }));
             builder.ConfigureTestServices(services => services.AddSingleton<IChatClient>(chat ?? new CountingChatClient()));
             builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
@@ -181,7 +181,10 @@ public sealed class WorkloadAdmissionLimitsTests
     {
         var store = factory.Services.GetRequiredService<ICaseStateStore>();
         var packageId = EvidenceEndpoints.PackageIdFor(Case, [new EvidenceDocument("statement.pdf", bytes)]);
-        Assert.Null(store.FindTrace(store.AuthorizeCase(Case, "presenter"), Case, packageId, "inv-" + packageId));
+        CaseScope scope;
+        try { scope = store.AuthorizeCase(Case, "presenter"); }
+        catch (CaseAccessDeniedException) { return; } // no case was created, so no trace can exist
+        Assert.Null(store.FindTrace(scope, Case, packageId, "inv-" + packageId));
     }
 
     private static int BasisCount(WebApplicationFactory<Program> factory) =>
@@ -240,7 +243,7 @@ public sealed class WorkloadAdmissionLimitsTests
     {
         var limits = new WorkloadAdmissionLimits(TimeProvider.System);
         var chat = new GatedChatClient();
-        using var factory = CreateFactory(limits, chat, isolatedStore: true);
+        using var factory = CreateFactory(limits, chat);
         using var client = factory.CreateClient();
         var presenter = await SignInAsync(client, "presenter");
         // The case exists before the concurrent submissions: two first submissions would otherwise both create it. A document that is
