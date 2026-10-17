@@ -82,6 +82,31 @@ Each outcome is a distinct type.
 
 `source_unavailable` is never represented as an empty successful list. Callers must handle each outcome separately.
 
+## Records envelopes
+
+`GET /api/v1/cases/{caseId}/sources/{sourceId}/records` returns exactly
+`contractVersion`, `caseId`, `sourceId` and `records`. Each record contains exactly
+`sourceId`, `recordId`, `recordVersion`, `asOf`, `caseId`, `kind`, `stale`,
+`payload` and `synthetic`.
+
+`GET /api/v1/cases/{caseId}/sources/{sourceId}/records/{recordId}` returns exactly
+`contractVersion`, `caseId`, `sourceId` and `record`, whose value has the same
+record shape. Both successful envelopes use the integer `contractVersion: 1`.
+The endpoint uses the case-scoped read-only `ISourceSystem<TPayload>` port and
+bounded source-read admission service. Identity, role and requested-case scope
+are checked before admission or source access; a returned record for another
+case is rejected before serialization.
+
+Every coded error response contains exactly `contractVersion` and `error`, and
+the error contains exactly `code`. An unavailable source returns HTTP 503 with
+`error.code = source_unavailable` and no `records` or `record` property.
+Unsupported integer path versions, including `/api/v2/...`, return HTTP 400
+with `error.code = unsupported_contract_version`. These errors never include
+source error details, record payloads or case data. An unauthenticated request
+returns a coded 401; an out-of-scope or missing case returns the same bodyless
+404. POST to either records path returns a bodyless 405 without accessing a
+source.
+
 ## Source-mode command
 
 `POST /api/v1/cases/{caseId}/sources/{sourceId}/mode` changes the simulated mode of one of the five sources. The command requires an authenticated `presenter` session, a case scope, a valid anti-forgery token, and a JSON body with `commandId`, `expectedRevision` and `mode`. The server derives the actor, timestamp and audit reason; client-supplied attribution is ignored.
