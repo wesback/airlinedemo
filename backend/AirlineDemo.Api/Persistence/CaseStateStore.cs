@@ -539,7 +539,7 @@ public sealed class CaseStateStore : ICaseStateStore
                     throw new BasisIntegrityException("Basis content or chain digest does not match.");
                 }
 
-                ValidateSourceBasisContent(next.Content);
+                ValidateSourceBasisContent(next.Content, requirePinDocument: commit.Action == "source-basis.gathered");
                 basis.Add(next);
             }
 
@@ -812,7 +812,7 @@ public sealed class CaseStateStore : ICaseStateStore
     private static string Digest(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    private static void ValidateSourceBasisContent(string content)
+    private static void ValidateSourceBasisContent(string content, bool requirePinDocument = false)
     {
         const string formatName = "source-record-pins-v1";
         JsonDocument document;
@@ -822,14 +822,19 @@ public sealed class CaseStateStore : ICaseStateStore
         }
         catch (JsonException)
         {
-            if (HasSourcePinFormatMarker(content))
+            if (requirePinDocument || HasSourcePinFormatMarker(content))
                 throw new BasisIntegrityException("A source basis pin document is malformed.");
             return;
         }
         using (document)
         {
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object || Text(root, "format") != formatName) return;
+            if (root.ValueKind != JsonValueKind.Object || Text(root, "format") != formatName)
+            {
+                if (requirePinDocument)
+                    throw new BasisIntegrityException("A gathered source basis must use the source-record-pins-v1 format.");
+                return;
+            }
             if (!root.TryGetProperty("pins", out var pins) || pins.ValueKind != JsonValueKind.Array || pins.GetArrayLength() == 0)
                 throw new BasisIntegrityException("A source basis must contain at least one immutable source pin.");
             var identities = new HashSet<(string SourceId, string RecordId, int Version)>();
@@ -867,6 +872,8 @@ public sealed class CaseStateStore : ICaseStateStore
 
         var objectDepth = 0;
         var arrayDepth = 0;
+        var hasFormatMarker = false;
+        var hasPinsProperty = false;
         for (var index = start; index < content.Length;)
         {
             var current = content[index];
@@ -882,16 +889,24 @@ public sealed class CaseStateStore : ICaseStateStore
                 while (previous >= 0 && char.IsWhiteSpace(content[previous])) previous--;
                 if (objectDepth == 1 && arrayDepth == 0
                     && previous >= 0 && content[previous] is '{' or ','
-                    && string.Equals(property, "format", StringComparison.Ordinal))
+                    && (string.Equals(property, "format", StringComparison.Ordinal)
+                        || string.Equals(property, "pins", StringComparison.Ordinal)))
                 {
                     var separator = SkipWhitespace(content, afterProperty);
                     if (separator < content.Length && content[separator] == ':')
                     {
-                        var valueStart = SkipWhitespace(content, separator + 1);
-                        if (valueStart < content.Length
-                            && TryReadJsonString(content, valueStart, out var value, out _)
-                            && string.Equals(value, formatName, StringComparison.Ordinal))
-                            return true;
+                        if (string.Equals(property, "pins", StringComparison.Ordinal))
+                        {
+                            hasPinsProperty = true;
+                        }
+                        else
+                        {
+                            var valueStart = SkipWhitespace(content, separator + 1);
+                            if (valueStart < content.Length
+                                && TryReadJsonString(content, valueStart, out var value, out _)
+                                && string.Equals(value, formatName, StringComparison.Ordinal))
+                                hasFormatMarker = true;
+                        }
                     }
                 }
 
@@ -918,7 +933,7 @@ public sealed class CaseStateStore : ICaseStateStore
             index++;
         }
 
-        return false;
+        return hasFormatMarker && hasPinsProperty;
     }
 
     private static bool TryReadJsonString(string content, int start, out string? value, out int end)
