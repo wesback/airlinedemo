@@ -65,19 +65,15 @@ public sealed class EvaluationFixtureModelGateTests
         var inputsSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(inputsJson))).ToLowerInvariant();
         var verifiedInputs = gate.AuthorizeInputs(id, 2, inputsJson, inputsSha256);
         Assert.Equal(inputsJson, verifiedInputs.InputsJson);
-        var pageTextClient = new RequestSpy();
-        await Assert.ThrowsAsync<EvaluationFixtureAuthorizationException>(async () =>
-        {
-            gate.AuthorizePageText(id, page + " changed");
-            await pageTextClient.GetResponseAsync([new ChatMessage(ChatRole.User, inputsJson)]);
-        });
-        Assert.Equal(0, pageTextClient.Requests);
-
         var client = new RequestSpy();
-        var adapter = new FourArmModelAdapters(gate, _ => client);
-        var changedPageCase = Case(Case().Content.Replace("\"pageText\":\"", "\"pageText\":\"changed ", StringComparison.Ordinal));
+        var adapter = new FourArmModelAdapters(gate, _ =>
+        {
+            var documents = Assert.IsType<EvaluationFixtureDocument[]>(verifiedInputs.Documents);
+            documents[0] = documents[0] with { PageText = documents[0].PageText + " changed" };
+            return client;
+        });
         await Assert.ThrowsAsync<EvaluationFixtureAuthorizationException>(() =>
-            adapter.ExecuteAsync(EvaluationArm.B, changedPageCase, FakeApprovedManifest.Approved()));
+            adapter.ExecuteAsync(EvaluationArm.B, verifiedCase, FakeApprovedManifest.Approved()));
         Assert.Equal(0, client.Requests);
 
         async Task AssertInvalidFixtureMakesNoRequest(Action<string> corrupt)

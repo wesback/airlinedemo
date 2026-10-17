@@ -7,6 +7,7 @@ public sealed class EvaluationFixtureModelGate
 {
     public const string FrozenCasesSha256 = "7318583ee0bdc540fdeabd85833d288843c2a1bc429b1f85c9709eac8443a049";
     private readonly Dictionary<string, VerifiedEvaluationFixtureCase> _cases;
+    private readonly Dictionary<string, HashSet<string>> _pageTexts;
     public EvaluationFixtureModelGate(string fixtureDirectory)
     {
         try
@@ -18,6 +19,7 @@ public sealed class EvaluationFixtureModelGate
                 root.GetProperty("caseCount").GetInt32() != 40 || root.GetProperty("casesSha256").GetString() != hash || hash != FrozenCasesSha256)
                 throw new EvaluationFixtureAuthorizationException("evaluation fixture manifest or hash is not the committed v2 corpus");
             _cases = new(StringComparer.Ordinal);
+            _pageTexts = new(StringComparer.Ordinal);
             foreach (var line in new UTF8Encoding(false, true).GetString(bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
                 using var row = JsonDocument.Parse(line); var item = row.RootElement; var id = item.GetProperty("caseId").GetString()!;
@@ -28,6 +30,7 @@ public sealed class EvaluationFixtureModelGate
                 if (item.GetProperty("inputVersion").GetInt32() != 2 || !_cases.TryAdd(id, new(id, 2, raw,
                     Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant(), docs)))
                     throw new EvaluationFixtureAuthorizationException("evaluation fixture has an invalid or duplicate case");
+                _pageTexts.Add(id, docs.Select(d => d.PageText).ToHashSet(StringComparer.Ordinal));
             }
             if (_cases.Count != 40) throw new EvaluationFixtureAuthorizationException("evaluation fixture must contain 40 cases");
         }
@@ -43,7 +46,7 @@ public sealed class EvaluationFixtureModelGate
         return item;
     }
     public void AuthorizePageText(string caseId, string pageText)
-    { if (!_cases.TryGetValue(caseId, out var item) || !item.Documents.Any(d => string.Equals(d.PageText, pageText, StringComparison.Ordinal))) throw new EvaluationFixtureAuthorizationException("page text is not an exact page in the verified v2 case"); }
+    { if (!_pageTexts.TryGetValue(caseId, out var pages) || !pages.Contains(pageText)) throw new EvaluationFixtureAuthorizationException("page text is not an exact page in the verified v2 case"); }
     public static EvaluationFixtureModelGate FromCommittedFixtures()
     {
         var roots = new List<DirectoryInfo>(); for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent) roots.Add(dir);
