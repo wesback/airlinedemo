@@ -45,6 +45,7 @@ public sealed class FourArmEvaluationRunnerTests
         public Func<EvaluationCase, long> Reservation { get; set; } = _ => 2;
         public Func<EvaluationCase, long> Usage { get; set; } = _ => 1;
         public Func<EvaluationArmRequest, bool>? Fail { get; set; }
+        public Func<EvaluationArmRequest, int>? ForbiddenAttempts { get; set; }
         public bool InvalidDCounts { get; set; }
         public string Prompt { get; set; } = "prompt-canary";
         public string Response { get; set; } = "response-canary";
@@ -57,6 +58,8 @@ public sealed class FourArmEvaluationRunnerTests
         public Task<EvaluationArmExecution> ExecuteAsync(EvaluationArmRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            for (var attempt = ForbiddenAttempts?.Invoke(request) ?? 0; attempt > 0; attempt--)
+                request.Calls.RecordForbiddenActionAttempt();
             if (Fail?.Invoke(request) == true) { request.Calls.RecordFailure(Prompt, FailureText); throw new InvalidOperationException("failure canary"); }
             if (Counts.Calls > 0) request.Calls.RecordResponse(Prompt, Response);
             return Task.FromResult(new EvaluationArmExecution("answer-" + request.Case.CaseId, Usage(request.Case),
@@ -64,8 +67,14 @@ public sealed class FourArmEvaluationRunnerTests
         }
         public void Dispose() => Disposed = true;
     }
+    private sealed class FixedStepTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+        public override long GetTimestamp() => Interlocked.Add(ref _timestamp, TimestampFrequency * 7 / 1000);
+    }
     private sealed class BoundedAgentChatClient : IChatClient
     {
+        public string? FunctionCallName { get; set; }
         public int Calls { get; private set; }
         public int ToolCalls { get; private set; }
         public int ToolResults { get; private set; }
@@ -91,10 +100,13 @@ public sealed class FourArmEvaluationRunnerTests
                 DeclaredToolSets.Add(tools.Select(tool => tool.Name).Order(StringComparer.Ordinal).ToArray());
                 ToolCalls++;
                 return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                    [new FunctionCallContent("evaluation-tool-call", tools[0].Name, new Dictionary<string, object?>())])));
+                    [new FunctionCallContent("evaluation-tool-call", FunctionCallName ?? tools[0].Name, new Dictionary<string, object?>())])));
             }
 
             DirectCalls++;
+            if (FunctionCallName is { } functionName)
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("evaluation-tool-call", functionName, new Dictionary<string, object?>())])));
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "production-answer")));
         }
 
@@ -183,6 +195,51 @@ public sealed class FourArmEvaluationRunnerTests
         Assert.Equal(160, fakes.Sum(f => f.Requests.Count));
         Assert.Contains(fakes[2].Requests, r => r.Case.CaseId == "EVAL-V2-01");
         Assert.All(fakes, f => Assert.True(f.Disposed));
+    }
+
+    [Fact]
+    public async Task Dispatch_records_monotonic_elapsed_time_and_forbidden_attempts()
+    {
+        using var files = new Inputs();
+        var fakes = Fakes();
+        fakes[0].Fail = request => request.Case.CaseId == "EVAL-V2-01";
+        fakes[1].Fail = request => request.Case.CaseId == "EVAL-V2-01";
+        fakes[1].ForbiddenAttempts = request => request.Case.CaseId == "EVAL-V2-01" ? 1 : 0;
+        var result = await new FourArmEvaluationRunner(fakes, timeProvider: new FixedStepTimeProvider())
+            .RunAsync(files.Options, TestContext.Current.CancellationToken);
+
+        var ordinaryFailure = result.Cases[0].Arms[0];
+        var rejectedCall = result.Cases[0].Arms[1];
+        var success = result.Cases[0].Arms[2];
+        Assert.Equal(7, ordinaryFailure.ElapsedMilliseconds);
+        Assert.Equal(0, ordinaryFailure.ForbiddenActionAttempts);
+        Assert.Equal(7, rejectedCall.ElapsedMilliseconds);
+        Assert.Equal(1, rejectedCall.ForbiddenActionAttempts);
+        Assert.NotNull(rejectedCall.Failure);
+        Assert.Equal(7, success.ElapsedMilliseconds);
+        Assert.Equal(0, success.ForbiddenActionAttempts);
+    }
+
+    [Fact]
+    public async Task Forbidden_function_attempts_are_counted_before_rejection()
+    {
+        using var files = new Inputs();
+        var chat = new BoundedAgentChatClient { FunctionCallName = "submit_mock_request" };
+        var executors = Enum.GetValues<EvaluationArm>()
+            .Select(arm => new ProductionEvaluationArmExecutor(arm, _ => chat))
+            .ToArray();
+        var result = await new FourArmEvaluationRunner(executors)
+            .RunAsync(files.Options, TestContext.Current.CancellationToken);
+
+        Assert.All(result.Cases, item =>
+        {
+            Assert.Equal(0, item.Arms[0].ForbiddenActionAttempts);
+            foreach (var dispatch in item.Arms.Skip(1))
+            {
+                Assert.Equal(1, dispatch.ForbiddenActionAttempts);
+                Assert.NotNull(dispatch.Failure);
+            }
+        });
     }
 
     [Fact]
