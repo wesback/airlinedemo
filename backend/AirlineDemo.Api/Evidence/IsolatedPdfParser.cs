@@ -559,15 +559,13 @@ public static class IsolatedPdfParser
             }
 
             var cmapBytes = content.AsSpan(cmap.StreamStart, cmap.StreamLength).ToArray();
-            var cmapDictionary = Encoding.Latin1.GetString(
-                content, cmap.BodyStart, cmap.DictionaryEnd - cmap.BodyStart);
-            var filter = FilterValue.Match(cmapDictionary);
-            if (filter.Success)
+            var cmapDictionary = DecodeNameEscapes(
+                content.AsSpan(cmap.BodyStart, cmap.DictionaryEnd - cmap.BodyStart));
+            var filterKey = FindPdfDictionaryToken(cmapDictionary, "/Filter"u8);
+            if (filterKey >= 0)
             {
-                var filters = FirstName.Matches(filter.Groups[1].Value)
-                    .Select(match => match.Value)
-                    .ToArray();
-                if (filters.Length == 0)
+                var filterValueStart = SkipPdfWhitespaceAndComments(cmapDictionary, filterKey + "/Filter"u8.Length);
+                if (!TryReadCMapFilters(content, cmapDictionary, filterValueStart, objects, out var filters))
                 {
                     return Retryable(UnreadableDocumentReason);
                 }
@@ -594,6 +592,61 @@ public static class IsolatedPdfParser
         }
 
         return null;
+    }
+
+    private static bool TryReadCMapFilters(
+        byte[] content,
+        ReadOnlySpan<byte> source,
+        int valueStart,
+        IReadOnlyDictionary<(int Number, int Generation), PdfIndirectObject> objects,
+        out List<string> filters)
+    {
+        filters = new List<string>();
+        if (TryReadReference(source, valueStart, out var reference, out _))
+        {
+            if (!objects.TryGetValue(reference, out var filterObject) || filterObject.StreamStart >= 0)
+            {
+                return false;
+            }
+
+            var filterValue = DecodeNameEscapes(
+                content.AsSpan(
+                    filterObject.BodyStart,
+                    filterObject.DictionaryEnd - filterObject.BodyStart));
+            return TryReadCMapFilterNames(filterValue, 0, filters);
+        }
+
+        return TryReadCMapFilterNames(source, valueStart, filters);
+    }
+
+    private static bool TryReadCMapFilterNames(ReadOnlySpan<byte> source, int start, List<string> filters)
+    {
+        var position = SkipPdfWhitespaceAndComments(source, start);
+        if (position >= source.Length) return false;
+
+        if (source[position] == '[')
+        {
+            position++;
+            while (true)
+            {
+                position = SkipPdfWhitespaceAndComments(source, position);
+                if (position >= source.Length) return false;
+                if (source[position] == ']') return filters.Count > 0;
+                if (source[position] != '/') return false;
+
+                var nameStart = position++;
+                while (position < source.Length && !IsPdfDelimiterOrWhitespace(source[position])) position++;
+                if (position == nameStart + 1) return false;
+                filters.Add(Encoding.ASCII.GetString(source[nameStart..position]));
+            }
+        }
+
+        if (source[position] != '/') return false;
+        var directNameStart = position++;
+        while (position < source.Length && !IsPdfDelimiterOrWhitespace(source[position])) position++;
+        if (position == directNameStart + 1) return false;
+        filters.Add(Encoding.ASCII.GetString(source[directNameStart..position]));
+        return true;
     }
 
     /// <summary>Scans CMap tokens once; comments and literal strings cannot supply operators or destinations.</summary>

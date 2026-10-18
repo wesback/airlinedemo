@@ -321,6 +321,29 @@ public class IsolatedPdfParserTests
     }
 
     [Fact]
+    public void UnicodeGlyphExpansionRejectsEscapedAndIndirectFilterEntriesBeforeStartingWorker()
+    {
+        var oversizedCMap = Encoding.ASCII.GetBytes(
+            $"1 beginbfchar\n<41> <{string.Concat(Enumerable.Repeat("0041", 1024))}>\nendbfchar");
+        var cases = new[]
+        {
+            CMapPdf(oversizedCMap, flate: true, filterKey: "/Fil#74er"),
+            CMapPdf(oversizedCMap, flate: true, indirectFilter: true),
+        };
+
+        foreach (var pdf in cases)
+        {
+            var starts = new[] { 0 };
+            var outcome = IsolatedPdfParser.Parse(pdf, CountingWorker(starts));
+
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal(UnreadableReason, outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
+            Assert.Equal(0, starts[0]);
+        }
+    }
+
+    [Fact]
     public void LargeTextStreamIsRejectedBeforeStartingWorker()
     {
         var starts = new[] { 0 };
@@ -465,10 +488,18 @@ public class IsolatedPdfParserTests
         return compressed.ToArray();
     }
 
-    private static byte[] CMapPdf(byte[] cmap, bool flate = false, string? filter = null)
+    private static byte[] CMapPdf(
+        byte[] cmap,
+        bool flate = false,
+        string? filter = null,
+        string filterKey = "/Filter",
+        bool indirectFilter = false)
     {
         var cmapBytes = flate ? Flate(cmap) : cmap;
         var filterEntry = filter ?? (flate ? "/FlateDecode" : null);
+        var filterDictionaryEntry = filterEntry is null
+            ? string.Empty
+            : $" {filterKey} {(indirectFilter ? "7 0 R" : filterEntry)}";
         using var pdf = new MemoryStream();
         var offsets = new List<long>();
         void Object(string header)
@@ -487,9 +518,13 @@ public class IsolatedPdfParserTests
         Write(pdf, "\n");
         Write(pdf, "endstream endobj\n");
         Object("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >> endobj\n");
-        Object($"6 0 obj << /Length {cmapBytes.Length}{(filterEntry is null ? string.Empty : $" /Filter {filterEntry}")} >> stream\n");
+        Object($"6 0 obj << /Length {cmapBytes.Length}{filterDictionaryEntry} >> stream\n");
         pdf.Write(cmapBytes);
         Write(pdf, "\nendstream endobj\n");
+        if (indirectFilter)
+        {
+            Object($"7 0 obj {filterEntry} endobj\n");
+        }
 
         var xrefOffset = pdf.Position;
         var size = offsets.Count + 1;
