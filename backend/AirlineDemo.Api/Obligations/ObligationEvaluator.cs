@@ -246,9 +246,7 @@ public static class ObligationEvaluator
         };
         var evaluation = Evaluate(sourceObligation, scenarioAsOf, drafts);
         var citedDraft = evaluation.NewDraft is null ? null : evaluation.NewDraft with { Citation = citation };
-        var citedDrafts = citedDraft is null
-            ? evaluation.Drafts
-            : evaluation.Drafts.Select(draft => draft.Id == citedDraft.Id ? citedDraft : draft).ToArray();
+        var citedDrafts = evaluation.Drafts.Select(draft => draft with { Citation = citation }).ToArray();
 
         // The sender is an observation seam only; evaluating a draft never sends a notice.
         _ = sender;

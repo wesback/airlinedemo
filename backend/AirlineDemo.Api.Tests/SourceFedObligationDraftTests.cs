@@ -80,6 +80,36 @@ public sealed class SourceFedObligationDraftTests
     }
 
     [Fact]
+    public async Task ExistingDraftHistoryReceivesThePinnedContractsCitation()
+    {
+        using var scenario = await CreateScenario(Contract());
+        var oldCitation = new ObligationSourceCitation("contracts", "previous-clause", 6);
+        var history = new[]
+        {
+            new NoticeDraft("OBL-1-draft-1", "OBL-1", 1, ["REQ-1"],
+                new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero),
+                NoticeDraftStatus.Superseded, "superseded body") { Citation = oldCitation },
+            new NoticeDraft("OBL-1-draft-2", "OBL-1", 1, ["REQ-1"],
+                new DateTimeOffset(2026, 9, 2, 0, 0, 0, TimeSpan.Zero),
+                NoticeDraftStatus.Current, "current body") { Citation = oldCitation },
+        };
+
+        var result = ObligationEvaluator.EvaluateFromPinnedContracts(Make([Missing()]), CaseId, 1,
+            scenario.Store.Read(scenario.Scope).Basis[^1].Content, Modes("available"), history);
+
+        Assert.Equal(ObligationState.AtRisk, result.State);
+        Assert.Null(result.NewDraft);
+        Assert.Equal(
+            new[]
+            {
+                ("OBL-1-draft-1", NoticeDraftStatus.Superseded, "contracts", "contract-clause", 7),
+                ("OBL-1-draft-2", NoticeDraftStatus.Current, "contracts", "contract-clause", 7),
+            },
+            result.Drafts.Select(draft =>
+                (draft.Id, draft.Status, draft.Citation!.SourceId, draft.Citation.RecordId, draft.Citation.RecordVersion)));
+    }
+
+    [Fact]
     public async Task ScenarioDateAndInclusiveUtcWindowUseExactBoundaries()
     {
         var cases = new[]
