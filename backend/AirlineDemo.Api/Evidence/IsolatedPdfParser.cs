@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.IO.Compression;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -20,6 +23,9 @@ public sealed class IsolatedPdfParserOptions
 
     public IReadOnlyList<string> WorkerArguments { get; init; } = Array.Empty<string>();
 
+    /// <summary>Called immediately before each worker start; tests count calls to prove a rejected input never reaches a worker.</summary>
+    public Action? WorkerStarting { get; init; }
+
     public static IsolatedPdfParserOptions Default { get; } = new();
 }
 
@@ -37,6 +43,11 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
+        if (PreflightStreamFilters(content) is { } rejected)
+        {
+            return rejected;
+        }
+
         // Root bypasses the read-only mode of the working directory, so root without a drop to "nobody" fails closed.
         if (CannotIsolateWorker(OperatingSystem.IsLinux(), options.WorkerFileName is not null, Environment.UserName, File.Exists(SetprivPath)))
         {
@@ -49,6 +60,7 @@ public static class IsolatedPdfParser
             Directory.CreateDirectory(workingDirectory);
             RestrictWorkingDirectory(workingDirectory);
 
+            options.WorkerStarting?.Invoke();
             using var process = Process.Start(CreateStartInfo(options, workingDirectory));
             if (process is null)
             {
@@ -426,6 +438,90 @@ public static class IsolatedPdfParser
             {
             }
         }
+    }
+
+    /// <summary>Largest decoded size of one Flate stream the parent lets reach a worker.</summary>
+    internal const long DecodedStreamLimitBytes = 8L * 1024 * 1024;
+
+    private static readonly Regex FilterValue = new(@"/Filter\s*(\[[^\]]*\]|/[^\s/<>\[\]()%]+)", RegexOptions.CultureInvariant);
+    private static readonly Regex NameWithEscape = new(@"/[^\s/<>\[\]()%]*#[0-9A-Fa-f]{2}[^\s/<>\[\]()%]*", RegexOptions.CultureInvariant);
+    private static readonly Regex FirstName = new(@"/[^\s/<>\[\]()%]+", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Before any worker starts, inflates each Flate stream up to <see cref="DecodedStreamLimitBytes"/> and rejects the
+    /// document when one expands further. The scan visits every byte of the input once. A filter name spelled with a
+    /// <c>#</c> escape is not resolved here, so the document is treated as unreadable.
+    /// </summary>
+    internal static (EvidenceProcessingState State, string Reason, string Text)? PreflightStreamFilters(byte[] content)
+    {
+        var streamKeyword = "stream"u8;
+        var endKeyword = "endstream"u8;
+        var position = 0;
+        var dictionaryFloor = 0;
+        while (position < content.Length)
+        {
+            var found = content.AsSpan(position).IndexOf(streamKeyword);
+            if (found < 0) break;
+            var keyword = position + found;
+            position = keyword + streamKeyword.Length;
+            if (keyword >= 3 && content.AsSpan(keyword - 3, 3).SequenceEqual("end"u8)) continue;
+
+            var dictionaryStart = content.AsSpan(dictionaryFloor, keyword - dictionaryFloor).LastIndexOf("obj"u8);
+            dictionaryStart = dictionaryStart < 0 ? dictionaryFloor : dictionaryFloor + dictionaryStart + 3;
+            var dictionary = Encoding.Latin1.GetString(content, dictionaryStart, keyword - dictionaryStart);
+
+            var dataStart = position;
+            if (dataStart < content.Length && content[dataStart] == '\r') dataStart++;
+            if (dataStart < content.Length && content[dataStart] == '\n') dataStart++;
+            var end = content.AsSpan(dataStart).IndexOf(endKeyword);
+            var dataEnd = end < 0 ? content.Length : dataStart + end;
+            position = dataEnd;
+            dictionaryFloor = dataEnd;
+
+            if (NameWithEscape.Matches(dictionary).Any(m => IsFlateOrFilterName(Unescape(m.Value))))
+            {
+                return Retryable("PdfPig could not open or read the document; retry is possible");
+            }
+
+            var filter = FilterValue.Match(dictionary);
+            if (!filter.Success) continue;
+            var first = FirstName.Match(filter.Groups[1].Value);
+            if (!first.Success || first.Value is not ("/FlateDecode" or "/Fl")) continue;
+
+            if (InflatedBytesExceedLimit(content, dataStart, dataEnd - dataStart))
+            {
+                return Retryable($"PDF stream content exceeds {DecodedStreamLimitBytes} decoded bytes; retry is possible");
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsFlateOrFilterName(string name) => name is "/Filter" or "/FlateDecode" or "/Fl";
+
+    private static string Unescape(string name) =>
+        Regex.Replace(name, "#([0-9A-Fa-f]{2})", m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+
+    private static bool InflatedBytesExceedLimit(byte[] content, int offset, int length)
+    {
+        try
+        {
+            using var zlib = new ZLibStream(new MemoryStream(content, offset, length), CompressionMode.Decompress);
+            var buffer = new byte[81920];
+            long total = 0;
+            int read;
+            while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                total += read;
+                if (total > DecodedStreamLimitBytes) return true;
+            }
+        }
+        catch (InvalidDataException)
+        {
+            // Damaged data is the worker's to reject.
+        }
+
+        return false;
     }
 
     private static (EvidenceProcessingState State, string Reason, string Text) Retryable(string reason) =>

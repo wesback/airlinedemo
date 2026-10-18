@@ -135,11 +135,105 @@ public sealed class DeploymentCostEvidenceTests
         Assert.Contains("\"varianceAmount\":\"not measured\"", evidence.ToJson());
     }
 
+    private static readonly string[] Scopes = ["A", "B", "C", "D", "transition", "deployment"];
+    private static readonly string[] Categories =
+        ["cost-per-page", "cost-per-case", "transition-cost", "active", "idle", "residual"];
+    private static readonly string[] PlannedLabels =
+    [
+        "case-study stipulation", "external evidence", "scenario assumption", "architectural decision",
+        "synthetic demonstration result", "unvalidated target", "derived"
+    ];
+
+    private static void AssertContract(DeploymentCostObservation observation, bool accepted)
+    {
+        var evidence = MeasuredEvidence() with { Observations = [observation] };
+        if (accepted)
+            evidence.Validate();
+        else
+            Assert.ThrowsAny<ArgumentException>(evidence.Validate);
+    }
+
+    private static DeploymentCostObservation Observation(
+        bool planned, bool observed, bool variance, string label = "scenario assumption") =>
+        MeasuredEvidence().Observations[0] with
+        {
+            Scope = "A",
+            Category = "active",
+            PlannedAmount = planned ? DeploymentCostAmount.Measured(100m) : DeploymentCostAmount.NotMeasured,
+            ObservedAmount = observed ? DeploymentCostAmount.Measured(125m) : DeploymentCostAmount.NotMeasured,
+            VarianceAmount = variance ? DeploymentCostAmount.Measured(25m) : DeploymentCostAmount.NotMeasured,
+            PlannedEvidenceReference = planned ? "test:planned" : "not measured",
+            ObservedEvidenceReference = observed ? "test:observed" : "not measured",
+            PlannedEvidenceLabel = planned ? label : "not measured",
+            ObservedEvidenceLabel = observed ? "external evidence" : "not measured",
+            VarianceEvidenceLabel = variance ? "derived" : "not measured",
+            Currency = planned || observed || variance ? "EUR" : "not measured"
+        };
+
+    [Fact]
+    public void AcceptsOnlyListedScopesCategoriesAndFields()
+    {
+        var valid = Observation(true, true, true);
+
+        foreach (var scope in Scopes)
+            AssertContract(valid with { Scope = scope }, true);
+        foreach (var scope in new[] { "E", "a", "Transition", "global", "" })
+            AssertContract(valid with { Scope = scope }, false);
+
+        foreach (var category in Categories)
+            AssertContract(valid with { Category = category }, true);
+        foreach (var category in new[] { "compute", "Active", "cost-per-token", "" })
+            AssertContract(valid with { Category = category }, false);
+
+        foreach (var label in PlannedLabels)
+            AssertContract(Observation(true, true, true, label), true);
+        AssertContract(Observation(true, true, true, "invented label"), false);
+        AssertContract(Observation(true, true, true, "not measured"), false);
+        AssertContract(Observation(false, true, false) with { PlannedEvidenceLabel = "not measured" }, true);
+        AssertContract(Observation(false, true, false) with { PlannedEvidenceLabel = "derived" }, false);
+
+        foreach (var currency in new[] { "EUR", "USD", "GBP" })
+            AssertContract(valid with { Currency = currency }, true);
+        foreach (var currency in new[] { "eur", "Eur", "EU", "EURO", "E1R", "€", "", "ZZZ", "not measured" })
+            AssertContract(valid with { Currency = currency }, false);
+
+        AssertContract(valid with { PeriodStartUtc = "2026-01-01T00:00:00Z", PeriodEndUtc = "2026-01-01T00:00:01Z" }, true);
+        foreach (var start in new[] { "2026-01-01T00:00:00+02:00", "2026-01-01T00:00:00", "2026-01-01" })
+            AssertContract(valid with { PeriodStartUtc = start }, false);
+        AssertContract(valid with { PeriodEndUtc = "2026-01-02T00:00:00+00:00" }, false);
+        AssertContract(valid with { PeriodEndUtc = valid.PeriodStartUtc }, false);
+        AssertContract(valid with { PeriodEndUtc = "2025-12-31T23:59:59Z" }, false);
+
+        // planned, observed, variance measured flags: variance needs both inputs measured.
+        foreach (var (planned, observed, variance, accepted) in new[]
+                 {
+                     (true, true, true, true), (true, false, false, true), (false, true, false, true),
+                     (false, false, false, true), (true, true, false, false), (true, false, true, false),
+                     (false, true, true, false), (false, false, true, false)
+                 })
+            AssertContract(Observation(planned, observed, variance), accepted);
+
+        // Currency is "not measured" if and only if all three amounts are not measured.
+        AssertContract(Observation(false, false, false), true);
+        AssertContract(Observation(false, false, false) with { Currency = "EUR" }, false);
+        AssertContract(Observation(true, false, false) with { Currency = "not measured" }, false);
+
+        // Labels and references per amount.
+        AssertContract(valid with { ObservedEvidenceLabel = "synthetic demonstration result" }, false);
+        AssertContract(valid with { VarianceEvidenceLabel = "external evidence" }, false);
+        AssertContract(valid with { VarianceEvidenceLabel = "not measured" }, false);
+        AssertContract(valid with { PlannedEvidenceReference = "" }, false);
+        AssertContract(valid with { ObservedEvidenceReference = " " }, false);
+        AssertContract(Observation(false, true, false) with { PlannedEvidenceReference = "test:planned" }, false);
+        AssertContract(Observation(true, false, false) with { ObservedEvidenceLabel = "external evidence" }, false);
+        AssertContract(Observation(true, true, false), false);
+    }
+
     private static DeploymentCostEvidence MeasuredEvidence() => new(
         1, new string('a', 40), "synthetic-test-deployment",
         [
             new DeploymentCostObservation(
-                "test scope", "compute", DeploymentCostAmount.Measured(100m), DeploymentCostAmount.Measured(125m),
+                "A", "active", DeploymentCostAmount.Measured(100m), DeploymentCostAmount.Measured(125m),
                 DeploymentCostAmount.Measured(25m), "EUR", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z",
                 "test:planned", "test:observed", "scenario assumption", "external evidence", "derived")
         ]);

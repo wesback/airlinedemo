@@ -1,0 +1,224 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 230,
+  "branch": "ai-sdlc/issue-230",
+  "commitSha": "52db044cb596de68ce18100a28703cc49369d18b",
+  "round": 3,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new CMap guard addresses oversized Unicode mappings before PdfPig opens the document. Its block-matching regex can take excessive CPU on a bounded but adversarial stream.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 48,
+          "message": "OWASP A06:2025 (Insecure Design): the CMap block regex can rescan the remainder of a large malformed stream for each unmatched block start, creating a reachable CPU denial-of-service path.",
+          "confidence": 0.92,
+          "category": "performance",
+          "evidence": {
+            "codePathTraced": "CheckStreamLimits passes decoded streams up to 8 MiB to HasBoundedCMapExpansion, which runs CMapBlock.Matches. For each `beginbfchar` or `beginbfrange` without a matching end token, the lazy body match can scan the remaining stream before failing.",
+            "failureScenario": "A presenter submits a PDF under the document and decoded-stream limits whose stream repeats `beginbfchar` many times without `endbfchar`. Repeated scans of the remaining stream can consume excessive API CPU before the parser rejects the document, disrupting service."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added CMap validation addresses the reported oversized glyph mapping case, but the extraction guard still runs after PdfPig may materialize a large page letter collection. That leaves an API resource-exhaustion path reachable.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 145,
+          "message": "The text-size guard still runs after PdfPig materializes page letters. The new CMap checks constrain glyph mapping expansion, but do not bound the memory used by a large collection of letters before the guard runs.",
+          "confidence": 0.82,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The stream check caps decoded bytes, then ParseCore calls getTextParts(page) before CanMaterializePageText can enforce the text limit. The production delegate accesses page.Letters, whose letter objects may be materialized before the guard runs.",
+            "failureScenario": "A PDF under the 10 MB input cap uses a content stream under the 8 MiB decoded cap containing many short text operations. PdfPig can materialize a large letter collection in the API process before the text-length guard rejects it, potentially exhausting service memory. This leaves the resource-exhaustion risk reachable (OWASP A06:2025, Insecure Design)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added CMap guard can be bypassed by placing a block terminator in a PDF comment. The unchecked mapping can still trigger excessive allocation during PdfPig page-text extraction.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 279,
+          "message": "OWASP A06:2025 (Insecure Design): comment text can prematurely terminate CMap validation, leaving an oversized glyph mapping to reach in-process extraction.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "HasBoundedCMapExpansion matches CMap block terminators on raw stream text at line 279, then removes PDF comments from the already matched body at line 287. A comment containing `endbfchar` can therefore terminate the check early, leaving the real mapping unchecked before PdfPig opens and extracts the page.",
+            "failureScenario": "A presenter submits a PDF under the input and decoded-stream limits with a ToUnicode stream containing `beginbfchar`, then a comment with `endbfchar`, followed by a one-byte source code mapped to a very long Unicode string and the actual `endbfchar`. The checker sees an empty block and accepts it; PdfPig honors the comment and materializes the long mapping for repeated glyphs, potentially exhausting API memory or CPU. This is an insecure-design resource exhaustion risk (OWASP A06:2025)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
