@@ -116,6 +116,24 @@ public sealed class CapeTownEvidenceTests
     }
 
     [Fact]
+    public void PublicAssessmentClaimPreservesCapeTownEvidenceReliance()
+    {
+        const string submissionJson =
+            """{"kind":"MissingRequirement","value":"return package","component":"Engine","serialNumber":"ENG-1","witnesses":[],"relatedRequirementId":"REQ-CAPE-TOWN","reliesOnCapeTownEvidence":true}""";
+        var submission = JsonSerializer.Deserialize<AssessmentClaimSubmission>(
+            submissionJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(submission);
+        var mapped = AssessmentEndpoints.ToClaim(submission, ClaimKind.MissingRequirement, []);
+
+        Assert.True(mapped.ReliesOnCapeTownEvidence);
+        Assert.Equal(RequirementId, mapped.RelatedRequirementId);
+        Assert.Throws<InvalidDataException>(() => Assess(
+            null,
+            mapped.RelatedRequirementId,
+            reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence));
+    }
+
+    [Fact]
     public void ValidCapeTownFixtureUsesPinnedPublicKey()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources");

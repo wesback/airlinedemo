@@ -15,7 +15,8 @@ public sealed record AssessmentClaimSubmission(
     string? SerialNumber,
     IReadOnlyList<AssessmentWitnessSubmission?>? Witnesses,
     string? RelatedRequirementId = null,
-    string? Regime = null);
+    string? Regime = null,
+    bool ReliesOnCapeTownEvidence = false);
 
 public sealed record AssessmentWitnessSubmission(string? DocumentId, int Page, string? Quote);
 
@@ -180,7 +181,7 @@ public static class AssessmentEndpoints
         ClaimKind kind,
         IReadOnlyList<DocumentWitness> witnesses) =>
         new(kind, submitted.Value!, submitted.Component!, submitted.SerialNumber!, witnesses,
-            submitted.RelatedRequirementId, submitted.Regime);
+            submitted.RelatedRequirementId, submitted.Regime, submitted.ReliesOnCapeTownEvidence);
 
     private static object View(string id, AssessmentRecord record) => new
     {
