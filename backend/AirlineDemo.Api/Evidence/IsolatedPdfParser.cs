@@ -48,6 +48,11 @@ public static class IsolatedPdfParser
             return rejected;
         }
 
+        if (PreflightPageContentSources(content) is { } oversizedText)
+        {
+            return oversizedText;
+        }
+
         // Root bypasses the read-only mode of the working directory, so root without a drop to "nobody" fails closed.
         if (CannotIsolateWorker(OperatingSystem.IsLinux(), options.WorkerFileName is not null, Environment.UserName, File.Exists(SetprivPath)))
         {
@@ -443,9 +448,781 @@ public static class IsolatedPdfParser
     /// <summary>Largest decoded size of one Flate stream the parent lets reach a worker.</summary>
     internal const long DecodedStreamLimitBytes = 8L * 1024 * 1024;
 
+    private const long TextSourceLimitBytes = 512L * 1024;
+    private const string TextSourceLimitReason = "PDF text source exceeds 524288 bytes; retry is possible";
+    private const string UnreadableDocumentReason = "PdfPig could not open or read the document; retry is possible";
+
     private static readonly Regex FilterValue = new(@"/Filter\s*(\[[^\]]*\]|/[^\s/<>\[\]()%]+)", RegexOptions.CultureInvariant);
     private static readonly Regex NameWithEscape = new(@"/[^\s/<>\[\]()%]*#[0-9A-Fa-f]{2}[^\s/<>\[\]()%]*", RegexOptions.CultureInvariant);
     private static readonly Regex FirstName = new(@"/[^\s/<>\[\]()%]+", RegexOptions.CultureInvariant);
+
+    private readonly record struct PdfIndirectObject(
+        int Number,
+        int Generation,
+        int BodyStart,
+        int DictionaryEnd,
+        int BodyEnd,
+        int StreamStart,
+        int StreamLength,
+        bool HasDeclaredStreamLength,
+        (int Number, int Generation)? LengthReference);
+
+    /// <summary>Bounds decoded page-content bytes across all page references before a worker can start.</summary>
+    private static (EvidenceProcessingState State, string Reason, string Text)? PreflightPageContentSources(byte[] content)
+    {
+        var objects = ReadIndirectObjects(content);
+        if (objects.Count == 0) return null;
+        long totalBytes = 0;
+        var streamLengths = new Dictionary<(int Number, int Generation), long>();
+        foreach (var page in objects.Values)
+        {
+            var dictionary = DecodeNameEscapes(content.AsSpan(page.BodyStart, page.DictionaryEnd - page.BodyStart));
+            var type = FindPdfDictionaryToken(dictionary, "/Type"u8);
+            if (type < 0 || !HasNameValue(dictionary, type + "/Type"u8.Length, "/Page"u8)) continue;
+            var contents = FindPdfDictionaryToken(dictionary, "/Contents"u8);
+            if (contents < 0) continue;
+            var valueStart = SkipPdfWhitespaceAndComments(dictionary, contents + "/Contents"u8.Length);
+            if (valueStart >= dictionary.Length) return Retryable(UnreadableDocumentReason);
+            List<(int Number, int Generation)> references;
+            if (dictionary[valueStart] == '[')
+            {
+                var arrayReferences = ReadArrayReferences(dictionary, valueStart);
+                if (arrayReferences is null) return Retryable(UnreadableDocumentReason);
+                references = arrayReferences;
+            }
+            else
+            {
+                if (!TryReadReference(dictionary, valueStart, out var reference, out _))
+                {
+                    if (IsPdfToken(dictionary, valueStart, "null"u8)) continue;
+                    return Retryable(UnreadableDocumentReason);
+                }
+
+                references = new List<(int Number, int Generation)> { reference };
+            }
+            foreach (var reference in references)
+            {
+                if (!objects.TryGetValue(reference, out var stream))
+                {
+                    return Retryable(UnreadableDocumentReason);
+                }
+                if (stream.StreamStart < 0)
+                {
+                    return Retryable(UnreadableDocumentReason);
+                }
+                if (!stream.HasDeclaredStreamLength)
+                {
+                    return Retryable(UnreadableDocumentReason);
+                }
+                if (!streamLengths.TryGetValue(reference, out var sourceBytes))
+                {
+                    sourceBytes = DecodedContentStreamLength(content, stream, out var readable);
+                    if (!readable) return Retryable(UnreadableDocumentReason);
+                    streamLengths.Add(reference, sourceBytes);
+                }
+                if (sourceBytes > TextSourceLimitBytes - totalBytes)
+                {
+                    return Retryable(TextSourceLimitReason);
+                }
+                totalBytes += sourceBytes;
+            }
+        }
+        return null;
+    }
+
+    private static Dictionary<(int Number, int Generation), PdfIndirectObject> ReadIndirectObjects(byte[] content)
+    {
+        var objects = new Dictionary<(int Number, int Generation), PdfIndirectObject>();
+        var position = 0;
+        while (position < content.Length)
+        {
+            var found = content.AsSpan(position).IndexOf("obj"u8);
+            if (found < 0) break;
+            var objectKeyword = position + found;
+            position = objectKeyword + "obj"u8.Length;
+            if (!TryReadObjectHeader(content, objectKeyword, out var number, out var generation, out var bodyStart))
+            {
+                continue;
+            }
+            var endObject = FindPdfToken(content, "endobj"u8, bodyStart);
+            if (endObject < 0) break;
+            var streamKeyword = FindPdfToken(content, "stream"u8, bodyStart, endObject);
+            var dictionaryEnd = streamKeyword < 0 ? endObject : streamKeyword;
+            var streamStart = -1;
+            var streamLength = 0;
+            var hasDeclaredStreamLength = false;
+            (int Number, int Generation)? lengthReference = null;
+            if (streamKeyword >= 0)
+            {
+                streamStart = streamKeyword + "stream"u8.Length;
+                if (streamStart < content.Length && content[streamStart] == '\r') streamStart++;
+                if (streamStart < content.Length && content[streamStart] == '\n') streamStart++;
+
+                var dictionary = content.AsSpan(bodyStart, streamKeyword - bodyStart);
+                hasDeclaredStreamLength = TryReadStreamLength(dictionary, out var declaredLength, out lengthReference)
+                    && declaredLength <= content.Length - streamStart;
+                var declaredEnd = hasDeclaredStreamLength ? streamStart + declaredLength : streamStart;
+                var endStream = FindPdfToken(content, "endstream"u8, hasDeclaredStreamLength ? declaredEnd : streamStart);
+                if (endStream >= 0)
+                {
+                    if (hasDeclaredStreamLength)
+                    {
+                        streamLength = declaredLength;
+                    }
+                    else
+                    {
+                        var dataEnd = endStream;
+                        if (dataEnd > streamStart && content[dataEnd - 1] == '\n') dataEnd--;
+                        if (dataEnd > streamStart && content[dataEnd - 1] == '\r') dataEnd--;
+                        streamLength = dataEnd - streamStart;
+                    }
+                    endObject = FindPdfToken(content, "endobj"u8, endStream + "endstream"u8.Length);
+                    if (endObject < 0) break;
+                }
+                else
+                {
+                    streamStart = -1;
+                }
+            }
+            objects[(number, generation)] = new PdfIndirectObject(
+                number, generation, bodyStart, dictionaryEnd, endObject, streamStart, streamLength,
+                hasDeclaredStreamLength, lengthReference);
+            position = endObject + "endobj"u8.Length;
+        }
+        ResolveIndirectStreamLengths(content, objects);
+        return objects;
+    }
+
+    private static bool TryReadStreamLength(
+        ReadOnlySpan<byte> dictionary,
+        out int length,
+        out (int Number, int Generation)? lengthReference)
+    {
+        length = 0;
+        lengthReference = null;
+        var key = FindPdfDictionaryToken(dictionary, "/Length"u8);
+        if (key < 0) return false;
+        var cursor = SkipPdfWhitespaceAndComments(dictionary, key + "/Length"u8.Length);
+        if (!TryReadInteger(dictionary, ref cursor, out length)) return false;
+        cursor = SkipPdfWhitespaceAndComments(dictionary, cursor);
+        if (cursor < dictionary.Length && IsDigit(dictionary[cursor]))
+        {
+            if (!TryReadInteger(dictionary, ref cursor, out var generation)) return false;
+            cursor = SkipPdfWhitespaceAndComments(dictionary, cursor);
+            if (IsPdfToken(dictionary, cursor, "R"u8))
+            {
+                lengthReference = (length, generation);
+            }
+            return false;
+        }
+
+        return cursor == dictionary.Length || IsPdfDelimiterOrWhitespace(dictionary[cursor]);
+    }
+
+    /// <summary>
+    /// Returns a copy of a dictionary with <c>#xx</c> escapes in names decoded (<c>/Ty#70e</c> becomes <c>/Type</c>), so key
+    /// lookups see the names PDF readers see. An escape that would produce whitespace or a delimiter stays escaped.
+    /// </summary>
+    private static byte[] DecodeNameEscapes(ReadOnlySpan<byte> source)
+    {
+        var decoded = new List<byte>(source.Length);
+        var inName = false;
+        for (var i = 0; i < source.Length; i++)
+        {
+            var b = source[i];
+            if (b == '/') { inName = true; decoded.Add(b); continue; }
+            if (inName && IsPdfDelimiterOrWhitespace(b)) inName = false;
+            if (inName && b == '#' && i + 2 < source.Length + 0 && Uri.IsHexDigit((char)source[i + 1]) && Uri.IsHexDigit((char)source[i + 2]))
+            {
+                var value = (byte)Convert.ToInt32(Encoding.ASCII.GetString(source.Slice(i + 1, 2)), 16);
+                if (value != '#' && value != 0 && !IsPdfDelimiterOrWhitespace(value))
+                {
+                    decoded.Add(value);
+                    i += 2;
+                    continue;
+                }
+            }
+
+            decoded.Add(b);
+        }
+
+        return decoded.ToArray();
+    }
+
+    private static int FindPdfDictionaryToken(ReadOnlySpan<byte> source, ReadOnlySpan<byte> token)
+    {
+        var dictionaryDepth = 0;
+        var arrayDepth = 0;
+        var expectKey = false;
+        for (var position = 0; position < source.Length;)
+        {
+            if (source[position] == '%')
+            {
+                while (position < source.Length && source[position] is not (byte)'\r' and not (byte)'\n') position++;
+                continue;
+            }
+
+            if (source[position] == '(')
+            {
+                position = SkipLiteralString(source, position);
+                if (dictionaryDepth == 1 && arrayDepth == 0 && !expectKey) expectKey = true;
+                continue;
+            }
+
+            if (source[position] == '<')
+            {
+                if (position + 1 < source.Length && source[position + 1] == '<')
+                {
+                    dictionaryDepth++;
+                    if (dictionaryDepth == 1) expectKey = true;
+                    position += 2;
+                }
+                else
+                {
+                    position++;
+                    while (position < source.Length && source[position] != '>') position++;
+                    if (position < source.Length) position++;
+                    if (dictionaryDepth == 1 && arrayDepth == 0 && !expectKey) expectKey = true;
+                }
+
+                continue;
+            }
+
+            if (source[position] == '>' && position + 1 < source.Length && source[position + 1] == '>')
+            {
+                dictionaryDepth--;
+                if (dictionaryDepth == 1 && arrayDepth == 0) expectKey = true;
+                position += 2;
+                continue;
+            }
+
+            if (source[position] == '[')
+            {
+                arrayDepth++;
+                position++;
+                continue;
+            }
+
+            if (source[position] == ']')
+            {
+                arrayDepth--;
+                if (dictionaryDepth == 1 && arrayDepth == 0) expectKey = true;
+                position++;
+                continue;
+            }
+
+            if (source[position] == '/')
+            {
+                var after = position + token.Length;
+                if (dictionaryDepth == 1
+                    && arrayDepth == 0
+                    && expectKey
+                    && after <= source.Length
+                    && source.Slice(position, token.Length).SequenceEqual(token)
+                    && (after == source.Length || IsPdfDelimiterOrWhitespace(source[after])))
+                {
+                    return position;
+                }
+
+                if (dictionaryDepth == 1 && arrayDepth == 0)
+                {
+                    expectKey = !expectKey;
+                }
+
+                position++;
+                while (position < source.Length && !IsPdfDelimiterOrWhitespace(source[position])) position++;
+                continue;
+            }
+
+            if (dictionaryDepth == 1 && arrayDepth == 0 && !expectKey
+                && !IsPdfWhitespace(source[position]))
+            {
+                expectKey = true;
+            }
+
+            position++;
+        }
+
+        return -1;
+    }
+
+    private static int SkipPdfWhitespaceAndComments(ReadOnlySpan<byte> source, int position)
+    {
+        while (position < source.Length)
+        {
+            if (IsPdfWhitespace(source[position]))
+            {
+                position++;
+            }
+            else if (source[position] == '%')
+            {
+                while (position < source.Length && source[position] is not (byte)'\r' and not (byte)'\n') position++;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return position;
+    }
+
+    private static void ResolveIndirectStreamLengths(
+        byte[] content,
+        Dictionary<(int Number, int Generation), PdfIndirectObject> objects)
+    {
+        foreach (var (key, stream) in objects.ToArray())
+        {
+            if (stream.LengthReference is not { } reference) continue;
+            if (!objects.TryGetValue(reference, out var lengthObject)
+                || lengthObject.StreamStart >= 0
+                || !TryReadIntegerObject(content, lengthObject, out var length)
+                || length > content.Length - stream.StreamStart
+                || FindPdfToken(content, "endstream"u8, stream.StreamStart + length) < 0)
+            {
+                objects[key] = stream with { StreamStart = -1 };
+                continue;
+            }
+
+            objects[key] = stream with { StreamLength = length, HasDeclaredStreamLength = true };
+        }
+    }
+
+    private static bool TryReadIntegerObject(byte[] content, PdfIndirectObject pdfObject, out int value)
+    {
+        var body = content.AsSpan(pdfObject.BodyStart, pdfObject.BodyEnd - pdfObject.BodyStart);
+        var cursor = SkipWhitespace(body, 0);
+        if (!TryReadInteger(body, ref cursor, out value)) return false;
+        cursor = SkipWhitespace(body, cursor);
+        return cursor == body.Length;
+    }
+
+    private static bool TryReadObjectHeader(
+        ReadOnlySpan<byte> content,
+        int objectKeyword,
+        out int number,
+        out int generation,
+        out int bodyStart)
+    {
+        number = 0;
+        generation = 0;
+        bodyStart = 0;
+        if (objectKeyword + 3 < content.Length && !IsPdfDelimiterOrWhitespace(content[objectKeyword + 3])) return false;
+        var cursor = objectKeyword;
+        while (cursor > 0 && IsPdfWhitespace(content[cursor - 1])) cursor--;
+        var generationEnd = cursor;
+        while (cursor > 0 && IsDigit(content[cursor - 1])) cursor--;
+        if (cursor == generationEnd || cursor == 0 || !IsPdfWhitespace(content[cursor - 1])) return false;
+        if (!TryParsePositiveInteger(content.Slice(cursor, generationEnd - cursor), allowZero: true, out generation)) return false;
+        cursor--;
+        while (cursor > 0 && IsPdfWhitespace(content[cursor - 1])) cursor--;
+        var numberEnd = cursor;
+        while (cursor > 0 && IsDigit(content[cursor - 1])) cursor--;
+        if (cursor == numberEnd || (cursor > 0 && !IsPdfDelimiterOrWhitespace(content[cursor - 1]))) return false;
+        if (!TryParsePositiveInteger(content.Slice(cursor, numberEnd - cursor), allowZero: false, out number)) return false;
+
+        bodyStart = objectKeyword + 3;
+        return true;
+    }
+
+    private static List<(int Number, int Generation)>? ReadArrayReferences(ReadOnlySpan<byte> dictionary, int start)
+    {
+        var references = new List<(int Number, int Generation)>();
+        for (var position = start + 1; position < dictionary.Length;)
+        {
+            position = SkipWhitespace(dictionary, position);
+            if (position >= dictionary.Length) return null;
+            if (dictionary[position] == ']') return references;
+            if (TryReadReference(dictionary, position, out var reference, out var afterReference))
+            {
+                references.Add(reference);
+                position = afterReference;
+            }
+            else
+            {
+                position++;
+            }
+        }
+        return null;
+    }
+
+    private static bool TryReadReference(
+        ReadOnlySpan<byte> source,
+        int start,
+        out (int Number, int Generation) reference,
+        out int afterReference)
+    {
+        reference = default;
+        afterReference = start;
+        var cursor = SkipWhitespace(source, start);
+        if (!TryReadInteger(source, ref cursor, out var number)) return false;
+        if (cursor >= source.Length || !IsPdfWhitespace(source[cursor])) return false;
+        cursor = SkipWhitespace(source, cursor);
+        if (!TryReadInteger(source, ref cursor, out var generation)) return false;
+        if (cursor >= source.Length || !IsPdfWhitespace(source[cursor])) return false;
+        cursor = SkipWhitespace(source, cursor);
+        if (!IsPdfToken(source, cursor, "R"u8)) return false;
+        reference = (number, generation);
+        afterReference = cursor + 1;
+        return true;
+    }
+
+    private static long DecodedContentStreamLength(
+        byte[] content,
+        PdfIndirectObject stream,
+        out bool readable)
+    {
+        readable = true;
+        var dictionary = Encoding.Latin1.GetString(
+            content, stream.BodyStart, stream.DictionaryEnd - stream.BodyStart);
+        var filter = FilterValue.Match(dictionary);
+        if (!filter.Success)
+        {
+            var source = content.AsSpan(stream.StreamStart, stream.StreamLength);
+            return ContainsTextShowingOperator(source)
+                ? Math.Min(stream.StreamLength, TextSourceLimitBytes + 1)
+                : 0;
+        }
+        var filters = FirstName.Matches(filter.Groups[1].Value).Select(match => match.Value).ToArray();
+        if (filters.Length == 0)
+        {
+            readable = false;
+            return 0;
+        }
+
+        var decoded = content.AsSpan(stream.StreamStart, stream.StreamLength).ToArray();
+        for (var index = 0; index < filters.Length; index++)
+        {
+            if (!TryDecodeContentFilter(
+                filters[index], decoded, DecodedStreamLimitBytes, out decoded, out var exceededLimit))
+            {
+                readable = false;
+                return 0;
+            }
+            if (exceededLimit) return TextSourceLimitBytes + 1;
+        }
+
+        return ContainsTextShowingOperator(decoded)
+            ? Math.Min(decoded.Length, TextSourceLimitBytes + 1)
+            : 0;
+    }
+
+    private static bool TryDecodeContentFilter(
+        string filter,
+        byte[] source,
+        long maximumBytes,
+        out byte[] decoded,
+        out bool exceededLimit)
+    {
+        decoded = Array.Empty<byte>();
+        exceededLimit = false;
+        using var output = new MemoryStream();
+        var overflow = false;
+
+        bool WriteByte(byte value)
+        {
+            if (output.Length >= maximumBytes)
+            {
+                overflow = true;
+                return false;
+            }
+
+            output.WriteByte(value);
+            return true;
+        }
+
+        if (filter is "/FlateDecode" or "/Fl")
+        {
+            try
+            {
+                using var zlib = new ZLibStream(new MemoryStream(source), CompressionMode.Decompress);
+                var buffer = new byte[81920];
+                int read;
+                while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    for (var index = 0; index < read; index++)
+                    {
+                        if (!WriteByte(buffer[index]))
+                        {
+                            exceededLimit = overflow;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch (InvalidDataException)
+            {
+                return false;
+            }
+        }
+        else if (filter is "/ASCIIHexDecode" or "/AHx")
+        {
+            var highNibble = -1;
+            foreach (var value in source)
+            {
+                if (IsPdfWhitespace(value)) continue;
+                if (value == '>') break;
+                var nibble = HexValue(value);
+                if (nibble < 0) return false;
+                if (highNibble < 0)
+                {
+                    highNibble = nibble;
+                }
+                else
+                {
+                    if (!WriteByte((byte)((highNibble << 4) | nibble)))
+                    {
+                        exceededLimit = overflow;
+                        return true;
+                    }
+                    highNibble = -1;
+                }
+            }
+
+            if (highNibble >= 0 && !WriteByte((byte)(highNibble << 4)))
+            {
+                exceededLimit = overflow;
+                return true;
+            }
+        }
+        else if (filter is "/ASCII85Decode" or "/A85")
+        {
+            ulong group = 0;
+            var groupSize = 0;
+            foreach (var value in source)
+            {
+                if (IsPdfWhitespace(value)) continue;
+                if (value == '~')
+                {
+                    break;
+                }
+                if (value == 'z')
+                {
+                    if (groupSize != 0) return false;
+                    for (var index = 0; index < 4; index++)
+                    {
+                        if (!WriteByte(0))
+                        {
+                            exceededLimit = overflow;
+                            return true;
+                        }
+                    }
+                    continue;
+                }
+                if (value is < (byte)'!' or > (byte)'u') return false;
+                group = group * 85 + (uint)(value - '!');
+                if (++groupSize == 5)
+                {
+                    if (group > uint.MaxValue) return false;
+                    for (var shift = 24; shift >= 0; shift -= 8)
+                    {
+                        if (!WriteByte((byte)(group >> shift)))
+                        {
+                            exceededLimit = overflow;
+                            return true;
+                        }
+                    }
+                    group = 0;
+                    groupSize = 0;
+                }
+            }
+
+            if (groupSize == 1) return false;
+            if (groupSize > 1)
+            {
+                var outputBytes = groupSize - 1;
+                for (var index = groupSize; index < 5; index++) group = group * 85 + 84;
+                if (group > uint.MaxValue) return false;
+                for (var index = 0; index < outputBytes; index++)
+                {
+                    var shift = 24 - index * 8;
+                    if (!WriteByte((byte)(group >> shift)))
+                    {
+                        exceededLimit = overflow;
+                        return true;
+                    }
+                }
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        decoded = output.ToArray();
+        return true;
+    }
+
+    private static int HexValue(byte value) => value switch
+    {
+        >= (byte)'0' and <= (byte)'9' => value - '0',
+        >= (byte)'A' and <= (byte)'F' => value - 'A' + 10,
+        >= (byte)'a' and <= (byte)'f' => value - 'a' + 10,
+        _ => -1,
+    };
+
+    private static bool ContainsTextShowingOperator(ReadOnlySpan<byte> content)
+    {
+        for (var position = 0; position < content.Length;)
+        {
+            var value = content[position];
+            if (IsPdfWhitespace(value))
+            {
+                position++;
+                continue;
+            }
+
+            if (value == '%')
+            {
+                while (position < content.Length
+                    && content[position] != (byte)'\r'
+                    && content[position] != (byte)'\n') position++;
+                continue;
+            }
+
+            if (value == '(')
+            {
+                position = SkipLiteralString(content, position);
+                continue;
+            }
+
+            if (value == '<')
+            {
+                if (position + 1 < content.Length && content[position + 1] == '<')
+                {
+                    position += 2;
+                }
+                else
+                {
+                    position++;
+                    while (position < content.Length && content[position] != '>') position++;
+                    if (position < content.Length) position++;
+                }
+
+                continue;
+            }
+
+            if (value == '/')
+            {
+                position++;
+                while (position < content.Length && !IsPdfDelimiterOrWhitespace(content[position])) position++;
+                continue;
+            }
+
+            if (value == (byte)'\'' || value == (byte)'"') return true;
+            if (value == (byte)'[' || value == (byte)']' || value == (byte)'{'
+                || value == (byte)'}' || value == (byte)')' || value == (byte)'>')
+            {
+                position++;
+                continue;
+            }
+
+            var tokenStart = position;
+            while (position < content.Length
+                && !IsPdfDelimiterOrWhitespace(content[position])
+                && content[position] != (byte)'\''
+                && content[position] != (byte)'"')
+            {
+                position++;
+            }
+
+            var token = content[tokenStart..position];
+            if (token.SequenceEqual("Tj"u8) || token.SequenceEqual("TJ"u8)) return true;
+        }
+
+        return false;
+    }
+
+    private static int SkipLiteralString(ReadOnlySpan<byte> content, int position)
+    {
+        var depth = 0;
+        while (position < content.Length)
+        {
+            var value = content[position++];
+            if (value == '\\')
+            {
+                if (position < content.Length) position++;
+            }
+            else if (value == '(')
+            {
+                depth++;
+            }
+            else if (value == ')' && --depth == 0)
+            {
+                break;
+            }
+        }
+
+        return position;
+    }
+
+    private static int FindPdfToken(ReadOnlySpan<byte> source, ReadOnlySpan<byte> token, int start, int limit = -1)
+    {
+        if (limit < 0 || limit > source.Length) limit = source.Length;
+        while (start < limit)
+        {
+            var found = source[start..limit].IndexOf(token);
+            if (found < 0) return -1;
+            var index = start + found;
+            var after = index + token.Length;
+            if ((index == 0 || IsPdfDelimiterOrWhitespace(source[index - 1]))
+                && (after == source.Length || IsPdfDelimiterOrWhitespace(source[after])))
+            {
+                return index;
+            }
+
+            start = after;
+        }
+
+        return -1;
+    }
+
+    private static bool HasNameValue(ReadOnlySpan<byte> source, int start, ReadOnlySpan<byte> value)
+    {
+        start = SkipPdfWhitespaceAndComments(source, start);
+        return start + value.Length <= source.Length
+            && source.Slice(start, value.Length).SequenceEqual(value)
+            && (start + value.Length == source.Length || IsPdfDelimiterOrWhitespace(source[start + value.Length]));
+    }
+
+    private static bool IsPdfToken(ReadOnlySpan<byte> source, int start, ReadOnlySpan<byte> token) =>
+        start + token.Length <= source.Length
+        && source.Slice(start, token.Length).SequenceEqual(token)
+        && (start + token.Length == source.Length || IsPdfDelimiterOrWhitespace(source[start + token.Length]));
+
+    private static int SkipWhitespace(ReadOnlySpan<byte> source, int position)
+    {
+        while (position < source.Length && IsPdfWhitespace(source[position])) position++;
+        return position;
+    }
+
+    private static bool TryReadInteger(ReadOnlySpan<byte> source, ref int position, out int value)
+    {
+        var start = position;
+        while (position < source.Length && IsDigit(source[position])) position++;
+        return TryParsePositiveInteger(source[start..position], allowZero: true, out value);
+    }
+
+    private static bool TryParsePositiveInteger(ReadOnlySpan<byte> source, bool allowZero, out int value)
+    {
+        value = 0;
+        if (source.IsEmpty) return false;
+        foreach (var digit in source)
+        {
+            if (!IsDigit(digit) || value > (int.MaxValue - (digit - '0')) / 10) return false;
+            value = value * 10 + digit - '0';
+        }
+
+        return allowZero || value > 0;
+    }
+
+    private static bool IsDigit(byte value) => value is >= (byte)'0' and <= (byte)'9';
+
+    private static bool IsPdfWhitespace(byte value) => value is 0 or 9 or 10 or 12 or 13 or 32;
+
+    private static bool IsPdfDelimiterOrWhitespace(byte value) =>
+        IsPdfWhitespace(value) || value is (byte)'(' or (byte)')' or (byte)'<' or (byte)'>' or (byte)'['
+            or (byte)']' or (byte)'{' or (byte)'}' or (byte)'/' or (byte)'%';
 
     /// <summary>
     /// Before any worker starts, inflates each Flate stream up to <see cref="DecodedStreamLimitBytes"/> and rejects the
