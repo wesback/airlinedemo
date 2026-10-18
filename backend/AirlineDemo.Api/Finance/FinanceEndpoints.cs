@@ -83,7 +83,8 @@ public static class FinanceEndpoints
         return Results.Ok(ReserveCalculator.Calculate($"RSV-{caseId}", 1, ReservePeriod, input?.Usage, input?.Rates));
     }
 
-    private static IResult GetObligations(string caseId, HttpContext http, DemoSessionStore sessions, FinanceInputStore inputs, TimeProvider time)
+    private static IResult GetObligations(string caseId, HttpContext http, DemoSessionStore sessions, FinanceInputStore inputs,
+        ICaseStateStore store, SourceModeStore sourceModes)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null) return DemoAuthEndpoints.Unauthenticated();
@@ -91,7 +92,15 @@ public static class FinanceEndpoints
 
         var input = inputs.Find(caseId);
         if (input?.Obligation is null) return Results.NotFound();
-        return Results.Ok(ObligationEvaluator.Evaluate(input.Obligation, time.GetUtcNow(), input.NoticeDrafts));
+
+        var scope = TechnicalReviewPolicy.ScopeFor(store, session.User.CaseScopes, caseId);
+        var state = scope is null ? null : store.Read(scope);
+        var basis = state?.Basis.LastOrDefault();
+        var modes = state is null
+            ? SourceModes.Sources.ToDictionary(source => source, _ => SourceModes.Available, StringComparer.Ordinal)
+            : sourceModes.ModesFor(state);
+        return Results.Ok(ObligationEvaluator.EvaluateFromPinnedContracts(input.Obligation, caseId,
+            basis?.Version ?? 0, basis?.Content, modes, input.NoticeDrafts));
     }
 
     // Simulated decisions: they append one audit event and never issue an invoice or send a notice.
