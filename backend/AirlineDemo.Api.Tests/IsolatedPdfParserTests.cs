@@ -67,7 +67,7 @@ public class IsolatedPdfParserTests
         return padToBytes > unpadded.Length ? Build(padToBytes - unpadded.Length) : unpadded;
     }
 
-    /// <summary>A one-page PDF whose content stream inflates to 600 MB of zeros (above the 512 MB limit) from a few hundred kilobytes.</summary>
+    /// <summary>A one-page PDF whose content stream expands beyond the parser's decoded-stream limit.</summary>
     private static byte[] FlateBomb()
     {
         using var compressed = new MemoryStream();
@@ -75,7 +75,7 @@ public class IsolatedPdfParserTests
         {
             var chunk = new byte[1024 * 1024];
             Array.Fill(chunk, (byte)' ');
-            for (var i = 0; i < 600; i++)
+            for (var i = 0; i < 9; i++)
             {
                 zlib.Write(chunk);
             }
@@ -160,6 +160,7 @@ public class IsolatedPdfParserTests
     public void PdfLimitsAreCheckedBeforeParsing()
     {
         var exactLimitOpens = 0;
+        var exactLimitPageReads = 0;
         var exactLimit = IsolatedPdfParser.Parse(
             MinimalPdf(200, (int)EvidenceIntake.MaxDocumentBytes),
             "exact-limit.pdf",
@@ -167,13 +168,20 @@ public class IsolatedPdfParserTests
             {
                 exactLimitOpens++;
                 return PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
+            },
+            page =>
+            {
+                exactLimitPageReads++;
+                return page.Text;
             });
 
         Assert.Equal(1, exactLimitOpens);
         Assert.Equal(EvidenceProcessingState.Complete, exactLimit.State);
         Assert.Equal(200, exactLimit.Text.Count(character => character == EvidenceIntake.PageSeparator) + 1);
+        Assert.Equal(200, exactLimitPageReads);
 
         var tooManyPagesOpens = 0;
+        var tooManyPagesReads = 0;
         var tooManyPages = IsolatedPdfParser.Parse(
             MinimalPdf(201),
             "too-many-pages.pdf",
@@ -181,9 +189,15 @@ public class IsolatedPdfParserTests
             {
                 tooManyPagesOpens++;
                 return PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
+            },
+            page =>
+            {
+                tooManyPagesReads++;
+                return page.Text;
             });
 
         Assert.Equal(1, tooManyPagesOpens);
+        Assert.Equal(0, tooManyPagesReads);
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, tooManyPages.State);
         Assert.Equal(string.Empty, tooManyPages.Text);
 
@@ -234,17 +248,17 @@ public class IsolatedPdfParserTests
         Assert.Equal(string.Empty, outcome.Text);
     }
 
-    // A compressed bomb padded beyond the document cap is rejected before PdfPig opens it.
+    // Compressed content is bounded before PdfPig can expand it inside the API process.
     [Fact]
     public void FlateBomb_FailsWithinLimits_AndServiceStillProcessesValidPdf()
     {
         var compressedBomb = FlateBomb();
-        Array.Resize(ref compressedBomb, (int)EvidenceIntake.MaxDocumentBytes + 1);
+        Assert.True(compressedBomb.Length <= EvidenceIntake.MaxDocumentBytes);
         var bomb = IsolatedPdfParser.Parse(compressedBomb, "bomb.pdf");
 
-        Assert.Equal(EvidenceProcessingState.RejectedPermanent, bomb.State);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, bomb.State);
+        Assert.Equal("PDF stream content exceeds 8388608 decoded bytes; retry is possible", bomb.Reason);
         Assert.Equal(string.Empty, bomb.Text);
-        Assert.StartsWith("bomb.pdf is 10485761 bytes; limit is 10485760", bomb.Reason);
 
         var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf");
         Assert.Equal(EvidenceProcessingState.Complete, valid.State);

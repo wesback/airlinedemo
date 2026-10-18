@@ -1,7 +1,11 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
 
 using AirlineDemo.Api.Evidence.PdfWorker;
 
@@ -31,13 +35,20 @@ public sealed class IsolatedPdfParserOptions
 public static class IsolatedPdfParser
 {
     private const int PollMilliseconds = 25;
+    private const int MaxDecodedStreamBytes = 8 * 1024 * 1024;
+    private const string PdfReadFailureReason = "PdfPig could not open or read the document; retry is possible";
+    private const string PdfStreamLimitReason = "PDF stream content exceeds 8388608 decoded bytes; retry is possible";
+    private static readonly Regex DirectStreamLength = new(@"/Length\s+([0-9]+)\s*(?=/|>>)", RegexOptions.CultureInvariant);
+    private static readonly Regex SingleFlateFilter = new(
+        @"/Filter\s+(?:/FlateDecode|\[\s*/FlateDecode\s*\])(?:\s|/|>>|\[)",
+        RegexOptions.CultureInvariant);
 
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         IsolatedPdfParserOptions? options = null)
     {
         _ = options;
-        return ParseCore(content, "document.pdf", OpenDocument);
+        return ParseCore(content, "document.pdf", OpenDocument, page => page.Text);
     }
 
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
@@ -46,14 +57,21 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         _ = options;
-        return ParseCore(content, fileName, OpenDocument);
+        return ParseCore(content, fileName, OpenDocument, page => page.Text);
     }
 
     internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         string fileName,
         Func<byte[], PdfDocument> openDocument) =>
-        ParseCore(content, fileName, openDocument);
+        ParseCore(content, fileName, openDocument, page => page.Text);
+
+    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
+        byte[] content,
+        string fileName,
+        Func<byte[], PdfDocument> openDocument,
+        Func<Page, string> getPageText) =>
+        ParseCore(content, fileName, openDocument, getPageText);
 
     private static PdfDocument OpenDocument(byte[] content) =>
         PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
@@ -61,7 +79,8 @@ public static class IsolatedPdfParser
     private static (EvidenceProcessingState State, string Reason, string Text) ParseCore(
         byte[] content,
         string fileName,
-        Func<byte[], PdfDocument> openDocument)
+        Func<byte[], PdfDocument> openDocument,
+        Func<Page, string> getPageText)
     {
         if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
         {
@@ -72,6 +91,17 @@ public static class IsolatedPdfParser
 
         try
         {
+            var streamCheck = CheckStreamLimits(content);
+            if (streamCheck.Exceeded)
+            {
+                return Retryable(PdfStreamLimitReason);
+            }
+
+            if (!streamCheck.Safe)
+            {
+                return Retryable(PdfReadFailureReason);
+            }
+
             using var pdf = openDocument(content);
             if (pdf.NumberOfPages > EvidenceIntake.MaxPagesPerDocument)
             {
@@ -92,20 +122,169 @@ public static class IsolatedPdfParser
                     text.Append(EvidenceIntake.PageSeparator);
                 }
 
-                text.Append(page.Text);
+                var pageText = getPageText(page);
+                if (pageText.Length > MaxDecodedStreamBytes - text.Length)
+                {
+                    return Retryable(PdfStreamLimitReason);
+                }
+
+                text.Append(pageText);
             }
 
             return (EvidenceProcessingState.Complete, "accepted", text.ToString());
         }
         catch (OutOfMemoryException)
         {
-            return Retryable("PdfPig could not open or read the document; retry is possible");
+            return Retryable(PdfReadFailureReason);
         }
         catch (Exception)
         {
-            return Retryable("PdfPig could not open or read the document; retry is possible");
+            return Retryable(PdfReadFailureReason);
         }
     }
+
+    // Reject ambiguous stream layouts and cap decoded bytes before PdfPig can materialize page content.
+    private static (bool Safe, bool Exceeded) CheckStreamLimits(byte[] content)
+    {
+        var decodedBytes = 0;
+        var offset = 0;
+        while ((offset = FindPdfToken(content, "stream", offset)) >= 0)
+        {
+            var streamStart = offset;
+            var objectBoundary = LastIndexOfPdfToken(content, "endobj", streamStart);
+            var objectSearchStart = objectBoundary < 0 ? 0 : objectBoundary + "endobj".Length;
+            var objectStart = FindPdfToken(content, "obj", objectSearchStart);
+            if (objectStart <= objectBoundary)
+            {
+                offset = streamStart + "stream".Length;
+                continue;
+            }
+
+            var headerStart = objectStart + "obj".Length;
+            var header = Encoding.Latin1.GetString(content, headerStart, streamStart - headerStart);
+            if (!header.TrimEnd().EndsWith(">>", StringComparison.Ordinal))
+            {
+                return (false, false);
+            }
+
+            var hasFilter = header.Contains("/Filter", StringComparison.Ordinal);
+            var lengthMatch = DirectStreamLength.Match(header);
+            var streamLength = -1;
+            var hasDirectLength = lengthMatch.Success
+                && int.TryParse(lengthMatch.Groups[1].Value, out streamLength)
+                && streamLength >= 0;
+            if (hasFilter && !SingleFlateFilter.IsMatch(header))
+            {
+                return (false, false);
+            }
+
+            if (hasFilter && SingleFlateFilter.IsMatch(header)
+                && (CountOccurrences(header, "<<") != 1
+                    || CountOccurrences(header, "/Length") != 1
+                    || CountOccurrences(header, "/Filter") != 1))
+            {
+                return (false, false);
+            }
+
+            if (!hasDirectLength)
+            {
+                return (false, false);
+            }
+
+            var dataStart = streamStart + "stream".Length;
+            if (dataStart < content.Length && content[dataStart] == '\r') dataStart++;
+            if (dataStart < content.Length && content[dataStart] == '\n') dataStart++;
+            var length = streamLength;
+            if (length > content.Length - dataStart)
+            {
+                return (false, false);
+            }
+
+            if (hasFilter)
+            {
+                using var compressed = new MemoryStream(content, dataStart, length, writable: false);
+                using var inflater = new ZLibStream(compressed, CompressionMode.Decompress);
+                var buffer = new byte[8192];
+                while (true)
+                {
+                    var read = inflater.Read(buffer, 0, Math.Min(buffer.Length, MaxDecodedStreamBytes - decodedBytes + 1));
+                    if (read == 0) break;
+                    decodedBytes += read;
+                    if (decodedBytes > MaxDecodedStreamBytes) return (true, true);
+                }
+            }
+            else
+            {
+                decodedBytes += length;
+                if (decodedBytes > MaxDecodedStreamBytes) return (true, true);
+            }
+
+            var afterData = dataStart + length;
+            var end = FindPdfToken(content, "endstream", afterData);
+            if (end < 0) return (false, false);
+            for (var i = afterData; i < end; i++)
+            {
+                if (!IsPdfWhitespace(content[i])) return (false, false);
+            }
+
+            offset = end + "endstream".Length;
+        }
+
+        return (true, false);
+    }
+
+    private static int CountOccurrences(string value, string match)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = value.IndexOf(match, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += match.Length;
+        }
+
+        return count;
+    }
+
+    private static int FindPdfToken(byte[] content, string token, int start)
+    {
+        var tokenBytes = Encoding.ASCII.GetBytes(token);
+        for (var index = start; index <= content.Length - tokenBytes.Length; index++)
+        {
+            if (!HasPdfTokenAt(content, tokenBytes, index)) continue;
+            return index;
+        }
+
+        return -1;
+    }
+
+    private static int LastIndexOfPdfToken(byte[] content, string token, int before)
+    {
+        var tokenBytes = Encoding.ASCII.GetBytes(token);
+        for (var index = Math.Min(before - tokenBytes.Length, content.Length - tokenBytes.Length); index >= 0; index--)
+        {
+            if (HasPdfTokenAt(content, tokenBytes, index)) return index;
+        }
+
+        return -1;
+    }
+
+    private static bool HasPdfTokenAt(byte[] content, byte[] token, int index)
+    {
+        if (index > 0 && !IsPdfDelimiter(content[index - 1])) return false;
+        if (index + token.Length < content.Length && !IsPdfDelimiter(content[index + token.Length])) return false;
+        for (var i = 0; i < token.Length; i++)
+        {
+            if (content[index + i] != token[i]) return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsPdfDelimiter(byte value) =>
+        value is 0 or 9 or 10 or 12 or 13 or 32 or 37 or 40 or 41 or 47 or 60 or 62 or 91 or 93 or 123 or 125;
+
+    private static bool IsPdfWhitespace(byte value) => value is 0 or 9 or 10 or 12 or 13 or 32;
 
     /// <summary>
     /// Builds the child's start info: no shell, no inherited environment, redirected stdin/stdout. On Linux the child
