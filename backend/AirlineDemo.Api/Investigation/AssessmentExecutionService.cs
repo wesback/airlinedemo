@@ -12,7 +12,9 @@ public sealed record AssessmentClaim(
     string Value,
     string Component,
     string SerialNumber,
-    IReadOnlyList<DocumentWitness> Witnesses);
+    IReadOnlyList<DocumentWitness> Witnesses,
+    string? RelatedRequirementId = null,
+    string? Regime = null);
 
 /// <summary>The accepted evidence basis an assessment runs against, with its completeness and identity state.</summary>
 public sealed record AssessmentBasis(
@@ -26,7 +28,14 @@ public sealed record AssessmentBasis(
 
 public sealed record AssessedWitness(string DocumentId, int Page);
 
-public sealed record AssessedClaim(string Kind, string Value, string Component, string SerialNumber, IReadOnlyList<AssessedWitness> Witnesses);
+public sealed record AssessedClaim(
+    string Kind,
+    string Value,
+    string Component,
+    string SerialNumber,
+    IReadOnlyList<AssessedWitness> Witnesses,
+    string? RelatedRequirementId = null,
+    string? SpecialistResult = null);
 
 /// <summary>
 /// The stored result of one assessment. It holds typed values and source identifiers only: no witness quote,
@@ -128,17 +137,21 @@ public sealed class AssessmentExecutionService(
         var isCurrent = current is not null && current.BasisId == basis.BasisId && current.BasisVersion == basis.BasisVersion;
         // Evidence, coverage and identity come only from the stored accepted basis; the supplied basis is matched by identity.
         var documents = isCurrent ? current!.Documents : NoDocuments;
+        var specialistFlags = isCurrent ? ReadSpecialistFlags(current!.SourcePins ?? []) : [];
+        var specialistClaims = claims.Select(claim => ResolveSpecialistFlag(claim, specialistFlags)).ToArray();
         var validated = claims
             .Select(claim => ClaimValidator.Validate(
                 new InvestigationClaim(claim.Value, claim.Witnesses), claim.Kind, documents, claim.Value))
             .ToArray();
         var assessed = claims
-            .Select(claim => new AssessedClaim(
+            .Select((claim, index) => new AssessedClaim(
                 claim.Kind.ToString(),
                 claim.Value,
                 claim.Component,
                 claim.SerialNumber,
-                (claim.Witnesses ?? []).Where(w => w is not null).Select(w => new AssessedWitness(w.DocumentId, w.Page)).ToArray()))
+                (claim.Witnesses ?? []).Where(w => w is not null).Select(w => new AssessedWitness(w.DocumentId, w.Page)).ToArray(),
+                claim.RelatedRequirementId,
+                specialistClaims[index].Result))
             .ToArray();
         assessed = assessed.Select((claim, index) =>
         {
@@ -147,10 +160,11 @@ public sealed class AssessmentExecutionService(
             return claim with { Witnesses = claim.Witnesses.Concat(sourceWitnesses).ToArray() };
         }).ToArray();
 
+        var specialistRoute = RouteSpecialistFlags(specialistClaims);
         var (outcome, reason) = isCurrent
             ? sourceModeFinding.Reason is { } sourceReason
                 ? (Review, sourceReason)
-                : Route(current!, validated)
+                : specialistRoute ?? Route(current!, validated)
             : (Review, "supplied basis is not the current accepted basis");
         string? requestId = null;
         string? workItemId = null;
@@ -251,7 +265,7 @@ public sealed class AssessmentExecutionService(
             }
         }
 
-        if (outcome == Review)
+        if (outcome == Review || specialistClaims.Any(claim => claim.Matched))
         {
             workItemId = $"assessment-{Guid.NewGuid():N}";
             var workItemCommit = store.CreateWorkItem(
@@ -365,5 +379,69 @@ public sealed class AssessmentExecutionService(
             ClaimKind.MissingRequirement => (Request, "single supported missing requirement on current basis"),
             _ => (Review, "unsupported claim kind"),
         };
+    }
+
+    private sealed record SpecialistClaimResolution(string? Result, bool Matched, bool RelatedToUnmatchedRegime = false);
+
+    private static SpecialistClaimResolution ResolveSpecialistFlag(
+        AssessmentClaim claim,
+        IReadOnlyList<SpecialistReviewFlag> flags)
+    {
+        if (string.IsNullOrWhiteSpace(claim.RelatedRequirementId))
+            return new SpecialistClaimResolution(null, false);
+
+        var related = flags.Where(flag =>
+            string.Equals(flag.RelatedRequirementId, claim.RelatedRequirementId, StringComparison.Ordinal)).ToArray();
+        if (related.Length == 0)
+            return new SpecialistClaimResolution(null, false);
+
+        var applicable = related.Where(flag =>
+            flag.Topic != "sanctions" || string.Equals(flag.Regime, claim.Regime, StringComparison.Ordinal)).ToArray();
+        if (applicable.Length == 0)
+            return new SpecialistClaimResolution("not_assessed", false, true);
+
+        var result = applicable.Any(flag => flag.Result == "specialist_review_required")
+            ? "specialist_review_required"
+            : "not_assessed";
+        return new SpecialistClaimResolution(result, true);
+    }
+
+    private static (string Outcome, string Reason)? RouteSpecialistFlags(
+        IReadOnlyList<SpecialistClaimResolution> claims)
+    {
+        if (claims.Any(claim => claim.Matched && claim.Result == "specialist_review_required"))
+            return (Review, "specialist review required");
+        if (claims.Any(claim => claim.Matched && claim.Result == "not_assessed"))
+            return ("not_assessed", "not_assessed");
+        if (claims.Any(claim => claim.RelatedToUnmatchedRegime))
+            return ("not_assessed", "not_assessed");
+        return null;
+    }
+
+    private static IReadOnlyList<SpecialistReviewFlag> ReadSpecialistFlags(
+        IReadOnlyList<SourceBasisPin> pins)
+    {
+        var flags = new List<SpecialistReviewFlag>();
+        foreach (var pin in pins.Where(pin => pin.SourceId == "contracts"))
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(pin.Content);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("kind", out var kind) || kind.GetString() != "specialist_flag")
+                continue;
+            if (!root.TryGetProperty("payload", out var payload)
+                || !payload.TryGetProperty("fields", out var fields)
+                || fields.ValueKind != System.Text.Json.JsonValueKind.Object)
+                throw new InvalidDataException("Pinned specialist_flag payload is invalid.");
+
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var field in fields.EnumerateObject())
+            {
+                if (field.Value.ValueKind != System.Text.Json.JsonValueKind.String)
+                    throw new InvalidDataException("Pinned specialist_flag payload is invalid.");
+                values.Add(field.Name, field.Value.GetString()!);
+            }
+            flags.Add(SpecialistReviewFlag.Parse(values));
+        }
+        return flags;
     }
 }
