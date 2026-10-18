@@ -14,7 +14,8 @@ public sealed record AssessmentClaim(
     string SerialNumber,
     IReadOnlyList<DocumentWitness> Witnesses,
     string? RelatedRequirementId = null,
-    string? Regime = null);
+    string? Regime = null,
+    bool ReliesOnCapeTownEvidence = false);
 
 /// <summary>The accepted evidence basis an assessment runs against, with its completeness and identity state.</summary>
 public sealed record AssessmentBasis(
@@ -476,14 +477,16 @@ public sealed class AssessmentExecutionService(
         IReadOnlyList<SpecialistReviewFlag> flags,
         IReadOnlyList<PinnedCapeTownEvidence> evidence)
     {
-        if (evidence.Count == 0
-            || string.IsNullOrWhiteSpace(claim.RelatedRequirementId)
-            || !claim.Value.Contains("Cape Town", StringComparison.OrdinalIgnoreCase))
+        if (evidence.Count == 0)
             return new CapeTownClaimResolution(null, false, []);
 
-        var flag = flags.FirstOrDefault(item =>
-            item.Topic == "cape_town"
-            && string.Equals(item.RelatedRequirementId, claim.RelatedRequirementId, StringComparison.Ordinal));
+        var flag = string.IsNullOrWhiteSpace(claim.RelatedRequirementId)
+            ? null
+            : flags.FirstOrDefault(item =>
+                item.Topic == "cape_town"
+                && string.Equals(item.RelatedRequirementId, claim.RelatedRequirementId, StringComparison.Ordinal));
+        if (!claim.ReliesOnCapeTownEvidence && flag is null)
+            return new CapeTownClaimResolution(null, false, []);
         if (flag is null)
             throw new InvalidDataException(
                 "A finding relying on cape_town_interest requires an exact matching cape_town specialist_flag.");

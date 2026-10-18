@@ -72,7 +72,8 @@ public sealed class CapeTownEvidenceTests
     [Fact]
     public void EvidenceRequiresExactCapeTownFlagAndNeverProducesLegalOutcome()
     {
-        using var matching = Assess(new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"), RequirementId);
+        using var matching = Assess(new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"),
+            RequirementId, reliesOnCapeTownEvidence: true);
         Assert.Equal("Review", matching.Record.Outcome);
         Assert.Equal("specialist review required", matching.Record.Reason);
         Assert.Equal(new CapeTownInterestEvidence("SYN-INT-CT-001", "SYN-REG-CT-001", "not_recorded", false),
@@ -86,16 +87,26 @@ public sealed class CapeTownEvidenceTests
         Assert.Contains("\"internationalInterestRef\":\"SYN-INT-CT-001\"", exposed, StringComparison.Ordinal);
         foreach (var conclusion in new[] { "priority", "remedy", "outcome", "recoverability" })
             Assert.DoesNotContain(conclusion, exposed, StringComparison.OrdinalIgnoreCase);
-        Assert.Throws<InvalidDataException>(() => Assess(null, RequirementId));
-        Assert.Throws<InvalidDataException>(() => Assess(new SpecialistReviewFlag(RequirementId, "other", "specialist_review_required"), RequirementId));
-        Assert.Throws<InvalidDataException>(() => Assess(new SpecialistReviewFlag("REQ-CAPE-TOWN-OTHER", "cape_town", "specialist_review_required"), RequirementId));
-        Assert.Throws<InvalidDataException>(() => Assess(new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"), "req-cape-town"));
+        Assert.Throws<InvalidDataException>(() => Assess(null, RequirementId, reliesOnCapeTownEvidence: true));
+        Assert.Throws<InvalidDataException>(() => Assess(
+            new SpecialistReviewFlag(RequirementId, "other", "specialist_review_required"),
+            RequirementId, reliesOnCapeTownEvidence: true));
+        Assert.Throws<InvalidDataException>(() => Assess(
+            new SpecialistReviewFlag("REQ-CAPE-TOWN-OTHER", "cape_town", "specialist_review_required"),
+            RequirementId, reliesOnCapeTownEvidence: true));
+        Assert.Throws<InvalidDataException>(() => Assess(
+            new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"),
+            "req-cape-town", reliesOnCapeTownEvidence: true));
+        Assert.Throws<InvalidDataException>(() => Assess(
+            new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"),
+            null, reliesOnCapeTownEvidence: true));
 
         using var unrelated = Assess(
             null,
             RequirementId,
-            "The return package needs review.",
-            "The return package needs review.");
+            "The return package mentions Cape Town incidentally.",
+            "The return package mentions Cape Town incidentally.",
+            reliesOnCapeTownEvidence: false);
         Assert.Equal("Request", unrelated.Record.Outcome);
         Assert.Equal("single supported missing requirement on current basis", unrelated.Record.Reason);
         Assert.Equal(RequirementId, Assert.Single(unrelated.Record.Claims).RelatedRequirementId);
@@ -157,9 +168,10 @@ public sealed class CapeTownEvidenceTests
 
     private static AssessmentScenario Assess(
         SpecialistReviewFlag? flag,
-        string relatedRequirementId,
+        string? relatedRequirementId,
         string claimValue = Quote,
-        string witnessQuote = Quote)
+        string witnessQuote = Quote,
+        bool reliesOnCapeTownEvidence = false)
     {
         var path = Path.Combine(Path.GetTempPath(), $"cape-town-evidence-{Guid.NewGuid():N}.json");
         var store = new CaseStateStore(path);
@@ -177,7 +189,8 @@ public sealed class CapeTownEvidenceTests
         var claims = new[]
         {
             new AssessmentClaim(ClaimKind.MissingRequirement, claimValue, "Engine", "ENG-1",
-                [new DocumentWitness("doc-1", 1, witnessQuote)], relatedRequirementId),
+                [new DocumentWitness("doc-1", 1, witnessQuote)], relatedRequirementId,
+                ReliesOnCapeTownEvidence: reliesOnCapeTownEvidence),
         };
         try
         {
