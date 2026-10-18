@@ -160,6 +160,10 @@ public sealed class SourceSystemTelemetryContractTests
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         var logger = factory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-fixture-test");
         var environmentName = factory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName;
+        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadPinned(
+            Path.Combine(Path.GetTempPath(), $"missing-source-fixtures-{Guid.NewGuid():N}"),
+            logger,
+            environmentName));
         Assert.Throws<IOException>(() => SourceFixtureLoader.LoadPinnedAndPublish(
             Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
             new SourceFixtureStore(PublishedFixtureState.Empty),
@@ -181,24 +185,27 @@ public sealed class SourceSystemTelemetryContractTests
         foreach (var (name, severity) in expected)
         {
             var matches = events.Where(item => item.Name == name).ToArray();
-            Assert.True(matches.Length == 1, $"Expected one '{name}', captured: {string.Join(" | ", events.Select(item => $"{item.Name} [{string.Join(", ", item.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}"))}]"))}");
-            var record = matches[0];
-            Assert.Equal(severity.Severity, record.SeverityText);
-            Assert.Equal(severity.Number, record.SeverityNumber);
-            var contractAttributes = record.Attributes
-                .Where(attribute => attribute.Key is "deployment.environment" or "event.name" or "severity.number"
-                    or "severity.text" or "service.name" or "service.version")
-                .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
-            Assert.Equal(
-                new[] { "deployment.environment", "event.name", "severity.number", "severity.text", "service.name", "service.version" }
-                    .OrderBy(key => key, StringComparer.Ordinal),
-                contractAttributes.Keys.OrderBy(key => key, StringComparer.Ordinal));
-            Assert.Equal(name, contractAttributes["event.name"]);
-            Assert.Equal(severity.Severity, contractAttributes["severity.text"]);
-            Assert.Equal(severity.Number, Convert.ToInt32(contractAttributes["severity.number"]));
-            Assert.Equal(TelemetryRedaction.ServiceName, contractAttributes["service.name"]);
-            Assert.Equal(TelemetryRedaction.ServiceVersion, contractAttributes["service.version"]);
-            Assert.Equal(environmentName.ToLowerInvariant(), contractAttributes["deployment.environment"]);
+            var expectedCount = name == "source.fixture.rejected" ? 2 : 1;
+            Assert.True(matches.Length == expectedCount, $"Expected {expectedCount} '{name}' event(s), captured: {string.Join(" | ", events.Select(item => $"{item.Name} [{string.Join(", ", item.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}"))}]"))}");
+            foreach (var record in matches)
+            {
+                Assert.Equal(severity.Severity, record.SeverityText);
+                Assert.Equal(severity.Number, record.SeverityNumber);
+                var contractAttributes = record.Attributes
+                    .Where(attribute => attribute.Key is "deployment.environment" or "event.name" or "severity.number"
+                        or "severity.text" or "service.name" or "service.version")
+                    .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+                Assert.Equal(
+                    new[] { "deployment.environment", "event.name", "severity.number", "severity.text", "service.name", "service.version" }
+                        .OrderBy(key => key, StringComparer.Ordinal),
+                    contractAttributes.Keys.OrderBy(key => key, StringComparer.Ordinal));
+                Assert.Equal(name, contractAttributes["event.name"]);
+                Assert.Equal(severity.Severity, contractAttributes["severity.text"]);
+                Assert.Equal(severity.Number, Convert.ToInt32(contractAttributes["severity.number"]));
+                Assert.Equal(TelemetryRedaction.ServiceName, contractAttributes["service.name"]);
+                Assert.Equal(TelemetryRedaction.ServiceVersion, contractAttributes["service.version"]);
+                Assert.Equal(environmentName.ToLowerInvariant(), contractAttributes["deployment.environment"]);
+            }
         }
         var output = string.Join("\n", events.SelectMany(item =>
             item.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}").Append(item.Body ?? string.Empty)));
