@@ -95,6 +95,8 @@ Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `con
 
 The new finance records use the typed kind `maintenance_reserve` with the common fields (`recordedAmount`, `collectedAmount`, `currency`, `period`, `dueDate`, `rateBasis`, `rate`). The `case-001` finance records keep their earlier kinds.
 
+The contracts fixture contains seven synthetic `specialist_flag` records: one each for `cape_town`, `ifrs16`, `gdpr` and `other`, and three for `sanctions` (regimes `EU`, `US` and `UK`). Each record has a distinct related requirement identifier and one of the accepted result values.
+
 ### Signing
 
 The detached signature is RSA-PSS over the bytes of `<source>.manifest.json`, hash SHA-256, salt length 32 bytes, verified against the public key pinned in `SourceFixtureLoader`. The private key is held by the release owner and is never in the repository. It is kept on the maintainer's machine at `~/release-keys/airlinedemo-fixtures.pem` (mode 600, backed up by the owner). If it is lost, generate a new key pair, pin its public key (SubjectPublicKeyInfo DER, base64) in `SourceFixtureLoader` and re-sign all five manifests. After any change to a fixture or manifest, the release owner re-signs all five manifests:

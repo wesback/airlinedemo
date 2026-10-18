@@ -116,6 +116,8 @@ public sealed class SpecialistReviewFlagTests
         {
             foreach (var conclusion in new[] { "lease classification", "impairment", "accounting recognition", "recognized" })
                 Assert.DoesNotContain(conclusion, output, StringComparison.OrdinalIgnoreCase);
+            using var document = JsonDocument.Parse(output);
+            Assert.DoesNotContain(PropertyNames(document.RootElement), IsAccountingConclusionProperty);
         }
         using var unrelated = Assess(Flag("ifrs16", "specialist_review_required"), "OTHER-REQ");
         Assert.Equal("Request", unrelated.Record.Outcome);
@@ -141,8 +143,40 @@ public sealed class SpecialistReviewFlagTests
     [Fact]
     public void ValidFixtureAndTamperingFailureAreAtomic()
     {
+        _ = new ContractsSource();
         var committed = Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources");
-        Assert.Equal(5, SourceFixtureLoader.LoadPinned(committed).Count);
+        var pinned = SourceFixtureLoader.LoadPinned(committed);
+        Assert.Equal(5, pinned.Count);
+        var contracts = pinned["contracts"];
+        Assert.Equal(11, contracts.Manifest.RecordCounts["contracts"]);
+        using (var fixture = JsonDocument.Parse(contracts.FixtureBytes))
+        {
+            var records = fixture.RootElement.GetProperty("records");
+            Assert.Equal(11, records.GetArrayLength());
+            var flags = records.EnumerateArray()
+                .Where(record => record.GetProperty("kind").GetString() == "specialist_flag")
+                .ToArray();
+            Assert.Equal(7, flags.Length);
+            Assert.All(flags, record => Assert.True(record.GetProperty("synthetic").GetBoolean()));
+            var actual = flags.Select(record =>
+            {
+                var fields = record.GetProperty("payload").EnumerateObject()
+                    .ToDictionary(property => property.Name, property => property.Value.GetString()!, StringComparer.Ordinal);
+                return SpecialistReviewFlag.Parse(fields);
+            }).ToArray();
+            Assert.Equal(
+            [
+                new SpecialistReviewFlag("REQ-SANCTIONS-EU", "sanctions", "specialist_review_required", "EU"),
+                new SpecialistReviewFlag("REQ-SANCTIONS-US", "sanctions", "specialist_review_required", "US"),
+                new SpecialistReviewFlag("REQ-SANCTIONS-UK", "sanctions", "not_assessed", "UK"),
+                new SpecialistReviewFlag("REQ-CAPE-TOWN", "cape_town", "specialist_review_required"),
+                new SpecialistReviewFlag("REQ-IFRS16", "ifrs16", "not_assessed"),
+                new SpecialistReviewFlag("REQ-GDPR", "gdpr", "not_assessed"),
+                new SpecialistReviewFlag("REQ-OTHER", "other", "specialist_review_required"),
+            ], actual);
+            Assert.Equal(7, actual.Select(flag => flag.RelatedRequirementId)
+                .Distinct(StringComparer.Ordinal).Count());
+        }
 
         using var key = RSA.Create(2048);
         using var directory = new TempDirectory();
@@ -227,6 +261,40 @@ public sealed class SpecialistReviewFlagTests
     }
     private static SpecialistReviewFlag Flag(string topic, string result, string? regime = null) =>
         new("REQ-1", topic, result, regime);
+
+    private static IEnumerable<string> PropertyNames(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                yield return property.Name;
+                foreach (var nested in PropertyNames(property.Value))
+                    yield return nested;
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                foreach (var nested in PropertyNames(item))
+                    yield return nested;
+            }
+        }
+    }
+
+    private static bool IsAccountingConclusionProperty(string propertyName)
+    {
+        var normalized = new string(propertyName
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+        return normalized.Contains("leaseclassification", StringComparison.Ordinal)
+            || normalized.Contains("impairment", StringComparison.Ordinal)
+            || normalized.Contains("accountingrecognition", StringComparison.Ordinal)
+            || normalized.Contains("accountingconclusion", StringComparison.Ordinal)
+            || normalized.Contains("recognized", StringComparison.Ordinal);
+    }
 
     private static Dictionary<string, string> ToFields(SpecialistReviewFlag flag)
     {
