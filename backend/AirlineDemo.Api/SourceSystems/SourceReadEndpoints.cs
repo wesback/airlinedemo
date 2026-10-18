@@ -1,4 +1,5 @@
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,14 +22,14 @@ public static class SourceReadEndpoints
     private static IResult RejectGetMutation(int version, string caseId, string sourceId, string recordId) =>
         Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
     private static Task<IResult> List(int version, string caseId, string sourceId, HttpContext http, DemoSessionStore sessions,
-        ICaseStateStore cases, SourceReadBudget budget, TimeProvider time) =>
-        Read(version, caseId, sourceId, null, http, sessions, cases, budget, time);
+        ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time) =>
+        Read(version, caseId, sourceId, null, http, sessions, cases, modes, budget, time);
 
     private static Task<IResult> Get(int version, string caseId, string sourceId, string recordId, HttpContext http,
-        DemoSessionStore sessions, ICaseStateStore cases, SourceReadBudget budget, TimeProvider time) =>
-        Read(version, caseId, sourceId, recordId, http, sessions, cases, budget, time);
+        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time) =>
+        Read(version, caseId, sourceId, recordId, http, sessions, cases, modes, budget, time);
     private static async Task<IResult> Read(int version, string caseId, string sourceId, string? recordId, HttpContext http,
-        DemoSessionStore sessions, ICaseStateStore cases, SourceReadBudget budget, TimeProvider time)
+        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time)
     {
         if (version != 1) return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version");
 
@@ -39,9 +40,11 @@ public static class SourceReadEndpoints
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null) return Error(StatusCodes.Status401Unauthorized, "unauthenticated");
 
-        if (TechnicalReviewPolicy.ScopeFor(cases, session.User.CaseScopes, caseId) is null) return Results.NotFound();
+        var scope = TechnicalReviewPolicy.ScopeFor(cases, session.User.CaseScopes, caseId);
+        if (scope is null) return Results.NotFound();
         if (!Allowed(session.User.Role, sourceId)) return Error(StatusCodes.Status403Forbidden, "forbidden");
         if (http.Request.Query.Count != 0) return Error(StatusCodes.Status400BadRequest, "invalid_request");
+        var mode = modes.ModesFor(cases.Read(scope))[sourceId];
 
         Guid? leaseId;
         try { leaseId = await budget.TryAcquireAsync(session.Id, caseId, receivedAt, linked.Token); }
@@ -54,8 +57,8 @@ public static class SourceReadEndpoints
             try
             {
                 var outcome = recordId is null
-                    ? await ListSource(http.RequestServices, sourceId, caseId, linked.Token)
-                    : await GetSource(http.RequestServices, sourceId, caseId, recordId, linked.Token);
+                    ? await ListSource(http.RequestServices, sourceId, caseId, mode, linked.Token)
+                    : await GetSource(http.RequestServices, sourceId, caseId, recordId, mode, linked.Token);
                 if (deadline.IsCancellationRequested) return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
                 if (outcome.ErrorCode is not null)
                     return Error(outcome.ErrorCode switch
@@ -87,30 +90,32 @@ public static class SourceReadEndpoints
         "legal-reviewer" => sourceId is "contracts" or "records",
         _ => false,
     };
-    private static Task<ReadOutcome> ListSource(IServiceProvider services, string sourceId, string caseId, CancellationToken cancellationToken) =>
+    private static Task<ReadOutcome> ListSource(IServiceProvider services, string sourceId, string caseId, string mode, CancellationToken cancellationToken) =>
         sourceId switch
         {
-            "technical" => List(services.GetRequiredService<ISourceSystem<TechnicalPayload>>(), caseId, cancellationToken),
-            "maintenance" => List(services.GetRequiredService<ISourceSystem<MaintenancePayload>>(), caseId, cancellationToken),
-            "finance" => List(services.GetRequiredService<ISourceSystem<FinancePayload>>(), caseId, cancellationToken),
-            "records" => List(services.GetRequiredService<ISourceSystem<RecordsPayload>>(), caseId, cancellationToken),
-            "contracts" => List(services.GetRequiredService<ISourceSystem<ContractsPayload>>(), caseId, cancellationToken),
+            "technical" => List(services.GetRequiredService<ISourceSystem<TechnicalPayload>>(), caseId, sourceId, mode, cancellationToken),
+            "maintenance" => List(services.GetRequiredService<ISourceSystem<MaintenancePayload>>(), caseId, sourceId, mode, cancellationToken),
+            "finance" => List(services.GetRequiredService<ISourceSystem<FinancePayload>>(), caseId, sourceId, mode, cancellationToken),
+            "records" => List(services.GetRequiredService<ISourceSystem<RecordsPayload>>(), caseId, sourceId, mode, cancellationToken),
+            "contracts" => List(services.GetRequiredService<ISourceSystem<ContractsPayload>>(), caseId, sourceId, mode, cancellationToken),
             _ => Task.FromResult(new ReadOutcome(null, 0, "unknown_source")),
         };
-    private static Task<ReadOutcome> GetSource(IServiceProvider services, string sourceId, string caseId, string recordId,
+    private static Task<ReadOutcome> GetSource(IServiceProvider services, string sourceId, string caseId, string recordId, string mode,
         CancellationToken cancellationToken) =>
         sourceId switch
         {
-            "technical" => Get(services.GetRequiredService<ISourceSystem<TechnicalPayload>>(), caseId, recordId, cancellationToken),
-            "maintenance" => Get(services.GetRequiredService<ISourceSystem<MaintenancePayload>>(), caseId, recordId, cancellationToken),
-            "finance" => Get(services.GetRequiredService<ISourceSystem<FinancePayload>>(), caseId, recordId, cancellationToken),
-            "records" => Get(services.GetRequiredService<ISourceSystem<RecordsPayload>>(), caseId, recordId, cancellationToken),
-            "contracts" => Get(services.GetRequiredService<ISourceSystem<ContractsPayload>>(), caseId, recordId, cancellationToken),
+            "technical" => Get(services.GetRequiredService<ISourceSystem<TechnicalPayload>>(), caseId, recordId, sourceId, mode, cancellationToken),
+            "maintenance" => Get(services.GetRequiredService<ISourceSystem<MaintenancePayload>>(), caseId, recordId, sourceId, mode, cancellationToken),
+            "finance" => Get(services.GetRequiredService<ISourceSystem<FinancePayload>>(), caseId, recordId, sourceId, mode, cancellationToken),
+            "records" => Get(services.GetRequiredService<ISourceSystem<RecordsPayload>>(), caseId, recordId, sourceId, mode, cancellationToken),
+            "contracts" => Get(services.GetRequiredService<ISourceSystem<ContractsPayload>>(), caseId, recordId, sourceId, mode, cancellationToken),
             _ => Task.FromResult(new ReadOutcome(null, 0, "unknown_source")),
         };
-    private static async Task<ReadOutcome> List<T>(ISourceSystem<T> source, string caseId, CancellationToken cancellationToken) where T : class
+    private static async Task<ReadOutcome> List<T>(ISourceSystem<T> source, string caseId, string sourceId, string mode, CancellationToken cancellationToken) where T : class
     {
-        var result = await source.ListAsync(caseId, cancellationToken, MaxListReadRecords);
+        var maxRecords = mode == "conflicting" ? (MaxListReadRecords + 1) / 2 : MaxListReadRecords;
+        var result = await SourceModeFindingPolicy.Apply(source, sourceId, mode)
+            .ListAsync(caseId, cancellationToken, maxRecords);
         return result switch
         {
             SourceReadSucceeded<IReadOnlyList<SourceRecord<T>>> success =>
@@ -121,9 +126,10 @@ public static class SourceReadEndpoints
             _ => new(null, 0, "unknown_source"),
         };
     }
-    private static async Task<ReadOutcome> Get<T>(ISourceSystem<T> source, string caseId, string recordId, CancellationToken cancellationToken) where T : class
+    private static async Task<ReadOutcome> Get<T>(ISourceSystem<T> source, string caseId, string recordId, string sourceId, string mode, CancellationToken cancellationToken) where T : class
     {
-        var result = await source.GetAsync(caseId, recordId, cancellationToken);
+        var result = await SourceModeFindingPolicy.Apply(source, sourceId, mode)
+            .GetAsync(caseId, recordId, cancellationToken);
         return result switch
         {
             SourceReadSucceeded<SourceRecord<T>> success =>

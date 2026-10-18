@@ -82,6 +82,19 @@ Each outcome is a distinct type.
 
 `source_unavailable` is never represented as an empty successful list. Callers must handle each outcome separately.
 
+## Source-mode reads and dependent findings
+
+Reads apply each case mode without changing fixture data: `available` returns the fixture result, `unavailable` returns
+`SourceUnavailable<T>` without calling the port, `stale` sets `asOf: 2026-09-30` and `stale: true`, and `conflicting`
+returns each record plus a simulated alternate version whose `recordVersion` is one greater; the list preserves both, and get returns the alternate.
+
+Assessments compare technical serials cited by document witnesses with source serials. Unavailable or stale dependent
+findings route to `Review` with reason `source_unavailable` or `source_stale`; mismatch or conflicting mode routes to
+`Review` with reason `source_conflict`. Claims retain document witnesses and source witnesses named
+`source:<sourceId>:<recordId>:v<recordVersion>`. Non-available modes create no mock requests or accepted events. Only available
+mode refreshes pinned basis content; stale/conflicting reads are assessment-only. Basis history uses the append-only
+`ICaseStateStore.Commit(scope, expectedRevision, ...)` operation.
+
 ## Records envelopes
 
 `GET /api/v1/cases/{caseId}/sources/{sourceId}/records` returns exactly

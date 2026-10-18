@@ -56,7 +56,8 @@ public sealed class AssessmentExecutionService(
     ISourceSystem<MaintenancePayload>? maintenance = null,
     ISourceSystem<FinancePayload>? finance = null,
     ISourceSystem<RecordsPayload>? records = null,
-    ISourceSystem<ContractsPayload>? contracts = null)
+    ISourceSystem<ContractsPayload>? contracts = null,
+    SourceModeStore? sourceModes = null)
 {
     public const string Baseline = "Baseline";
     public const string Request = "Request";
@@ -74,17 +75,37 @@ public sealed class AssessmentExecutionService(
         ArgumentNullException.ThrowIfNull(basis);
         ArgumentNullException.ThrowIfNull(claims);
 
+        var sourceModeFinding = new SourceModeFindingResult(null, new Dictionary<int, IReadOnlyList<AssessedWitness>>());
+        var persisted = store.Read(scope);
         if (HasAnySourceSystem)
         {
             EnsureSourceSystemsConfigured();
-            var persisted = store.Read(scope);
-            if (persisted.Basis.Count == basis.BasisVersion)
+            var modes = sourceModes?.ModesFor(persisted)
+                ?? SourceModes.Sources.ToDictionary(sourceId => sourceId, _ => SourceModes.Available, StringComparer.Ordinal);
+            var anyUnavailable = modes.Values.Contains("unavailable", StringComparer.Ordinal);
+            if (!anyUnavailable)
             {
-                basis = RefreshSourceBasis(scope, basis, persisted);
+                var gathered = EvidenceIntake.GatherSourceBasisAsync(
+                    scope.CaseId,
+                    SourceModeFindingPolicy.Apply(technical!, "technical", modes["technical"]),
+                    SourceModeFindingPolicy.Apply(maintenance!, "maintenance", modes["maintenance"]),
+                    SourceModeFindingPolicy.Apply(finance!, "finance", modes["finance"]),
+                    SourceModeFindingPolicy.Apply(records!, "records", modes["records"]),
+                    SourceModeFindingPolicy.Apply(contracts!, "contracts", modes["contracts"]))
+                    .GetAwaiter().GetResult();
+                sourceModeFinding = SourceModeFindingPolicy.Assess(claims, modes, gathered.Pins);
+                if (modes.Values.All(mode => mode == SourceModes.Available) && persisted.Basis.Count == basis.BasisVersion)
+                {
+                    (basis, persisted) = RefreshSourceBasis(scope, basis, persisted, gathered);
+                }
+            }
+            else
+            {
+                sourceModeFinding = SourceModeFindingPolicy.Assess(claims, modes, []);
             }
         }
 
-        var expectedRevision = store.Read(scope).Revision;
+        var expectedRevision = persisted.Revision;
         var current = assessments.CurrentBasis(scope.CaseId);
         var isCurrent = current is not null && current.BasisId == basis.BasisId && current.BasisVersion == basis.BasisVersion;
         // Evidence, coverage and identity come only from the stored accepted basis; the supplied basis is matched by identity.
@@ -101,9 +122,17 @@ public sealed class AssessmentExecutionService(
                 claim.SerialNumber,
                 (claim.Witnesses ?? []).Where(w => w is not null).Select(w => new AssessedWitness(w.DocumentId, w.Page)).ToArray()))
             .ToArray();
+        assessed = assessed.Select((claim, index) =>
+        {
+            if (!sourceModeFinding.WitnessesByClaim.TryGetValue(index, out var sourceWitnesses))
+                return claim;
+            return claim with { Witnesses = claim.Witnesses.Concat(sourceWitnesses).ToArray() };
+        }).ToArray();
 
         var (outcome, reason) = isCurrent
-            ? Route(current!, validated)
+            ? sourceModeFinding.Reason is { } sourceReason
+                ? (Review, sourceReason)
+                : Route(current!, validated)
             : (Review, "supplied basis is not the current accepted basis");
         string? requestId = null;
         string? workItemId = null;
@@ -234,23 +263,25 @@ public sealed class AssessmentExecutionService(
 
     private bool HasAnySourceSystem =>
         technical is not null || maintenance is not null || finance is not null || records is not null || contracts is not null;
-    private AssessmentBasis RefreshSourceBasis(CaseScope scope, AssessmentBasis basis, CaseState state)
+    private (AssessmentBasis Basis, CaseState State) RefreshSourceBasis(
+        CaseScope scope,
+        AssessmentBasis basis,
+        CaseState state,
+        GatheredSourceBasis gathered)
     {
-        var gathered = EvidenceIntake.GatherSourceBasisAsync(
-            scope.CaseId, technical!, maintenance!, finance!, records!, contracts!).GetAwaiter().GetResult();
         var latest = state.Basis.LastOrDefault();
         if (latest?.Content != gathered.Content)
         {
             var next = CaseStateStore.CreateBasisVersion(
                 checked(state.Basis.Count + 1), gathered.Content, latest?.BasisDigest ?? string.Empty);
-            store.Commit(scope, state.Revision, new CaseCommit(
+            state = store.Commit(scope, state.Revision, new CaseCommit(
                 next, null, Actor, "source-basis.gathered",
-                $"Pinned {gathered.Pins.Count} source records with content digest {next.ContentDigest}"));
-            latest = next;
+                $"Pinned {gathered.Pins.Count} source records with content digest {next.ContentDigest}")).State;
+            latest = state.Basis.LastOrDefault();
         }
         var refreshed = basis with { BasisVersion = latest!.Version, SourcePins = gathered.Pins };
         assessments.SetCurrentBasis(scope.CaseId, refreshed);
-        return refreshed;
+        return (refreshed, state);
     }
     private void EnsureSourceSystemsConfigured()
     {
