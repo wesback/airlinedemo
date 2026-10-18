@@ -48,6 +48,11 @@ public static class IsolatedPdfParser
             return rejected;
         }
 
+        if (PreflightUnicodeGlyphExpansion(content) is { } oversizedUnicode)
+        {
+            return oversizedUnicode;
+        }
+
         if (PreflightPageContentSources(content) is { } oversizedText)
         {
             return oversizedText;
@@ -449,6 +454,8 @@ public static class IsolatedPdfParser
     internal const long DecodedStreamLimitBytes = 8L * 1024 * 1024;
 
     private const long TextSourceLimitBytes = 512L * 1024;
+    private const int UnicodeDestinationLimitBytes = 1024;
+    private const int CMapBlockStartLimit = 4096;
     private const string TextSourceLimitReason = "PDF text source exceeds 524288 bytes; retry is possible";
     private const string UnreadableDocumentReason = "PdfPig could not open or read the document; retry is possible";
 
@@ -528,6 +535,179 @@ public static class IsolatedPdfParser
             }
         }
         return null;
+    }
+
+    /// <summary>Rejects oversized Unicode destinations and excessive CMap blocks before a worker can start.</summary>
+    private static (EvidenceProcessingState State, string Reason, string Text)? PreflightUnicodeGlyphExpansion(byte[] content)
+    {
+        var objects = ReadIndirectObjects(content);
+        var scannedStreams = new HashSet<(int Number, int Generation)>();
+        foreach (var pdfObject in objects.Values)
+        {
+            var dictionary = DecodeNameEscapes(content.AsSpan(
+                pdfObject.BodyStart, pdfObject.DictionaryEnd - pdfObject.BodyStart));
+            var key = FindPdfDictionaryToken(dictionary, "/ToUnicode"u8);
+            if (key < 0) continue;
+
+            var valueStart = SkipPdfWhitespaceAndComments(dictionary, key + "/ToUnicode"u8.Length);
+            if (!TryReadReference(dictionary, valueStart, out var reference, out _)
+                || !objects.TryGetValue(reference, out var cmap)
+                || cmap.StreamStart < 0
+                || !scannedStreams.Add(reference))
+            {
+                continue;
+            }
+
+            var cmapBytes = content.AsSpan(cmap.StreamStart, cmap.StreamLength).ToArray();
+            var cmapDictionary = Encoding.Latin1.GetString(
+                content, cmap.BodyStart, cmap.DictionaryEnd - cmap.BodyStart);
+            var filter = FilterValue.Match(cmapDictionary);
+            if (filter.Success)
+            {
+                var filters = FirstName.Matches(filter.Groups[1].Value)
+                    .Select(match => match.Value)
+                    .ToArray();
+                if (filters.Length == 0) continue;
+                if (filters[0] is "/FlateDecode" or "/Fl")
+                {
+                    try
+                    {
+                        using var input = new MemoryStream(cmapBytes, writable: false);
+                        using var zlib = new ZLibStream(input, CompressionMode.Decompress);
+                        using var output = new MemoryStream();
+                        var buffer = new byte[81920];
+                        int read;
+                        while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            if (output.Length > DecodedStreamLimitBytes - read)
+                            {
+                                return Retryable(UnreadableDocumentReason);
+                            }
+                            output.Write(buffer, 0, read);
+                        }
+                        cmapBytes = output.ToArray();
+                    }
+                    catch (InvalidDataException)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    continue;
+                }
+            }
+
+            if (CMapExceedsUnicodeBounds(cmapBytes))
+            {
+                return Retryable(UnreadableDocumentReason);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Scans CMap tokens once; comments and literal strings cannot supply operators or destinations.</summary>
+    private static bool CMapExceedsUnicodeBounds(ReadOnlySpan<byte> cmap)
+    {
+        const int noBlock = 0;
+        const int bfcharBlock = 1;
+        const int bfrangeBlock = 2;
+        var activeBlock = noBlock;
+        var hexOperandIndex = 0;
+        var blockStarts = 0;
+
+        for (var position = 0; position < cmap.Length;)
+        {
+            var value = cmap[position];
+            if (IsPdfWhitespace(value))
+            {
+                position++;
+                continue;
+            }
+
+            if (value == '%')
+            {
+                while (position < cmap.Length && cmap[position] is not (byte)'\r' and not (byte)'\n')
+                {
+                    position++;
+                }
+                continue;
+            }
+
+            if (value == '(')
+            {
+                position = SkipLiteralString(cmap, position);
+                continue;
+            }
+
+            if (value == '<')
+            {
+                if (position + 1 < cmap.Length && cmap[position + 1] == '<')
+                {
+                    position += 2;
+                    continue;
+                }
+
+                var destinationOperand = activeBlock == bfcharBlock
+                    ? hexOperandIndex % 2 == 1
+                    : activeBlock == bfrangeBlock && hexOperandIndex % 3 == 2;
+                position++;
+                var hexDigits = 0;
+                while (position < cmap.Length && cmap[position] != '>')
+                {
+                    if (Uri.IsHexDigit((char)cmap[position])
+                        && ++hexDigits > UnicodeDestinationLimitBytes * 2
+                        && destinationOperand)
+                    {
+                        return true;
+                    }
+                    position++;
+                }
+                if (position < cmap.Length) position++;
+
+                if (activeBlock != noBlock)
+                {
+                    hexOperandIndex++;
+                }
+                continue;
+            }
+
+            if (value == '/')
+            {
+                position++;
+                while (position < cmap.Length && !IsPdfDelimiterOrWhitespace(cmap[position])) position++;
+                continue;
+            }
+
+            if (IsPdfDelimiterOrWhitespace(value))
+            {
+                position++;
+                continue;
+            }
+
+            var tokenStart = position;
+            while (position < cmap.Length && !IsPdfDelimiterOrWhitespace(cmap[position])) position++;
+            var token = cmap[tokenStart..position];
+            if (token.SequenceEqual("beginbfchar"u8) || token.SequenceEqual("beginbfrange"u8))
+            {
+                blockStarts++;
+                if (blockStarts > CMapBlockStartLimit) return true;
+                if (activeBlock == noBlock)
+                {
+                    activeBlock = token.SequenceEqual("beginbfchar"u8) ? bfcharBlock : bfrangeBlock;
+                    hexOperandIndex = 0;
+                }
+            }
+            else if ((activeBlock == bfcharBlock && token.SequenceEqual("endbfchar"u8))
+                || (activeBlock == bfrangeBlock && token.SequenceEqual("endbfrange"u8)))
+            {
+                activeBlock = noBlock;
+                hexOperandIndex = 0;
+            }
+        }
+
+        return false;
     }
 
     private static Dictionary<(int Number, int Generation), PdfIndirectObject> ReadIndirectObjects(byte[] content)

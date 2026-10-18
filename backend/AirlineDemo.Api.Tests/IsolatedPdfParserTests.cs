@@ -246,6 +246,55 @@ public class IsolatedPdfParserTests
     }
 
     [Fact]
+    public void UnicodeGlyphExpansionIsRejectedBeforeStartingWorker()
+    {
+        var oversizedTarget = string.Concat(Enumerable.Repeat("0041", 1024));
+        var oversizedCases = new[]
+        {
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <41> <{oversizedTarget}>\nendbfrange"),
+            Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <41> <{oversizedTarget}>\nendbfrange"),
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n% endbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfchar\n", 10_000))}"),
+            Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfrange\n", 10_000))}"),
+        };
+        var compressed = new HashSet<int> { 1, 3 };
+        for (var index = 0; index < oversizedCases.Length; index++)
+        {
+            var starts = new[] { 0 };
+            var outcome = IsolatedPdfParser.Parse(
+                CMapPdf(oversizedCases[index], compressed.Contains(index)),
+                CountingWorker(starts));
+
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal(UnreadableReason, outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
+            Assert.Equal(0, starts[0]);
+        }
+
+        var boundedStarts = new[] { 0 };
+        var boundedOptions = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = "/bin/sh",
+            WorkerArguments = new[]
+            {
+                "-c",
+                "cat >/dev/null; printf '%s' '{\"State\":\"Complete\",\"Reason\":\"\",\"Text\":\"page 1\"}'",
+            },
+            WorkerStarting = () => boundedStarts[0]++,
+        };
+        var bounded = IsolatedPdfParser.Parse(
+            CMapPdf(Encoding.ASCII.GetBytes("1 beginbfchar\n<41> <0041>\nendbfchar")),
+            boundedOptions);
+
+        Assert.Equal(EvidenceProcessingState.Complete, bounded.State);
+        Assert.Equal(string.Empty, bounded.Reason);
+        Assert.Equal("page 1", bounded.Text);
+        Assert.Equal(1, boundedStarts[0]);
+    }
+
+    [Fact]
     public void LargeTextStreamIsRejectedBeforeStartingWorker()
     {
         var starts = new[] { 0 };
@@ -388,6 +437,43 @@ public class IsolatedPdfParserTests
         }
 
         return compressed.ToArray();
+    }
+
+    private static byte[] CMapPdf(byte[] cmap, bool flate = false)
+    {
+        var cmapBytes = flate ? Flate(cmap) : cmap;
+        using var pdf = new MemoryStream();
+        var offsets = new List<long>();
+        void Object(string header)
+        {
+            offsets.Add(pdf.Position);
+            Write(pdf, header);
+        }
+
+        Write(pdf, "%PDF-1.4\n");
+        Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        Object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+        Object("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >> endobj\n");
+        var pageContent = Encoding.ASCII.GetBytes("BT /F1 12 Tf (page 1) Tj ET");
+        Object($"4 0 obj << /Length {pageContent.Length} >> stream\n");
+        pdf.Write(pageContent);
+        Write(pdf, "\n");
+        Write(pdf, "endstream endobj\n");
+        Object("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >> endobj\n");
+        Object($"6 0 obj << /Length {cmapBytes.Length}{(flate ? " /Filter /FlateDecode" : string.Empty)} >> stream\n");
+        pdf.Write(cmapBytes);
+        Write(pdf, "\nendstream endobj\n");
+
+        var xrefOffset = pdf.Position;
+        var size = offsets.Count + 1;
+        var xref = new StringBuilder($"xref\n0 {size}\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            xref.Append($"{offset:D10} 00000 n \n");
+        }
+        xref.Append($"trailer << /Root 1 0 R /Size {size} >>\nstartxref\n{xrefOffset}\n%%EOF\n");
+        Write(pdf, xref.ToString());
+        return pdf.ToArray();
     }
 
     private static byte[] Ascii85(byte[] content)
