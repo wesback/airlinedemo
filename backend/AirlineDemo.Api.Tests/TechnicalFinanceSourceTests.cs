@@ -69,7 +69,7 @@ public sealed class TechnicalFinanceSourceTests
                 "partNumber=SYN-ENG-7000-A;position=engine_1;serialNumber=SYN-SN-88412",
                 "cycles=151;hours=198.0;periodEnd=2026-08-31;periodStart=2026-08-01",
                 "cycles=164;hours=212.5;periodEnd=2026-09-30;periodStart=2026-09-01",
-                "regime=EASA;requirement=SYN-AD-2026-014;responsibleParty=lessee-operator",
+                "regime=EASA;requirementId=SYN-AD-2026-014;responsibleParty=lessee-operator",
             },
             technicalRecords.Select(r => Flatten(r.Payload.Fields)).ToArray());
 

@@ -21,16 +21,16 @@ public class IsolatedPdfParserTests
     }
 
     /// <summary>A one-page PDF whose content stream inflates to 600 MB of zeros (above the 512 MB limit) from a few hundred kilobytes.</summary>
-    private static byte[] FlateBomb()
+    private static byte[] FlateBomb(string filter = "/FlateDecode", long decodedBytes = 600L * 1024 * 1024)
     {
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
         {
             var chunk = new byte[1024 * 1024];
             Array.Fill(chunk, (byte)' ');
-            for (var i = 0; i < 600; i++)
+            for (var remaining = decodedBytes; remaining > 0; remaining -= chunk.Length)
             {
-                zlib.Write(chunk);
+                zlib.Write(chunk, 0, (int)Math.Min(chunk.Length, remaining));
             }
         }
 
@@ -47,7 +47,7 @@ public class IsolatedPdfParserTests
         Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
         Object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
         Object("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n");
-        Object($"4 0 obj << /Length {body.Length} /Filter /FlateDecode >> stream\n");
+        Object($"4 0 obj << /Length {body.Length} {(filter.StartsWith("/Fil") ? filter : "/Filter " + filter)} >> stream\n");
         pdf.Write(body);
         Write(pdf, "\nendstream endobj\n");
 
@@ -60,6 +60,81 @@ public class IsolatedPdfParserTests
         }
 
         xref.Append($"trailer << /Root 1 0 R /Size 5 >>\nstartxref\n{xrefOffset}\n%%EOF\n");
+        Write(pdf, xref.ToString());
+        return pdf.ToArray();
+    }
+
+    private static byte[] TextContentPdf(
+        byte[] streamContent,
+        int pageCount,
+        bool indirectContentsArray = false,
+        string streamDictionaryEntries = "",
+        bool indirectStreamLength = false,
+        string streamDictionaryPrefix = "",
+        string pageDictionaryPrefix = "",
+        bool commentContentsWithHarmlessStream = false,
+        string typeKey = "/Type",
+        string contentsKey = "/Contents")
+    {
+        if (commentContentsWithHarmlessStream && (indirectContentsArray || indirectStreamLength))
+        {
+            throw new ArgumentException("The harmless commented stream is supported only for direct contents and lengths.");
+        }
+
+        using var pdf = new MemoryStream();
+        var offsets = new List<long>();
+        void Object(string header)
+        {
+            offsets.Add(pdf.Position);
+            Write(pdf, header);
+        }
+
+        var pageIds = Enumerable.Range(3, pageCount).ToArray();
+        var streamId = pageCount + 3;
+        var arrayId = streamId + 1;
+        var lengthId = arrayId + 1;
+        var contentReference = indirectContentsArray ? arrayId : streamId;
+        var streamLength = indirectStreamLength ? $"{lengthId} 0 R" : streamContent.Length.ToString();
+        var harmlessStreamId = streamId + 1;
+
+        Write(pdf, "%PDF-1.4\n");
+        Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        Object($"2 0 obj << /Type /Pages /Kids [{string.Join(' ', pageIds.Select(id => $"{id} 0 R"))}] /Count {pageCount} >> endobj\n");
+        foreach (var pageId in pageIds)
+        {
+            var fakeContentsEntry = commentContentsWithHarmlessStream
+                ? $"% /Contents {harmlessStreamId} 0 R\n"
+                : string.Empty;
+            Object($"{pageId} 0 obj << {pageDictionaryPrefix}{fakeContentsEntry}{typeKey} /Page /Parent 2 0 R /MediaBox [0 0 612 792] {contentsKey} {contentReference} 0 R >> endobj\n");
+        }
+
+        if (indirectContentsArray)
+        {
+            Object($"{arrayId} 0 obj [{streamId} 0 R] endobj\n");
+        }
+
+        Object($"{streamId} 0 obj << {streamDictionaryPrefix}/Length {streamLength} {streamDictionaryEntries} >> stream\n");
+        pdf.Write(streamContent);
+        Write(pdf, "\nendstream endobj\n");
+        if (commentContentsWithHarmlessStream)
+        {
+            Object($"{harmlessStreamId} 0 obj << /Length 3 >> stream\nq Q\nendstream endobj\n");
+        }
+
+        if (indirectStreamLength)
+        {
+            Object($"{lengthId} 0 obj {streamContent.Length} endobj\n");
+        }
+
+        var xrefOffset = pdf.Position;
+        var size = offsets.Count + 1;
+        var xref = new StringBuilder($"xref\n0 {size}\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            xref.Append($"{offset:D10} 00000 n \n");
+        }
+
+        xref.Append($"trailer << /Root 1 0 R /Size {size} >>\nstartxref\n{xrefOffset}\n%%EOF\n");
         Write(pdf, xref.ToString());
         return pdf.ToArray();
     }
@@ -110,12 +185,451 @@ public class IsolatedPdfParserTests
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, bomb.State);
         Assert.True(
-            bomb.Reason.Contains("memory limit") || bomb.Reason.Contains("time limit"),
+            bomb.Reason.Contains("memory limit") || bomb.Reason.Contains("time limit") || bomb.Reason.Contains("decoded bytes"),
             $"bomb was not stopped by a limit: {bomb.Reason}");
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"bomb took {clock.Elapsed}");
 
         var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
         Assert.Equal(EvidenceProcessingState.Complete, valid.State);
+    }
+
+    private const string BombReason = "PDF stream content exceeds 8388608 decoded bytes; retry is possible";
+    private const string UnreadableReason = "PdfPig could not open or read the document; retry is possible";
+
+    private static IsolatedPdfParserOptions CountingWorker(int[] starts) => new()
+    {
+        WorkerFileName = "/bin/sh",
+        WorkerArguments = new[] { "-c", "cat > /dev/null" },
+        WorkerStarting = () => starts[0]++,
+    };
+
+    // AC-1: a Flate stream that decodes past 8,388,608 bytes is refused before a worker starts, in all three spellings.
+    [Theory]
+    [InlineData("/FlateDecode", BombReason)]
+    [InlineData("/Flate#44ecode", UnreadableReason)]
+    [InlineData("/Fil#74er /FlateDecode", UnreadableReason)]
+    public void StreamFilterPreflightRejectsBeforeStartingWorker(string filter, string reason)
+    {
+        var starts = new[] { 0 };
+        var input = FlateBomb(filter, 9L * 1024 * 1024);
+        Assert.True(input.Length <= 10_485_760);
+
+        var outcome = IsolatedPdfParser.Parse(input, CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal(reason, outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    // AC-2: exactly 8,388,608 decoded bytes is accepted and starts the worker once.
+    [Fact]
+    public void StreamFilterPreflightAcceptsExactDecodedLimitAndStartsWorkerOnce()
+    {
+        var starts = new[] { 0 };
+
+        IsolatedPdfParser.Parse(FlateBomb(decodedBytes: 8L * 1024 * 1024), CountingWorker(starts));
+
+        Assert.Equal(1, starts[0]);
+    }
+
+    // One byte over the limit is refused.
+    [Fact]
+    public void StreamFilterPreflightRefusesOneByteOverTheLimit()
+    {
+        var starts = new[] { 0 };
+
+        var outcome = IsolatedPdfParser.Parse(FlateBomb(decodedBytes: 8L * 1024 * 1024 + 1), CountingWorker(starts));
+
+        Assert.Equal(BombReason, outcome.Reason);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void UnicodeGlyphExpansionIsRejectedBeforeStartingWorker()
+    {
+        var oversizedTarget = string.Concat(Enumerable.Repeat("0041", 1024));
+        var oversizedCases = new[]
+        {
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <41> <{oversizedTarget}>\nendbfrange"),
+            Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <41> <{oversizedTarget}>\nendbfrange"),
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n% endbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n(% endbfchar <41> <{oversizedTarget}>)\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfchar\n", 10_000))}"),
+            Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfrange\n", 10_000))}"),
+            Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <42> [<0041> <{oversizedTarget}>]\nendbfrange"),
+        };
+        var compressed = new HashSet<int> { 1, 3 };
+        for (var index = 0; index < oversizedCases.Length; index++)
+        {
+            var starts = new[] { 0 };
+            var outcome = IsolatedPdfParser.Parse(
+                CMapPdf(oversizedCases[index], compressed.Contains(index)),
+                CountingWorker(starts));
+
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal(UnreadableReason, outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
+            Assert.Equal(0, starts[0]);
+        }
+
+        var boundedStarts = new[] { 0 };
+        var boundedOptions = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = "/bin/sh",
+            WorkerArguments = new[]
+            {
+                "-c",
+                "cat >/dev/null; printf '%s' '{\"State\":\"Complete\",\"Reason\":\"\",\"Text\":\"page 1\"}'",
+            },
+            WorkerStarting = () => boundedStarts[0]++,
+        };
+        var bounded = IsolatedPdfParser.Parse(
+            CMapPdf(Encoding.ASCII.GetBytes("1 beginbfchar\n<41> <0041>\nendbfchar")),
+            boundedOptions);
+
+        Assert.Equal(EvidenceProcessingState.Complete, bounded.State);
+        Assert.Equal(string.Empty, bounded.Reason);
+        Assert.Equal("page 1", bounded.Text);
+        Assert.Equal(1, boundedStarts[0]);
+    }
+
+    [Fact]
+    public void UnicodeGlyphExpansionRejectsUninspectableFilteredCMapBeforeStartingWorker()
+    {
+        var oversizedCMap = Encoding.ASCII.GetBytes(
+            $"1 beginbfchar\n<41> <{string.Concat(Enumerable.Repeat("0041", 1024))}>\nendbfchar");
+        var asciiHexCMap = Encoding.ASCII.GetBytes($"{Convert.ToHexString(oversizedCMap)}>");
+        var cases = new[]
+        {
+            (CMap: asciiHexCMap, Filter: "/ASCIIHexDecode"),
+            (CMap: Encoding.ASCII.GetBytes("1 beginbfchar\n<41> <0041>\nendbfchar"), Filter: "/DCTDecode"),
+            (CMap: oversizedCMap, Filter: "[]"),
+        };
+
+        foreach (var testCase in cases)
+        {
+            var starts = new[] { 0 };
+            var outcome = IsolatedPdfParser.Parse(
+                CMapPdf(testCase.CMap, filter: testCase.Filter),
+                CountingWorker(starts));
+
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal(UnreadableReason, outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
+            Assert.Equal(0, starts[0]);
+        }
+    }
+
+    [Fact]
+    public void UnicodeGlyphExpansionRejectsOversizedCMapInFlateFilterArrayBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var oversizedCMap = Encoding.ASCII.GetBytes(
+            $"1 beginbfchar\n<41> <{string.Concat(Enumerable.Repeat("0041", 1024))}>\nendbfchar");
+        var outcome = IsolatedPdfParser.Parse(
+            CMapPdf(oversizedCMap, flate: true, filter: "[/FlateDecode]"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal(UnreadableReason, outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void UnicodeGlyphExpansionRejectsEscapedAndIndirectFilterEntriesBeforeStartingWorker()
+    {
+        var oversizedCMap = Encoding.ASCII.GetBytes(
+            $"1 beginbfchar\n<41> <{string.Concat(Enumerable.Repeat("0041", 1024))}>\nendbfchar");
+        var cases = new[]
+        {
+            CMapPdf(oversizedCMap, flate: true, filterKey: "/Fil#74er"),
+            CMapPdf(oversizedCMap, flate: true, indirectFilter: true),
+        };
+
+        foreach (var pdf in cases)
+        {
+            var starts = new[] { 0 };
+            var outcome = IsolatedPdfParser.Parse(pdf, CountingWorker(starts));
+
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal(UnreadableReason, outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
+            Assert.Equal(0, starts[0]);
+        }
+    }
+
+    [Fact]
+    public void LargeTextStreamIsRejectedBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(TextContentPdf(textSource, pageCount: 1), CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void CommentedLengthEntryCannotBypassTextSourceLimitBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, streamDictionaryPrefix: "% /Length 1\n"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void NestedLengthEntryCannotBypassTextSourceLimitBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, streamDictionaryPrefix: "/Nested << /Length 1 >> "),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Theory]
+    [InlineData("/Type", "/Contents")]
+    [InlineData("/Ty#70e", "/Contents")]
+    [InlineData("/Type", "/Cont#65nts")]
+    [InlineData("/Ty#70e", "/Cont#65nts")]
+    public void EscapedPageDictionaryNamesCannotBypassTextSourceLimitBeforeStartingWorker(string typeKey, string contentsKey)
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, typeKey: typeKey, contentsKey: contentsKey),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void CommentedPageTypeCannotBypassTextSourceLimitBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, pageDictionaryPrefix: "% /Type /Catalog\n"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void CommentedContentsReferenceCannotHideActualOversizedPageContent()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, commentContentsWithHarmlessStream: true),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void EndstreamTokenInsideTextSourceDoesNotTruncateTheDeclaredIndirectStreamLength()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"(endstream {new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, indirectStreamLength: true),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void Ascii85ThenFlateTextSourceIsCountedAfterEveryFilter()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+        var encodedSource = Ascii85(Flate(textSource));
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(
+                encodedSource,
+                pageCount: 1,
+                streamDictionaryEntries: "/Filter [/ASCII85Decode /FlateDecode]"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    private static byte[] Flate(byte[] content)
+    {
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            zlib.Write(content);
+        }
+
+        return compressed.ToArray();
+    }
+
+    private static byte[] CMapPdf(
+        byte[] cmap,
+        bool flate = false,
+        string? filter = null,
+        string filterKey = "/Filter",
+        bool indirectFilter = false)
+    {
+        var cmapBytes = flate ? Flate(cmap) : cmap;
+        var filterEntry = filter ?? (flate ? "/FlateDecode" : null);
+        var filterDictionaryEntry = filterEntry is null
+            ? string.Empty
+            : $" {filterKey} {(indirectFilter ? "7 0 R" : filterEntry)}";
+        using var pdf = new MemoryStream();
+        var offsets = new List<long>();
+        void Object(string header)
+        {
+            offsets.Add(pdf.Position);
+            Write(pdf, header);
+        }
+
+        Write(pdf, "%PDF-1.4\n");
+        Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        Object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+        Object("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >> endobj\n");
+        var pageContent = Encoding.ASCII.GetBytes("BT /F1 12 Tf (page 1) Tj ET");
+        Object($"4 0 obj << /Length {pageContent.Length} >> stream\n");
+        pdf.Write(pageContent);
+        Write(pdf, "\n");
+        Write(pdf, "endstream endobj\n");
+        Object("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >> endobj\n");
+        Object($"6 0 obj << /Length {cmapBytes.Length}{filterDictionaryEntry} >> stream\n");
+        pdf.Write(cmapBytes);
+        Write(pdf, "\nendstream endobj\n");
+        if (indirectFilter)
+        {
+            Object($"7 0 obj {filterEntry} endobj\n");
+        }
+
+        var xrefOffset = pdf.Position;
+        var size = offsets.Count + 1;
+        var xref = new StringBuilder($"xref\n0 {size}\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            xref.Append($"{offset:D10} 00000 n \n");
+        }
+        xref.Append($"trailer << /Root 1 0 R /Size {size} >>\nstartxref\n{xrefOffset}\n%%EOF\n");
+        Write(pdf, xref.ToString());
+        return pdf.ToArray();
+    }
+
+    private static byte[] Ascii85(byte[] content)
+    {
+        var encoded = new StringBuilder();
+        Span<char> digits = stackalloc char[5];
+        for (var offset = 0; offset < content.Length; offset += 4)
+        {
+            var length = Math.Min(4, content.Length - offset);
+            uint value = 0;
+            for (var index = 0; index < 4; index++)
+            {
+                value = (value << 8) | (index < length ? content[offset + index] : 0u);
+            }
+
+            if (length == 4 && value == 0)
+            {
+                encoded.Append('z');
+                continue;
+            }
+
+            for (var index = 4; index >= 0; index--)
+            {
+                digits[index] = (char)('!' + value % 85);
+                value /= 85;
+            }
+            encoded.Append(digits[..(length + 1)]);
+        }
+
+        encoded.Append("~>");
+        return Encoding.ASCII.GetBytes(encoded.ToString());
+    }
+
+    [Fact]
+    public void RepeatedPageContentReferencesAreBoundedBeforeStartingWorker()
+    {
+        var boundedContent = Encoding.ASCII.GetBytes($"({new string('x', 500 * 1024)}) Tj");
+        var startsForOnePage = new[] { 0 };
+        var onePageOptions = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = "/bin/sh",
+            WorkerArguments = new[]
+            {
+                "-c",
+                "cat >/dev/null; printf '%s' '{\"State\":\"Complete\",\"Reason\":\"accepted\",\"Text\":\"bounded text\"}'",
+            },
+            WorkerStarting = () => startsForOnePage[0]++,
+        };
+
+        var onePage = IsolatedPdfParser.Parse(TextContentPdf(boundedContent, pageCount: 1), onePageOptions);
+
+        Assert.Equal(EvidenceProcessingState.Complete, onePage.State);
+        Assert.Equal("accepted", onePage.Reason);
+        Assert.Equal("bounded text", onePage.Text);
+        Assert.Equal(1, startsForOnePage[0]);
+
+        var startsForSharedReference = new[] { 0 };
+        var sharedReference = IsolatedPdfParser.Parse(
+            TextContentPdf(boundedContent, pageCount: 200),
+            CountingWorker(startsForSharedReference));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, sharedReference.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", sharedReference.Reason);
+        Assert.Equal(string.Empty, sharedReference.Text);
+        Assert.Equal(0, startsForSharedReference[0]);
+
+        var startsForIndirectArray = new[] { 0 };
+        var indirectArray = IsolatedPdfParser.Parse(
+            TextContentPdf(boundedContent, pageCount: 200, indirectContentsArray: true),
+            CountingWorker(startsForIndirectArray));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, indirectArray.State);
+        Assert.Equal(UnreadableReason, indirectArray.Reason);
+        Assert.Equal(string.Empty, indirectArray.Text);
+        Assert.Equal(0, startsForIndirectArray[0]);
     }
 
     // AC-2: exceeding the 30 second wall-clock limit kills the child (tested here with a 2 second limit).

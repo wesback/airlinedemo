@@ -1,0 +1,326 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 402,
+  "branch": "ai-sdlc/issue-402",
+  "commitSha": "3a64ccd1416ddebb5156720b88b87ddfc5726abd",
+  "round": 1,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-2 changes resolve the reported stream-boundary and filter-chain issues. I found no additional in-scope defect.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous stream-bound findings appear addressed, but comment-aware parsing is still needed to prevent a crafted /Length comment from bypassing the preflight limit.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 562,
+          "message": "The stream-length lookup can trust a /Length entry inside a PDF comment, allowing oversized text content to bypass preflight. Skip comments when parsing dictionary tokens.",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "TryReadStreamLength uses FindPdfToken to select the first /Length token in a stream dictionary. FindPdfToken does not skip PDF comments, so a commented-out /Length entry can be parsed as the stream length.",
+            "failureScenario": "A PDF dictionary contains a comment with `/Length 1` before its real `/Length` entry. The preflight records a one-byte stream and can miss a later text-showing operator, then starts the worker; PdfPig ignores the comment and reads the actual oversized stream. Repeated page references can therefore bypass the text-source bound. OWASP A04:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two fixes address both prior findings: stream boundaries use declared lengths, including indirect lengths, and supported filter chains are decoded before applying the text-source limit. I found no remaining security defect in scope.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 1,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 360,
+      "total": 481,
+      "percent": 74.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "covered": 360,
+          "total": 481,
+          "missed": [
+            488,
+            489,
+            490,
+            491,
+            492,
+            496,
+            497,
+            498,
+            506,
+            507,
+            514,
+            515,
+            544,
+            545,
+            583,
+            584,
+            585,
+            634,
+            635,
+            636,
+            681,
+            682,
+            683,
+            684,
+            685,
+            686,
+            687,
+            688,
+            689,
+            690,
+            691,
+            692,
+            694,
+            695,
+            696,
+            697,
+            698,
+            699,
+            740,
+            741,
+            742,
+            750,
+            751,
+            752,
+            777,
+            778,
+            779,
+            798,
+            799,
+            800,
+            805,
+            806,
+            807,
+            811,
+            812,
+            813,
+            814,
+            815,
+            816,
+            817,
+            818,
+            819,
+            820,
+            821,
+            822,
+            824,
+            825,
+            826,
+            827,
+            828,
+            830,
+            831,
+            832,
+            834,
+            835,
+            836,
+            837,
+            839,
+            857,
+            858,
+            859,
+            872,
+            873,
+            874,
+            892,
+            893,
+            894,
+            900,
+            901,
+            908,
+            909,
+            910,
+            911,
+            912,
+            913,
+            914,
+            928,
+            929,
+            930,
+            931,
+            932,
+            942,
+            943,
+            944,
+            945,
+            946,
+            948,
+            949,
+            950,
+            951,
+            952,
+            954,
+            967,
+            968,
+            969,
+            995,
+            996,
+            997,
+            1026,
+            1027,
+            1029
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

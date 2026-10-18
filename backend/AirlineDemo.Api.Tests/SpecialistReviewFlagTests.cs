@@ -352,7 +352,7 @@ public sealed class SpecialistReviewFlagTests
             var fixture = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 sourceId = source,
-                records = new[] { new { caseId = "case-001" } },
+                records = new[] { new { caseId = "case-001", payload = new { containsPersonalData = false } } },
             });
             var manifest = JsonSerializer.SerializeToUtf8Bytes(new
             {

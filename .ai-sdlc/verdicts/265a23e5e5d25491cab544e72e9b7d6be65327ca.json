@@ -1,0 +1,248 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 230,
+  "branch": "ai-sdlc/issue-230",
+  "commitSha": "265a23e5e5d25491cab544e72e9b7d6be65327ca",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation addresses the in-process parsing behavior, but the diff exceeds the issue's explicit size limit and needs a person to decide how to split it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 30,
+          "message": "",
+          "confidence": 0.99,
+          "category": "design",
+          "evidence": {
+            "codePathTraced": "The parser implementation and its tests add substantially more than 500 changed lines across the files in scope.",
+            "failureScenario": "When the pipeline evaluates this pull request, the issue's 500 changed-line limit is exceeded and the change cannot proceed as written."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The two-page corpus test can pass without verifying required text from page one. The change also exceeds the stated diff-size limit, which requires a story split.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 178,
+          "message": "The two-page assertion can pass when “Alpha only on page one.” is missing. Assert that both phrases are present and that Alpha’s index is less than Beta’s.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "PdfPigExtractsTextAndIgnoresNonTextContent compares the two IndexOf results without asserting that both phrases are present.",
+            "failureScenario": "If the parser returns only “Beta only on page two.”, IndexOf for Alpha is -1 and the assertion -1 < 0 passes. The test therefore does not verify that the first page’s required text is extracted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 30,
+          "message": "NEEDS-PERSON: The change exceeds the issue’s 500 changed-line limit. Split the story before this change proceeds.",
+          "confidence": 0.99,
+          "category": "design",
+          "evidence": {
+            "codePathTraced": "The parser and test changes in the supplied diff exceed the acceptance criterion’s 500 changed-line limit, excluding pipeline evidence files.",
+            "failureScenario": "When the pipeline evaluates this pull request, the over-limit diff fails the stated criterion and cannot proceed as written."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The preflight can perform quadratic work on a bounded PDF because it scans raw bytes for stream tokens without skipping comments or strings, then repeats earlier searches for each match.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 155,
+          "message": "Raw `stream` tokens in comments or strings can trigger repeated full-prefix scans in the preflight, creating a CPU denial-of-service path.",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "CheckStreamLimits searches for each raw `stream` token, and for each one rescans from the start for the preceding `endobj` and next `obj`. These searches do not skip PDF comments or literal strings.",
+            "failureScenario": "A presenter submits a PDF under the 10 MiB cap containing a long comment with many delimiter-bounded `stream` tokens and no `obj` or `endobj` tokens. Each match triggers scans over an increasingly long prefix, causing quadratic CPU work before the document is rejected. OWASP A06:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

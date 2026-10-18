@@ -18,9 +18,10 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         string sourceId,
         string resourceName,
         SourceFixtureManifest manifest,
-        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload)
+        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload,
+        Func<string, IReadOnlyDictionary<string, string>, IReadOnlyList<string>>? validatePayload = null)
     {
-        _records = Load(sourceId, resourceName, manifest, createPayload);
+        _records = Load(sourceId, resourceName, manifest, createPayload, validatePayload);
     }
 
     public Task<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>> ListAsync(
@@ -53,13 +54,14 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         string sourceId,
         string resourceName,
         SourceFixtureManifest manifest,
-        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload)
+        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload,
+        Func<string, IReadOnlyDictionary<string, string>, IReadOnlyList<string>>? validatePayload)
     {
         using var stream = typeof(FixtureSourceSystem<TPayload>).Assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Embedded source fixture '{resourceName}' is missing.");
         using var buffer = new MemoryStream();
         stream.CopyTo(buffer);
-        return ParseFixture(sourceId, resourceName, manifest, buffer.ToArray(), createPayload);
+        return ParseFixture(sourceId, resourceName, manifest, buffer.ToArray(), createPayload, validatePayload);
     }
 
     // Verifies the fixture bytes against the signed manifest (metadata, digest, record count) before any record is served (AC-004).
@@ -68,7 +70,8 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         string resourceName,
         SourceFixtureManifest manifest,
         byte[] content,
-        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload)
+        Func<IReadOnlyDictionary<string, string>, TPayload> createPayload,
+        Func<string, IReadOnlyDictionary<string, string>, IReadOnlyList<string>>? validatePayload = null)
     {
         var manifestProblems = manifest.Validate();
         if (manifestProblems.Count > 0)
@@ -104,7 +107,14 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         var records = new List<SourceRecord<TPayload>>();
         foreach (var dto in file.Records)
         {
-            var fields = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(dto.Payload, StringComparer.Ordinal));
+            var fields = ReadPayloadFields(sourceId, dto.Payload, resourceName, dto.RecordId);
+            var payloadProblems = validatePayload?.Invoke(dto.Kind, fields) ?? [];
+            if (payloadProblems.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Source fixture '{resourceName}' record '{dto.RecordId}' is invalid: {string.Join(" ", payloadProblems)}");
+            }
+
             var record = new SourceRecord<TPayload>
             {
                 SourceId = sourceId,
@@ -136,6 +146,50 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         return records.AsReadOnly();
     }
 
+    private static IReadOnlyDictionary<string, string> ReadPayloadFields(
+        string sourceId,
+        JsonElement payload,
+        string resourceName,
+        string recordId)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"Source fixture '{resourceName}' record '{recordId}' payload must be an object.");
+        }
+
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (sourceId == "records" && property.Name == "containsPersonalData")
+            {
+                if (property.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                {
+                    throw new InvalidOperationException(
+                        $"Source fixture '{resourceName}' record '{recordId}' containsPersonalData must be a JSON boolean.");
+                }
+
+                fields.Add(property.Name, property.Value.GetBoolean().ToString(CultureInfo.InvariantCulture).ToLowerInvariant());
+            }
+            else if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                fields.Add(property.Name, property.Value.GetString() ?? string.Empty);
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Source fixture '{resourceName}' record '{recordId}' payload field '{property.Name}' must be a string.");
+            }
+        }
+
+        if (sourceId == "records" && !fields.ContainsKey("containsPersonalData"))
+        {
+            throw new InvalidOperationException(
+                $"Source fixture '{resourceName}' record '{recordId}' is missing containsPersonalData.");
+        }
+
+        return new ReadOnlyDictionary<string, string>(fields);
+    }
+
     // JSON shape of a signed source fixture file; field names are camelCase per docs/source-systems-contract.md.
     internal sealed class FixtureFile
     {
@@ -158,19 +212,68 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
 
         public bool Synthetic { get; set; }
 
-        public Dictionary<string, string> Payload { get; set; } = [];
+        public JsonElement Payload { get; set; }
     }
 }
 
 // Typed payload for technical records: a kind-specific set of named string fields, read-only.
 public sealed record TechnicalPayload(IReadOnlyDictionary<string, string> Fields);
 
+public static class ApplicabilityPayloadValidator
+{
+    private static readonly string[] AllowedFields = ["requirementId", "regime", "responsibleParty"];
+
+    public static IReadOnlyList<string> Validate<TValue>(IReadOnlyDictionary<string, TValue>? fields)
+    {
+        if (fields is null)
+        {
+            return ["Applicability payload fields are required."];
+        }
+
+        var problems = new List<string>();
+        if (!fields.TryGetValue("requirementId", out var requirementId))
+        {
+            problems.Add("Applicability requirementId is required.");
+        }
+        else if (requirementId is not string requirement || string.IsNullOrWhiteSpace(requirement))
+        {
+            problems.Add("Applicability requirementId must be a non-empty string.");
+        }
+
+        if (fields.TryGetValue("regime", out var regime)
+            && regime is not ("EASA" or "FAA-91" or "FAA-121" or "Other"))
+        {
+            problems.Add("Applicability regime must be EASA, FAA-91, FAA-121 or Other.");
+        }
+
+        if (fields.TryGetValue("responsibleParty", out var responsibleParty)
+            && responsibleParty is not ("lessee-operator" or "lessor" or "camo" or "unassigned"))
+        {
+            problems.Add("Applicability responsibleParty must be lessee-operator, lessor, camo or unassigned.");
+        }
+
+        foreach (var field in fields.Keys.Except(AllowedFields, StringComparer.Ordinal))
+        {
+            problems.Add($"Unexpected applicability field '{field}'.");
+        }
+
+        return problems;
+    }
+}
+
+internal static class TechnicalPayloadValidator
+{
+    public static IReadOnlyList<string> Validate(string kind, IReadOnlyDictionary<string, string> fields) =>
+        kind == "applicability" ? ApplicabilityPayloadValidator.Validate(fields) : [];
+}
+
 public sealed class TechnicalSource()
     : FixtureSourceSystem<TechnicalPayload>(
         "technical",
         "AirlineDemo.Api.Fixtures.sources.technical.json",
         CoreManifest,
-        fields => new TechnicalPayload(fields))
+        fields => new TechnicalPayload(fields),
+        TechnicalPayloadValidator.Validate)
 {
     // Signed manifest for technical.json: its SHA-256 digest and declared record counts (AC-004).
     // Sources this story does not supply yet are declared with zero records.
@@ -179,7 +282,7 @@ public sealed class TechnicalSource()
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
         SourceFixtureVersion = "2026.10.1",
         ScenarioDate = "2026-10-01",
-        Sha256 = "757f3eb44b5dd835577c661257e60c3605d10e7d39cf8668f985b362e4e92604",
+        Sha256 = "f91580362c0291381eee10954dce58407a94eb553d223e29e334e68b629e5923",
         RecordCounts = new Dictionary<string, int>
         {
             ["technical"] = 13,
