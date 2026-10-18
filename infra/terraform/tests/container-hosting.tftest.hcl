@@ -182,12 +182,11 @@ run "empty_image_digest" {
   expect_failures = [var.image_digest]
 }
 
-run "empty_demo_passcode_secret_uri" {
+run "demo_passcode_secret_is_referenced" {
   command = plan
 
-  variables {
-    demo_passcode_secret_uri = ""
+  assert {
+    condition     = length([for secret in azurerm_container_app.app.secret : secret if secret.name == "demo-passcode" && secret.key_vault_secret_id == "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"]) == 1 && length(azurerm_container_app.app.secret) == 1
+    error_message = "The Container App must reference the configured demo passcode Key Vault secret."
   }
-
-  expect_failures = [var.demo_passcode_secret_uri]
 }
