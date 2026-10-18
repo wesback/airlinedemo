@@ -1,0 +1,296 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 230,
+  "branch": "ai-sdlc/issue-230",
+  "commitSha": "0fd6df149adcfff90f73622f16d390d8c60de26e",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The CMap preflight has reachable comment-bypass and repeated-scan resource risks, and the page text guard may run after large PdfPig allocations. The CMap tests also omit required cases from the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 279,
+          "message": "CMap comments are removed after block matching, so a terminator inside a comment can bypass the oversized-mapping check.",
+          "confidence": 0.91,
+          "category": "performance",
+          "evidence": {
+            "codePathTraced": "HasBoundedCMapExpansion matches CMap block terminators against raw stream text, then removes comments from the matched body.",
+            "failureScenario": "A CMap comment contains `endbfchar` before an oversized mapping and its actual terminator. The regex ends the block at the comment text, the comment is removed afterward, and the oversized mapping is not checked before PdfPig opens the document. This violates the comment-handling criterion and leaves an unbounded mapping path (OWASP A06:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 48,
+          "message": "The CMap block regex can rescan the remaining stream for each unmatched start, leaving a CPU exhaustion path.",
+          "confidence": 0.92,
+          "category": "performance",
+          "evidence": {
+            "codePathTraced": "HasBoundedCMapExpansion runs CMapBlock.Matches on each decoded stream. For every unmatched beginbfchar or beginbfrange, the lazy body match scans forward looking for a terminator.",
+            "failureScenario": "A bounded stream repeats unmatched CMap block starts. Each match attempt can rescan the remaining stream, consuming excessive CPU before the parser rejects the document. This violates the required single forward pass (OWASP A06:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 138,
+          "message": "The text-size guard runs after PdfPig may materialize the page's letters, so it does not bound extraction memory.",
+          "confidence": 0.84,
+          "category": "performance",
+          "evidence": {
+            "codePathTraced": "ParseCore passes page.Letters.Select(letter => letter.Value) to CanMaterializePageText before checking the total text length. Accessing page.Letters can materialize the full letter collection and mapped values before the guard rejects it.",
+            "failureScenario": "A document within the input and decoded-stream limits uses many text operations or glyph mappings that produce a very large letter collection. PdfPig allocates that collection before CanMaterializePageText can enforce its cap, potentially exhausting API process memory (OWASP A06:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 216,
+          "message": "The CMap preflight test omits required cases: a comment containing a terminator, repeated unmatched block starts, and a valid bounded control case.",
+          "confidence": 0.87,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "UnicodeGlyphExpansionIsRejectedBeforeOpeningPdfPig covers oversized bfchar and bfrange destinations, but does not include the required comment-terminator case, repeated unmatched starts, or a valid bounded CMap control.",
+            "failureScenario": "If comment terminators are mishandled or repeated unmatched starts cause excessive rescanning, the current test still passes because none of those inputs are exercised; the acceptance criterion's listed cases are not verified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The in-process tests cover several core outcomes, but the CMap preflight still has reachable validation and CPU risks. The named preflight tests also omit required cases and do not prove that the filter inputs are rejected before PdfPig opens the document.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 48,
+          "message": "The CMap regex can rescan the stream for each unmatched block start, leaving a reachable CPU denial-of-service path (OWASP A06:2025).",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "HasBoundedCMapExpansion uses CMapBlock.Matches with a lazy body match. For each unmatched beginbfchar or beginbfrange token, the regex can scan the remaining bounded stream before failing.",
+            "failureScenario": "A document with a bounded stream containing many unmatched beginbfchar tokens can trigger repeated scans of the remaining stream before rejection, consuming excessive API CPU. This also conflicts with the criterion requiring one forward pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 279,
+          "message": "CMap validation can treat a terminator inside a comment as the block terminator, allowing an oversized mapping to bypass preflight (OWASP A06:2025).",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "HasBoundedCMapExpansion matches block terminators before removing PDF comments from the matched body. A comment containing endbfchar can therefore terminate validation before the actual mapping is checked.",
+            "failureScenario": "A PDF with a comment containing endbfchar before an oversized mapping passes the block check; parsing then reaches the open seam instead of returning retryable with zero opens, contrary to the CMap test criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 246,
+          "message": "The stream and CMap preflight criterion is missing required cases: comment terminator, repeated unmatched starts, valid bounded CMap control, and counting-open assertions for all three filter inputs. Add tests that assert the specified outcomes and zero opens where required.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "UnicodeGlyphExpansionIsRejectedBeforeOpeningPdfPig covers oversized bfchar and bfrange destinations, but does not test a comment terminator, repeated unmatched block starts, or a valid bounded CMap control. The stream-filter tests also do not use a counting open seam.",
+            "failureScenario": "If comment terminators bypass CMap validation, unmatched starts cause repeated scans, or a filter variant reaches PdfPig before rejection, the current tests can still pass because those cases and the zero-open assertion for filter inputs are not exercised."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The CMap preflight has a reachable comment-terminator bypass and can spend excessive CPU on repeated unmatched block starts. Both defects affect untrusted PDFs before they reach the PdfPig open seam.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 279,
+          "message": "PDF comments can prematurely terminate CMap validation, allowing an oversized glyph mapping to reach in-process extraction.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "HasBoundedCMapExpansion matches CMapBlock terminators in raw stream text, then removes PDF comments from the matched body. PdfPig later reads the same stream while ignoring comments.",
+            "failureScenario": "A presenter submits a PDF within the document and decoded-stream limits with beginbfchar, a PDF comment containing endbfchar, then an oversized Unicode mapping and the actual terminator. The preflight treats the comment text as the block terminator and accepts the unchecked mapping; PdfPig can then expand repeated glyphs into excessive page text in the API process. OWASP A06:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 48,
+          "message": "The CMap block regex can repeatedly scan the remainder of a bounded malformed stream, creating a CPU denial-of-service path.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "HasBoundedCMapExpansion applies CMapBlock.Matches to decoded streams up to 8 MiB. For each unmatched beginbfchar or beginbfrange, the lazy body pattern can scan the remaining stream before failing.",
+            "failureScenario": "A presenter submits a bounded stream containing many beginbfchar or beginbfrange tokens without matching terminators. Repeated scans of the remaining stream consume excessive API CPU before the document is rejected. OWASP A06:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
