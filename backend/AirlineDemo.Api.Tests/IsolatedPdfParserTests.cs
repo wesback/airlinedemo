@@ -64,7 +64,12 @@ public class IsolatedPdfParserTests
         return pdf.ToArray();
     }
 
-    private static byte[] TextContentPdf(byte[] streamContent, int pageCount, bool indirectContentsArray = false)
+    private static byte[] TextContentPdf(
+        byte[] streamContent,
+        int pageCount,
+        bool indirectContentsArray = false,
+        string streamDictionaryEntries = "",
+        bool indirectStreamLength = false)
     {
         using var pdf = new MemoryStream();
         var offsets = new List<long>();
@@ -77,7 +82,9 @@ public class IsolatedPdfParserTests
         var pageIds = Enumerable.Range(3, pageCount).ToArray();
         var streamId = pageCount + 3;
         var arrayId = streamId + 1;
+        var lengthId = arrayId + 1;
         var contentReference = indirectContentsArray ? arrayId : streamId;
+        var streamLength = indirectStreamLength ? $"{lengthId} 0 R" : streamContent.Length.ToString();
 
         Write(pdf, "%PDF-1.4\n");
         Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
@@ -92,9 +99,13 @@ public class IsolatedPdfParserTests
             Object($"{arrayId} 0 obj [{streamId} 0 R] endobj\n");
         }
 
-        Object($"{streamId} 0 obj << /Length {streamContent.Length} >> stream\n");
+        Object($"{streamId} 0 obj << /Length {streamLength} {streamDictionaryEntries} >> stream\n");
         pdf.Write(streamContent);
         Write(pdf, "\nendstream endobj\n");
+        if (indirectStreamLength)
+        {
+            Object($"{lengthId} 0 obj {streamContent.Length} endobj\n");
+        }
 
         var xrefOffset = pdf.Position;
         var size = offsets.Count + 1;
@@ -227,6 +238,84 @@ public class IsolatedPdfParserTests
         Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
         Assert.Equal(string.Empty, outcome.Text);
         Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void EndstreamTokenInsideTextSourceDoesNotTruncateTheDeclaredIndirectStreamLength()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"(endstream {new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, indirectStreamLength: true),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void Ascii85ThenFlateTextSourceIsCountedAfterEveryFilter()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+        var encodedSource = Ascii85(Flate(textSource));
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(
+                encodedSource,
+                pageCount: 1,
+                streamDictionaryEntries: "/Filter [/ASCII85Decode /FlateDecode]"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    private static byte[] Flate(byte[] content)
+    {
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            zlib.Write(content);
+        }
+
+        return compressed.ToArray();
+    }
+
+    private static byte[] Ascii85(byte[] content)
+    {
+        var encoded = new StringBuilder();
+        Span<char> digits = stackalloc char[5];
+        for (var offset = 0; offset < content.Length; offset += 4)
+        {
+            var length = Math.Min(4, content.Length - offset);
+            uint value = 0;
+            for (var index = 0; index < 4; index++)
+            {
+                value = (value << 8) | (index < length ? content[offset + index] : 0u);
+            }
+
+            if (length == 4 && value == 0)
+            {
+                encoded.Append('z');
+                continue;
+            }
+
+            for (var index = 4; index >= 0; index--)
+            {
+                digits[index] = (char)('!' + value % 85);
+                value /= 85;
+            }
+            encoded.Append(digits[..(length + 1)]);
+        }
+
+        encoded.Append("~>");
+        return Encoding.ASCII.GetBytes(encoded.ToString());
     }
 
     [Fact]

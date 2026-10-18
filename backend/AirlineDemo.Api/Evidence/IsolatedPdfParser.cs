@@ -463,7 +463,9 @@ public static class IsolatedPdfParser
         int DictionaryEnd,
         int BodyEnd,
         int StreamStart,
-        int StreamLength);
+        int StreamLength,
+        bool HasDeclaredStreamLength,
+        (int Number, int Generation)? LengthReference);
 
     /// <summary>Bounds decoded page-content bytes across all page references before a worker can start.</summary>
     private static (EvidenceProcessingState State, string Reason, string Text)? PreflightPageContentSources(byte[] content)
@@ -508,9 +510,14 @@ public static class IsolatedPdfParser
                 {
                     return Retryable(UnreadableDocumentReason);
                 }
+                if (!stream.HasDeclaredStreamLength)
+                {
+                    return Retryable(UnreadableDocumentReason);
+                }
                 if (!streamLengths.TryGetValue(reference, out var sourceBytes))
                 {
-                    sourceBytes = DecodedContentStreamLength(content, stream);
+                    sourceBytes = DecodedContentStreamLength(content, stream, out var readable);
+                    if (!readable) return Retryable(UnreadableDocumentReason);
                     streamLengths.Add(reference, sourceBytes);
                 }
                 if (sourceBytes > TextSourceLimitBytes - totalBytes)
@@ -543,19 +550,32 @@ public static class IsolatedPdfParser
             var dictionaryEnd = streamKeyword < 0 ? endObject : streamKeyword;
             var streamStart = -1;
             var streamLength = 0;
+            var hasDeclaredStreamLength = false;
+            (int Number, int Generation)? lengthReference = null;
             if (streamKeyword >= 0)
             {
                 streamStart = streamKeyword + "stream"u8.Length;
                 if (streamStart < content.Length && content[streamStart] == '\r') streamStart++;
                 if (streamStart < content.Length && content[streamStart] == '\n') streamStart++;
 
-                var endStream = FindPdfToken(content, "endstream"u8, streamStart);
+                var dictionary = content.AsSpan(bodyStart, streamKeyword - bodyStart);
+                hasDeclaredStreamLength = TryReadStreamLength(dictionary, out var declaredLength, out lengthReference)
+                    && declaredLength <= content.Length - streamStart;
+                var declaredEnd = hasDeclaredStreamLength ? streamStart + declaredLength : streamStart;
+                var endStream = FindPdfToken(content, "endstream"u8, hasDeclaredStreamLength ? declaredEnd : streamStart);
                 if (endStream >= 0)
                 {
-                    var dataEnd = endStream;
-                    if (dataEnd > streamStart && content[dataEnd - 1] == '\n') dataEnd--;
-                    if (dataEnd > streamStart && content[dataEnd - 1] == '\r') dataEnd--;
-                    streamLength = dataEnd - streamStart;
+                    if (hasDeclaredStreamLength)
+                    {
+                        streamLength = declaredLength;
+                    }
+                    else
+                    {
+                        var dataEnd = endStream;
+                        if (dataEnd > streamStart && content[dataEnd - 1] == '\n') dataEnd--;
+                        if (dataEnd > streamStart && content[dataEnd - 1] == '\r') dataEnd--;
+                        streamLength = dataEnd - streamStart;
+                    }
                     endObject = FindPdfToken(content, "endobj"u8, endStream + "endstream"u8.Length);
                     if (endObject < 0) break;
                 }
@@ -565,10 +585,68 @@ public static class IsolatedPdfParser
                 }
             }
             objects[(number, generation)] = new PdfIndirectObject(
-                number, generation, bodyStart, dictionaryEnd, endObject, streamStart, streamLength);
+                number, generation, bodyStart, dictionaryEnd, endObject, streamStart, streamLength,
+                hasDeclaredStreamLength, lengthReference);
             position = endObject + "endobj"u8.Length;
         }
+        ResolveIndirectStreamLengths(content, objects);
         return objects;
+    }
+
+    private static bool TryReadStreamLength(
+        ReadOnlySpan<byte> dictionary,
+        out int length,
+        out (int Number, int Generation)? lengthReference)
+    {
+        length = 0;
+        lengthReference = null;
+        var key = FindPdfToken(dictionary, "/Length"u8, 0);
+        if (key < 0) return false;
+        var cursor = SkipWhitespace(dictionary, key + "/Length"u8.Length);
+        if (!TryReadInteger(dictionary, ref cursor, out length)) return false;
+        cursor = SkipWhitespace(dictionary, cursor);
+        if (cursor < dictionary.Length && IsDigit(dictionary[cursor]))
+        {
+            if (!TryReadInteger(dictionary, ref cursor, out var generation)) return false;
+            cursor = SkipWhitespace(dictionary, cursor);
+            if (IsPdfToken(dictionary, cursor, "R"u8))
+            {
+                lengthReference = (length, generation);
+            }
+            return false;
+        }
+
+        return cursor == dictionary.Length || IsPdfDelimiterOrWhitespace(dictionary[cursor]);
+    }
+
+    private static void ResolveIndirectStreamLengths(
+        byte[] content,
+        Dictionary<(int Number, int Generation), PdfIndirectObject> objects)
+    {
+        foreach (var (key, stream) in objects.ToArray())
+        {
+            if (stream.LengthReference is not { } reference) continue;
+            if (!objects.TryGetValue(reference, out var lengthObject)
+                || lengthObject.StreamStart >= 0
+                || !TryReadIntegerObject(content, lengthObject, out var length)
+                || length > content.Length - stream.StreamStart
+                || FindPdfToken(content, "endstream"u8, stream.StreamStart + length) < 0)
+            {
+                objects[key] = stream with { StreamStart = -1 };
+                continue;
+            }
+
+            objects[key] = stream with { StreamLength = length, HasDeclaredStreamLength = true };
+        }
+    }
+
+    private static bool TryReadIntegerObject(byte[] content, PdfIndirectObject pdfObject, out int value)
+    {
+        var body = content.AsSpan(pdfObject.BodyStart, pdfObject.BodyEnd - pdfObject.BodyStart);
+        var cursor = SkipWhitespace(body, 0);
+        if (!TryReadInteger(body, ref cursor, out value)) return false;
+        cursor = SkipWhitespace(body, cursor);
+        return cursor == body.Length;
     }
 
     private static bool TryReadObjectHeader(
@@ -641,39 +719,199 @@ public static class IsolatedPdfParser
         return true;
     }
 
-    private static long DecodedContentStreamLength(byte[] content, PdfIndirectObject stream)
+    private static long DecodedContentStreamLength(
+        byte[] content,
+        PdfIndirectObject stream,
+        out bool readable)
     {
+        readable = true;
         var dictionary = Encoding.Latin1.GetString(
             content, stream.BodyStart, stream.DictionaryEnd - stream.BodyStart);
         var filter = FilterValue.Match(dictionary);
         if (!filter.Success)
         {
-            return ContainsTextShowingOperator(content.AsSpan(stream.StreamStart, stream.StreamLength))
-                ? stream.StreamLength
+            var source = content.AsSpan(stream.StreamStart, stream.StreamLength);
+            return ContainsTextShowingOperator(source)
+                ? Math.Min(stream.StreamLength, TextSourceLimitBytes + 1)
                 : 0;
         }
-        var first = FirstName.Match(filter.Groups[1].Value);
-        if (!first.Success || first.Value is not ("/FlateDecode" or "/Fl")) return stream.StreamLength;
-        try
+        var filters = FirstName.Matches(filter.Groups[1].Value).Select(match => match.Value).ToArray();
+        if (filters.Length == 0)
         {
-            using var zlib = new ZLibStream(
-                new MemoryStream(content, stream.StreamStart, stream.StreamLength), CompressionMode.Decompress);
-            using var decoded = new MemoryStream();
-            var buffer = new byte[81920];
-            long total = 0;
-            int read;
-            while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
+            readable = false;
+            return 0;
+        }
+
+        var decoded = content.AsSpan(stream.StreamStart, stream.StreamLength).ToArray();
+        for (var index = 0; index < filters.Length; index++)
+        {
+            if (!TryDecodeContentFilter(
+                filters[index], decoded, DecodedStreamLimitBytes, out decoded, out var exceededLimit))
             {
-                total += read;
-                decoded.Write(buffer, 0, read);
+                readable = false;
+                return 0;
             }
-            return ContainsTextShowingOperator(decoded.GetBuffer().AsSpan(0, (int)total)) ? total : 0;
+            if (exceededLimit) return TextSourceLimitBytes + 1;
         }
-        catch (InvalidDataException)
-        {
-            return stream.StreamLength;
-        }
+
+        return ContainsTextShowingOperator(decoded)
+            ? Math.Min(decoded.Length, TextSourceLimitBytes + 1)
+            : 0;
     }
+
+    private static bool TryDecodeContentFilter(
+        string filter,
+        byte[] source,
+        long maximumBytes,
+        out byte[] decoded,
+        out bool exceededLimit)
+    {
+        decoded = Array.Empty<byte>();
+        exceededLimit = false;
+        using var output = new MemoryStream();
+        var overflow = false;
+
+        bool WriteByte(byte value)
+        {
+            if (output.Length >= maximumBytes)
+            {
+                overflow = true;
+                return false;
+            }
+
+            output.WriteByte(value);
+            return true;
+        }
+
+        if (filter is "/FlateDecode" or "/Fl")
+        {
+            try
+            {
+                using var zlib = new ZLibStream(new MemoryStream(source), CompressionMode.Decompress);
+                var buffer = new byte[81920];
+                int read;
+                while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    for (var index = 0; index < read; index++)
+                    {
+                        if (!WriteByte(buffer[index]))
+                        {
+                            exceededLimit = overflow;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch (InvalidDataException)
+            {
+                return false;
+            }
+        }
+        else if (filter is "/ASCIIHexDecode" or "/AHx")
+        {
+            var highNibble = -1;
+            foreach (var value in source)
+            {
+                if (IsPdfWhitespace(value)) continue;
+                if (value == '>') break;
+                var nibble = HexValue(value);
+                if (nibble < 0) return false;
+                if (highNibble < 0)
+                {
+                    highNibble = nibble;
+                }
+                else
+                {
+                    if (!WriteByte((byte)((highNibble << 4) | nibble)))
+                    {
+                        exceededLimit = overflow;
+                        return true;
+                    }
+                    highNibble = -1;
+                }
+            }
+
+            if (highNibble >= 0 && !WriteByte((byte)(highNibble << 4)))
+            {
+                exceededLimit = overflow;
+                return true;
+            }
+        }
+        else if (filter is "/ASCII85Decode" or "/A85")
+        {
+            ulong group = 0;
+            var groupSize = 0;
+            foreach (var value in source)
+            {
+                if (IsPdfWhitespace(value)) continue;
+                if (value == '~')
+                {
+                    break;
+                }
+                if (value == 'z')
+                {
+                    if (groupSize != 0) return false;
+                    for (var index = 0; index < 4; index++)
+                    {
+                        if (!WriteByte(0))
+                        {
+                            exceededLimit = overflow;
+                            return true;
+                        }
+                    }
+                    continue;
+                }
+                if (value is < (byte)'!' or > (byte)'u') return false;
+                group = group * 85 + (uint)(value - '!');
+                if (++groupSize == 5)
+                {
+                    if (group > uint.MaxValue) return false;
+                    for (var shift = 24; shift >= 0; shift -= 8)
+                    {
+                        if (!WriteByte((byte)(group >> shift)))
+                        {
+                            exceededLimit = overflow;
+                            return true;
+                        }
+                    }
+                    group = 0;
+                    groupSize = 0;
+                }
+            }
+
+            if (groupSize == 1) return false;
+            if (groupSize > 1)
+            {
+                var outputBytes = groupSize - 1;
+                for (var index = groupSize; index < 5; index++) group = group * 85 + 84;
+                if (group > uint.MaxValue) return false;
+                for (var index = 0; index < outputBytes; index++)
+                {
+                    var shift = 24 - index * 8;
+                    if (!WriteByte((byte)(group >> shift)))
+                    {
+                        exceededLimit = overflow;
+                        return true;
+                    }
+                }
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        decoded = output.ToArray();
+        return true;
+    }
+
+    private static int HexValue(byte value) => value switch
+    {
+        >= (byte)'0' and <= (byte)'9' => value - '0',
+        >= (byte)'A' and <= (byte)'F' => value - 'A' + 10,
+        >= (byte)'a' and <= (byte)'f' => value - 'a' + 10,
+        _ => -1,
+    };
 
     private static bool ContainsTextShowingOperator(ReadOnlySpan<byte> content)
     {
