@@ -928,6 +928,12 @@ public static class IsolatedPdfParser
         var tokenBytes = Encoding.ASCII.GetBytes(token);
         for (var index = start; index <= content.Length - tokenBytes.Length; index++)
         {
+            if (content[index] == '%')
+            {
+                while (index < content.Length && content[index] is not (10 or 13)) index++;
+                continue;
+            }
+
             if (!HasPdfTokenAt(content, tokenBytes, index)) continue;
             return index;
         }

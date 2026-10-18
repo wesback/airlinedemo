@@ -519,6 +519,36 @@ public class IsolatedPdfParserTests
     }
 
     [Fact]
+    public void CommentStreamTokensDoNotTriggerRepeatedPreflightScans()
+    {
+        var pdf = MinimalPdf(1);
+        var comment = Encoding.ASCII.GetBytes("%" + string.Concat(Enumerable.Repeat("stream ", 32 * 1024)) + "\n");
+        var input = new byte[pdf.Length + comment.Length];
+        pdf.CopyTo(input, 0);
+        comment.CopyTo(input, pdf.Length);
+        var workerStarts = 0;
+        var clock = Stopwatch.StartNew();
+
+        var outcome = IsolatedPdfParser.Parse(
+            input,
+            "comment-stream-tokens.pdf",
+            IsolatedPdfParserOptions.Default,
+            _ =>
+            {
+                workerStarts++;
+                return null;
+            });
+
+        clock.Stop();
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"Preflight took {clock.Elapsed} for comment tokens.");
+        Assert.Equal(1, workerStarts);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("worker could not be started; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+    }
+
+    [Fact]
     public void HungWorker_IsKilledByTimeLimit()
     {
         var options = new IsolatedPdfParserOptions
