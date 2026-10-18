@@ -48,6 +48,11 @@ public static class IsolatedPdfParser
             return rejected;
         }
 
+        if (PreflightUnicodeGlyphExpansion(content) is { } oversizedUnicode)
+        {
+            return oversizedUnicode;
+        }
+
         if (PreflightPageContentSources(content) is { } oversizedText)
         {
             return oversizedText;
@@ -449,6 +454,8 @@ public static class IsolatedPdfParser
     internal const long DecodedStreamLimitBytes = 8L * 1024 * 1024;
 
     private const long TextSourceLimitBytes = 512L * 1024;
+    private const int UnicodeDestinationLimitBytes = 1024;
+    private const int CMapBlockStartLimit = 4096;
     private const string TextSourceLimitReason = "PDF text source exceeds 524288 bytes; retry is possible";
     private const string UnreadableDocumentReason = "PdfPig could not open or read the document; retry is possible";
 
@@ -528,6 +535,250 @@ public static class IsolatedPdfParser
             }
         }
         return null;
+    }
+
+    /// <summary>Rejects oversized Unicode destinations and excessive CMap blocks before a worker can start.</summary>
+    private static (EvidenceProcessingState State, string Reason, string Text)? PreflightUnicodeGlyphExpansion(byte[] content)
+    {
+        var objects = ReadIndirectObjects(content);
+        var scannedStreams = new HashSet<(int Number, int Generation)>();
+        foreach (var pdfObject in objects.Values)
+        {
+            var dictionary = DecodeNameEscapes(content.AsSpan(
+                pdfObject.BodyStart, pdfObject.DictionaryEnd - pdfObject.BodyStart));
+            var key = FindPdfDictionaryToken(dictionary, "/ToUnicode"u8);
+            if (key < 0) continue;
+
+            var valueStart = SkipPdfWhitespaceAndComments(dictionary, key + "/ToUnicode"u8.Length);
+            if (!TryReadReference(dictionary, valueStart, out var reference, out _)
+                || !objects.TryGetValue(reference, out var cmap)
+                || cmap.StreamStart < 0
+                || !scannedStreams.Add(reference))
+            {
+                continue;
+            }
+
+            var cmapBytes = content.AsSpan(cmap.StreamStart, cmap.StreamLength).ToArray();
+            var cmapDictionary = DecodeNameEscapes(
+                content.AsSpan(cmap.BodyStart, cmap.DictionaryEnd - cmap.BodyStart));
+            var filterKey = FindPdfDictionaryToken(cmapDictionary, "/Filter"u8);
+            if (filterKey >= 0)
+            {
+                var filterValueStart = SkipPdfWhitespaceAndComments(cmapDictionary, filterKey + "/Filter"u8.Length);
+                if (!TryReadCMapFilters(content, cmapDictionary, filterValueStart, objects, out var filters))
+                {
+                    return Retryable(UnreadableDocumentReason);
+                }
+
+                foreach (var streamFilter in filters)
+                {
+                    if (!TryDecodeContentFilter(
+                        streamFilter,
+                        cmapBytes,
+                        DecodedStreamLimitBytes,
+                        out cmapBytes,
+                        out var exceededLimit)
+                        || exceededLimit)
+                    {
+                        return Retryable(UnreadableDocumentReason);
+                    }
+                }
+            }
+
+            if (CMapExceedsUnicodeBounds(cmapBytes))
+            {
+                return Retryable(UnreadableDocumentReason);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryReadCMapFilters(
+        byte[] content,
+        ReadOnlySpan<byte> source,
+        int valueStart,
+        IReadOnlyDictionary<(int Number, int Generation), PdfIndirectObject> objects,
+        out List<string> filters)
+    {
+        filters = new List<string>();
+        if (TryReadReference(source, valueStart, out var reference, out _))
+        {
+            if (!objects.TryGetValue(reference, out var filterObject) || filterObject.StreamStart >= 0)
+            {
+                return false;
+            }
+
+            var filterValue = DecodeNameEscapes(
+                content.AsSpan(
+                    filterObject.BodyStart,
+                    filterObject.DictionaryEnd - filterObject.BodyStart));
+            return TryReadCMapFilterNames(filterValue, 0, filters);
+        }
+
+        return TryReadCMapFilterNames(source, valueStart, filters);
+    }
+
+    private static bool TryReadCMapFilterNames(ReadOnlySpan<byte> source, int start, List<string> filters)
+    {
+        var position = SkipPdfWhitespaceAndComments(source, start);
+        if (position >= source.Length) return false;
+
+        if (source[position] == '[')
+        {
+            position++;
+            while (true)
+            {
+                position = SkipPdfWhitespaceAndComments(source, position);
+                if (position >= source.Length) return false;
+                if (source[position] == ']') return filters.Count > 0;
+                if (source[position] != '/') return false;
+
+                var nameStart = position++;
+                while (position < source.Length && !IsPdfDelimiterOrWhitespace(source[position])) position++;
+                if (position == nameStart + 1) return false;
+                filters.Add(Encoding.ASCII.GetString(source[nameStart..position]));
+            }
+        }
+
+        if (source[position] != '/') return false;
+        var directNameStart = position++;
+        while (position < source.Length && !IsPdfDelimiterOrWhitespace(source[position])) position++;
+        if (position == directNameStart + 1) return false;
+        filters.Add(Encoding.ASCII.GetString(source[directNameStart..position]));
+        return true;
+    }
+
+    /// <summary>Scans CMap tokens once; comments and literal strings cannot supply operators or destinations.</summary>
+    private static bool CMapExceedsUnicodeBounds(ReadOnlySpan<byte> cmap)
+    {
+        const int noBlock = 0;
+        const int bfcharBlock = 1;
+        const int bfrangeBlock = 2;
+        var activeBlock = noBlock;
+        var hexOperandIndex = 0;
+        var bfrangeArrayDestination = false;
+        var blockStarts = 0;
+
+        for (var position = 0; position < cmap.Length;)
+        {
+            var value = cmap[position];
+            if (IsPdfWhitespace(value))
+            {
+                position++;
+                continue;
+            }
+
+            if (value == '%')
+            {
+                while (position < cmap.Length && cmap[position] is not (byte)'\r' and not (byte)'\n')
+                {
+                    position++;
+                }
+                continue;
+            }
+
+            if (value == '(')
+            {
+                position = SkipLiteralString(cmap, position);
+                continue;
+            }
+
+            if (value == '<')
+            {
+                if (position + 1 < cmap.Length && cmap[position + 1] == '<')
+                {
+                    position += 2;
+                    continue;
+                }
+
+                var destinationOperand = activeBlock == bfcharBlock
+                    ? hexOperandIndex % 2 == 1
+                    : activeBlock == bfrangeBlock
+                        && (bfrangeArrayDestination || hexOperandIndex == 2);
+                position++;
+                var hexDigits = 0;
+                while (position < cmap.Length && cmap[position] != '>')
+                {
+                    if (Uri.IsHexDigit((char)cmap[position])
+                        && ++hexDigits > UnicodeDestinationLimitBytes * 2
+                        && destinationOperand)
+                    {
+                        return true;
+                    }
+                    position++;
+                }
+                if (position < cmap.Length) position++;
+
+                if (activeBlock == bfcharBlock)
+                {
+                    hexOperandIndex++;
+                }
+                else if (activeBlock == bfrangeBlock && !bfrangeArrayDestination)
+                {
+                    hexOperandIndex = hexOperandIndex == 2 ? 0 : hexOperandIndex + 1;
+                }
+                continue;
+            }
+
+            if (value == '[')
+            {
+                if (activeBlock == bfrangeBlock && hexOperandIndex == 2)
+                {
+                    bfrangeArrayDestination = true;
+                }
+                position++;
+                continue;
+            }
+
+            if (value == ']')
+            {
+                if (activeBlock == bfrangeBlock && bfrangeArrayDestination)
+                {
+                    bfrangeArrayDestination = false;
+                    hexOperandIndex = 0;
+                }
+                position++;
+                continue;
+            }
+
+            if (value == '/')
+            {
+                position++;
+                while (position < cmap.Length && !IsPdfDelimiterOrWhitespace(cmap[position])) position++;
+                continue;
+            }
+
+            if (IsPdfDelimiterOrWhitespace(value))
+            {
+                position++;
+                continue;
+            }
+
+            var tokenStart = position;
+            while (position < cmap.Length && !IsPdfDelimiterOrWhitespace(cmap[position])) position++;
+            var token = cmap[tokenStart..position];
+            if (token.SequenceEqual("beginbfchar"u8) || token.SequenceEqual("beginbfrange"u8))
+            {
+                blockStarts++;
+                if (blockStarts > CMapBlockStartLimit) return true;
+                if (activeBlock == noBlock)
+                {
+                    activeBlock = token.SequenceEqual("beginbfchar"u8) ? bfcharBlock : bfrangeBlock;
+                    hexOperandIndex = 0;
+                    bfrangeArrayDestination = false;
+                }
+            }
+            else if ((activeBlock == bfcharBlock && token.SequenceEqual("endbfchar"u8))
+                || (activeBlock == bfrangeBlock && token.SequenceEqual("endbfrange"u8)))
+            {
+                activeBlock = noBlock;
+                hexOperandIndex = 0;
+                bfrangeArrayDestination = false;
+            }
+        }
+
+        return false;
     }
 
     private static Dictionary<(int Number, int Generation), PdfIndirectObject> ReadIndirectObjects(byte[] content)
