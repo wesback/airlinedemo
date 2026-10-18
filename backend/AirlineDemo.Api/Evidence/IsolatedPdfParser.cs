@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using UglyToad.PdfPig;
 
 using AirlineDemo.Api.Evidence.PdfWorker;
 
@@ -24,9 +25,8 @@ public sealed class IsolatedPdfParserOptions
 }
 
 /// <summary>
-/// Parses one PDF in a short-lived child process (the application's <c>--pdf-worker</c> entry point). The PDF is
-/// written to the child's standard input and the extracted text is read back as JSON from standard output. The
-/// parent never opens the PDF itself. The child is killed when it exceeds the memory or wall-clock limit.
+/// Parses bounded PDF page text in the API process. The worker-isolation helpers remain available to the worker
+/// entry point, but evidence intake does not start a child process.
 /// </summary>
 public static class IsolatedPdfParser
 {
@@ -36,64 +36,74 @@ public static class IsolatedPdfParser
         byte[] content,
         IsolatedPdfParserOptions? options = null)
     {
-        options ??= IsolatedPdfParserOptions.Default;
-        // Root bypasses the read-only mode of the working directory, so root without a drop to "nobody" fails closed.
-        if (CannotIsolateWorker(OperatingSystem.IsLinux(), options.WorkerFileName is not null, Environment.UserName, File.Exists(SetprivPath)))
+        _ = options;
+        return ParseCore(content, "document.pdf", OpenDocument);
+    }
+
+    public static (EvidenceProcessingState State, string Reason, string Text) Parse(
+        byte[] content,
+        string fileName,
+        IsolatedPdfParserOptions? options = null)
+    {
+        _ = options;
+        return ParseCore(content, fileName, OpenDocument);
+    }
+
+    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
+        byte[] content,
+        string fileName,
+        Func<byte[], PdfDocument> openDocument) =>
+        ParseCore(content, fileName, openDocument);
+
+    private static PdfDocument OpenDocument(byte[] content) =>
+        PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
+
+    private static (EvidenceProcessingState State, string Reason, string Text) ParseCore(
+        byte[] content,
+        string fileName,
+        Func<byte[], PdfDocument> openDocument)
+    {
+        if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
         {
-            return Retryable("worker cannot be isolated from its working directory; the document was not accepted, retry is possible");
+            return (EvidenceProcessingState.RejectedPermanent,
+                $"{fileName} is {content.LongLength} bytes; limit is {EvidenceIntake.MaxDocumentBytes}",
+                string.Empty);
         }
 
-        var workingDirectory = ChooseWorkingDirectory();
         try
         {
-            Directory.CreateDirectory(workingDirectory);
-            RestrictWorkingDirectory(workingDirectory);
-
-            using var process = Process.Start(CreateStartInfo(options, workingDirectory));
-            if (process is null)
+            using var pdf = openDocument(content);
+            if (pdf.NumberOfPages > EvidenceIntake.MaxPagesPerDocument)
             {
-                return Retryable("worker could not be started; retry is possible");
+                return Retryable($"{pdf.NumberOfPages} pages; limit is {EvidenceIntake.MaxPagesPerDocument}");
             }
 
-            // Windows has no prlimit: a Job Object caps the child's committed memory in the kernel.
-            WindowsJobObject? memoryJob = null;
-            if (OperatingSystem.IsWindows() && !WindowsJobObject.TryAssign(process, options.MemoryLimitBytes, out memoryJob))
+            var text = new System.Text.StringBuilder();
+            var pageIndex = 0;
+            foreach (var page in pdf.GetPages())
             {
-                process.Kill();
-                return Retryable("worker memory limit could not be enforced; the document was not accepted, retry is possible");
-            }
-
-            // Linux: a cgroup v2 limit caps total memory in the kernel where the host delegates one; otherwise
-            // prlimit --data plus the working-set check in Supervise enforce the limit.
-            using var memoryCgroup = OperatingSystem.IsLinux() ? LinuxCgroup.TryAssign(process, options.MemoryLimitBytes) : null;
-            using (memoryJob)
-            {
-                return Supervise(process, content, options);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException
-            or System.ComponentModel.Win32Exception)
-        {
-            return Retryable("worker could not be started; retry is possible");
-        }
-        finally
-        {
-            try
-            {
-                if (!OperatingSystem.IsWindows())
+                if (page.ExperimentalAccess.GetAnnotations().Any())
                 {
-                    // The directory was made read-only before the run; the owner must be able to write again to delete it.
-                    File.SetUnixFileMode(workingDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    return (EvidenceProcessingState.RejectedPermanent, "annotations are not accepted", string.Empty);
                 }
 
-                Directory.Delete(workingDirectory, recursive: true);
+                if (pageIndex++ > 0)
+                {
+                    text.Append(EvidenceIntake.PageSeparator);
+                }
+
+                text.Append(page.Text);
             }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
+
+            return (EvidenceProcessingState.Complete, "accepted", text.ToString());
+        }
+        catch (OutOfMemoryException)
+        {
+            return Retryable("PdfPig could not open or read the document; retry is possible");
+        }
+        catch (Exception)
+        {
+            return Retryable("PdfPig could not open or read the document; retry is possible");
         }
     }
 

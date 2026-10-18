@@ -97,9 +97,24 @@ public class EvidenceIntakeTests
 
         var result = EvidenceIntake.Process([Doc(file, Fixture(file))], store);
 
-        Assert.Equal(EvidenceProcessingState.RejectedPermanent, result.State);
-        Assert.Empty(result.Versions);
-        Assert.Null(store.Latest(file));
+        if (file == "annotated.pdf")
+        {
+            Assert.Equal(EvidenceProcessingState.RejectedPermanent, result.State);
+            Assert.Empty(result.Versions);
+            Assert.Null(store.Latest(file));
+            return;
+        }
+
+        Assert.Equal(EvidenceProcessingState.Complete, result.State);
+        var version = Assert.Single(result.Versions);
+        Assert.Equal(version, store.Latest(file));
+        Assert.Equal(file switch
+        {
+            "image.pdf" => string.Empty,
+            "embedded-files.pdf" => "synthetic embedded file",
+            "acroform.pdf" => "synthetic form",
+            _ => throw new ArgumentOutOfRangeException(nameof(file), file, "Unexpected fixture."),
+        }, version.Text.Trim());
     }
 
     [Theory]

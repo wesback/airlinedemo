@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Evidence.PdfWorker;
+using UglyToad.PdfPig;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -18,6 +19,52 @@ public class IsolatedPdfParserTests
         }
 
         return File.ReadAllBytes(Path.Combine(dir!, "Fixtures", "PdfCorpus", name));
+    }
+
+    private static byte[] MinimalPdf(int pages, int padToBytes = 0)
+    {
+        byte[] Build(int padding)
+        {
+            var pdf = new StringBuilder("%PDF-1.4\n");
+            if (padding > 0)
+            {
+                pdf.Append('%', padding - 1).Append('\n');
+            }
+
+            var offsets = new List<int>();
+            void Add(string value)
+            {
+                offsets.Add(pdf.Length);
+                pdf.Append(offsets.Count).Append(" 0 obj ").Append(value).Append('\n');
+            }
+
+            var fontId = 3 + 2 * pages;
+            var kids = string.Join(" ", Enumerable.Range(0, pages).Select(i => $"{3 + 2 * i} 0 R"));
+            Add("<< /Type /Catalog /Pages 2 0 R >> endobj");
+            Add($"<< /Type /Pages /Count {pages} /Kids [{kids}] >> endobj");
+            for (var i = 0; i < pages; i++)
+            {
+                var contentId = 4 + 2 * i;
+                Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentId} 0 R /Resources << /Font << /F1 {fontId} 0 R >> >> >> endobj");
+                var content = $"BT /F1 12 Tf 72 720 Td (page {i + 1}) Tj ET";
+                Add($"<< /Length {content.Length} >> stream\n{content}\nendstream endobj");
+            }
+
+            Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj");
+            var xrefPosition = pdf.Length;
+            pdf.Append("xref\n0 ").Append(offsets.Count + 1).Append("\n0000000000 65535 f \n");
+            foreach (var offset in offsets)
+            {
+                pdf.Append(offset.ToString("D10")).Append(" 00000 n \n");
+            }
+
+            pdf.Append("trailer << /Size ").Append(offsets.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n")
+                .Append(xrefPosition.ToString("D10")).Append("\n%%EOF\n");
+            return Encoding.ASCII.GetBytes(pdf.ToString());
+        }
+
+        var unpadded = Build(0);
+        return padToBytes > unpadded.Length ? Build(padToBytes - unpadded.Length) : unpadded;
     }
 
     /// <summary>A one-page PDF whose content stream inflates to 600 MB of zeros (above the 512 MB limit) from a few hundred kilobytes.</summary>
@@ -70,83 +117,171 @@ public class IsolatedPdfParserTests
         stream.Write(bytes);
     }
 
-    /// <summary>
-    /// Runs the application's own worker entry point through the dotnet host, without the network namespace wrapper,
-    /// so these tests never skip. The parent still applies the memory, time and output limits and the empty environment.
-    /// </summary>
-    private static IsolatedPdfParserOptions RealWorker(long? memoryLimitBytes = null) => new()
-    {
-        WorkerFileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
-        WorkerArguments = new[] { typeof(IsolatedPdfParser).Assembly.Location, PdfWorkerEntry.Switch },
-        MemoryLimitBytes = memoryLimitBytes ?? 512L * 1024 * 1024,
-    };
-
-    // AC-1: the parent hands the PDF to a child worker and reads JSON back. Covered by the valid, corrupt and hang tests.
+    // DD-026: bounded page text is extracted by PdfPig in the API process.
     [Fact]
-    public void ValidPdf_IsExtractedByChildProcess()
+    public void PdfPigExtractsTextAndIgnoresNonTextContent()
     {
-        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
+        var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf");
+        var twoPages = IsolatedPdfParser.Parse(Fixture("two-pages.pdf"), "two-pages.pdf");
+        var form = IsolatedPdfParser.Parse(Fixture("acroform.pdf"), "acroform.pdf");
+        var embedded = IsolatedPdfParser.Parse(Fixture("embedded-files.pdf"), "embedded-files.pdf");
+        var image = IsolatedPdfParser.Parse(Fixture("image.pdf"), "image.pdf");
+
+        Assert.Equal(EvidenceProcessingState.Complete, valid.State);
+        Assert.False(string.IsNullOrWhiteSpace(valid.Text));
+        Assert.Equal(EvidenceProcessingState.Complete, twoPages.State);
+        Assert.True(twoPages.Text.IndexOf("Alpha only on page one.", StringComparison.Ordinal)
+            < twoPages.Text.IndexOf("Beta only on page two.", StringComparison.Ordinal));
+        Assert.Equal(EvidenceProcessingState.Complete, form.State);
+        Assert.Equal("synthetic form", form.Text.Trim());
+        Assert.DoesNotContain("field value", form.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(EvidenceProcessingState.Complete, embedded.State);
+        Assert.Equal("synthetic embedded file", embedded.Text.Trim());
+        Assert.DoesNotContain("attachment content", embedded.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(EvidenceProcessingState.Complete, image.State);
+        Assert.Equal(string.Empty, image.Text);
+    }
+
+    [Fact]
+    public void PdfPigParsesWithoutStartingWorker()
+    {
+        var options = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-worker"),
+        };
+
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf", options);
 
         Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
         Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
     }
 
     [Fact]
+    public void PdfLimitsAreCheckedBeforeParsing()
+    {
+        var exactLimitOpens = 0;
+        var exactLimit = IsolatedPdfParser.Parse(
+            MinimalPdf(200, (int)EvidenceIntake.MaxDocumentBytes),
+            "exact-limit.pdf",
+            content =>
+            {
+                exactLimitOpens++;
+                return PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
+            });
+
+        Assert.Equal(1, exactLimitOpens);
+        Assert.Equal(EvidenceProcessingState.Complete, exactLimit.State);
+        Assert.Equal(200, exactLimit.Text.Count(character => character == EvidenceIntake.PageSeparator) + 1);
+
+        var tooManyPagesOpens = 0;
+        var tooManyPages = IsolatedPdfParser.Parse(
+            MinimalPdf(201),
+            "too-many-pages.pdf",
+            content =>
+            {
+                tooManyPagesOpens++;
+                return PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
+            });
+
+        Assert.Equal(1, tooManyPagesOpens);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, tooManyPages.State);
+        Assert.Equal(string.Empty, tooManyPages.Text);
+
+        var oversizedOpens = 0;
+        var oversized = IsolatedPdfParser.Parse(
+            MinimalPdf(1, (int)EvidenceIntake.MaxDocumentBytes + 1),
+            "oversized.pdf",
+            _ =>
+            {
+                oversizedOpens++;
+                throw new InvalidOperationException("Oversized input must not be opened.");
+            });
+
+        Assert.Equal(0, oversizedOpens);
+        Assert.Equal(EvidenceProcessingState.RejectedPermanent, oversized.State);
+        Assert.Equal("oversized.pdf is 10485761 bytes; limit is 10485760", oversized.Reason);
+    }
+
+    [Fact]
+    public void MalformedPdfFailuresAreRetryableWithoutPartialText()
+    {
+        foreach (var (name, content) in new[]
+        {
+            ("corrupt.pdf", Fixture("corrupt.pdf")),
+            ("truncated.pdf", Fixture("truncated.pdf")),
+            ("invalid.pdf", new byte[] { 0x00, 0x01, 0x02, 0x03 }),
+        })
+        {
+            var outcome = IsolatedPdfParser.Parse(content, name);
+
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal("PdfPig could not open or read the document; retry is possible", outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
+        }
+
+        var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf");
+        Assert.Equal(EvidenceProcessingState.Complete, valid.State);
+        Assert.False(string.IsNullOrWhiteSpace(valid.Text));
+    }
+
+    [Fact]
     public void CorruptPdf_IsRejectedAsRetryable()
     {
-        var outcome = IsolatedPdfParser.Parse(Fixture("corrupt.pdf"), RealWorker());
+        var outcome = IsolatedPdfParser.Parse(Fixture("corrupt.pdf"), "corrupt.pdf");
 
-        Assert.NotEqual(EvidenceProcessingState.Complete, outcome.State);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PdfPig could not open or read the document; retry is possible", outcome.Reason);
         Assert.Equal(string.Empty, outcome.Text);
     }
 
-    // AC-3: a flate bomb fails within the limits and the next valid PDF is still processed.
+    // A compressed bomb padded beyond the document cap is rejected before PdfPig opens it.
     [Fact]
     public void FlateBomb_FailsWithinLimits_AndServiceStillProcessesValidPdf()
     {
-        var clock = Stopwatch.StartNew();
-        var bomb = IsolatedPdfParser.Parse(FlateBomb(), RealWorker());
-        clock.Stop();
+        var compressedBomb = FlateBomb();
+        Array.Resize(ref compressedBomb, (int)EvidenceIntake.MaxDocumentBytes + 1);
+        var bomb = IsolatedPdfParser.Parse(compressedBomb, "bomb.pdf");
 
-        Assert.Equal(EvidenceProcessingState.RejectedRetryable, bomb.State);
-        Assert.True(
-            bomb.Reason.Contains("memory limit") || bomb.Reason.Contains("time limit"),
-            $"bomb was not stopped by a limit: {bomb.Reason}");
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"bomb took {clock.Elapsed}");
+        Assert.Equal(EvidenceProcessingState.RejectedPermanent, bomb.State);
+        Assert.Equal(string.Empty, bomb.Text);
+        Assert.StartsWith("bomb.pdf is 10485761 bytes; limit is 10485760", bomb.Reason);
 
-        var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
+        var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf");
         Assert.Equal(EvidenceProcessingState.Complete, valid.State);
+        Assert.False(string.IsNullOrWhiteSpace(valid.Text));
     }
 
-    // AC-2: exceeding the 30 second wall-clock limit kills the child (tested here with a 2 second limit).
+    // Worker process settings are ignored by the in-process parser.
     [Fact]
     public void HungWorker_IsKilledByTimeLimit()
     {
         var options = new IsolatedPdfParserOptions
         {
-            WorkerFileName = "/bin/sh",
-            WorkerArguments = new[] { "-c", "sleep 60" },
-            WallClockLimit = TimeSpan.FromSeconds(2),
+            WorkerFileName = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-worker"),
+            WallClockLimit = TimeSpan.FromMilliseconds(1),
         };
 
         var clock = Stopwatch.StartNew();
-        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf", options);
         clock.Stop();
 
-        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
-        Assert.Contains("time limit", outcome.Reason);
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"hang took {clock.Elapsed}");
+        Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
+        Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
     }
 
-    // AC-2: exceeding the memory limit kills the child and returns a retryable failure with no evidence.
+    // Worker process settings are ignored by the in-process parser.
     [Fact]
     public void MemoryLimit_KillsWorkerAndReturnsRetryable()
     {
-        // A 1-byte cap stops the child before it can read the PDF: it must not complete.
-        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker(memoryLimitBytes: 1));
+        var options = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-worker"),
+            MemoryLimitBytes = 1,
+        };
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf", options);
 
-        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
-        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
+        Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
     }
 
     // AC-2: the memory cap is a kernel limit on the child (Linux), so removing it from the start info fails this test.
@@ -241,7 +376,7 @@ public class IsolatedPdfParserTests
         Assert.False(Directory.Exists(first));
     }
 
-    // AC-4: the temporary working directory is deleted after the worker run, whatever its outcome.
+    // In-process parsing does not create a worker temporary directory.
     [Fact]
     public void Parse_DeletesItsTemporaryWorkingDirectoryAfterTheRun()
     {
@@ -250,55 +385,28 @@ public class IsolatedPdfParserTests
 
         var before = WorkerDirectories();
 
-        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf");
 
         Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
         Assert.Empty(WorkerDirectories().Except(before).ToList());
     }
 
-    // AC-4: each Parse run starts its worker in a distinct, empty, temporary directory that is gone afterwards.
+    // In-process parsing does not create a worker directory on either run.
     [Fact]
     public void Parse_RunsEachWorkerInADistinctEmptyTemporaryDirectory()
     {
-        if (OperatingSystem.IsWindows())
+        var before = Directory.GetDirectories(Path.GetTempPath(), "pdf-worker-*").ToHashSet();
+        var options = new IsolatedPdfParserOptions
         {
-            return;
-        }
+            WorkerFileName = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-worker"),
+        };
 
-        var record = Path.Combine(Path.GetTempPath(), "pdf-cwd-" + Guid.NewGuid().ToString("N"));
-        var recorded = new List<(string Directory, string Listing)>();
-        try
-        {
-            for (var run = 0; run < 2; run++)
-            {
-                var options = new IsolatedPdfParserOptions
-                {
-                    WorkerFileName = "/bin/sh",
-                    WorkerArguments = new[] { "-c", "{ pwd -P; ls -A; } > \"$0\"", record },
-                };
+        var first = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "first.pdf", options);
+        var second = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "second.pdf", options);
 
-                IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
-
-                var lines = File.ReadAllLines(record);
-                recorded.Add((lines[0], string.Join("|", lines.Skip(1))));
-                File.Delete(record);
-            }
-        }
-        finally
-        {
-            File.Delete(record);
-        }
-
-        var tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd('/');
-        foreach (var (directory, listing) in recorded)
-        {
-            Assert.Contains("pdf-worker-", directory);
-            Assert.StartsWith(Path.GetFullPath(tempRoot).TrimEnd('/'), Path.GetFullPath(directory));
-            Assert.Equal(string.Empty, listing);
-            Assert.False(Directory.Exists(directory));
-        }
-
-        Assert.NotEqual(recorded[0].Directory, recorded[1].Directory);
+        Assert.Equal(EvidenceProcessingState.Complete, first.State);
+        Assert.Equal(EvidenceProcessingState.Complete, second.State);
+        Assert.Empty(Directory.GetDirectories(Path.GetTempPath(), "pdf-worker-*").Except(before));
     }
 
     [Theory]
@@ -312,42 +420,47 @@ public class IsolatedPdfParserTests
         Assert.Equal(expected, IsolatedPdfParser.CannotIsolateWorker(linux, customWorker, user, setprivAvailable));
     }
 
-    // AC-2 (output bound): a child that writes more than OutputLimitBytes is killed and nothing is buffered without limit.
+    // Worker output limits do not affect in-process page-text extraction.
     [Fact]
     public void OversizedWorkerOutput_IsKilledAndReturnsRetryable()
     {
         var options = new IsolatedPdfParserOptions
         {
-            WorkerFileName = "/bin/sh",
-            WorkerArguments = new[] { "-c", "head -c 1000000 /dev/zero" },
-            OutputLimitBytes = 1024,
+            WorkerFileName = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-worker"),
+            OutputLimitBytes = 1,
         };
 
-        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), options);
+        var outcome = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf", options);
 
-        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
-        Assert.Contains("output size limit", outcome.Reason);
-        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
+        Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
     }
 
-    // AC-1: intake routes every PDF through IsolatedPdfParser; a hung worker stops intake before anything is stored.
+    // Intake uses the in-process parser and commits only successful page-text extraction.
     [Fact]
     public void Intake_RoutesPdfThroughIsolatedParser_AndStoresNothingWhenWorkerIsKilled()
     {
         var options = new IsolatedPdfParserOptions
         {
-            WorkerFileName = "/bin/sh",
-            WorkerArguments = new[] { "-c", "sleep 60" },
-            WallClockLimit = TimeSpan.FromSeconds(2),
+            WorkerFileName = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-worker"),
         };
         var store = new EvidenceBasisStore();
-        var documents = new[] { new EvidenceDocument("valid.pdf", Fixture("valid-text.pdf")) };
+        var success = EvidenceIntake.Process(
+            [new EvidenceDocument("valid.pdf", Fixture("valid-text.pdf"))],
+            store,
+            options);
 
-        var result = EvidenceIntake.Process(documents, store, options);
+        Assert.Equal(EvidenceProcessingState.Complete, success.State);
+        Assert.NotNull(store.Latest("valid.pdf"));
 
-        Assert.Equal(EvidenceProcessingState.RejectedRetryable, result.State);
-        Assert.Contains("time limit", result.Reason);
-        Assert.Null(store.Latest("valid.pdf"));
+        var failed = EvidenceIntake.Process(
+            [new EvidenceDocument("bad.pdf", Fixture("corrupt.pdf"))],
+            store,
+            options);
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, failed.State);
+        Assert.Empty(failed.Versions);
+        Assert.Null(store.Latest("bad.pdf"));
     }
 
     // AC-1: the worker entry point turns stdin bytes into a JSON-ready response.

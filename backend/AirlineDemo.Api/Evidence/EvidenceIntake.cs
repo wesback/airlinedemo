@@ -263,7 +263,7 @@ public static class EvidenceIntake
         var extracted = new List<(string Key, string Text)>(documents.Count);
         foreach (var document in documents)
         {
-            var outcome = IsolatedPdfParser.Parse(document.Content, parserOptions);
+            var outcome = IsolatedPdfParser.Parse(document.Content, document.FileName, parserOptions);
             if (outcome.State != EvidenceProcessingState.Complete)
             {
                 return new EvidenceIntakeResult(outcome.State, $"{document.FileName}: {outcome.Reason}", Array.Empty<EvidenceBasisVersion>());
@@ -326,7 +326,7 @@ public static class EvidenceIntake
         for (var i = 0; i < documents.Count; i++)
         {
             var document = documents[i];
-            var outcome = IsolatedPdfParser.Parse(document.Content, parserOptions);
+            var outcome = IsolatedPdfParser.Parse(document.Content, document.FileName, parserOptions);
             if (outcome.State == EvidenceProcessingState.Complete)
             {
                 accepted.Add((i, $"{caseId}/{document.FileName}", outcome.Text));
