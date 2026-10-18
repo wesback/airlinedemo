@@ -31,6 +31,15 @@ The port is read-only. It has no write, update or delete members, and it has no 
 
 `SourceRecord<TPayload>.Validate(requestedCaseId)` returns every violation. An empty list means the record is valid. A record whose `caseId` differs from `requestedCaseId` is rejected and must never be returned.
 
+## Technical payloads
+
+| Kind | Field | Type and accepted values |
+|---|---|---|
+| `utilization` | `periodStart` | String date, `YYYY-MM-DD`; first day of the reserve month. |
+| `utilization` | `periodEnd` | String date, `YYYY-MM-DD`; last day of the reserve month. |
+| `utilization` | `hours` | Non-negative decimal string; flight-hour utilization. |
+| `utilization` | `cycles` | Non-negative decimal string; cycle utilization. |
+
 ## Finance payloads
 
 `FinancePayload` is shared by exactly four finance kinds. Every value is a string; a payload must contain exactly the fields listed for its kind.
@@ -43,6 +52,8 @@ The port is read-only. It has no write, update or delete members, and it has no 
 | `reserve_reimbursement` | `recordedAmount` (non-negative decimal string), `collectedAmount` (non-negative decimal string), `currency` (three uppercase letters), `period` (string, `YYYY-MM`), `dueDate` (string, `YYYY-MM-DD`), `claimId` (string), `status` (`claimed`, `approved` or `paid`) |
 
 `FinanceRecordValidator` rejects unknown kinds, missing fields and fields not listed for that kind. Reserve drafts consume only `maintenance_reserve` and `reserve_reimbursement`: billed is `recordedAmount`, collected is `collectedAmount`, underbilled is the non-negative difference, and overdue is underbilled when `dueDate` is before the draft period's last calendar day. Reimbursable is `recordedAmount` only for an approved or paid reimbursement. The draft total is the sum of underbilled amounts; it makes no profit, revenue or cash-recognition claim.
+
+The source-fed reserve calculation reads `rateBasis` (`per_flight_hour` or `per_cycle`) and `rate` (a non-negative decimal string) from pinned `maintenance_reserve` records. It multiplies the matching pinned technical `hours` or `cycles` by that rate, rounds each calculation line to cents with midpoints away from zero, and then sums the rounded lines. `reserve_reimbursement` records remain separate finance lines with their own `claimId` (non-empty string) and `status` (`claimed`, `approved` or `paid`); billed, collected, underbilled, overdue and reimbursable remain separate values. Each calculated reserve line cites both the technical utilization record and the finance rate record by `(sourceId, recordId, recordVersion)`. A missing or non-available required source blocks the draft rather than treating its value as zero.
 
 ## Signed fixture cases
 

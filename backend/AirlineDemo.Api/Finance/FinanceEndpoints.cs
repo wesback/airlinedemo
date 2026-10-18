@@ -4,6 +4,7 @@ using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Obligations;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
+using AirlineDemo.Api.SourceSystems;
 
 namespace AirlineDemo.Api.Finance;
 
@@ -65,11 +66,18 @@ public static class FinanceEndpoints
         return app;
     }
 
-    private static IResult GetReserve(string caseId, HttpContext http, DemoSessionStore sessions, FinanceInputStore inputs)
+    private static IResult GetReserve(string caseId, HttpContext http, DemoSessionStore sessions,
+        FinanceInputStore inputs, ICaseStateStore store, SourceModeStore sourceModes)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null) return DemoAuthEndpoints.Unauthenticated();
         if (!session.User.CaseScopes.Contains(caseId)) return Results.NotFound();
+
+        var scope = TechnicalReviewPolicy.ScopeFor(store, session.User.CaseScopes, caseId);
+        if (scope is not null && store.Read(scope) is { } state
+            && state.Basis.LastOrDefault() is { } basis && ReserveCalculator.IsSourceBasisContent(basis.Content))
+            return Results.Ok(ReserveCalculator.CalculateFromPinnedSources($"RSV-{caseId}", 1, ReservePeriod,
+                caseId, basis.Content, sourceModes.ModesFor(state)));
 
         var input = inputs.Find(caseId);
         return Results.Ok(ReserveCalculator.Calculate($"RSV-{caseId}", 1, ReservePeriod, input?.Usage, input?.Rates));
