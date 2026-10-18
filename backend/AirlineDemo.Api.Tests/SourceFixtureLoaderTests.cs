@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.SourceSystems;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -270,6 +271,96 @@ public sealed class SourceFixtureLoaderTests
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.json")));
         return document.RootElement.GetProperty("records").EnumerateArray().Select(record => record.Clone()).ToList();
+    }
+
+    // AC-004: every record in each committed signed fixture carries a JSON boolean true synthetic marker.
+    [Fact]
+    public void AC004_all_signed_fixture_records_are_synthetic()
+    {
+        foreach (var source in Sources)
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.json")));
+            foreach (var record in document.RootElement.GetProperty("records").EnumerateArray())
+            {
+                Assert.Equal(JsonValueKind.True, record.GetProperty("synthetic").ValueKind);
+            }
+        }
+    }
+
+    // AC-004: the default dependency-injection registrations are exactly the five fixture-backed source implementations,
+    // and none returns records for an unknown case.
+    [Fact]
+    public async Task AC004_default_sources_return_no_records_for_unknown_case()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        var services = factory.Services;
+
+        await AssertUnknownCaseAsync<TechnicalPayload, TechnicalSource>(services);
+        await AssertUnknownCaseAsync<MaintenancePayload, MaintenanceSource>(services);
+        await AssertUnknownCaseAsync<FinancePayload, FinanceSource>(services);
+        await AssertUnknownCaseAsync<RecordsPayload, RecordsSource>(services);
+        await AssertUnknownCaseAsync<ContractsPayload, ContractsSource>(services);
+    }
+
+    // AC-004: each CoreManifest and committed sidecar describes the exact fixture bytes and record count.
+    [Fact]
+    public void AC004_default_di_manifests_match_all_signed_fixture_sets()
+    {
+        var coreManifests = new Dictionary<string, SourceFixtureManifest>
+        {
+            ["technical"] = TechnicalSource.CoreManifest,
+            ["maintenance"] = MaintenanceSource.CoreManifest,
+            ["finance"] = FinanceSource.CoreManifest,
+            ["records"] = RecordsSource.CoreManifest,
+            ["contracts"] = ContractsSource.CoreManifest,
+        };
+
+        foreach (var source in Sources)
+        {
+            var fixtureBytes = File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.json"));
+            using var fixture = JsonDocument.Parse(fixtureBytes);
+            var recordCount = fixture.RootElement.GetProperty("records").GetArrayLength();
+            var digest = Convert.ToHexString(SHA256.HashData(fixtureBytes)).ToLowerInvariant();
+
+            AssertManifestMetadata(coreManifests[source], source, digest, recordCount);
+
+            using var sidecar = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.manifest.json")));
+            AssertManifestMetadata(sidecar.RootElement, source, digest, recordCount);
+        }
+    }
+
+    private static async Task AssertUnknownCaseAsync<TPayload, TSource>(IServiceProvider services)
+        where TPayload : class
+        where TSource : class, ISourceSystem<TPayload>
+    {
+        var registeredSources = services.GetServices<ISourceSystem<TPayload>>();
+        var source = Assert.IsType<TSource>(Assert.Single(registeredSources));
+        var result = Assert.IsType<SourceReadSucceeded<IReadOnlyList<SourceRecord<TPayload>>>>(
+            await source.ListAsync("case-unknown"));
+
+        Assert.Empty(result.Value);
+    }
+
+    private static void AssertManifestMetadata(
+        SourceFixtureManifest manifest,
+        string source,
+        string digest,
+        int recordCount)
+    {
+        Assert.Equal("1", manifest.SchemaVersion);
+        Assert.Equal("2026.10.1", manifest.SourceFixtureVersion);
+        Assert.Equal("2026-10-01", manifest.ScenarioDate);
+        Assert.Equal(digest, manifest.Sha256);
+        Assert.Equal(recordCount, manifest.RecordCounts[source]);
+    }
+
+    private static void AssertManifestMetadata(JsonElement manifest, string source, string digest, int recordCount)
+    {
+        Assert.Equal("1", manifest.GetProperty("schemaVersion").GetString());
+        Assert.Equal("2026.10.1", manifest.GetProperty("sourceFixtureVersion").GetString());
+        Assert.Equal("2026-10-01", manifest.GetProperty("scenarioDate").GetString());
+        Assert.Equal(digest, manifest.GetProperty("sha256").GetString());
+        Assert.Equal(recordCount, manifest.GetProperty("recordCounts").GetProperty(source).GetInt32());
     }
 
     // AC-004: the core case and Cases A, B and C each have records in all five sources, with the scenario each case exists to show.
