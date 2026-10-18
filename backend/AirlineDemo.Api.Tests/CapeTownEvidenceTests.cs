@@ -116,9 +116,9 @@ public sealed class CapeTownEvidenceTests
     }
 
     [Fact]
-    public void PublicAssessmentCannotDisableCapeTownEvidenceReliance()
+    public void PublicAssessmentRelianceComesFromAcceptedCapeTownFlag()
     {
-        foreach (var relianceField in new[] { "", ",\"reliesOnCapeTownEvidence\":false" })
+        foreach (var relianceField in new[] { "", ",\"reliesOnCapeTownEvidence\":false", ",\"reliesOnCapeTownEvidence\":true" })
         {
             var submissionJson =
                 $$"""{"kind":"MissingRequirement","value":"return package","component":"Engine","serialNumber":"ENG-1","witnesses":[],"relatedRequirementId":"REQ-CAPE-TOWN"{{relianceField}}}""";
@@ -127,13 +127,37 @@ public sealed class CapeTownEvidenceTests
             Assert.NotNull(submission);
             var mapped = AssessmentEndpoints.ToClaim(submission, ClaimKind.MissingRequirement, []);
 
-            Assert.True(mapped.ReliesOnCapeTownEvidence);
+            Assert.False(mapped.ReliesOnCapeTownEvidence);
             Assert.Equal(RequirementId, mapped.RelatedRequirementId);
-            Assert.Throws<InvalidDataException>(() => Assess(
-                null,
+            using var matching = Assess(
+                new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"),
                 mapped.RelatedRequirementId,
-                reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence));
+                reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence);
+            Assert.Equal("Review", matching.Record.Outcome);
+            Assert.Equal(new CapeTownInterestEvidence("SYN-INT-CT-001", "SYN-REG-CT-001", "not_recorded", false),
+                Assert.Single(matching.Record.Claims).CapeTownEvidence!.Single());
         }
+    }
+
+    [Fact]
+    public void UnrelatedPublicClaimDoesNotRequireCapeTownFlagWhenEvidenceIsPinned()
+    {
+        var submission = new AssessmentClaimSubmission(
+            "MissingRequirement", "return package", "Engine", "ENG-1", [], "REQ-OTHER");
+        var mapped = AssessmentEndpoints.ToClaim(submission, ClaimKind.MissingRequirement, []);
+
+        Assert.False(mapped.ReliesOnCapeTownEvidence);
+        using var unrelated = Assess(
+            null,
+            mapped.RelatedRequirementId,
+            "The return package mentions Cape Town incidentally.",
+            "The return package mentions Cape Town incidentally.",
+            reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence);
+        Assert.Equal("Request", unrelated.Record.Outcome);
+        Assert.Equal("single supported missing requirement on current basis", unrelated.Record.Reason);
+        Assert.Equal("REQ-OTHER", Assert.Single(unrelated.Record.Claims).RelatedRequirementId);
+        Assert.Null(unrelated.Record.Claims.Single().CapeTownEvidence);
+        Assert.Single(unrelated.Inbox.Requests);
     }
 
     [Fact]

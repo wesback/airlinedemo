@@ -180,7 +180,7 @@ public static class AssessmentEndpoints
         ClaimKind kind,
         IReadOnlyList<DocumentWitness> witnesses) =>
         new(kind, submitted.Value!, submitted.Component!, submitted.SerialNumber!, witnesses,
-            submitted.RelatedRequirementId, submitted.Regime, ReliesOnCapeTownEvidence: true);
+            submitted.RelatedRequirementId, submitted.Regime);
 
     private static object View(string id, AssessmentRecord record) => new
     {
