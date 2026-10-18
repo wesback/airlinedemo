@@ -1,10 +1,16 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using AirlineDemo.Api.Auth;
 using DemoCaseGenerator;
 
 namespace AirlineDemo.Api.Tests;
 
+[CollectionDefinition("Rehearsal capture globals", DisableParallelization = true)]
+public sealed class RehearsalCaptureCollection { }
+
+[Collection("Rehearsal capture globals")]
 public sealed class RehearsalCaptureTests
 {
     private static readonly string[] Names = ["repositoryRevision", "fixtureConfigurationVersion", "deploymentId", "traceReference", "decision",
@@ -111,7 +117,113 @@ public sealed class RehearsalCaptureTests
         }
         var injected = new FakeReader(new(HttpStatusCode.OK, System.Text.Encoding.UTF8.GetBytes(raw.Replace("\"steps\":[", "\"prompt\":\"raw-sentinel\",\"steps\":[", StringComparison.Ordinal))));
         await Assert.ThrowsAsync<InvalidDataException>(() => Capture(injected));
+        var mismatchedIdentity = JsonNode.Parse(raw)!; mismatchedIdentity["caseId"] = "case-b";
+        await Assert.ThrowsAsync<InvalidDataException>(() => Capture(new FakeReader(new(HttpStatusCode.OK,
+            System.Text.Encoding.UTF8.GetBytes(mismatchedIdentity.ToJsonString())))));
+        var invalidSteps = JsonNode.Parse(raw)!; invalidSteps["steps"] = new JsonObject();
+        await Assert.ThrowsAsync<InvalidDataException>(() => Capture(new FakeReader(new(HttpStatusCode.OK,
+            System.Text.Encoding.UTF8.GetBytes(invalidSteps.ToJsonString())))));
+        var outOfOrder = JsonNode.Parse(raw)!; outOfOrder["steps"]![1]!["sequence"] = 3;
+        await Assert.ThrowsAsync<InvalidDataException>(() => Capture(new FakeReader(new(HttpStatusCode.OK,
+            System.Text.Encoding.UTF8.GetBytes(outOfOrder.ToJsonString())))));
+        var invalidStep = JsonNode.Parse(raw)!; invalidStep["steps"]![0]!["unlisted"] = "value";
+        await Assert.ThrowsAsync<InvalidDataException>(() => Capture(new FakeReader(new(HttpStatusCode.OK,
+            System.Text.Encoding.UTF8.GetBytes(invalidStep.ToJsonString())))));
         await Assert.ThrowsAsync<HttpRequestException>(() => Capture(new FakeReader(new(HttpStatusCode.Unauthorized, []))));
+    }
+
+    [Fact]
+    public async Task GeneratorDispatchesCaptureCommandsAndOnlyWritesObservedResults()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "rehearsal-command-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var originalInput = Console.In; var originalOutput = Console.Out; var originalError = Console.Error;
+        var environmentNames = new[]
+        {
+            "REHEARSAL_TIMING_OUTPUT", "REHEARSAL_TRACE_OUTPUT", "REHEARSAL_BASE_URL",
+            "REHEARSAL_SESSION_COOKIE", "REHEARSAL_CASE_ID", "REHEARSAL_RUN_ID", "REHEARSAL_INVESTIGATION_ID",
+        };
+        var originalEnvironment = environmentNames.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+        var output = new StringWriter(); var error = new StringWriter();
+        try
+        {
+            Console.SetOut(output); Console.SetError(error);
+
+            var missingMeasurement = Path.Combine(root, "missing-measurement.json");
+            Environment.SetEnvironmentVariable("REHEARSAL_TIMING_OUTPUT", missingMeasurement);
+            Console.SetIn(new StringReader(""));
+            Assert.Equal(1, await Generator.Main(["capture-timing"]));
+            Assert.False(File.Exists(missingMeasurement));
+            Assert.Equal("capture failed: Timing measurement was not provided." + Environment.NewLine, error.ToString());
+
+            var timingPath = Path.Combine(root, "timing.json");
+            Environment.SetEnvironmentVariable("REHEARSAL_TIMING_OUTPUT", timingPath);
+            Console.SetIn(new StringReader("\n\n\n\n"));
+            Assert.Equal(0, await Generator.Main(["capture-timing"]));
+            Assert.True(File.Exists(timingPath));
+            using (var timing = JsonDocument.Parse(File.ReadAllText(timingPath)))
+            {
+                Assert.Equal(new[]
+                {
+                    "outcomeStartedAtUtc", "outcomeEndedAtUtc", "outcomeDurationSeconds", "liveSegmentStartedAtUtc",
+                    "liveSegmentEndedAtUtc", "liveSegmentDurationSeconds", "fallbackOutcome",
+                }, timing.RootElement.EnumerateObject().Select(property => property.Name));
+                Assert.Equal("not-used", timing.RootElement.GetProperty("fallbackOutcome").GetString());
+                Assert.True(timing.RootElement.GetProperty("outcomeDurationSeconds").GetDouble() >= 0);
+                Assert.True(timing.RootElement.GetProperty("liveSegmentDurationSeconds").GetDouble() >= 0);
+            }
+            Assert.Contains("Observed timing recorded; both live timing limits passed.", output.ToString(), StringComparison.Ordinal);
+
+            const string storedTrace = """{"caseId":"case-a","runId":"run-1","investigationId":"inv-1","basisVersion":3,"modelDeploymentName":"dep","apiVersion":"v1","region":"r","contentFilterSetting":"on","decision":"approve","actorToken":"opaque","outcome":"done","steps":[{"sequence":1,"toolName":"lookup","documentId":"doc-1","pageNumber":1,"citationCheckOutcome":"verified","correctionCode":"None","policyHandover":"None"}]}""";
+            var tracePath = Path.Combine(root, "trace.json");
+            Environment.SetEnvironmentVariable("REHEARSAL_TRACE_OUTPUT", tracePath);
+            Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", "http://127.0.0.1:1");
+            Environment.SetEnvironmentVariable("REHEARSAL_SESSION_COOKIE", "session");
+            Environment.SetEnvironmentVariable("REHEARSAL_CASE_ID", "case-a");
+            Environment.SetEnvironmentVariable("REHEARSAL_RUN_ID", "run-1");
+            Environment.SetEnvironmentVariable("REHEARSAL_INVESTIGATION_ID", "inv-1");
+            using (var server = new StoredTraceServer(storedTrace))
+            {
+                Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", server.BaseUrl);
+                Assert.Equal(0, await Generator.Main(["capture-trace"]));
+                await server.AssertRequested();
+            }
+            const string expectedTrace = """{"caseId":"case-a","runId":"run-1","investigationId":"inv-1","basisVersion":3,"modelDeploymentName":"dep","apiVersion":"v1","region":"r","contentFilterSetting":"on","decision":"approve","outcome":"done","steps":[{"sequence":1,"toolName":"lookup","documentId":"doc-1","pageNumber":1,"citationCheckOutcome":"verified","correctionCode":"None","policyHandover":"None"}]}""";
+            Assert.Equal(expectedTrace, File.ReadAllText(tracePath));
+
+            var absentPath = Path.Combine(root, "absent-trace.json");
+            Environment.SetEnvironmentVariable("REHEARSAL_TRACE_OUTPUT", absentPath);
+            error.GetStringBuilder().Clear();
+            using (var server = new MissingTraceServer())
+            {
+                Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", server.BaseUrl);
+                Assert.Equal(1, await Generator.Main(["capture-trace"]));
+                await server.AssertRequested();
+            }
+            Assert.False(File.Exists(absentPath));
+            Assert.Equal("capture failed: Trace was absent or outside the session's case scope; no capture was written." + Environment.NewLine,
+                error.ToString());
+
+            var insecurePath = Path.Combine(root, "insecure-trace.json");
+            Environment.SetEnvironmentVariable("REHEARSAL_TRACE_OUTPUT", insecurePath);
+            Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", "http://example.invalid");
+            Assert.Equal(1, await Generator.Main(["capture-trace"]));
+            Assert.False(File.Exists(insecurePath));
+
+            Environment.SetEnvironmentVariable("REHEARSAL_TRACE_OUTPUT", tracePath);
+            Assert.Equal(1, await Generator.Main(["capture-trace"]));
+            Assert.Contains($"Refusing to overwrite existing capture: {tracePath}", error.ToString(), StringComparison.Ordinal);
+
+            Assert.Equal(2, await Generator.Main([]));
+            Assert.EndsWith("usage: DemoCaseGenerator <output-dir> | evaluation <output-dir> <version> | capture-timing | capture-trace" + Environment.NewLine,
+                error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetIn(originalInput); Console.SetOut(originalOutput); Console.SetError(originalError);
+            foreach (var (name, value) in originalEnvironment) Environment.SetEnvironmentVariable(name, value);
+            Directory.Delete(root, true);
+        }
     }
 
     [Fact]
@@ -281,6 +393,41 @@ public sealed class RehearsalCaptureTests
             Assert.Equal("GET /api/cases/case-a/dashboard/traces/run-1/inv-1 HTTP/1.1", request);
             var response = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             await stream.WriteAsync(response, TestContext.Current.CancellationToken);
+        }
+
+        public Task AssertRequested() => _request;
+        public void Dispose() => _listener.Stop();
+    }
+    private sealed class StoredTraceServer : IDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener _listener = new(System.Net.IPAddress.Loopback, 0);
+        private readonly Task _request;
+        private readonly string _content;
+        public string BaseUrl { get; }
+
+        public StoredTraceServer(string content)
+        {
+            _content = content;
+            _listener.Start();
+            var endpoint = (System.Net.IPEndPoint)_listener.LocalEndpoint;
+            BaseUrl = $"http://127.0.0.1:{endpoint.Port}";
+            _request = Respond();
+        }
+
+        private async Task Respond()
+        {
+            using var client = await _listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+            await using var stream = client.GetStream();
+            using var reader = new StreamReader(stream, leaveOpen: true);
+            var lines = new List<string>();
+            string? line;
+            while (!string.IsNullOrEmpty(line = await reader.ReadLineAsync(TestContext.Current.CancellationToken))) lines.Add(line);
+            Assert.Equal("GET /api/cases/case-a/dashboard/traces/run-1/inv-1 HTTP/1.1", lines[0]);
+            Assert.Contains($"Cookie: {DemoAuthEndpoints.CookieName}=session", lines, StringComparer.OrdinalIgnoreCase);
+            var body = System.Text.Encoding.UTF8.GetBytes(_content);
+            var header = System.Text.Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(header, TestContext.Current.CancellationToken);
+            await stream.WriteAsync(body, TestContext.Current.CancellationToken);
         }
 
         public Task AssertRequested() => _request;
