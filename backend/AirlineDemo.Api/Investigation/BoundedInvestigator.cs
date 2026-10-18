@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.SourceSystems;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -57,7 +58,9 @@ public sealed class BoundedInvestigator(
     string evidenceVersion,
     IChatClient modelClient,
     IInvestigationLimits? limits = null,
-    InvestigationTelemetry? telemetry = null)
+    InvestigationTelemetry? telemetry = null,
+    string? role = null,
+    InvestigationSourceSystems? sourceSystems = null)
 {
     public const string UntrustedBegin = "<<<UNTRUSTED_DOCUMENT>>>";
     public const string UntrustedEnd = "<<<END_UNTRUSTED_DOCUMENT>>>";
@@ -81,7 +84,7 @@ public sealed class BoundedInvestigator(
     {
         ValidateDocuments(documents);
 
-        // Every document text that reaches the model, including tool results, is added here before the next call is gated.
+        // Evidence passed to the model is authorized before each call; all model inputs, including tool results, are token-estimated.
         var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var evidence = new List<string>(documents);
@@ -91,8 +94,15 @@ public sealed class BoundedInvestigator(
             name => traceRecorder?.RecordToolCall(knownTools.Contains(name) ? name : InvestigationTraceRecorder.UnknownTool));
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
         var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
-        foreach (var function in tools.Functions) knownTools.Add(function.Name);
-        var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
+        var functions = tools.Functions.AsEnumerable();
+        if (sourceSystems is not null)
+        {
+            functions = functions.Concat(new SourceReadTools(caseId, role ?? string.Empty, sourceSystems, limits).Functions);
+        }
+
+        var declaredTools = functions.ToArray();
+        foreach (var function in declaredTools) knownTools.Add(function.Name);
+        var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: declaredTools);
 
         InvestigationResult? result = null;
         var outcome = "escalated";

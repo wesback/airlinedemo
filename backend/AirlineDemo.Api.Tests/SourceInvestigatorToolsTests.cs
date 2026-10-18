@@ -1,0 +1,273 @@
+using System.Text.Json;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.SourceSystems;
+using Microsoft.Extensions.AI;
+
+namespace AirlineDemo.Api.Tests;
+
+public sealed class SourceInvestigatorToolsTests
+{
+    private const string CaseId = "bound-case";
+    private const string Region = "swedencentral";
+    private const string Evidence = "SYNTHETIC EVIDENCE: Return readiness is pending reserve approval.";
+    private const string Claims =
+        """[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"return-status","page":1,"quote":"Return readiness is pending reserve approval."}]}]""";
+    private const string ApprovedJson =
+        """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""";
+    private static readonly string[] SourceIds = ["technical", "maintenance", "finance", "records", "contracts"];
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private sealed class CountingLimits : IInvestigationLimits
+    {
+        public int Tools { get; private set; }
+        public int Models { get; private set; }
+        public List<int> InputEstimates { get; } = [];
+
+        public ValueTask BeforeToolCallAsync(CancellationToken cancellationToken)
+        {
+            Tools++;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask BeforeModelCallAsync(CancellationToken cancellationToken)
+        {
+            Models++;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask BeforeModelCallAsync(int estimatedInputTokens, CancellationToken cancellationToken)
+        {
+            Models++;
+            InputEstimates.Add(estimatedInputTokens);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class CountingSource<TPayload>(SourceRecord<TPayload> record)
+        : ISourceSystem<TPayload>, ICountingSource where TPayload : class
+    {
+        public int ListCalls { get; private set; }
+        public int GetCalls { get; private set; }
+        public string? LastListCase { get; private set; }
+        public string? LastGetCase { get; private set; }
+        public string? LastRecordId { get; private set; }
+        public SourceRecord<TPayload> Record { get; } = record;
+        object ICountingSource.RecordValue => Record;
+
+        public Task<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>> ListAsync(
+            string caseId, CancellationToken cancellationToken = default, int? maxRecords = null)
+        {
+            ListCalls++;
+            LastListCase = caseId;
+            IReadOnlyList<SourceRecord<TPayload>> result = record.CaseId == caseId ? [record] : [];
+            return Task.FromResult<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>>(
+                new SourceReadSucceeded<IReadOnlyList<SourceRecord<TPayload>>>(result));
+        }
+
+        public Task<SourceReadResult<SourceRecord<TPayload>>> GetAsync(
+            string caseId, string recordId, CancellationToken cancellationToken = default)
+        {
+            GetCalls++;
+            LastGetCase = caseId;
+            LastRecordId = recordId;
+            SourceReadResult<SourceRecord<TPayload>> result = record.CaseId == caseId && record.RecordId == recordId
+                ? new SourceReadSucceeded<SourceRecord<TPayload>>(record)
+                : new SourceRecordNotFound<SourceRecord<TPayload>>(recordId);
+            return Task.FromResult(result);
+        }
+    }
+
+    private interface ICountingSource
+    {
+        int ListCalls { get; }
+        int GetCalls { get; }
+        string? LastListCase { get; }
+        string? LastGetCase { get; }
+        string? LastRecordId { get; }
+        object RecordValue { get; }
+    }
+
+    private sealed record Sources(
+        CountingSource<TechnicalPayload> Technical,
+        CountingSource<MaintenancePayload> Maintenance,
+        CountingSource<FinancePayload> Finance,
+        CountingSource<RecordsPayload> Records,
+        CountingSource<ContractsPayload> Contracts)
+    {
+        public InvestigationSourceSystems Ports => new(Technical, Maintenance, Finance, Records, Contracts);
+    }
+
+    private sealed class CaseSource : ICaseReadSource
+    {
+        public IReadOnlyList<string> GetInventory(string caseId) => ["return-status"];
+        public string? GetApprovedRequirements(string caseId) => null;
+        public string? GetSourcePage(string caseId, string documentId, int page) => page == 1 ? "Return readiness is pending reserve approval." : null;
+        public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) => [];
+        public string? GetProcessingStatus(string caseId) => null;
+    }
+
+    private sealed class ScriptedChatClient(Func<IList<ChatMessage>, ChatOptions?, ChatResponse> respond) : IChatClient
+    {
+        public List<IList<ChatMessage>> Requests { get; } = [];
+        public List<ChatOptions?> Options { get; } = [];
+        public ChatClientMetadata Metadata { get; } = new("source-tools-test");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var request = messages.ToList();
+            Requests.Add(request);
+            Options.Add(options);
+            return Task.FromResult(respond(request, options));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private static ApprovedModelManifest Approved() => ApprovedModelManifest.Parse(ApprovedJson);
+    private static ChatResponse Reply(string text) => new(new ChatMessage(ChatRole.Assistant, text));
+
+    private static Sources CreateSources(string payload = "synthetic source value", string caseId = CaseId) => new(
+        Source<TechnicalPayload>("technical", payload, caseId), Source<MaintenancePayload>("maintenance", payload, caseId),
+        Source<FinancePayload>("finance", payload, caseId), Source<RecordsPayload>("records", payload, caseId),
+        Source<ContractsPayload>("contracts", payload, caseId));
+
+    private static CountingSource<TPayload> Source<TPayload>(string sourceId, string value, string caseId)
+        where TPayload : class
+    {
+        var fields = new Dictionary<string, string> { ["value"] = value };
+        if (typeof(TPayload) == typeof(RecordsPayload))
+        {
+            fields.Add("documentId", "return-status");
+            fields.Add("documentVersion", "1");
+            fields.Add("containsPersonalData", "false");
+        }
+        object payload = typeof(TPayload) == typeof(TechnicalPayload) ? new TechnicalPayload(fields)
+            : typeof(TPayload) == typeof(MaintenancePayload) ? new MaintenancePayload(fields)
+            : typeof(TPayload) == typeof(FinancePayload) ? new FinancePayload(fields)
+            : typeof(TPayload) == typeof(RecordsPayload) ? new RecordsPayload(fields)
+            : typeof(TPayload) == typeof(ContractsPayload) ? new ContractsPayload(fields)
+            : throw new InvalidOperationException($"Unknown source payload {typeof(TPayload).Name}.");
+        var record = new SourceRecord<TPayload>
+        {
+            SourceId = sourceId, RecordId = "record-1", RecordVersion = 1, AsOf = new DateOnly(2026, 10, 1),
+            CaseId = caseId, Kind = "test", Payload = (TPayload)payload,
+        };
+        return new CountingSource<TPayload>(record);
+    }
+
+    private static string Expected<TPayload>(TPayload value) =>
+        $"{BoundedInvestigator.UntrustedBegin}\n{JsonSerializer.Serialize(value, JsonOptions)}\n{BoundedInvestigator.UntrustedEnd}";
+
+    [Fact]
+    public async Task SourceToolAllowlistHasOnlyTwoCaseBoundReadOperations()
+    {
+        var sources = CreateSources();
+        var model = new ScriptedChatClient((_, _) => Reply(Claims));
+        var investigator = new BoundedInvestigator(CaseId, new CaseSource(), Approved(),
+            SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model,
+            role: "technical-reviewer", sourceSystems: sources.Ports);
+
+        await investigator.InvestigateAsync([Evidence]);
+
+        var tools = model.Options[0]!.Tools!;
+        var sourceTools = tools.Where(tool => tool.Name is SourceReadTools.ListTool or SourceReadTools.GetTool)
+            .OfType<AIFunctionDeclaration>().ToDictionary(tool => tool.Name, tool => JsonDocument.Parse(tool.JsonSchema.GetRawText()).RootElement);
+        Assert.Equal(new[] { SourceReadTools.GetTool, SourceReadTools.ListTool }, sourceTools.Keys.Order(StringComparer.Ordinal).ToArray());
+        var listSchema = sourceTools[SourceReadTools.ListTool];
+        var getSchema = sourceTools[SourceReadTools.GetTool];
+        Assert.Equal(["sourceId"], listSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(["recordId", "sourceId"], getSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public async Task SourceToolsEnforceRoleAndBoundCaseForEveryMatrixPair()
+    {
+        var roles = new[] { "technical-reviewer", "finance-reviewer", "legal-reviewer", "presenter", "executive", "unknown" };
+        foreach (var role in roles)
+        foreach (var sourceId in SourceIds)
+        {
+            var sources = CreateSources();
+            var limits = new CountingLimits();
+            var tools = new SourceReadTools(CaseId, role, sources.Ports, limits);
+            var list = tools.Functions.Single(function => function.Name == SourceReadTools.ListTool);
+            var get = tools.Functions.Single(function => function.Name == SourceReadTools.GetTool);
+
+            var listResult = (await list.InvokeAsync(new AIFunctionArguments { ["sourceId"] = sourceId }))?.ToString();
+            var getResult = (await get.InvokeAsync(new AIFunctionArguments
+            {
+                ["sourceId"] = sourceId,
+                ["recordId"] = "record-1",
+            }))?.ToString();
+
+            var allowed = role switch
+            {
+                "technical-reviewer" => sourceId is "technical" or "maintenance" or "records",
+                "finance-reviewer" => sourceId is "technical" or "finance",
+                "legal-reviewer" => sourceId is "contracts" or "records",
+                _ => false,
+            };
+            ICountingSource selected = sourceId switch
+            {
+                "technical" => sources.Technical,
+                "maintenance" => sources.Maintenance,
+                "finance" => sources.Finance,
+                "records" => sources.Records,
+                "contracts" => sources.Contracts,
+                _ => throw new InvalidOperationException("Unexpected source identifier."),
+            };
+
+            if (allowed)
+            {
+                Assert.Equal(Expected(new[] { selected.RecordValue }), listResult);
+                Assert.Equal(Expected(selected.RecordValue), getResult);
+                Assert.Equal((CaseId, CaseId, "record-1"), (selected.LastListCase, selected.LastGetCase, selected.LastRecordId));
+            }
+            else
+            {
+                Assert.Equal("""{"error":"forbidden"}""", listResult);
+                Assert.Equal("""{"error":"forbidden"}""", getResult);
+                Assert.Equal((0, 0), (selected.ListCalls, selected.GetCalls));
+            }
+
+            Assert.Equal(2, limits.Tools);
+            Assert.Equal(0, sources.Technical.ListCalls + sources.Maintenance.ListCalls + sources.Finance.ListCalls
+                + sources.Records.ListCalls + sources.Contracts.ListCalls - (allowed ? 1 : 0));
+            Assert.Equal(0, sources.Technical.GetCalls + sources.Maintenance.GetCalls + sources.Finance.GetCalls
+                + sources.Records.GetCalls + sources.Contracts.GetCalls - (allowed ? 1 : 0));
+        }
+    }
+
+    [Fact]
+    public async Task SourceCallsUseExistingInvestigationBudgets()
+    {
+        var longValue = "source payload " + "x".PadRight(3000, 'x');
+        var sources = CreateSources(longValue);
+        var limits = new CountingLimits();
+        var deniedTools = new SourceReadTools(CaseId, "presenter", sources.Ports, limits);
+        var denied = await deniedTools.Functions.Single(function => function.Name == SourceReadTools.ListTool)
+            .InvokeAsync(new AIFunctionArguments { ["sourceId"] = "technical" });
+        Assert.Equal("""{"error":"forbidden"}""", denied?.ToString());
+        Assert.Equal(1, limits.Tools);
+        Assert.Equal(0, sources.Technical.ListCalls);
+
+        var model = new ScriptedChatClient((messages, _) =>
+            messages.Any(message => message.Contents.OfType<FunctionResultContent>().Any())
+                ? Reply(Claims)
+                : new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("source-list", SourceReadTools.ListTool, new Dictionary<string, object?> { ["sourceId"] = "technical" })])));
+        var investigator = new BoundedInvestigator(CaseId, new CaseSource(), Approved(),
+            SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model, limits,
+            role: "technical-reviewer", sourceSystems: sources.Ports);
+
+        await investigator.InvestigateAsync([Evidence]);
+
+        Assert.Equal(2, limits.Tools);
+        Assert.Equal(2, limits.Models);
+        Assert.Equal((1, 0), (sources.Technical.ListCalls, sources.Technical.GetCalls));
+        Assert.True(limits.InputEstimates[1] > limits.InputEstimates[0] + 1000);
+    }
+}
