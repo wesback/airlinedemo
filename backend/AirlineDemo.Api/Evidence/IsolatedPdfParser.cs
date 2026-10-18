@@ -477,11 +477,11 @@ public static class IsolatedPdfParser
         foreach (var page in objects.Values)
         {
             var dictionary = content.AsSpan(page.BodyStart, page.DictionaryEnd - page.BodyStart);
-            var type = FindPdfToken(dictionary, "/Type"u8, 0);
+            var type = FindPdfDictionaryToken(dictionary, "/Type"u8);
             if (type < 0 || !HasNameValue(dictionary, type + "/Type"u8.Length, "/Page"u8)) continue;
-            var contents = FindPdfToken(dictionary, "/Contents"u8, 0);
+            var contents = FindPdfDictionaryToken(dictionary, "/Contents"u8);
             if (contents < 0) continue;
-            var valueStart = SkipWhitespace(dictionary, contents + "/Contents"u8.Length);
+            var valueStart = SkipPdfWhitespaceAndComments(dictionary, contents + "/Contents"u8.Length);
             if (valueStart >= dictionary.Length) return Retryable(UnreadableDocumentReason);
             List<(int Number, int Generation)> references;
             if (dictionary[valueStart] == '[')
@@ -621,6 +621,9 @@ public static class IsolatedPdfParser
 
     private static int FindPdfDictionaryToken(ReadOnlySpan<byte> source, ReadOnlySpan<byte> token)
     {
+        var dictionaryDepth = 0;
+        var arrayDepth = 0;
+        var expectKey = false;
         for (var position = 0; position < source.Length;)
         {
             if (source[position] == '%')
@@ -632,6 +635,7 @@ public static class IsolatedPdfParser
             if (source[position] == '(')
             {
                 position = SkipLiteralString(source, position);
+                if (dictionaryDepth == 1 && arrayDepth == 0 && !expectKey) expectKey = true;
                 continue;
             }
 
@@ -639,6 +643,8 @@ public static class IsolatedPdfParser
             {
                 if (position + 1 < source.Length && source[position + 1] == '<')
                 {
+                    dictionaryDepth++;
+                    if (dictionaryDepth == 1) expectKey = true;
                     position += 2;
                 }
                 else
@@ -646,18 +652,62 @@ public static class IsolatedPdfParser
                     position++;
                     while (position < source.Length && source[position] != '>') position++;
                     if (position < source.Length) position++;
+                    if (dictionaryDepth == 1 && arrayDepth == 0 && !expectKey) expectKey = true;
                 }
 
                 continue;
             }
 
-            var after = position + token.Length;
-            if (after <= source.Length
-                && source.Slice(position, token.Length).SequenceEqual(token)
-                && (position == 0 || IsPdfDelimiterOrWhitespace(source[position - 1]))
-                && (after == source.Length || IsPdfDelimiterOrWhitespace(source[after])))
+            if (source[position] == '>' && position + 1 < source.Length && source[position + 1] == '>')
             {
-                return position;
+                dictionaryDepth--;
+                if (dictionaryDepth == 1 && arrayDepth == 0) expectKey = true;
+                position += 2;
+                continue;
+            }
+
+            if (source[position] == '[')
+            {
+                arrayDepth++;
+                position++;
+                continue;
+            }
+
+            if (source[position] == ']')
+            {
+                arrayDepth--;
+                if (dictionaryDepth == 1 && arrayDepth == 0) expectKey = true;
+                position++;
+                continue;
+            }
+
+            if (source[position] == '/')
+            {
+                var after = position + token.Length;
+                if (dictionaryDepth == 1
+                    && arrayDepth == 0
+                    && expectKey
+                    && after <= source.Length
+                    && source.Slice(position, token.Length).SequenceEqual(token)
+                    && (after == source.Length || IsPdfDelimiterOrWhitespace(source[after])))
+                {
+                    return position;
+                }
+
+                if (dictionaryDepth == 1 && arrayDepth == 0)
+                {
+                    expectKey = !expectKey;
+                }
+
+                position++;
+                while (position < source.Length && !IsPdfDelimiterOrWhitespace(source[position])) position++;
+                continue;
+            }
+
+            if (dictionaryDepth == 1 && arrayDepth == 0 && !expectKey
+                && !IsPdfWhitespace(source[position]))
+            {
+                expectKey = true;
             }
 
             position++;
@@ -1099,7 +1149,7 @@ public static class IsolatedPdfParser
 
     private static bool HasNameValue(ReadOnlySpan<byte> source, int start, ReadOnlySpan<byte> value)
     {
-        start = SkipWhitespace(source, start);
+        start = SkipPdfWhitespaceAndComments(source, start);
         return start + value.Length <= source.Length
             && source.Slice(start, value.Length).SequenceEqual(value)
             && (start + value.Length == source.Length || IsPdfDelimiterOrWhitespace(source[start + value.Length]));

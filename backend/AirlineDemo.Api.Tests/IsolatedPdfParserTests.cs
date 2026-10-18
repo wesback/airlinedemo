@@ -70,8 +70,15 @@ public class IsolatedPdfParserTests
         bool indirectContentsArray = false,
         string streamDictionaryEntries = "",
         bool indirectStreamLength = false,
-        string streamDictionaryPrefix = "")
+        string streamDictionaryPrefix = "",
+        string pageDictionaryPrefix = "",
+        bool commentContentsWithHarmlessStream = false)
     {
+        if (commentContentsWithHarmlessStream && (indirectContentsArray || indirectStreamLength))
+        {
+            throw new ArgumentException("The harmless commented stream is supported only for direct contents and lengths.");
+        }
+
         using var pdf = new MemoryStream();
         var offsets = new List<long>();
         void Object(string header)
@@ -86,13 +93,17 @@ public class IsolatedPdfParserTests
         var lengthId = arrayId + 1;
         var contentReference = indirectContentsArray ? arrayId : streamId;
         var streamLength = indirectStreamLength ? $"{lengthId} 0 R" : streamContent.Length.ToString();
+        var harmlessStreamId = streamId + 1;
 
         Write(pdf, "%PDF-1.4\n");
         Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
         Object($"2 0 obj << /Type /Pages /Kids [{string.Join(' ', pageIds.Select(id => $"{id} 0 R"))}] /Count {pageCount} >> endobj\n");
         foreach (var pageId in pageIds)
         {
-            Object($"{pageId} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentReference} 0 R >> endobj\n");
+            var fakeContentsEntry = commentContentsWithHarmlessStream
+                ? $"% /Contents {harmlessStreamId} 0 R\n"
+                : string.Empty;
+            Object($"{pageId} 0 obj << {pageDictionaryPrefix}{fakeContentsEntry}/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentReference} 0 R >> endobj\n");
         }
 
         if (indirectContentsArray)
@@ -103,6 +114,11 @@ public class IsolatedPdfParserTests
         Object($"{streamId} 0 obj << {streamDictionaryPrefix}/Length {streamLength} {streamDictionaryEntries} >> stream\n");
         pdf.Write(streamContent);
         Write(pdf, "\nendstream endobj\n");
+        if (commentContentsWithHarmlessStream)
+        {
+            Object($"{harmlessStreamId} 0 obj << /Length 3 >> stream\nq Q\nendstream endobj\n");
+        }
+
         if (indirectStreamLength)
         {
             Object($"{lengthId} 0 obj {streamContent.Length} endobj\n");
@@ -249,6 +265,54 @@ public class IsolatedPdfParserTests
 
         var outcome = IsolatedPdfParser.Parse(
             TextContentPdf(textSource, pageCount: 1, streamDictionaryPrefix: "% /Length 1\n"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void NestedLengthEntryCannotBypassTextSourceLimitBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, streamDictionaryPrefix: "/Nested << /Length 1 >> "),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void CommentedPageTypeCannotBypassTextSourceLimitBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, pageDictionaryPrefix: "% /Type /Catalog\n"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void CommentedContentsReferenceCannotHideActualOversizedPageContent()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, commentContentsWithHarmlessStream: true),
             CountingWorker(starts));
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
