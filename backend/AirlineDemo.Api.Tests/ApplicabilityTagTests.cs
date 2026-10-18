@@ -88,6 +88,20 @@ public sealed class ApplicabilityTagTests
     }
 
     [Fact]
+    public async Task NonMissingRequirementClaimsDoNotRequireIdOrEvidenceRegime()
+    {
+        await using var h = new AssessmentEndpointsTests.Harness();
+        var presenter = await AssessmentEndpointsTests.SignInAsync(h.Client, "presenter");
+        var claim = ClaimBody();
+        claim["kind"] = "Baseline";
+
+        using var response = await PostClaim(h.Client, presenter, claim);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Empty(h.Inbox.Requests);
+    }
+
+    [Fact]
     public void MissingTagsRouteToReviewAndNameEachMissingProperty()
     {
         var cases = new (Dictionary<string, string> Fields, string Reason)[]
