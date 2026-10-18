@@ -258,6 +258,7 @@ public class IsolatedPdfParserTests
             Encoding.ASCII.GetBytes($"1 beginbfchar\n% endbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
             Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfchar\n", 10_000))}"),
             Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfrange\n", 10_000))}"),
+            Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <42> [<0041> <{oversizedTarget}>]\nendbfrange"),
         };
         var compressed = new HashSet<int> { 1, 3 };
         for (var index = 0; index < oversizedCases.Length; index++)

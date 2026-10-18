@@ -657,6 +657,7 @@ public static class IsolatedPdfParser
         const int bfrangeBlock = 2;
         var activeBlock = noBlock;
         var hexOperandIndex = 0;
+        var bfrangeArrayDestination = false;
         var blockStarts = 0;
 
         for (var position = 0; position < cmap.Length;)
@@ -693,7 +694,8 @@ public static class IsolatedPdfParser
 
                 var destinationOperand = activeBlock == bfcharBlock
                     ? hexOperandIndex % 2 == 1
-                    : activeBlock == bfrangeBlock && hexOperandIndex % 3 == 2;
+                    : activeBlock == bfrangeBlock
+                        && (bfrangeArrayDestination || hexOperandIndex == 2);
                 position++;
                 var hexDigits = 0;
                 while (position < cmap.Length && cmap[position] != '>')
@@ -708,10 +710,35 @@ public static class IsolatedPdfParser
                 }
                 if (position < cmap.Length) position++;
 
-                if (activeBlock != noBlock)
+                if (activeBlock == bfcharBlock)
                 {
                     hexOperandIndex++;
                 }
+                else if (activeBlock == bfrangeBlock && !bfrangeArrayDestination)
+                {
+                    hexOperandIndex = hexOperandIndex == 2 ? 0 : hexOperandIndex + 1;
+                }
+                continue;
+            }
+
+            if (value == '[')
+            {
+                if (activeBlock == bfrangeBlock && hexOperandIndex == 2)
+                {
+                    bfrangeArrayDestination = true;
+                }
+                position++;
+                continue;
+            }
+
+            if (value == ']')
+            {
+                if (activeBlock == bfrangeBlock && bfrangeArrayDestination)
+                {
+                    bfrangeArrayDestination = false;
+                    hexOperandIndex = 0;
+                }
+                position++;
                 continue;
             }
 
@@ -739,6 +766,7 @@ public static class IsolatedPdfParser
                 {
                     activeBlock = token.SequenceEqual("beginbfchar"u8) ? bfcharBlock : bfrangeBlock;
                     hexOperandIndex = 0;
+                    bfrangeArrayDestination = false;
                 }
             }
             else if ((activeBlock == bfcharBlock && token.SequenceEqual("endbfchar"u8))
@@ -746,6 +774,7 @@ public static class IsolatedPdfParser
             {
                 activeBlock = noBlock;
                 hexOperandIndex = 0;
+                bfrangeArrayDestination = false;
             }
         }
 
