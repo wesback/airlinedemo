@@ -1,0 +1,273 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 402,
+  "branch": "ai-sdlc/issue-402",
+  "commitSha": "420bf515598fb4573fc454e72a7b3541c4129d0d",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A content stream containing an endstream token in its data can bypass the text-source limit because the scanner truncates its measured length at that token.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 545,
+          "message": "The preflight can undercount a content stream when its data contains the token endstream. Use the declared stream length to locate the data boundary so oversized text sources are rejected before the worker starts.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ReadIndirectObjects finds the first endstream token in the raw bytes and uses its position to set StreamLength. DecodedContentStreamLength then scans only those bytes, although the PDF stream's declared /Length determines where its data ends.",
+            "failureScenario": "A valid PDF has a content stream whose declared /Length covers more than 524288 bytes, with an endstream token in the stream data before a large text-showing operation. The preflight counts only the prefix before that token, so the oversized text source can reach the worker instead of being rejected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The two new tests assert the required rejection results, empty text, and zero worker starts; the repeated-reference test also checks the one-page success case. The existing stream-filter tests are present, and the `build-and-gate` job runs `dotnet test AirlineDemo.sln`, which includes them.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new preflight undercounts filtered text sources for supported filter chains, allowing oversized or repeatedly referenced decoded text to reach the worker.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 667,
+          "message": "The text-source bound can be bypassed with a filter chain whose first filter is not FlateDecode. Count the fully decoded content length before applying the 512 KiB limit. OWASP A06:2025.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "PreflightPageContentSources calls DecodedContentStreamLength for each referenced page-content stream. When the first filter is not FlateDecode or Fl, that method counts the encoded stream length instead of the decoded text-source length.",
+            "failureScenario": "An attacker submits a PDF with a Flate-compressed text stream wrapped in ASCII85. The encoded stream can be under 512 KiB while decoding to more than 512 KiB; repeated page references are then charged only the small encoded length, so the PDF passes the intended text-source bound and can make the worker process far more repeated text than the limit allows."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 234,
+      "total": 295,
+      "percent": 79.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "covered": 234,
+          "total": 295,
+          "missed": [
+            486,
+            487,
+            488,
+            489,
+            490,
+            494,
+            495,
+            496,
+            504,
+            505,
+            537,
+            538,
+            563,
+            564,
+            565,
+            603,
+            604,
+            605,
+            606,
+            607,
+            608,
+            609,
+            610,
+            611,
+            612,
+            613,
+            614,
+            616,
+            617,
+            618,
+            619,
+            620,
+            621,
+            672,
+            673,
+            674,
+            690,
+            691,
+            692,
+            693,
+            694,
+            704,
+            705,
+            706,
+            707,
+            708,
+            710,
+            711,
+            712,
+            713,
+            714,
+            716,
+            729,
+            730,
+            731,
+            757,
+            758,
+            759,
+            788,
+            789,
+            791
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
