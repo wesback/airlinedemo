@@ -110,7 +110,10 @@ public class IsolatedPdfParserTests
     }
 
     /// <summary>A one-page PDF with a Flate stream containing the requested number of decoded whitespace bytes.</summary>
-    private static byte[] FlatePdf(int decodedBytes, string filter = "/Filter /FlateDecode")
+    private static byte[] FlatePdf(
+        int decodedBytes,
+        string filter = "/Filter /FlateDecode",
+        string dictionaryEntry = "")
     {
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
@@ -138,7 +141,7 @@ public class IsolatedPdfParserTests
         Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
         Object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
         Object("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n");
-        Object($"4 0 obj << /Length {body.Length} {filter} >> stream\n");
+        Object($"4 0 obj << /Length {body.Length} {filter}{dictionaryEntry} >> stream\n");
         pdf.Write(body);
         Write(pdf, "\nendstream endobj\n");
 
@@ -516,6 +519,50 @@ public class IsolatedPdfParserTests
         Assert.Equal(EvidenceProcessingState.Complete, outcome.State);
         Assert.Equal("accepted", outcome.Reason);
         Assert.Equal("\n", outcome.Text);
+    }
+
+    [Fact]
+    public void StreamFilterPreflightIgnoresEndobjInsideComments()
+    {
+        var workerStarts = 0;
+        var input = FlatePdf(9 * 1024 * 1024, dictionaryEntry: " /Note (x) % endobj\n");
+        Assert.True(input.Length <= EvidenceIntake.MaxDocumentBytes);
+        var outcome = IsolatedPdfParser.Parse(
+            input,
+            "comment-endobj-stream.pdf",
+            IsolatedPdfParserOptions.Default,
+            _ =>
+            {
+                workerStarts++;
+                return null;
+            });
+
+        Assert.Equal(0, workerStarts);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF stream content exceeds 8388608 decoded bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+    }
+
+    [Fact]
+    public void StreamFilterPreflightDoesNotTreatPercentInsideLiteralStringAsComment()
+    {
+        var workerStarts = 0;
+        var input = FlatePdf(9 * 1024 * 1024, dictionaryEntry: " /Note (percent % sign)");
+        Assert.True(input.Length <= EvidenceIntake.MaxDocumentBytes);
+        var outcome = IsolatedPdfParser.Parse(
+            input,
+            "literal-percent-stream.pdf",
+            IsolatedPdfParserOptions.Default,
+            _ =>
+            {
+                workerStarts++;
+                return null;
+            });
+
+        Assert.Equal(0, workerStarts);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF stream content exceeds 8388608 decoded bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
     }
 
     [Fact]

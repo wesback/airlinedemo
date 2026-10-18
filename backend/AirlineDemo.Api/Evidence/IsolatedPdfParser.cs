@@ -926,16 +926,14 @@ public static class IsolatedPdfParser
     private static int FindPdfToken(byte[] content, string token, int start)
     {
         var tokenBytes = Encoding.ASCII.GetBytes(token);
-        for (var index = start; index <= content.Length - tokenBytes.Length; index++)
+        var literalDepth = 0;
+        var index = Math.Max(start, 0);
+        while (index <= content.Length - tokenBytes.Length)
         {
-            if (content[index] == '%')
-            {
-                while (index < content.Length && content[index] is not (10 or 13)) index++;
-                continue;
-            }
+            if (SkipPdfCommentOrLiteral(content, content.Length, ref index, ref literalDepth)) continue;
 
-            if (!HasPdfTokenAt(content, tokenBytes, index)) continue;
-            return index;
+            if (HasPdfTokenAt(content, tokenBytes, index)) return index;
+            index++;
         }
 
         return -1;
@@ -944,12 +942,68 @@ public static class IsolatedPdfParser
     private static int LastIndexOfPdfToken(byte[] content, string token, int before)
     {
         var tokenBytes = Encoding.ASCII.GetBytes(token);
-        for (var index = Math.Min(before - tokenBytes.Length, content.Length - tokenBytes.Length); index >= 0; index--)
+        var limit = Math.Min(before, content.Length);
+        var literalDepth = 0;
+        var lastMatch = -1;
+        var index = 0;
+        while (index < limit)
         {
-            if (HasPdfTokenAt(content, tokenBytes, index)) return index;
+            if (SkipPdfCommentOrLiteral(content, limit, ref index, ref literalDepth)) continue;
+
+            if (index <= limit - tokenBytes.Length && HasPdfTokenAt(content, tokenBytes, index))
+            {
+                lastMatch = index;
+            }
+
+            index++;
         }
 
-        return -1;
+        return lastMatch;
+    }
+
+    private static bool SkipPdfCommentOrLiteral(
+        byte[] content,
+        int limit,
+        ref int index,
+        ref int literalDepth)
+    {
+        if (literalDepth > 0)
+        {
+            if (content[index] == '\\')
+            {
+                index++;
+                if (index < limit && content[index] == '\r'
+                    && index + 1 < limit && content[index + 1] == '\n')
+                {
+                    index++;
+                }
+
+                index++;
+            }
+            else
+            {
+                if (content[index] == '(') literalDepth++;
+                else if (content[index] == ')') literalDepth--;
+                index++;
+            }
+
+            return true;
+        }
+
+        if (content[index] == '%')
+        {
+            while (index < limit && content[index] is not (10 or 13)) index++;
+            return true;
+        }
+
+        if (content[index] == '(')
+        {
+            literalDepth = 1;
+            index++;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool HasPdfTokenAt(byte[] content, byte[] token, int index)
