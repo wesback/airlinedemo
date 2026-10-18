@@ -40,6 +40,8 @@ The port is read-only. It has no write, update or delete members, and it has no 
 | `utilization` | `hours` | Non-negative decimal string; flight-hour utilization. |
 | `utilization` | `cycles` | Non-negative decimal string; cycle utilization. |
 
+An `applicability` payload contains exactly `requirementId` (required, non-empty string), optional `regime` (`EASA`, `FAA-91`, `FAA-121` or `Other`), and optional `responsibleParty` (`lessee-operator`, `lessor`, `camo` or `unassigned`). An unlisted value or any additional field is rejected. The fixture applicability record is synthetic and identifies requirement `SYN-AD-2026-014`.
+
 ## Finance payloads
 
 `FinancePayload` is shared by exactly four finance kinds. Every value is a string; a payload must contain exactly the fields listed for its kind.
