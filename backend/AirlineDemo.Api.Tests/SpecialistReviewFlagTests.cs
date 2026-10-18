@@ -242,11 +242,12 @@ public sealed class SpecialistReviewFlagTests
             {
                 ["doc-1"] = BasisDocument.Create("doc-1", [Quote]),
             },
-            [CreateFlagPin(flag)]);
+            [CreateFlagPin(flag), CreateApplicabilityPin(relatedRequirementId)]);
         assessments.SetCurrentBasis(CaseId, basis);
         var claims = (regimes ?? [null!]).Select(regime =>
             new AssessmentClaim(ClaimKind.MissingRequirement, "return package", "Engine", "ENG-1",
-                [new DocumentWitness("doc-1", 1, Quote)], relatedRequirementId, regime)).ToArray();
+                [new DocumentWitness("doc-1", 1, Quote)], relatedRequirementId, regime,
+                RequirementId: relatedRequirementId, EvidenceRegime: "EASA")).ToArray();
         var record = new AssessmentExecutionService(store, inbox, assessments).Assess(scope, basis, claims);
         return new AssessmentScenario(path, record, inbox, store, scope);
     }
@@ -263,6 +264,26 @@ public sealed class SpecialistReviewFlagTests
         return new SourceBasisPin("contracts", "flag-1", 1, content,
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant());
     }
+
+    private static SourceBasisPin CreateApplicabilityPin(string requirementId)
+    {
+        var content = JsonSerializer.Serialize(new
+        {
+            kind = "applicability",
+            payload = new
+            {
+                fields = new
+                {
+                    requirementId,
+                    regime = "EASA",
+                    responsibleParty = "lessee-operator",
+                },
+            },
+        });
+        return new SourceBasisPin("technical", $"app-{requirementId}", 1, content,
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant());
+    }
+
     private static SpecialistReviewFlag Flag(string topic, string result, string? regime = null) =>
         new("REQ-1", topic, result, regime);
 

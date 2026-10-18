@@ -15,7 +15,9 @@ public sealed record AssessmentClaimSubmission(
     string? SerialNumber,
     IReadOnlyList<AssessmentWitnessSubmission?>? Witnesses,
     string? RelatedRequirementId = null,
-    string? Regime = null);
+    string? Regime = null,
+    string? RequirementId = null,
+    string? EvidenceRegime = null);
 
 public sealed record AssessmentWitnessSubmission(string? DocumentId, int Page, string? Quote);
 
@@ -66,13 +68,17 @@ public static class AssessmentEndpoints
         foreach (var submitted in body.Claims)
         {
             var kindName = submitted!.Kind;
+            var isMissingRequirement = kindName == nameof(ClaimKind.MissingRequirement);
             if (string.IsNullOrWhiteSpace(kindName) ||
                 !Enum.GetNames<ClaimKind>().Contains(kindName, StringComparer.Ordinal) ||
                 string.IsNullOrWhiteSpace(submitted.Value) ||
                 string.IsNullOrWhiteSpace(submitted.Component) ||
                 string.IsNullOrWhiteSpace(submitted.SerialNumber) ||
                 (submitted.RelatedRequirementId is not null && string.IsNullOrWhiteSpace(submitted.RelatedRequirementId)) ||
-                (submitted.Regime is not null && !new[] { "EU", "US", "UK" }.Contains(submitted.Regime, StringComparer.Ordinal)))
+                (submitted.Regime is not null && !new[] { "EU", "US", "UK" }.Contains(submitted.Regime, StringComparer.Ordinal)) ||
+                (isMissingRequirement &&
+                    (string.IsNullOrWhiteSpace(submitted.RequirementId)
+                     || submitted.EvidenceRegime is not ("EASA" or "FAA-91" or "FAA-121" or "Other"))))
             {
                 return Results.BadRequest(new { error = "Assessment claim fields are invalid." });
             }
@@ -180,7 +186,9 @@ public static class AssessmentEndpoints
         ClaimKind kind,
         IReadOnlyList<DocumentWitness> witnesses) =>
         new(kind, submitted.Value!, submitted.Component!, submitted.SerialNumber!, witnesses,
-            submitted.RelatedRequirementId, submitted.Regime);
+            submitted.RelatedRequirementId, submitted.Regime,
+            RequirementId: submitted.RequirementId,
+            EvidenceRegime: submitted.EvidenceRegime);
 
     private static object View(string id, AssessmentRecord record) => new
     {
