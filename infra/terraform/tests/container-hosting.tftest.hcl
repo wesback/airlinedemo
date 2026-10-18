@@ -137,11 +137,11 @@ run "invalid_presenter_reviewer_cidrs" {
   expect_failures = [var.presenter_reviewer_cidrs]
 }
 
-run "missing_image_digest" {
+run "empty_image_digest" {
   command = plan
 
   variables {
-    image_digest = null
+    image_digest = ""
   }
 
   expect_failures = [var.image_digest]
