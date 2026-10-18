@@ -28,8 +28,8 @@ public static class SourceModeFindingPolicy
         var sourceRecords = sourceMode == "unavailable"
             ? []
             : pins.Where(pin => pin.SourceId == "technical")
-                .Select(pin => (Pin: pin, SerialNumber: ReadSerialNumber(pin.Content)))
-                .Where(record => record.SerialNumber is not null)
+                .Select(pin => (Pin: pin, Identity: ReadTechnicalIdentity(pin.Content)))
+                .Where(record => record.Identity.SerialNumber is not null)
                 .ToArray();
         for (var index = 0; index < claims.Count; index++)
         {
@@ -40,40 +40,56 @@ public static class SourceModeFindingPolicy
                     && !string.IsNullOrEmpty(witness.Quote)
                     && witness.Quote.Contains(claim.SerialNumber, StringComparison.Ordinal)))
                 continue;
+            var relevantRecords = sourceRecords
+                .Where(record => MatchesComponent(record.Identity.Position, claim.Component))
+                .ToArray();
             if (sourceMode == "unavailable")
             {
                 reason ??= "source_unavailable";
                 continue;
             }
-            if (sourceRecords.Length > 0)
+            if (relevantRecords.Length > 0)
             {
-                witnesses[index] = sourceRecords
+                witnesses[index] = relevantRecords
                     .Select(record => new AssessedWitness(
                         $"source:{record.Pin.SourceId}:{record.Pin.RecordId}:v{record.Pin.RecordVersion}",
                         0))
                     .ToArray();
             }
-            if (sourceMode == "stale")
+            if (sourceMode == "stale" && relevantRecords.Length > 0)
             {
                 reason ??= "source_stale";
             }
-            else if (sourceMode == "conflicting" ||
-                     sourceRecords.Any(record => !string.Equals(record.SerialNumber, claim.SerialNumber, StringComparison.Ordinal)))
+            else if (relevantRecords.Length > 0 &&
+                     (sourceMode == "conflicting" ||
+                      relevantRecords.Any(record => !string.Equals(record.Identity.SerialNumber, claim.SerialNumber, StringComparison.Ordinal))))
             {
                 reason ??= "source_conflict";
             }
         }
         return new SourceModeFindingResult(reason, witnesses);
     }
-    private static string? ReadSerialNumber(string content)
+    private static (string? SerialNumber, string? Position) ReadTechnicalIdentity(string content)
     {
         using var document = JsonDocument.Parse(content);
         var root = document.RootElement;
-        return root.TryGetProperty("payload", out var payload)
-            && payload.TryGetProperty("fields", out var fields)
-            && fields.TryGetProperty("serialNumber", out var serialNumber)
-            ? serialNumber.GetString()
+        if (!root.TryGetProperty("payload", out var payload)
+            || !payload.TryGetProperty("fields", out var fields))
+            return (null, null);
+        var serialNumber = fields.TryGetProperty("serialNumber", out var serial)
+            ? serial.GetString()
             : null;
+        var position = fields.TryGetProperty("position", out var fieldPosition)
+            ? fieldPosition.GetString()
+            : null;
+        return (serialNumber, position);
+    }
+    private static bool MatchesComponent(string? position, string component)
+    {
+        if (string.IsNullOrWhiteSpace(position) || string.IsNullOrWhiteSpace(component))
+            return false;
+        var positionComponent = position.Split('_', 2)[0];
+        return string.Equals(positionComponent, component.Trim(), StringComparison.OrdinalIgnoreCase);
     }
     private sealed class ModeSource<TPayload>(ISourceSystem<TPayload> inner, string sourceId, string mode) : ISourceSystem<TPayload> where TPayload : class
     {

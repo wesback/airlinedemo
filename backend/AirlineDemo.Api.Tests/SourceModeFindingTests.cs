@@ -18,13 +18,19 @@ public sealed class SourceModeFindingTests
     private sealed class ProbeSource<TPayload>(string sourceId, IReadOnlyList<SourceRecord<TPayload>> records)
         : ISourceSystem<TPayload> where TPayload : class
     {
+        private IReadOnlyList<SourceRecord<TPayload>> _records = records;
         public int Calls { get; private set; }
+        public IReadOnlyList<SourceRecord<TPayload>> Records
+        {
+            get => _records;
+            set => _records = value;
+        }
         public Task<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>> ListAsync(string caseId,
             CancellationToken cancellationToken = default, int? maxRecords = null)
         {
             Calls++;
             return Task.FromResult<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>>(
-                new SourceReadSucceeded<IReadOnlyList<SourceRecord<TPayload>>>(records
+                new SourceReadSucceeded<IReadOnlyList<SourceRecord<TPayload>>>(_records
                     .Where(record => record.CaseId == caseId && record.SourceId == sourceId)
                     .Take(maxRecords ?? int.MaxValue).ToArray()));
         }
@@ -41,15 +47,20 @@ public sealed class SourceModeFindingTests
         public CaseState Read(CaseScope scope) => inner.Read(scope);
         public BasisVersion GetBasisVersion(CaseScope scope, int version) => inner.GetBasisVersion(scope, version);
         public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => inner.ReadAudit(scope);
-        public CommitResult Commit(CaseScope scope, long revision, CaseCommit commit) => inner.Commit(scope, revision, commit);
-        public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope) => inner.ListWorkItems(scope);
-        public CommitResult CreateWorkItem(CaseScope scope, long revision, WorkItemDraft draft, string actor)
+        public CommitResult Commit(CaseScope scope, long revision, CaseCommit commit)
         {
-            var observed = inner.Read(scope);
-            inner.Commit(scope, observed.Revision, new CaseCommit(null, null, "concurrent-writer", "concurrent-update", "intervening revision"));
-            AfterRace = inner.Read(scope);
-            return inner.CreateWorkItem(scope, revision, draft, actor);
+            if (commit.Action == "source-basis.gathered")
+            {
+                var observed = inner.Read(scope);
+                inner.Commit(scope, observed.Revision, new CaseCommit(null, null, "concurrent-writer",
+                    "concurrent-update", "intervening revision"));
+                AfterRace = inner.Read(scope);
+            }
+            return inner.Commit(scope, revision, commit);
         }
+        public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope) => inner.ListWorkItems(scope);
+        public CommitResult CreateWorkItem(CaseScope scope, long revision, WorkItemDraft draft, string actor) =>
+            inner.CreateWorkItem(scope, revision, draft, actor);
         public CommitResult ChangeWorkItemState(CaseScope scope, long revision, string itemId, string state, string actor) =>
             inner.ChangeWorkItemState(scope, revision, itemId, state, actor);
         public void AppendTrace(CaseScope scope, InvestigationTrace trace) => inner.AppendTrace(scope, trace);
@@ -155,6 +166,33 @@ public sealed class SourceModeFindingTests
     }
 
     [Fact]
+    public void UnrelatedComponentSerialDoesNotConflictWithClaim()
+    {
+        var scenario = CreateScenario("available", SourceSerial, documentSerial: SourceSerial);
+        try
+        {
+            scenario.Technical.Records =
+            [
+                TechnicalRecord(CaseId, SourceSerial),
+                TechnicalRecord(CaseId, "SYN-SN-APU-001") with
+                {
+                    RecordId = "tech-apu-component-001",
+                    Payload = new TechnicalPayload(new Dictionary<string, string>
+                    {
+                        ["serialNumber"] = "SYN-SN-APU-001",
+                        ["position"] = "apu_1",
+                    }),
+                },
+            ];
+            var assessment = scenario.Execution.Assess(scenario.Scope, scenario.Basis, [Claim(SourceSerial)]);
+            Assert.Equal(("Baseline", "supported baseline"), (assessment.Outcome, assessment.Reason));
+            Assert.Equal([new AssessedWitness(DocumentId, 1), SourceWitness(1)],
+                Assert.Single(assessment.Claims).Witnesses);
+        }
+        finally { Delete(scenario.Path); }
+    }
+
+    [Fact]
     public void SourceFailuresNeverCreateRequestsAcceptancesOrRefreshBasis()
     {
         foreach (var mode in new[] { "unavailable", "stale", "conflicting" })
@@ -180,12 +218,13 @@ public sealed class SourceModeFindingTests
         var path = TempPath();
         try
         {
-            var setup = CreateScenario("unavailable", SourceSerial, "failure-race", path, DocumentSerial);
+            var setup = CreateScenario("available", SourceSerial, "failure-race", path, DocumentSerial);
             var gathered = Gather(setup);
             var pinned = CaseStateStore.CreateBasisVersion(1, gathered.Content, string.Empty);
             setup.Store.Commit(setup.Scope, setup.Store.Read(setup.Scope).Revision,
                 new CaseCommit(pinned, null, "presenter", "submit-evidence", "initial source basis"));
             var before = setup.Store.Read(setup.Scope);
+            setup.Technical.Records = [TechnicalRecord("failure-race", "SYN-SN-77202")];
             var racing = new RacingStore(setup.Store);
             var execution = new AssessmentExecutionService(
                 racing, setup.Inbox, setup.Assessments, setup.Technical, setup.Maintenance, setup.Finance,
@@ -195,9 +234,14 @@ public sealed class SourceModeFindingTests
             var intervening = Assert.IsType<CaseState>(racing.AfterRace);
             var after = setup.Store.Read(setup.Scope);
             Assert.Equal(before.Basis, after.Basis);
+            Assert.Equal(before.Basis.Select(version =>
+                    (version.Version, version.Content, version.ContentDigest, version.BasisDigest)),
+                after.Basis.Select(version =>
+                    (version.Version, version.Content, version.ContentDigest, version.BasisDigest)));
             Assert.Equal(intervening.Audit, after.Audit);
             Assert.Empty(setup.Inbox.Requests);
             Assert.Empty(setup.Store.ListWorkItems(setup.Scope));
+            Assert.Equal(0, after.Audit.Count(audit => audit.Action == "mock-response.accepted"));
         }
         finally { Delete(path); }
     }

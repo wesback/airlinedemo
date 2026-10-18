@@ -88,7 +88,8 @@ Reads apply each case mode without changing fixture data: `available` returns th
 `SourceUnavailable<T>` without calling the port, `stale` sets `asOf: 2026-09-30` and `stale: true`, and `conflicting`
 returns each record plus a simulated alternate version whose `recordVersion` is one greater; the list preserves both, and get returns the alternate.
 
-Assessments compare technical serials cited by document witnesses with source serials. Unavailable or stale dependent
+Assessments compare technical serials cited by document witnesses with source serials for the claimed component
+(for example, `Engine` matches `engine_1`, not `apu_1`). Unavailable or stale dependent
 findings route to `Review` with reason `source_unavailable` or `source_stale`; mismatch or conflicting mode routes to
 `Review` with reason `source_conflict`. Claims retain document witnesses and source witnesses named
 `source:<sourceId>:<recordId>:v<recordVersion>`. Non-available modes create no mock requests or accepted events. Only available
