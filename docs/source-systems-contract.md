@@ -55,6 +55,20 @@ The port is read-only. It has no write, update or delete members, and it has no 
 
 The source-fed reserve calculation reads `rateBasis` (`per_flight_hour` or `per_cycle`) and `rate` (a non-negative decimal string) from pinned `maintenance_reserve` records. It multiplies the matching pinned technical `hours` or `cycles` by that rate, rounds each calculation line to cents with midpoints away from zero, and then sums the rounded lines. `reserve_reimbursement` records remain separate finance lines with their own `claimId` (non-empty string) and `status` (`claimed`, `approved` or `paid`); billed, collected, underbilled, overdue and reimbursable remain separate values. Each calculated reserve line cites both the technical utilization record and the finance rate record by `(sourceId, recordId, recordVersion)`. A missing or non-available required source blocks the draft rather than treating its value as zero.
 
+## Contracts payloads
+
+The obligation evaluator consumes `obligation_clause` records from the latest committed source-basis pins. The `payload` contains these string fields:
+
+| Field | Type and meaning |
+|---|---|
+| `clauseId` | String identifier of the contract clause. |
+| `obligation` | String obligation name. |
+| `noticeWindowStart` | String date in `YYYY-MM-DD` format; inclusive first day of the notice window. |
+| `noticeWindowEnd` | String date in `YYYY-MM-DD` format; inclusive last day of the notice window. |
+| `noticeWindowDays` | String number of days in the notice window. |
+
+The evaluator uses the pinned record envelope's `asOf` date for the scenario date and cites the clause by its exact `(sourceId, recordId, recordVersion)` tuple. It does not read live contracts records or send notices.
+
 ## Signed fixture cases
 
 Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `contracts`) ships one fixture file under `backend/AirlineDemo.Api/Fixtures/sources/`, with a manifest (`<source>.manifest.json`) and a detached signature (`<source>.manifest.sig`). The manifest lists `owningCaseIds` (`case-001`, `case-a`, `case-b`, `case-c`), the SHA-256 digest of the fixture file and the record count of every source. Every record's `caseId` must be one of the owning IDs, and each source holds at least one record for each case.
