@@ -476,7 +476,7 @@ public static class IsolatedPdfParser
         var streamLengths = new Dictionary<(int Number, int Generation), long>();
         foreach (var page in objects.Values)
         {
-            var dictionary = content.AsSpan(page.BodyStart, page.DictionaryEnd - page.BodyStart);
+            var dictionary = DecodeNameEscapes(content.AsSpan(page.BodyStart, page.DictionaryEnd - page.BodyStart));
             var type = FindPdfDictionaryToken(dictionary, "/Type"u8);
             if (type < 0 || !HasNameValue(dictionary, type + "/Type"u8.Length, "/Page"u8)) continue;
             var contents = FindPdfDictionaryToken(dictionary, "/Contents"u8);
@@ -617,6 +617,36 @@ public static class IsolatedPdfParser
         }
 
         return cursor == dictionary.Length || IsPdfDelimiterOrWhitespace(dictionary[cursor]);
+    }
+
+    /// <summary>
+    /// Returns a copy of a dictionary with <c>#xx</c> escapes in names decoded (<c>/Ty#70e</c> becomes <c>/Type</c>), so key
+    /// lookups see the names PDF readers see. An escape that would produce whitespace or a delimiter stays escaped.
+    /// </summary>
+    private static byte[] DecodeNameEscapes(ReadOnlySpan<byte> source)
+    {
+        var decoded = new List<byte>(source.Length);
+        var inName = false;
+        for (var i = 0; i < source.Length; i++)
+        {
+            var b = source[i];
+            if (b == '/') { inName = true; decoded.Add(b); continue; }
+            if (inName && IsPdfDelimiterOrWhitespace(b)) inName = false;
+            if (inName && b == '#' && i + 2 < source.Length + 0 && Uri.IsHexDigit((char)source[i + 1]) && Uri.IsHexDigit((char)source[i + 2]))
+            {
+                var value = (byte)Convert.ToInt32(Encoding.ASCII.GetString(source.Slice(i + 1, 2)), 16);
+                if (value != '#' && value != 0 && !IsPdfDelimiterOrWhitespace(value))
+                {
+                    decoded.Add(value);
+                    i += 2;
+                    continue;
+                }
+            }
+
+            decoded.Add(b);
+        }
+
+        return decoded.ToArray();
     }
 
     private static int FindPdfDictionaryToken(ReadOnlySpan<byte> source, ReadOnlySpan<byte> token)

@@ -72,7 +72,9 @@ public class IsolatedPdfParserTests
         bool indirectStreamLength = false,
         string streamDictionaryPrefix = "",
         string pageDictionaryPrefix = "",
-        bool commentContentsWithHarmlessStream = false)
+        bool commentContentsWithHarmlessStream = false,
+        string typeKey = "/Type",
+        string contentsKey = "/Contents")
     {
         if (commentContentsWithHarmlessStream && (indirectContentsArray || indirectStreamLength))
         {
@@ -103,7 +105,7 @@ public class IsolatedPdfParserTests
             var fakeContentsEntry = commentContentsWithHarmlessStream
                 ? $"% /Contents {harmlessStreamId} 0 R\n"
                 : string.Empty;
-            Object($"{pageId} 0 obj << {pageDictionaryPrefix}{fakeContentsEntry}/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentReference} 0 R >> endobj\n");
+            Object($"{pageId} 0 obj << {pageDictionaryPrefix}{fakeContentsEntry}{typeKey} /Page /Parent 2 0 R /MediaBox [0 0 612 792] {contentsKey} {contentReference} 0 R >> endobj\n");
         }
 
         if (indirectContentsArray)
@@ -281,6 +283,26 @@ public class IsolatedPdfParserTests
 
         var outcome = IsolatedPdfParser.Parse(
             TextContentPdf(textSource, pageCount: 1, streamDictionaryPrefix: "/Nested << /Length 1 >> "),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Theory]
+    [InlineData("/Type", "/Contents")]
+    [InlineData("/Ty#70e", "/Contents")]
+    [InlineData("/Type", "/Cont#65nts")]
+    [InlineData("/Ty#70e", "/Cont#65nts")]
+    public void EscapedPageDictionaryNamesCannotBypassTextSourceLimitBeforeStartingWorker(string typeKey, string contentsKey)
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, typeKey: typeKey, contentsKey: contentsKey),
             CountingWorker(starts));
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
