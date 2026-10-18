@@ -266,7 +266,7 @@ public static class EvidenceIntake
             var outcome = IsolatedPdfParser.ParseDocument(document.Content, document.FileName, parserOptions, rejectUnsafeContent: true);
             if (outcome.State != EvidenceProcessingState.Complete)
             {
-                return new EvidenceIntakeResult(outcome.State, $"{document.FileName}: {outcome.Reason}", Array.Empty<EvidenceBasisVersion>());
+                return new EvidenceIntakeResult(outcome.State, outcome.Reason, Array.Empty<EvidenceBasisVersion>());
             }
 
             extracted.Add((document.FileName, outcome.Text));
@@ -370,18 +370,12 @@ public static class EvidenceIntake
                 return (EvidenceProcessingState.RejectedRetryable, $"{pdf.NumberOfPages} pages; limit is {MaxPagesPerDocument}", "");
             }
 
-            if (rejectUnsafeContent && HasEmbeddedFilesOrForms(pdf))
-                return (EvidenceProcessingState.RejectedPermanent, "embedded files or form fields are not accepted", "");
-
             var text = new StringBuilder();
             var pageIndex = 0;
             foreach (var page in pdf.GetPages())
             {
                 if (rejectUnsafeContent && page.ExperimentalAccess.GetAnnotations().Any())
                     return (EvidenceProcessingState.RejectedPermanent, "annotations are not accepted", "");
-
-                if (rejectUnsafeContent && page.GetImages().Any())
-                    return (EvidenceProcessingState.RejectedPermanent, "images are not accepted", "");
 
                 if (pageIndex > 0) text.Append(PageSeparator);
                 var pageText = pageTextReading is null

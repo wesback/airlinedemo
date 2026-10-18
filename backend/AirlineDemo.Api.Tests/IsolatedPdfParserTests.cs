@@ -903,12 +903,22 @@ public class IsolatedPdfParserTests
             WorkerStarting = () => workerStarts[0]++,
         };
         var store = new EvidenceBasisStore();
-        var documents = new[] { new EvidenceDocument("valid.pdf", Fixture("valid-text.pdf")) };
 
-        var result = EvidenceIntake.Process(documents, store, options);
+        var validResult = EvidenceIntake.Process(
+            [new EvidenceDocument("acroform.pdf", Fixture("acroform.pdf"))], store, options);
 
-        Assert.Equal(EvidenceProcessingState.Complete, result.State);
-        Assert.False(string.IsNullOrWhiteSpace(store.Latest("valid.pdf")?.Text));
+        Assert.Equal(EvidenceProcessingState.Complete, validResult.State);
+        var version = Assert.Single(validResult.Versions);
+        Assert.Equal("synthetic form", version.Text.Trim());
+        Assert.Equal(version, store.Latest("acroform.pdf"));
+        Assert.Equal(0, workerStarts[0]);
+
+        var invalidResult = EvidenceIntake.Process(
+            [new EvidenceDocument("corrupt.pdf", Fixture("corrupt.pdf"))], store, options);
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, invalidResult.State);
+        Assert.Empty(invalidResult.Versions);
+        Assert.Null(store.Latest("corrupt.pdf"));
         Assert.Equal(0, workerStarts[0]);
     }
 
