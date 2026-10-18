@@ -256,6 +256,7 @@ public class IsolatedPdfParserTests
             Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <41> <{oversizedTarget}>\nendbfrange"),
             Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <41> <{oversizedTarget}>\nendbfrange"),
             Encoding.ASCII.GetBytes($"1 beginbfchar\n% endbfchar\n<41> <{oversizedTarget}>\nendbfchar"),
+            Encoding.ASCII.GetBytes($"1 beginbfchar\n(% endbfchar <41> <{oversizedTarget}>)\n<41> <{oversizedTarget}>\nendbfchar"),
             Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfchar\n", 10_000))}"),
             Encoding.ASCII.GetBytes($"1 {string.Concat(Enumerable.Repeat("beginbfrange\n", 10_000))}"),
             Encoding.ASCII.GetBytes($"1 beginbfrange\n<41> <42> [<0041> <{oversizedTarget}>]\nendbfrange"),
@@ -305,6 +306,7 @@ public class IsolatedPdfParserTests
         {
             (CMap: asciiHexCMap, Filter: "/ASCIIHexDecode"),
             (CMap: Encoding.ASCII.GetBytes("1 beginbfchar\n<41> <0041>\nendbfchar"), Filter: "/DCTDecode"),
+            (CMap: oversizedCMap, Filter: "[]"),
         };
 
         foreach (var testCase in cases)
@@ -319,6 +321,22 @@ public class IsolatedPdfParserTests
             Assert.Equal(string.Empty, outcome.Text);
             Assert.Equal(0, starts[0]);
         }
+    }
+
+    [Fact]
+    public void UnicodeGlyphExpansionRejectsOversizedCMapInFlateFilterArrayBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var oversizedCMap = Encoding.ASCII.GetBytes(
+            $"1 beginbfchar\n<41> <{string.Concat(Enumerable.Repeat("0041", 1024))}>\nendbfchar");
+        var outcome = IsolatedPdfParser.Parse(
+            CMapPdf(oversizedCMap, flate: true, filter: "[/FlateDecode]"),
+            CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal(UnreadableReason, outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
     }
 
     [Fact]
