@@ -116,21 +116,24 @@ public sealed class CapeTownEvidenceTests
     }
 
     [Fact]
-    public void PublicAssessmentClaimPreservesCapeTownEvidenceReliance()
+    public void PublicAssessmentCannotDisableCapeTownEvidenceReliance()
     {
-        const string submissionJson =
-            """{"kind":"MissingRequirement","value":"return package","component":"Engine","serialNumber":"ENG-1","witnesses":[],"relatedRequirementId":"REQ-CAPE-TOWN","reliesOnCapeTownEvidence":true}""";
-        var submission = JsonSerializer.Deserialize<AssessmentClaimSubmission>(
-            submissionJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Assert.NotNull(submission);
-        var mapped = AssessmentEndpoints.ToClaim(submission, ClaimKind.MissingRequirement, []);
+        foreach (var relianceField in new[] { "", ",\"reliesOnCapeTownEvidence\":false" })
+        {
+            var submissionJson =
+                $$"""{"kind":"MissingRequirement","value":"return package","component":"Engine","serialNumber":"ENG-1","witnesses":[],"relatedRequirementId":"REQ-CAPE-TOWN"{{relianceField}}}""";
+            var submission = JsonSerializer.Deserialize<AssessmentClaimSubmission>(
+                submissionJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            Assert.NotNull(submission);
+            var mapped = AssessmentEndpoints.ToClaim(submission, ClaimKind.MissingRequirement, []);
 
-        Assert.True(mapped.ReliesOnCapeTownEvidence);
-        Assert.Equal(RequirementId, mapped.RelatedRequirementId);
-        Assert.Throws<InvalidDataException>(() => Assess(
-            null,
-            mapped.RelatedRequirementId,
-            reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence));
+            Assert.True(mapped.ReliesOnCapeTownEvidence);
+            Assert.Equal(RequirementId, mapped.RelatedRequirementId);
+            Assert.Throws<InvalidDataException>(() => Assess(
+                null,
+                mapped.RelatedRequirementId,
+                reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence));
+        }
     }
 
     [Fact]
