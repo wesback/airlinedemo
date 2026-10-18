@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Policy;
@@ -7,6 +11,7 @@ namespace AirlineDemo.Api.Tests;
 
 public sealed class AssessmentPersistenceTests : IDisposable
 {
+    private const string RequirementId = "REQ-1";
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "assessment-history-" + Guid.NewGuid().ToString("N"));
     private string PathFor => Path.Combine(_directory, "cases.json");
 
@@ -273,11 +278,33 @@ public sealed class AssessmentPersistenceTests : IDisposable
             new Dictionary<string, BasisDocument>
             {
                 ["doc-1"] = BasisDocument.Create("doc-1", ["pending reserve approval"]),
-            });
+            },
+            [ApplicabilityPin()]);
 
     private static AssessmentClaim Claim() =>
         new(ClaimKind.MissingRequirement, "pending reserve approval", "Engine", "ENG-123",
-            [new DocumentWitness("doc-1", 1, "pending reserve approval")]);
+            [new DocumentWitness("doc-1", 1, "pending reserve approval")],
+            RequirementId: RequirementId,
+            EvidenceRegime: "EASA");
+
+    private static SourceBasisPin ApplicabilityPin()
+    {
+        var content = JsonSerializer.Serialize(new
+        {
+            kind = "applicability",
+            payload = new
+            {
+                fields = new
+                {
+                    requirementId = RequirementId,
+                    regime = "EASA",
+                    responsibleParty = "lessee-operator",
+                },
+            },
+        });
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+        return new SourceBasisPin("technical", $"app-{RequirementId}", 1, content, digest);
+    }
 
     private static void AssertPersistedDelivery(
         ICaseStateStore store,
