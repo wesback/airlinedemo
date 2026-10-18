@@ -3,7 +3,7 @@ id: AISDLC-248
 title: "tests only: add mocked-plan coverage for private Container Apps hosting"
 status: Done
 source: "https://github.com/wesback/airlinedemo/issues/248"
-attestation: ".ai-sdlc/attestations/efac0fffcfec6f104cbd6d8c2c63cd2d31675d6c.dsse.json"
+attestation: ".ai-sdlc/attestations/98d41273b4fd91c446086eb923bc1fa9a30ca747.dsse.json"
 ---
 
-Implemented by the ep pipeline on `ai-sdlc/issue-248` at efac0fffcfec6f104cbd6d8c2c63cd2d31675d6c. Issue #248.
+Implemented by the ep pipeline on `ai-sdlc/issue-248` at 98d41273b4fd91c446086eb923bc1fa9a30ca747. Issue #248.
