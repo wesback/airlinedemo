@@ -194,7 +194,7 @@ public sealed class DeploymentCostEvidenceTests
 
         foreach (var currency in new[] { "EUR", "USD", "GBP" })
             AssertContract(valid with { Currency = currency }, true);
-        foreach (var currency in new[] { "eur", "Eur", "EU", "EURO", "E1R", "€", "", "not measured" })
+        foreach (var currency in new[] { "eur", "Eur", "EU", "EURO", "E1R", "€", "", "ZZZ", "not measured" })
             AssertContract(valid with { Currency = currency }, false);
 
         AssertContract(valid with { PeriodStartUtc = "2026-01-01T00:00:00Z", PeriodEndUtc = "2026-01-01T00:00:01Z" }, true);
