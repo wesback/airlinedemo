@@ -30,8 +30,7 @@ public sealed class IsolatedPdfParserOptions
 }
 
 /// <summary>
-/// Parses bounded PDF page text in the API process. The worker-isolation helpers remain available to the worker
-/// entry point, but evidence intake does not start a child process.
+/// Parses PDF page text in a bounded worker process after checking compressed stream expansion.
 /// </summary>
 public static class IsolatedPdfParser
 {
@@ -55,20 +54,103 @@ public static class IsolatedPdfParser
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         IsolatedPdfParserOptions? options = null)
-    {
-        _ = options;
-        return ParseCore(content, "document.pdf", OpenDocument, page => page.Text,
-            page => page.Letters.Select(letter => letter.Value));
-    }
+        => Parse(content, "document.pdf", options);
 
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         string fileName,
         IsolatedPdfParserOptions? options = null)
+        => Parse(content, fileName, options ?? IsolatedPdfParserOptions.Default, startWorker: Process.Start);
+
+    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
+        byte[] content,
+        string fileName,
+        IsolatedPdfParserOptions options,
+        Func<ProcessStartInfo, Process?> startWorker)
     {
-        _ = options;
-        return ParseCore(content, fileName, OpenDocument, page => page.Text,
-            page => page.Letters.Select(letter => letter.Value));
+        if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
+        {
+            return (EvidenceProcessingState.RejectedPermanent,
+                $"{fileName} is {content.LongLength} bytes; limit is {EvidenceIntake.MaxDocumentBytes}",
+                string.Empty);
+        }
+
+        try
+        {
+            var streamCheck = CheckStreamLimits(content);
+            if (streamCheck.TextExceeded)
+            {
+                return Retryable(PdfTextLimitReason);
+            }
+
+            if (streamCheck.Exceeded)
+            {
+                return Retryable(PdfStreamLimitReason);
+            }
+
+            if (!streamCheck.Safe)
+            {
+                return Retryable(PdfReadFailureReason);
+            }
+
+            if (CannotIsolateWorker(
+                OperatingSystem.IsLinux(),
+                options.WorkerFileName is not null,
+                Environment.UserName,
+                File.Exists(SetprivPath)))
+            {
+                return Retryable("worker cannot be isolated; retry is possible");
+            }
+
+            var workingDirectory = ChooseWorkingDirectory();
+            try
+            {
+                Directory.CreateDirectory(workingDirectory);
+                RestrictWorkingDirectory(workingDirectory);
+                using var process = startWorker(CreateStartInfo(options, workingDirectory));
+                if (process is null)
+                {
+                    return Retryable("worker could not be started; retry is possible");
+                }
+
+                if (OperatingSystem.IsWindows())
+                {
+                    if (!WindowsJobObject.TryAssign(process, options.MemoryLimitBytes, out var job))
+                    {
+                        return Terminate(process, "could not apply the memory limit");
+                    }
+
+                    using (job)
+                    {
+                        return Supervise(process, content, options);
+                    }
+                }
+
+                return Supervise(process, content, options);
+            }
+            finally
+            {
+                if (Directory.Exists(workingDirectory))
+                {
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        File.SetUnixFileMode(workingDirectory,
+                            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    }
+
+                    Directory.Delete(workingDirectory, recursive: true);
+                }
+            }
+        }
+        catch (OutOfMemoryException)
+        {
+            return Retryable(PdfReadFailureReason);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return Retryable(PdfReadFailureReason);
+        }
     }
 
     internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
