@@ -117,6 +117,16 @@ public class IsolatedPdfParserTests
         stream.Write(bytes);
     }
 
+    private static byte[] SingleStreamPdf(byte[] data, string dictionaryEntries = "")
+    {
+        using var pdf = new MemoryStream();
+        Write(pdf, "%PDF-1.4\n");
+        Write(pdf, $"1 0 obj << /Length {data.Length}{dictionaryEntries} >> stream\n");
+        pdf.Write(data);
+        Write(pdf, "\nendstream endobj\n");
+        return pdf.ToArray();
+    }
+
     // DD-026: bounded page text is extracted by PdfPig in the API process.
     [Fact]
     public void PdfPigExtractsTextAndIgnoresNonTextContent()
@@ -241,7 +251,6 @@ public class IsolatedPdfParserTests
     public void UnicodeGlyphExpansionIsRejectedBeforeOpeningPdfPig()
     {
         var target = string.Concat(Enumerable.Repeat("0041", 1024));
-        var text = $"BT <{string.Concat(Enumerable.Repeat("41", 9000))}> Tj ET";
         byte[] Compress(byte[] data)
         {
             using var compressed = new MemoryStream();
@@ -255,47 +264,67 @@ public class IsolatedPdfParserTests
 
         var cmaps = new[]
         {
-            $"1 beginbfchar\n<41> <{target}>\nendbfchar",
-            $"1 beginbfrange\n<41> <41> <{target}>\nendbfrange",
+            ($"1 beginbfchar\n<41> <{target}>\nendbfchar", ""),
+            ($"1 beginbfchar\n<41> <{target}>\nendbfchar", " /Filter /FlateDecode"),
+            ($"1 beginbfrange\n<41> <41> <{target}>\nendbfrange", ""),
+            ($"1 beginbfrange\n<41> <41> <{target}>\nendbfrange", " /Filter /FlateDecode"),
+            ($"1 beginbfchar\n% endbfchar\n<41> <{target}>\nendbfchar", ""),
+            ("1 " + string.Concat(Enumerable.Repeat("beginbfchar\n", 10_000)), ""),
+            ("1 " + string.Concat(Enumerable.Repeat("beginbfrange\n", 10_000)), ""),
         };
-        foreach (var cmap in cmaps)
+
+        foreach (var (cmap, filter) in cmaps)
         {
-            var cmapBytes = Encoding.ASCII.GetBytes(cmap);
-            foreach (var (cmapData, filter) in new[]
-            {
-                (cmapBytes, string.Empty),
-                (Compress(cmapBytes), "/Filter /FlateDecode"),
-            })
-            {
-                using var pdf = new MemoryStream();
-                Write(pdf, "%PDF-1.4\n");
-
-                void AddStream(int objectId, byte[] data, string streamFilter = "")
+            var data = Encoding.ASCII.GetBytes(cmap);
+            var opens = 0;
+            var outcome = IsolatedPdfParser.Parse(
+                SingleStreamPdf(filter.Length == 0 ? data : Compress(data), filter),
+                "expanded-glyphs.pdf",
+                _ =>
                 {
-                    Write(pdf, $"{objectId} 0 obj << /Length {data.Length} {streamFilter} >> stream\n");
-                    pdf.Write(data);
-                    Write(pdf, "\nendstream endobj\n");
-                }
+                    opens++;
+                    return PdfDocument.Open(MinimalPdf(1), new ParsingOptions { UseLenientParsing = true });
+                });
 
-                AddStream(1, cmapData, filter);
-                AddStream(2, Encoding.ASCII.GetBytes(text));
-
-                var opens = 0;
-                var outcome = IsolatedPdfParser.Parse(
-                    pdf.ToArray(),
-                    "expanded-glyphs.pdf",
-                    _ =>
-                    {
-                        opens++;
-                        return PdfDocument.Open(MinimalPdf(1), new ParsingOptions { UseLenientParsing = true });
-                    });
-
-                Assert.Equal(0, opens);
-                Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
-                Assert.Equal("PdfPig could not open or read the document; retry is possible", outcome.Reason);
-                Assert.Equal(string.Empty, outcome.Text);
-            }
+            Assert.Equal(0, opens);
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal("PdfPig could not open or read the document; retry is possible", outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
         }
+
+        var validOpens = 0;
+        var valid = IsolatedPdfParser.Parse(
+            SingleStreamPdf(Encoding.ASCII.GetBytes("1 beginbfchar\n<41> <0041>\nendbfchar")),
+            "bounded-cmap.pdf",
+            _ =>
+            {
+                validOpens++;
+                return PdfDocument.Open(MinimalPdf(1), new ParsingOptions { UseLenientParsing = true });
+            });
+
+        Assert.Equal(1, validOpens);
+        Assert.Equal(EvidenceProcessingState.Complete, valid.State);
+        Assert.Equal("page 1", valid.Text);
+    }
+
+    [Fact]
+    public void LargeTextStreamIsRejectedBeforeOpeningPdfPig()
+    {
+        var content = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+        var opens = 0;
+        var outcome = IsolatedPdfParser.Parse(
+            SingleStreamPdf(content),
+            "large-text.pdf",
+            _ =>
+            {
+                opens++;
+                throw new InvalidOperationException("Oversized page text must not reach PdfPig.");
+            });
+
+        Assert.Equal(0, opens);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
     }
 
     [Fact]
@@ -348,14 +377,24 @@ public class IsolatedPdfParserTests
     }
 
     [Theory]
-    [InlineData("/Filter /Flate#44ecode")]
-    [InlineData("/Fil#74er /FlateDecode")]
-    public void EscapedFilterName_IsRejectedWithoutExpandingStream(string filter)
+    [InlineData("/Filter /FlateDecode", "PDF stream content exceeds 8388608 decoded bytes; retry is possible")]
+    [InlineData("/Filter /Flate#44ecode", "PdfPig could not open or read the document; retry is possible")]
+    [InlineData("/Fil#74er /FlateDecode", "PdfPig could not open or read the document; retry is possible")]
+    public void StreamFilterPreflightRejectsBeforeOpeningPdfPig(string filter, string expectedReason)
     {
-        var outcome = IsolatedPdfParser.Parse(FlateBomb(filter), "escaped-filter.pdf");
+        var opens = 0;
+        var outcome = IsolatedPdfParser.Parse(
+            FlateBomb(filter),
+            "escaped-filter.pdf",
+            _ =>
+            {
+                opens++;
+                throw new InvalidOperationException("Unsafe stream filters must not reach PdfPig.");
+            });
 
+        Assert.Equal(0, opens);
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
-        Assert.Equal("PdfPig could not open or read the document; retry is possible", outcome.Reason);
+        Assert.Equal(expectedReason, outcome.Reason);
         Assert.Equal(string.Empty, outcome.Text);
     }
 
