@@ -1,0 +1,217 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 402,
+  "branch": "ai-sdlc/issue-402",
+  "commitSha": "b10698d2a750dba66ae9bb379336ad7b94fc5a96",
+  "round": 2,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The comment-aware fix addresses the prior finding, but its token scan can still select a nested /Length entry and let an oversized text stream reach the worker.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 562,
+          "message": "The comment-aware /Length lookup can select a key inside a nested dictionary. Track dictionary nesting so preflight uses the stream dictionary's top-level /Length.",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "TryReadStreamLength calls FindPdfDictionaryToken to find /Length. That scanner skips comments and strings but does not track nested dictionaries, so it can return a /Length key inside a nested dictionary before the stream dictionary's own key.",
+            "failureScenario": "A PDF stream dictionary places `/DecodeParms << /Length 1 >>` before its actual `/Length` entry. Preflight treats 1 as the stream length and may count no text-showing operator, then starts the worker. PdfPig reads the stream using the top-level length, so an oversized text source bypasses the preflight limit. OWASP A04:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added comment-aware test covers the reported comment bypass. The parser still accepts a nested dictionary’s /Length as the stream length, allowing the text-source limit to be bypassed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 640,
+          "message": "Track dictionary nesting when searching for the top-level /Length entry; a nested /Length can make the preflight undercount an oversized text stream.",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "FindPdfDictionaryToken skips comments and strings but enters nested dictionaries and returns the first /Length token it encounters. TryReadStreamLength then treats that value as the stream's declared length.",
+            "failureScenario": "A stream dictionary contains `/Metadata << /Length 1 >> /Length 524300`, followed by an oversized text stream. The preflight uses the nested value 1, counts at most one byte, and can start the worker even though PdfPig reads the actual stream. This bypasses the text-source bound. OWASP A04:2025."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The comment-aware stream-length fix does not cover page dictionary lookups. A crafted comment can make preflight inspect a harmless stream while PdfPig reads the oversized actual page content.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 475,
+          "message": "Page dictionary lookup can trust commented-out /Type and /Contents entries, bypassing the preflight text-source limit. Skip comments when locating these tokens.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "PreflightPageContentSources uses FindPdfToken to locate /Type and /Contents in page dictionaries. FindPdfToken does not skip PDF comments, so it can select those tokens from a comment instead of the actual dictionary entries.",
+            "failureScenario": "An attacker puts a comment before the real page entries containing `/Type /Page /Contents 4 0 R`, where object 4 is a small stream. Preflight counts that stream and can pass the PDF, while PdfPig ignores the comment and reads the actual oversized text stream. The worker then starts without the text-source bound being enforced. OWASP A06:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
