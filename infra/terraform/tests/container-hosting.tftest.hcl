@@ -147,11 +147,11 @@ run "empty_image_digest" {
   expect_failures = [var.image_digest]
 }
 
-run "missing_demo_passcode_secret_uri" {
+run "empty_demo_passcode_secret_uri" {
   command = plan
 
   variables {
-    demo_passcode_secret_uri = null
+    demo_passcode_secret_uri = ""
   }
 
   expect_failures = [var.demo_passcode_secret_uri]
