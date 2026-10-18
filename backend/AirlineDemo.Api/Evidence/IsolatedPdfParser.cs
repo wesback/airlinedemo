@@ -39,6 +39,7 @@ public static class IsolatedPdfParser
     private const string PdfReadFailureReason = "PdfPig could not open or read the document; retry is possible";
     private const string PdfStreamLimitReason = "PDF stream content exceeds 8388608 decoded bytes; retry is possible";
     private static readonly Regex DirectStreamLength = new(@"/Length\s+([0-9]+)\s*(?=/|>>)", RegexOptions.CultureInvariant);
+    private static readonly Regex EscapedPdfName = new(@"#[0-9A-Fa-f]{2}", RegexOptions.CultureInvariant);
     private static readonly Regex SingleFlateFilter = new(
         @"/Filter\s+(?:/FlateDecode|\[\s*/FlateDecode\s*\])(?:\s|/|>>|\[)",
         RegexOptions.CultureInvariant);
@@ -48,7 +49,8 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         _ = options;
-        return ParseCore(content, "document.pdf", OpenDocument, page => page.Text);
+        return ParseCore(content, "document.pdf", OpenDocument, page => page.Text,
+            page => page.Letters.Select(letter => letter.Value));
     }
 
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
@@ -57,21 +59,31 @@ public static class IsolatedPdfParser
         IsolatedPdfParserOptions? options = null)
     {
         _ = options;
-        return ParseCore(content, fileName, OpenDocument, page => page.Text);
+        return ParseCore(content, fileName, OpenDocument, page => page.Text,
+            page => page.Letters.Select(letter => letter.Value));
     }
 
     internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         string fileName,
         Func<byte[], PdfDocument> openDocument) =>
-        ParseCore(content, fileName, openDocument, page => page.Text);
+        ParseCore(content, fileName, openDocument, page => page.Text,
+            page => page.Letters.Select(letter => letter.Value));
 
     internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         string fileName,
         Func<byte[], PdfDocument> openDocument,
         Func<Page, string> getPageText) =>
-        ParseCore(content, fileName, openDocument, getPageText);
+        ParseCore(content, fileName, openDocument, getPageText, page => page.Letters.Select(letter => letter.Value));
+
+    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
+        byte[] content,
+        string fileName,
+        Func<byte[], PdfDocument> openDocument,
+        Func<Page, string> getPageText,
+        Func<Page, IEnumerable<string>> getTextParts) =>
+        ParseCore(content, fileName, openDocument, getPageText, getTextParts);
 
     private static PdfDocument OpenDocument(byte[] content) =>
         PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
@@ -80,7 +92,8 @@ public static class IsolatedPdfParser
         byte[] content,
         string fileName,
         Func<byte[], PdfDocument> openDocument,
-        Func<Page, string> getPageText)
+        Func<Page, string> getPageText,
+        Func<Page, IEnumerable<string>> getTextParts)
     {
         if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
         {
@@ -120,6 +133,11 @@ public static class IsolatedPdfParser
                 if (pageIndex++ > 0)
                 {
                     text.Append(EvidenceIntake.PageSeparator);
+                }
+
+                if (!CanMaterializePageText(getTextParts(page), text.Length))
+                {
+                    return Retryable(PdfStreamLimitReason);
                 }
 
                 var pageText = getPageText(page);
@@ -163,6 +181,11 @@ public static class IsolatedPdfParser
             var headerStart = objectStart + "obj".Length;
             var header = Encoding.Latin1.GetString(content, headerStart, streamStart - headerStart);
             if (!header.TrimEnd().EndsWith(">>", StringComparison.Ordinal))
+            {
+                return (false, false);
+            }
+
+            if (EscapedPdfName.IsMatch(header))
             {
                 return (false, false);
             }
@@ -231,6 +254,21 @@ public static class IsolatedPdfParser
         }
 
         return (true, false);
+    }
+
+    private static bool CanMaterializePageText(IEnumerable<string> textParts, int existingTextLength)
+    {
+        long maximumTextLength = existingTextLength;
+        foreach (var textPart in textParts)
+        {
+            maximumTextLength += textPart.Length + 4L;
+            if (maximumTextLength > MaxDecodedStreamBytes)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static int CountOccurrences(string value, string match)

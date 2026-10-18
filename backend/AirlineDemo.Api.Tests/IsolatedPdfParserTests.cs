@@ -68,7 +68,7 @@ public class IsolatedPdfParserTests
     }
 
     /// <summary>A one-page PDF whose content stream expands beyond the parser's decoded-stream limit.</summary>
-    private static byte[] FlateBomb()
+    private static byte[] FlateBomb(string filter = "/Filter /FlateDecode")
     {
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
@@ -94,7 +94,7 @@ public class IsolatedPdfParserTests
         Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
         Object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
         Object("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n");
-        Object($"4 0 obj << /Length {body.Length} /Filter /FlateDecode >> stream\n");
+        Object($"4 0 obj << /Length {body.Length} {filter} >> stream\n");
         pdf.Write(body);
         Write(pdf, "\nendstream endobj\n");
 
@@ -217,6 +217,27 @@ public class IsolatedPdfParserTests
     }
 
     [Fact]
+    public void OversizedPageTextIsRejectedBeforeFullTextExtraction()
+    {
+        var pageTextReads = 0;
+        var outcome = IsolatedPdfParser.Parse(
+            MinimalPdf(1),
+            "large-text.pdf",
+            content => PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true }),
+            page =>
+            {
+                pageTextReads++;
+                return page.Text;
+            },
+            _ => Enumerable.Repeat(new string('x', 100_000), 100));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF stream content exceeds 8388608 decoded bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, pageTextReads);
+    }
+
+    [Fact]
     public void MalformedPdfFailuresAreRetryableWithoutPartialText()
     {
         foreach (var (name, content) in new[]
@@ -263,6 +284,18 @@ public class IsolatedPdfParserTests
         var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), "valid-text.pdf");
         Assert.Equal(EvidenceProcessingState.Complete, valid.State);
         Assert.False(string.IsNullOrWhiteSpace(valid.Text));
+    }
+
+    [Theory]
+    [InlineData("/Filter /Flate#44ecode")]
+    [InlineData("/Fil#74er /FlateDecode")]
+    public void EscapedFilterName_IsRejectedWithoutExpandingStream(string filter)
+    {
+        var outcome = IsolatedPdfParser.Parse(FlateBomb(filter), "escaped-filter.pdf");
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PdfPig could not open or read the document; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
     }
 
     // Worker process settings are ignored by the in-process parser.
