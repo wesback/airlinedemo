@@ -4,6 +4,7 @@ using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.SourceSystems;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -144,7 +145,7 @@ public static class EvidenceEndpoints
         var (record, created) = packages.Submit(packageId, caseId,
             () => EvidenceIntake.ProcessPackage(caseId, documents, basis, parserOptions));
         // Runs on every submission until the trace exists, so a retry after a failed append re-runs only the investigation.
-        await RunInvestigationAsync(record, caseId, scope, session.User.Id, caseSources, basis, services, investigations, ct);
+        await RunInvestigationAsync(record, caseId, scope, session.User.Id, session.User.Role, caseSources, basis, services, investigations, ct);
         return created ? Results.Created($"/api/cases/{caseId}/packages/{packageId}", record) : Results.Ok(record);
     }
 
@@ -153,6 +154,7 @@ public static class EvidenceEndpoints
         string caseId,
         CaseScope scope,
         string actorId,
+        string role,
         EvidenceCaseReadSourceFactory caseSources,
         EvidenceBasisStore basis,
         IServiceProvider services,
@@ -196,7 +198,14 @@ public static class EvidenceEndpoints
             manifest.DeploymentName ?? string.Empty, manifest.ApiVersion ?? string.Empty, manifest.Region ?? string.Empty,
             manifest.ContentFilter ?? string.Empty, "escalate", actorToken);
         var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted, pinned), manifest, registry,
-            manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat);
+            manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat,
+            role: role,
+            sourceSystems: new InvestigationSourceSystems(
+                services.GetRequiredService<ISourceSystem<TechnicalPayload>>(),
+                services.GetRequiredService<ISourceSystem<MaintenancePayload>>(),
+                services.GetRequiredService<ISourceSystem<FinancePayload>>(),
+                services.GetRequiredService<ISourceSystem<RecordsPayload>>(),
+                services.GetRequiredService<ISourceSystem<ContractsPayload>>()));
 
         // A gate refusal (evidence not in the synthetic registry) or model output that breaks the claim contract is a recorded
         // outcome (escalated, rejected): the trace is already appended with it. Any append failure is a different exception

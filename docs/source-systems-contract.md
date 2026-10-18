@@ -158,6 +158,28 @@ bounded source-read admission service. Identity, role and requested-case scope
 are checked before admission or source access; a returned record for another
 case is rejected before serialization.
 
+## Investigator source-record tools
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `list_source_records` | `sourceId` | Lists records from one authorized source for the investigator's bound case. |
+| `get_source_record` | `sourceId`, `recordId` | Gets one authorized source record for the investigator's bound case. |
+
+Neither accepts `caseId`; server binds case and role. Both call the read-only port, reject source/case mismatches and
+delimit returned JSON as untrusted. Calls and returned results count against existing investigation/token limits.
+
+Direct source access follows this matrix; all unlisted pairs, including unknown roles, are denied before port access.
+
+| Role | Sources readable by direct investigator tools |
+|---|---|
+| `technical-reviewer` | `technical`, `maintenance`, `records` |
+| `finance-reviewer` | `technical`, `finance` |
+| `legal-reviewer` | `contracts`, `records` |
+| `presenter` | none |
+| `executive` | none |
+
+Presenters and executives may see source summaries, not records; no source write, mode-change, network-fetch, approval or request tool is exposed.
+
 Every coded error response contains exactly `contractVersion` and `error`, and
 the error contains exactly `code`. An unavailable source returns HTTP 503 with
 `error.code = source_unavailable` and no `records` or `record` property.
