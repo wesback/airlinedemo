@@ -69,6 +69,19 @@ The obligation evaluator consumes `obligation_clause` records from the latest co
 
 The evaluator uses the pinned record envelope's `asOf` date for the scenario date and cites the clause by its exact `(sourceId, recordId, recordVersion)` tuple. It does not read live contracts records or send notices.
 
+### Specialist review flags
+
+The `specialist_flag` kind contains exactly the following string fields:
+
+| Field | Accepted values |
+|---|---|
+| `relatedRequirementId` | Non-empty requirement identifier, matched ordinally and case-sensitively. |
+| `topic` | `sanctions`, `cape_town`, `ifrs16`, `gdpr` or `other`. |
+| `result` | `specialist_review_required` or `not_assessed`. |
+| `regime` | Required only for `sanctions`; exactly `EU`, `US` or `UK`. It is absent for all other topics. |
+
+Unknown or missing fields, empty base values, unsupported topic/result values and regime fields on non-sanctions flags invalidate the contracts source during fixture initialization. An assessment is related to a flag only through an explicit, exact `relatedRequirementId`. A matching `specialist_review_required` or `not_assessed` result routes to internal review without creating a mock request or acceptance event. Sanctions results apply only to the named regime; a different regime remains `not_assessed`. These outcomes are not clearance, compliance, recoverability, legal, financial or accounting conclusions. In particular, an `ifrs16` flag does not classify a lease, assess impairment or recognize an accounting amount.
+
 ## Signed fixture cases
 
 Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `contracts`) ships one fixture file under `backend/AirlineDemo.Api/Fixtures/sources/`, with a manifest (`<source>.manifest.json`) and a detached signature (`<source>.manifest.sig`). The manifest lists `owningCaseIds` (`case-001`, `case-a`, `case-b`, `case-c`), the SHA-256 digest of the fixture file and the record count of every source. Every record's `caseId` must be one of the owning IDs, and each source holds at least one record for each case.
