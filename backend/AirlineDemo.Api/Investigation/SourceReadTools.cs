@@ -26,8 +26,8 @@ public sealed class SourceReadTools(
 
     private IReadOnlyList<AIFunction>? _functions;
     private readonly HashSet<SourceRecordWitness> _readWitnesses = [];
-    private readonly HashSet<string> _markedPersonalDataFields = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _markedPersonalDataValues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _markedPersonalDataFields = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _markedPersonalDataValues = new(StringComparer.Ordinal);
     private readonly object _witnessGate = new();
 
     internal IReadOnlyCollection<SourceRecordWitness> ReadWitnesses
@@ -43,10 +43,16 @@ public sealed class SourceReadTools(
 
     internal bool ContainsMarkedPersonalData(string text)
     {
+        var normalizedText = NormalizePersonalDataMatch(text);
+        if (normalizedText.Length == 0)
+        {
+            return false;
+        }
+
         lock (_witnessGate)
         {
-            return _markedPersonalDataFields.Any(field => text.Contains(field, StringComparison.OrdinalIgnoreCase))
-                || _markedPersonalDataValues.Any(value => text.Contains(value, StringComparison.OrdinalIgnoreCase));
+            return _markedPersonalDataFields.Any(field => normalizedText.Contains(field, StringComparison.Ordinal))
+                || _markedPersonalDataValues.Any(value => normalizedText.Contains(value, StringComparison.Ordinal));
         }
     }
 
@@ -181,16 +187,28 @@ public sealed class SourceReadTools(
 
                 if (!string.IsNullOrEmpty(field))
                 {
-                    _markedPersonalDataFields.Add(field);
+                    AddNormalizedPersonalData(_markedPersonalDataFields, field);
                 }
 
                 if (!string.IsNullOrEmpty(value))
                 {
-                    _markedPersonalDataValues.Add(value);
+                    AddNormalizedPersonalData(_markedPersonalDataValues, value);
                 }
             }
         }
     }
+
+    private static void AddNormalizedPersonalData(HashSet<string> destination, string value)
+    {
+        var normalized = NormalizePersonalDataMatch(value);
+        if (normalized.Length > 0)
+        {
+            destination.Add(normalized);
+        }
+    }
+
+    private static string NormalizePersonalDataMatch(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
     private static string SerializeRecord<TPayload>(SourceRecord<TPayload> record) where TPayload : class
     {

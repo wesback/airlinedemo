@@ -348,13 +348,16 @@ public sealed class SourceInvestigatorToolsTests
     }
 
     [Theory]
-    [InlineData("subjectName")]
-    [InlineData("licenseNumber")]
-    [InlineData("SYN-PERSON-NAME-01")]
-    [InlineData("SYN-LICENSE-NUMBER-01")]
-    [InlineData("syn-person-name-01")]
-    [InlineData("syn-license-number-01")]
-    public async Task MarkedPersonalDataIsRejectedFromReturnedClaims(string markedText)
+    [InlineData("subjectName", false)]
+    [InlineData("licenseNumber", false)]
+    [InlineData("SYN-PERSON-NAME-01", false)]
+    [InlineData("SYN-LICENSE-NUMBER-01", false)]
+    [InlineData("syn-person-name-01", false)]
+    [InlineData("syn-license-number-01", false)]
+    [InlineData("SYN PERSON NAME 01", true)]
+    [InlineData("SYN.PERSON.NAME.01", true)]
+    [InlineData("SYN_PERSON_NAME_01", true)]
+    public async Task MarkedPersonalDataIsRejectedFromReturnedClaims(string markedText, bool isCitation)
     {
         const string caseId = "case-001";
         const string recordId = "rec-doc-arr-0012";
@@ -382,8 +385,17 @@ public sealed class SourceInvestigatorToolsTests
         {
             new
             {
-                text = markedText,
-                witnesses = new[] { new { documentId = "return-status", page = 1, quote = "Return readiness is pending reserve approval." } },
+                text = isCitation ? "Return readiness is pending reserve approval." : markedText,
+                witnesses = new[]
+                {
+                    new
+                    {
+                        documentId = "return-status",
+                        page = 1,
+                        quote = isCitation ? markedText : "Return readiness is pending reserve approval.",
+                    },
+                },
+                sourceWitnesses = new[] { new { sourceId = "records", recordId, recordVersion = 1 } },
             },
         }, JsonOptions);
         var calls = 0;
