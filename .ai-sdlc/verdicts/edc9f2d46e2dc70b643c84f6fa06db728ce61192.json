@@ -1,0 +1,236 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 361,
+  "branch": "ai-sdlc/issue-361",
+  "commitSha": "edc9f2d46e2dc70b643c84f6fa06db728ce61192",
+  "round": 5,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest mapping avoids requiring a Cape Town flag for every public claim, but also lets a Cape Town-dependent claim proceed when its matching flag is absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentEndpoints.cs",
+          "line": 183,
+          "message": "Public submissions can bypass the required matching-flag check when the flag is missing because this mapping leaves reliance false (OWASP A04:2025, Insecure Design).",
+          "confidence": 0.86,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ToClaim maps public submissions without setting ReliesOnCapeTownEvidence, so it defaults to false. When the accepted basis contains Cape Town evidence and no exact matching cape_town flag exists, ResolveCapeTownEvidence returns unmatched and assessment continues.",
+            "failureScenario": "A presenter submits a finding related to REQ-CAPE-TOWN that relies on the pinned Cape Town evidence, but the basis has no matching specialist flag. The public mapping leaves reliance false, so assessment accepts the finding without the required flag."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-six mapping avoids rejecting unrelated claims, but it also lets public claims that rely on Cape Town evidence bypass validation when the exact specialist flag is missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentEndpoints.cs",
+          "line": 183,
+          "message": "Public claims no longer carry a server-derived reliance signal. A Cape Town dependent submission without a matching flag therefore bypasses the required validation. The public path test covers only the case with a matching flag, not this missing-flag case.",
+          "confidence": 0.89,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ToClaim leaves ReliesOnCapeTownEvidence false. When the accepted basis contains Cape Town evidence but no exact matching flag exists, ResolveCapeTownEvidence returns unmatched and assessment proceeds.",
+            "failureScenario": "A public submission relies on the Cape Town record and uses relatedRequirementId REQ-CAPE-TOWN, but the basis has no matching cape_town flag. The claim bypasses validation instead of failing, violating the acceptance criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-six mapping prevents unrelated submissions from being treated as reliant, but it also leaves public submissions unable to signal reliance. A relied-upon finding without a matching Cape Town flag can therefore proceed through assessment.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentEndpoints.cs",
+          "line": 183,
+          "message": "The public assessment path can bypass the required flag check for a finding that relies on Cape Town evidence when its matching flag is absent. Derive reliance from a trusted signal and reject relied-upon findings without an exact matching cape_town flag (OWASP A04:2025, Insecure Design).",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ToClaim no longer marks public claims as relying on Cape Town evidence. In ResolveCapeTownEvidence, when the accepted basis contains that evidence but no matching flag exists, a claim with ReliesOnCapeTownEvidence false returns unmatched and assessment continues.",
+            "failureScenario": "An authorized presenter submits a finding that relies on the pinned Cape Town record, supplies its relatedRequirementId, and no matching cape_town flag exists. The public mapping leaves the reliance flag false, so assessment proceeds without refusing the finding or routing it for specialist review."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CapeTownEvidenceTests.cs",
+      "backend/AirlineDemo.Api.Tests/SpecialistReviewFlagTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

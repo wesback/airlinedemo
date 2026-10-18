@@ -84,6 +84,17 @@ The `specialist_flag` kind contains exactly the following string fields:
 
 Unknown or missing fields, empty base values, unsupported topic/result values and regime fields on non-sanctions flags invalidate the contracts source during fixture initialization. An assessment is related to a flag only through an explicit, exact `relatedRequirementId`. A matching `specialist_review_required` or `not_assessed` result routes to internal review without creating a mock request or acceptance event. Sanctions results apply only to the named regime; a different regime remains `not_assessed`. These outcomes are not clearance, compliance, recoverability, legal, financial or accounting conclusions. In particular, an `ifrs16` flag does not classify a lease, assess impairment or recognize an accounting amount.
 
+The `cape_town_interest` kind is a separate typed evidence payload with exactly these fields:
+
+| Field | Type and accepted values |
+|---|---|
+| `internationalInterestRef` | Non-empty string reference. |
+| `registrationRef` | Non-empty string reference. |
+| `idera` | `present`, `absent` or `not_recorded`. |
+| `stateDeclarationNoted` | JSON boolean. |
+
+The payload has no `relatedRequirementId` field. A finding that relies on this evidence must have a `relatedRequirementId` matching exactly and case-sensitively a `specialist_flag` whose topic is `cape_town`; otherwise assessment refuses the finding. A matching finding is routed to internal review and includes a source-record witness and the typed evidence. The evidence does not determine priority, remedy, outcome, recoverability or any legal result.
+
 ## Signed fixture cases
 
 Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `contracts`) ships one fixture file under `backend/AirlineDemo.Api/Fixtures/sources/`, with a manifest (`<source>.manifest.json`) and a detached signature (`<source>.manifest.sig`). The manifest lists `owningCaseIds` (`case-001`, `case-a`, `case-b`, `case-c`), the SHA-256 digest of the fixture file and the record count of every source. Every record's `caseId` must be one of the owning IDs, and each source holds at least one record for each case.
@@ -97,7 +108,7 @@ Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `con
 
 The new finance records use the typed kind `maintenance_reserve` with the common fields (`recordedAmount`, `collectedAmount`, `currency`, `period`, `dueDate`, `rateBasis`, `rate`). The `case-001` finance records keep their earlier kinds.
 
-The contracts fixture contains seven synthetic `specialist_flag` records: one each for `cape_town`, `ifrs16`, `gdpr` and `other`, and three for `sanctions` (regimes `EU`, `US` and `UK`). Each record has a distinct related requirement identifier and one of the accepted result values.
+The contracts fixture contains seven synthetic `specialist_flag` records: one each for `cape_town`, `ifrs16`, `gdpr` and `other`, and three for `sanctions` (regimes `EU`, `US` and `UK`). Each record has a distinct related requirement identifier and one of the accepted result values. It also contains one synthetic `cape_town_interest` record with reference-only values and no legal conclusion.
 
 ### Signing
 
