@@ -140,7 +140,7 @@ public sealed class RehearsalCaptureTests
         var originalInput = Console.In; var originalOutput = Console.Out; var originalError = Console.Error;
         var environmentNames = new[]
         {
-            "REHEARSAL_TIMING_OUTPUT", "REHEARSAL_TRACE_OUTPUT", "REHEARSAL_BASE_URL",
+            "REHEARSAL_TIMING_OUTPUT", "REHEARSAL_TRACE_OUTPUT", "REHEARSAL_BASE_URL", "REHEARSAL_EXPECTED_ORIGIN",
             "REHEARSAL_SESSION_COOKIE", "REHEARSAL_CASE_ID", "REHEARSAL_RUN_ID", "REHEARSAL_INVESTIGATION_ID",
         };
         var originalEnvironment = environmentNames.ToDictionary(name => name, Environment.GetEnvironmentVariable);
@@ -185,6 +185,7 @@ public sealed class RehearsalCaptureTests
             using (var server = new StoredTraceServer(storedTrace))
             {
                 Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", server.BaseUrl);
+                Environment.SetEnvironmentVariable("REHEARSAL_EXPECTED_ORIGIN", server.BaseUrl);
                 Assert.Equal(0, await Generator.Main(["capture-trace"]));
                 await server.AssertRequested();
             }
@@ -197,6 +198,7 @@ public sealed class RehearsalCaptureTests
             using (var server = new MissingTraceServer())
             {
                 Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", server.BaseUrl);
+                Environment.SetEnvironmentVariable("REHEARSAL_EXPECTED_ORIGIN", server.BaseUrl);
                 Assert.Equal(1, await Generator.Main(["capture-trace"]));
                 await server.AssertRequested();
             }
@@ -209,6 +211,24 @@ public sealed class RehearsalCaptureTests
             Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", "http://example.invalid");
             Assert.Equal(1, await Generator.Main(["capture-trace"]));
             Assert.False(File.Exists(insecurePath));
+
+            var mismatchedOriginPath = Path.Combine(root, "mismatched-origin.json");
+            Environment.SetEnvironmentVariable("REHEARSAL_TRACE_OUTPUT", mismatchedOriginPath);
+            Environment.SetEnvironmentVariable("REHEARSAL_BASE_URL", "https://attacker.example");
+            Environment.SetEnvironmentVariable("REHEARSAL_EXPECTED_ORIGIN", "https://service.example");
+            error.GetStringBuilder().Clear();
+            Assert.Equal(1, await Generator.Main(["capture-trace"]));
+            Assert.False(File.Exists(mismatchedOriginPath));
+            Assert.Equal("capture failed: REHEARSAL_BASE_URL must match REHEARSAL_EXPECTED_ORIGIN." + Environment.NewLine,
+                error.ToString());
+
+            var missingExpectedOriginPath = Path.Combine(root, "missing-expected-origin.json");
+            Environment.SetEnvironmentVariable("REHEARSAL_TRACE_OUTPUT", missingExpectedOriginPath);
+            Environment.SetEnvironmentVariable("REHEARSAL_EXPECTED_ORIGIN", null);
+            error.GetStringBuilder().Clear();
+            Assert.Equal(1, await Generator.Main(["capture-trace"]));
+            Assert.False(File.Exists(missingExpectedOriginPath));
+            Assert.Equal("capture failed: REHEARSAL_EXPECTED_ORIGIN is required." + Environment.NewLine, error.ToString());
 
             Environment.SetEnvironmentVariable("REHEARSAL_TRACE_OUTPUT", tracePath);
             Assert.Equal(1, await Generator.Main(["capture-trace"]));
@@ -349,6 +369,7 @@ public sealed class RehearsalCaptureTests
         ?? throw new FileNotFoundException($"Could not locate {name} in PATH.");
     private static void AddTraceEnvironment(IDictionary<string, string?> environment)
     {
+        environment["REHEARSAL_EXPECTED_ORIGIN"] = environment["REHEARSAL_BASE_URL"];
         environment["REHEARSAL_SESSION_COOKIE"] = "session";
         environment["REHEARSAL_CASE_ID"] = "case-a";
         environment["REHEARSAL_RUN_ID"] = "run-1";

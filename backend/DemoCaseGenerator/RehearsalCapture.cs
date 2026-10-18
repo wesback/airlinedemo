@@ -226,9 +226,11 @@ public static class RehearsalCommands
     public static async Task<int> CaptureTraceAsync()
     {
         var output = OutputPath("REHEARSAL_TRACE_OUTPUT");
-        var baseUri = new Uri(Required("REHEARSAL_BASE_URL"), UriKind.Absolute);
-        if (baseUri.Scheme != Uri.UriSchemeHttps && !(baseUri.IsLoopback && baseUri.Scheme == Uri.UriSchemeHttp))
-            throw new InvalidOperationException("REHEARSAL_BASE_URL must use HTTPS, except for a loopback development host.");
+        var baseUri = ParseServiceOrigin(Required("REHEARSAL_BASE_URL"), "REHEARSAL_BASE_URL");
+        var expectedOrigin = ParseServiceOrigin(Required("REHEARSAL_EXPECTED_ORIGIN"), "REHEARSAL_EXPECTED_ORIGIN");
+        if (Uri.Compare(baseUri, expectedOrigin, UriComponents.SchemeAndServer, UriFormat.SafeUnescaped,
+                StringComparison.OrdinalIgnoreCase) != 0)
+            throw new InvalidOperationException("REHEARSAL_BASE_URL must match REHEARSAL_EXPECTED_ORIGIN.");
         var cookie = Required("REHEARSAL_SESSION_COOKIE"); var caseId = Required("REHEARSAL_CASE_ID");
         var runId = Required("REHEARSAL_RUN_ID"); var investigationId = Required("REHEARSAL_INVESTIGATION_ID");
         using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
@@ -237,6 +239,15 @@ public static class RehearsalCommands
         WriteNew(output, content);
         Console.WriteLine("Stored trace response recorded.");
         return 0;
+    }
+
+    private static Uri ParseServiceOrigin(string value, string name)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || !string.IsNullOrEmpty(uri.UserInfo)
+            || uri.AbsolutePath != "/" || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)
+            || (uri.Scheme != Uri.UriSchemeHttps && !(uri.IsLoopback && uri.Scheme == Uri.UriSchemeHttp)))
+            throw new InvalidOperationException($"{name} must be an origin-only HTTPS URL, except for a loopback development host.");
+        return uri;
     }
 
     private static void Mark(string prompt, Action mark)
