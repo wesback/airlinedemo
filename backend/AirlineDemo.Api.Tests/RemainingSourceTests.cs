@@ -47,8 +47,8 @@ public sealed class RemainingSourceTests
             },
             records.Select(r => (r.RecordId, r.RecordVersion, r.CaseId, r.Kind)).ToArray());
         Assert.Equal(
-            new[] { ("SYN-DOC0011", "1"), ("SYN-DOC0012", "1"), ("SYN-DOC0013", "1") },
-            records.Select(r => (r.Payload.Fields["documentId"], r.Payload.Fields["documentVersion"])).ToArray());
+            new[] { ("SYN-DOC0011", "1", false), ("SYN-DOC0012", "1", true), ("SYN-DOC0013", "1", false) },
+            records.Select(r => (r.Payload.DocumentId, r.Payload.DocumentVersion, r.Payload.ContainsPersonalData)).ToArray());
 
         // The specialist_flag records are asserted in SpecialistReviewFlagTests; this test covers the clause.
         var contracts = (await ListOk(new ContractsSource(), CoreCase)).Where(r => r.Kind == "obligation_clause").ToList();
@@ -92,9 +92,7 @@ public sealed class RemainingSourceTests
 
         foreach (var record in records)
         {
-            Assert.Equal(new[] { "documentId", "documentType", "documentVersion", "parseStatus" }, record.Payload.Fields.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
-            Assert.False(record.Payload.Fields.ContainsKey("content"));
-            Assert.False(record.Payload.Fields.ContainsKey("text"));
+            Assert.Equal(new[] { "containsPersonalData", "documentId", "documentVersion" }, record.Payload.Fields.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
             Assert.Equal("records", record.SourceId);
             Assert.False(string.IsNullOrWhiteSpace(record.RecordId));
             Assert.True(record.RecordVersion >= 1);
@@ -109,8 +107,7 @@ public sealed class RemainingSourceTests
             {
                 ["documentId"] = "SYN-DOC0012",
                 ["documentVersion"] = "1",
-                ["documentType"] = "component-release",
-                ["parseStatus"] = "complete",
+                ["containsPersonalData"] = "true",
             },
             records[1].Payload.Fields);
 
@@ -119,8 +116,7 @@ public sealed class RemainingSourceTests
             {
                 ["documentId"] = "SYN-DOC0011",
                 ["documentVersion"] = "1",
-                ["documentType"] = "release-to-service",
-                ["parseStatus"] = "complete",
+                ["containsPersonalData"] = "false",
             },
             records[0].Payload.Fields);
 
@@ -129,8 +125,7 @@ public sealed class RemainingSourceTests
             {
                 ["documentId"] = "SYN-DOC0013",
                 ["documentVersion"] = "1",
-                ["documentType"] = "shop-visit-record",
-                ["parseStatus"] = "complete",
+                ["containsPersonalData"] = "false",
             },
             records[2].Payload.Fields);
 

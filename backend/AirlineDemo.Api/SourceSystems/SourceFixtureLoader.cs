@@ -273,6 +273,16 @@ public static class SourceFixtureLoader
                     throw Refuse(source, "a fixture record has no caseId.");
                 }
 
+                if (source == "records")
+                {
+                    if (!record.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object
+                        || !payload.TryGetProperty("containsPersonalData", out var marker)
+                        || marker.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    {
+                        throw Refuse(source, "every record payload must contain containsPersonalData as a JSON boolean.");
+                    }
+                }
+
                 caseIds.Add(caseId.GetString()!);
             }
 

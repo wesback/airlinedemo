@@ -8,7 +8,7 @@
       "caseId": "case-001",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOC0011", "documentVersion": "1", "documentType": "release-to-service", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOC0011", "documentVersion": "1", "containsPersonalData": false, "documentType": "release-to-service", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-doc-arr-0012",
@@ -17,7 +17,7 @@
       "caseId": "case-001",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOC0012", "documentVersion": "1", "documentType": "component-release", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOC0012", "documentVersion": "1", "containsPersonalData": true, "subjectName": "SYN-PERSON-NAME-01", "licenseNumber": "SYN-LICENSE-NUMBER-01", "documentType": "component-release", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-doc-arr-0013",
@@ -26,7 +26,7 @@
       "caseId": "case-001",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOC0013", "documentVersion": "1", "documentType": "shop-visit-record", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOC0013", "documentVersion": "1", "containsPersonalData": false, "documentType": "shop-visit-record", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-a-doc-001",
@@ -35,7 +35,7 @@
       "caseId": "case-a",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOCA001", "documentVersion": "1", "documentType": "release-to-service", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOCA001", "documentVersion": "1", "containsPersonalData": false, "documentType": "release-to-service", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-a-doc-002",
@@ -44,7 +44,7 @@
       "caseId": "case-a",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOCA002", "documentVersion": "1", "documentType": "shop-visit-record", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOCA002", "documentVersion": "1", "containsPersonalData": false, "documentType": "shop-visit-record", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-b-doc-001",
@@ -53,7 +53,7 @@
       "caseId": "case-b",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOCB001", "documentVersion": "1", "documentType": "release-to-service", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOCB001", "documentVersion": "1", "containsPersonalData": false, "documentType": "release-to-service", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-b-doc-002",
@@ -62,7 +62,7 @@
       "caseId": "case-b",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOCB002", "documentVersion": "1", "documentType": "component-release", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOCB002", "documentVersion": "1", "containsPersonalData": false, "documentType": "component-release", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-c-doc-001",
@@ -71,7 +71,7 @@
       "caseId": "case-c",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOCC001", "documentVersion": "1", "documentType": "release-to-service", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOCC001", "documentVersion": "1", "containsPersonalData": false, "documentType": "release-to-service", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-c-doc-002",
@@ -80,7 +80,7 @@
       "caseId": "case-c",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOCC002", "documentVersion": "1", "documentType": "shop-visit-record", "parseStatus": "complete" }
+      "payload": { "documentId": "SYN-DOCC002", "documentVersion": "1", "containsPersonalData": false, "documentType": "shop-visit-record", "parseStatus": "complete" }
     },
     {
       "recordId": "rec-c-doc-003",
@@ -89,7 +89,7 @@
       "caseId": "case-c",
       "kind": "document_index",
       "synthetic": true,
-      "payload": { "documentId": "SYN-DOCC003", "documentVersion": "1", "documentType": "component-release", "parseStatus": "blocked" }
+      "payload": { "documentId": "SYN-DOCC003", "documentVersion": "1", "containsPersonalData": false, "documentType": "component-release", "parseStatus": "blocked" }
     }
   ]
 }

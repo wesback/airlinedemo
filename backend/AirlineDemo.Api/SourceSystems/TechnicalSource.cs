@@ -107,7 +107,7 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         var records = new List<SourceRecord<TPayload>>();
         foreach (var dto in file.Records)
         {
-            var fields = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(dto.Payload, StringComparer.Ordinal));
+            var fields = ReadPayloadFields(sourceId, dto.Payload, resourceName, dto.RecordId);
             var payloadProblems = validatePayload?.Invoke(dto.Kind, fields) ?? [];
             if (payloadProblems.Count > 0)
             {
@@ -146,6 +146,50 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         return records.AsReadOnly();
     }
 
+    private static IReadOnlyDictionary<string, string> ReadPayloadFields(
+        string sourceId,
+        JsonElement payload,
+        string resourceName,
+        string recordId)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"Source fixture '{resourceName}' record '{recordId}' payload must be an object.");
+        }
+
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (sourceId == "records" && property.Name == "containsPersonalData")
+            {
+                if (property.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                {
+                    throw new InvalidOperationException(
+                        $"Source fixture '{resourceName}' record '{recordId}' containsPersonalData must be a JSON boolean.");
+                }
+
+                fields.Add(property.Name, property.Value.GetBoolean().ToString(CultureInfo.InvariantCulture).ToLowerInvariant());
+            }
+            else if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                fields.Add(property.Name, property.Value.GetString() ?? string.Empty);
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Source fixture '{resourceName}' record '{recordId}' payload field '{property.Name}' must be a string.");
+            }
+        }
+
+        if (sourceId == "records" && !fields.ContainsKey("containsPersonalData"))
+        {
+            throw new InvalidOperationException(
+                $"Source fixture '{resourceName}' record '{recordId}' is missing containsPersonalData.");
+        }
+
+        return new ReadOnlyDictionary<string, string>(fields);
+    }
+
     // JSON shape of a signed source fixture file; field names are camelCase per docs/source-systems-contract.md.
     internal sealed class FixtureFile
     {
@@ -168,7 +212,7 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
 
         public bool Synthetic { get; set; }
 
-        public Dictionary<string, string> Payload { get; set; } = [];
+        public JsonElement Payload { get; set; }
     }
 }
 
