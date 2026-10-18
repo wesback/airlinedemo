@@ -1,0 +1,247 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 403,
+  "branch": "ai-sdlc/issue-403",
+  "commitSha": "43539f4c9ab65fdde966cadff7ce4bb01e4bb53d",
+  "round": 1,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix rejects unsupported filters and decodes supported ones when /Filter is recognized. A valid escaped spelling of that key bypasses recognition, leaving the Unicode destination bound unenforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 564,
+          "message": "The previous filtered-CMap bypass remains reachable with a valid escaped /Filter name. Decode PDF names before matching the filter key, or reject dictionaries whose filter cannot be inspected (OWASP A06:2025).",
+          "confidence": 0.86,
+          "category": "A06:2025",
+          "evidence": {
+            "codePathTraced": "The preflight searches the raw stream dictionary for /Filter without decoding escaped PDF names. If the key is written as /Fi#6Cter, FilterValue.Match fails and the stream bytes are scanned as though they were unfiltered.",
+            "failureScenario": "A presenter submits a PDF whose /ToUnicode stream uses /Fi#6Cter /ASCIIHexDecode and contains a hex-encoded CMap with a 2,048-byte destination. The preflight does not decode the filter or detect the destination, so the worker starts with the oversized CMap."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix rejects directly specified unsupported filters, but a valid indirect /Filter reference bypasses decoding and leaves the CMap bound unenforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 570,
+          "message": "The new handling still bypasses the destination bound when a valid stream dictionary uses an indirect /Filter value. Resolve that value or reject uninspectable filter entries before scanning.",
+          "confidence": 0.67,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "FilterValue.Match only recognizes a filter written directly as a name or array. If /Filter is an indirect reference, filter.Success is false and the raw stream bytes go to CMapExceedsUnicodeBounds without decoding.",
+            "failureScenario": "A PDF uses /Filter 7 0 R, where object 7 resolves to /ASCII85Decode, and its encoded /ToUnicode stream contains a 2,048-byte destination. The scanner misses the encoded CMap operators, so the worker starts and processes the oversized mapping instead of returning the retryable rejection. This is an insecure design resource-boundary bypass (OWASP A06:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix handles ordinary ASCIIHex and unsupported filters, but the preflight still misses valid filtered CMaps when the /Filter key uses PDF name escaping.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 564,
+          "message": "The Unicode expansion bound can still be bypassed with a valid escaped /Filter dictionary key. Decode PDF name escapes before identifying filters, or reject CMap dictionaries whose filters cannot be inspected.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The preflight searches the raw CMap stream dictionary for /Filter. PDF name escapes are not decoded there, so an escaped key such as /Fil#74er is missed and the encoded stream bytes are scanned as if they were the decoded CMap.",
+            "failureScenario": "A presenter submits a PDF whose /ToUnicode stream uses /Fil#74er /ASCIIHexDecode and contains an ASCIIHex-encoded CMap with a 2,048-byte destination. The preflight sees no filter and finds no CMap operators in the encoded bytes, then starts the worker with the oversized mapping."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 112,
+      "total": 129,
+      "percent": 86.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "covered": 112,
+          "total": 129,
+          "missed": [
+            557,
+            558,
+            571,
+            572,
+            628,
+            629,
+            630,
+            636,
+            637,
+            638,
+            666,
+            667,
+            668,
+            669,
+            673,
+            674,
+            675
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
