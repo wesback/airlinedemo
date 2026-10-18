@@ -1,0 +1,205 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 384,
+  "branch": "ai-sdlc/issue-384",
+  "commitSha": "9e591492ee633b84c8118b5b9dbd410670d2f4bc",
+  "round": 0,
+  "pipelineVersion": "c543f99-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The identifier updates and documentation match the stated criteria. The changed records manifest still has its old detached signature, so fixture verification will reject it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Fixtures/sources/records.manifest.json",
+          "line": 6,
+          "message": "The records manifest digest changed without a corresponding re-signature. Include a valid updated signature so the loader accepts the fixture.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fixture digest changes with records.json, but the diff does not update records.manifest.sig. The acceptance criteria require a valid detached signature for each updated source manifest.",
+            "failureScenario": "When SourceFixtureLoader verifies the checked-in records manifest against the unchanged signature, verification fails and the fixture is refused, so the updated case-001 records cannot be published."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The parity updates and tests cover the requested identifiers. The changed records manifest has no matching signature update, so the signed fixture loader will refuse to publish it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Fixtures/sources/records.manifest.json",
+          "line": 5,
+          "message": "The records manifest signature was not refreshed after its digest changed. Re-sign the manifest so the checked-in fixture passes production signature verification (OWASP A08:2025).",
+          "confidence": 0.99,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The records fixture changes and its manifest SHA-256 changes, but the diff does not update records.manifest.sig. SourceFixtureLoader verifies the detached signature against the manifest before publishing fixtures.",
+            "failureScenario": "When the loader reads the changed records fixture, the manifest digest matches the fixture but the unchanged detached signature does not verify against the modified manifest, so fixture publication is refused."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The identifier updates match the stated mappings, and no injection or authorization issue is apparent. The records manifest digest changed without a corresponding signature update, so the fixture loader will reject publication.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Fixtures/sources/records.manifest.json",
+          "line": 6,
+          "message": "The changed fixture manifest has not been re-signed. Update the detached signatures required by the acceptance criterion so the changed fixtures can pass production-key verification.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The records manifest digest changed, but the diff does not update its detached signature. SourceFixtureLoader verifies fixture signatures before publication.",
+            "failureScenario": "When the loader reads the changed records fixture with the unchanged signature, signature verification fails and publication is refused."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceIdentifierParityTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
