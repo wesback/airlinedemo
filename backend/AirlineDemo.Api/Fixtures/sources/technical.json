@@ -44,7 +44,7 @@
       "caseId": "case-001",
       "kind": "applicability",
       "synthetic": true,
-      "payload": { "requirement": "SYN-AD-2026-014", "regime": "EASA", "responsibleParty": "lessee-operator" }
+      "payload": { "requirementId": "SYN-AD-2026-014", "regime": "EASA", "responsibleParty": "lessee-operator" }
     },
     {
       "recordId": "tech-a-airworthiness-001",
