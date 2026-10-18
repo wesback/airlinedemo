@@ -21,16 +21,16 @@ public class IsolatedPdfParserTests
     }
 
     /// <summary>A one-page PDF whose content stream inflates to 600 MB of zeros (above the 512 MB limit) from a few hundred kilobytes.</summary>
-    private static byte[] FlateBomb()
+    private static byte[] FlateBomb(string filter = "/FlateDecode", long decodedBytes = 600L * 1024 * 1024)
     {
         using var compressed = new MemoryStream();
         using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
         {
             var chunk = new byte[1024 * 1024];
             Array.Fill(chunk, (byte)' ');
-            for (var i = 0; i < 600; i++)
+            for (var remaining = decodedBytes; remaining > 0; remaining -= chunk.Length)
             {
-                zlib.Write(chunk);
+                zlib.Write(chunk, 0, (int)Math.Min(chunk.Length, remaining));
             }
         }
 
@@ -47,7 +47,7 @@ public class IsolatedPdfParserTests
         Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
         Object("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
         Object("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj\n");
-        Object($"4 0 obj << /Length {body.Length} /Filter /FlateDecode >> stream\n");
+        Object($"4 0 obj << /Length {body.Length} {(filter.StartsWith("/Fil") ? filter : "/Filter " + filter)} >> stream\n");
         pdf.Write(body);
         Write(pdf, "\nendstream endobj\n");
 
@@ -110,12 +110,64 @@ public class IsolatedPdfParserTests
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, bomb.State);
         Assert.True(
-            bomb.Reason.Contains("memory limit") || bomb.Reason.Contains("time limit"),
+            bomb.Reason.Contains("memory limit") || bomb.Reason.Contains("time limit") || bomb.Reason.Contains("decoded bytes"),
             $"bomb was not stopped by a limit: {bomb.Reason}");
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"bomb took {clock.Elapsed}");
 
         var valid = IsolatedPdfParser.Parse(Fixture("valid-text.pdf"), RealWorker());
         Assert.Equal(EvidenceProcessingState.Complete, valid.State);
+    }
+
+    private const string BombReason = "PDF stream content exceeds 8388608 decoded bytes; retry is possible";
+    private const string UnreadableReason = "PdfPig could not open or read the document; retry is possible";
+
+    private static IsolatedPdfParserOptions CountingWorker(int[] starts) => new()
+    {
+        WorkerFileName = "/bin/sh",
+        WorkerArguments = new[] { "-c", "cat > /dev/null" },
+        WorkerStarting = () => starts[0]++,
+    };
+
+    // AC-1: a Flate stream that decodes past 8,388,608 bytes is refused before a worker starts, in all three spellings.
+    [Theory]
+    [InlineData("/FlateDecode", BombReason)]
+    [InlineData("/Flate#44ecode", UnreadableReason)]
+    [InlineData("/Fil#74er /FlateDecode", UnreadableReason)]
+    public void StreamFilterPreflightRejectsBeforeStartingWorker(string filter, string reason)
+    {
+        var starts = new[] { 0 };
+        var input = FlateBomb(filter, 9L * 1024 * 1024);
+        Assert.True(input.Length <= 10_485_760);
+
+        var outcome = IsolatedPdfParser.Parse(input, CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal(reason, outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    // AC-2: exactly 8,388,608 decoded bytes is accepted and starts the worker once.
+    [Fact]
+    public void StreamFilterPreflightAcceptsExactDecodedLimitAndStartsWorkerOnce()
+    {
+        var starts = new[] { 0 };
+
+        IsolatedPdfParser.Parse(FlateBomb(decodedBytes: 8L * 1024 * 1024), CountingWorker(starts));
+
+        Assert.Equal(1, starts[0]);
+    }
+
+    // One byte over the limit is refused.
+    [Fact]
+    public void StreamFilterPreflightRefusesOneByteOverTheLimit()
+    {
+        var starts = new[] { 0 };
+
+        var outcome = IsolatedPdfParser.Parse(FlateBomb(decodedBytes: 8L * 1024 * 1024 + 1), CountingWorker(starts));
+
+        Assert.Equal(BombReason, outcome.Reason);
+        Assert.Equal(0, starts[0]);
     }
 
     // AC-2: exceeding the 30 second wall-clock limit kills the child (tested here with a 2 second limit).
