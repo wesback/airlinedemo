@@ -485,11 +485,9 @@ public sealed class AssessmentExecutionService(
             : flags.FirstOrDefault(item =>
                 item.Topic == "cape_town"
                 && string.Equals(item.RelatedRequirementId, claim.RelatedRequirementId, StringComparison.Ordinal));
-        if (!claim.ReliesOnCapeTownEvidence && flag is null)
-            return new CapeTownClaimResolution(null, false, []);
         if (flag is null)
             throw new InvalidDataException(
-                "A finding relying on cape_town_interest requires an exact matching cape_town specialist_flag.");
+                "A finding assessed with cape_town_interest requires an exact matching cape_town specialist_flag.");
         return new CapeTownClaimResolution(flag.Result, true, evidence);
     }
 

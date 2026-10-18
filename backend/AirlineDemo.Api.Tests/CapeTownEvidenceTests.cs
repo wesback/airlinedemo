@@ -1,12 +1,20 @@
+using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Policy;
 using AirlineDemo.Api.Requests;
 using AirlineDemo.Api.SourceSystems;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -100,64 +108,45 @@ public sealed class CapeTownEvidenceTests
         Assert.Throws<InvalidDataException>(() => Assess(
             new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"),
             null, reliesOnCapeTownEvidence: true));
-
-        using var unrelated = Assess(
-            null,
-            RequirementId,
-            "The return package mentions Cape Town incidentally.",
-            "The return package mentions Cape Town incidentally.",
-            reliesOnCapeTownEvidence: false);
-        Assert.Equal("Request", unrelated.Record.Outcome);
-        Assert.Equal("single supported missing requirement on current basis", unrelated.Record.Reason);
-        Assert.Equal(RequirementId, Assert.Single(unrelated.Record.Claims).RelatedRequirementId);
-        Assert.Null(unrelated.Record.Claims.Single().SpecialistResult);
-        Assert.Null(unrelated.Record.Claims.Single().CapeTownEvidence);
-        Assert.Single(unrelated.Inbox.Requests);
     }
 
     [Fact]
-    public void PublicAssessmentRelianceComesFromAcceptedCapeTownFlag()
+    public async Task PublicAssessmentRequiresExactCapeTownFlagForEveryClaimWhenEvidenceIsPinned()
     {
-        foreach (var relianceField in new[] { "", ",\"reliesOnCapeTownEvidence\":false", ",\"reliesOnCapeTownEvidence\":true" })
+        await using var endpoint = new AssessmentEndpointScenario();
+
+        using (var matching = await endpoint.SubmitAsync(RequirementId,
+                   [new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required")]))
         {
-            var submissionJson =
-                $$"""{"kind":"MissingRequirement","value":"return package","component":"Engine","serialNumber":"ENG-1","witnesses":[],"relatedRequirementId":"REQ-CAPE-TOWN"{{relianceField}}}""";
-            var submission = JsonSerializer.Deserialize<AssessmentClaimSubmission>(
-                submissionJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            Assert.NotNull(submission);
-            var mapped = AssessmentEndpoints.ToClaim(submission, ClaimKind.MissingRequirement, []);
-
-            Assert.False(mapped.ReliesOnCapeTownEvidence);
-            Assert.Equal(RequirementId, mapped.RelatedRequirementId);
-            using var matching = Assess(
-                new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"),
-                mapped.RelatedRequirementId,
-                reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence);
-            Assert.Equal("Review", matching.Record.Outcome);
-            Assert.Equal(new CapeTownInterestEvidence("SYN-INT-CT-001", "SYN-REG-CT-001", "not_recorded", false),
-                Assert.Single(matching.Record.Claims).CapeTownEvidence!.Single());
+            Assert.Equal(System.Net.HttpStatusCode.Created, matching.StatusCode);
+            var body = await matching.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            using var json = JsonDocument.Parse(body);
+            Assert.Equal("Review", json.RootElement.GetProperty("outcome").GetString());
+            Assert.Equal("specialist review required", json.RootElement.GetProperty("reason").GetString());
+            var claim = Assert.Single(json.RootElement.GetProperty("claims").EnumerateArray());
+            Assert.Equal(RequirementId, claim.GetProperty("relatedRequirementId").GetString());
+            Assert.Equal("specialist_review_required", claim.GetProperty("specialistResult").GetString());
+            var capeTownEvidence = Assert.Single(claim.GetProperty("capeTownEvidence").EnumerateArray());
+            Assert.Equal("SYN-INT-CT-001", capeTownEvidence.GetProperty("internationalInterestRef").GetString());
+            Assert.Equal("SYN-REG-CT-001", capeTownEvidence.GetProperty("registrationRef").GetString());
+            Assert.Equal("not_recorded", capeTownEvidence.GetProperty("idera").GetString());
+            Assert.False(capeTownEvidence.GetProperty("stateDeclarationNoted").GetBoolean());
+            foreach (var conclusion in new[] { "priority", "remedy", "outcome", "recoverability" })
+                Assert.DoesNotContain(conclusion, capeTownEvidence.GetRawText(), StringComparison.OrdinalIgnoreCase);
         }
-    }
 
-    [Fact]
-    public void UnrelatedPublicClaimDoesNotRequireCapeTownFlagWhenEvidenceIsPinned()
-    {
-        var submission = new AssessmentClaimSubmission(
-            "MissingRequirement", "return package", "Engine", "ENG-1", [], "REQ-OTHER");
-        var mapped = AssessmentEndpoints.ToClaim(submission, ClaimKind.MissingRequirement, []);
-
-        Assert.False(mapped.ReliesOnCapeTownEvidence);
-        using var unrelated = Assess(
-            null,
-            mapped.RelatedRequirementId,
-            "The return package mentions Cape Town incidentally.",
-            "The return package mentions Cape Town incidentally.",
-            reliesOnCapeTownEvidence: mapped.ReliesOnCapeTownEvidence);
-        Assert.Equal("Request", unrelated.Record.Outcome);
-        Assert.Equal("single supported missing requirement on current basis", unrelated.Record.Reason);
-        Assert.Equal("REQ-OTHER", Assert.Single(unrelated.Record.Claims).RelatedRequirementId);
-        Assert.Null(unrelated.Record.Claims.Single().CapeTownEvidence);
-        Assert.Single(unrelated.Inbox.Requests);
+        await AssertRejected(endpoint.SubmitAsync(RequirementId, []));
+        await AssertRejected(endpoint.SubmitAsync(RequirementId, [], false));
+        await AssertRejected(endpoint.SubmitAsync(RequirementId, [], true));
+        await AssertRejected(endpoint.SubmitAsync(RequirementId,
+            [new SpecialistReviewFlag(RequirementId, "other", "specialist_review_required")]));
+        await AssertRejected(endpoint.SubmitAsync(RequirementId,
+            [new SpecialistReviewFlag("REQ-CAPE-TOWN-OTHER", "cape_town", "specialist_review_required")]));
+        await AssertRejected(endpoint.SubmitAsync("req-cape-town",
+            [new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required")]));
+        await AssertRejected(endpoint.SubmitAsync(null,
+            [new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required")]));
+        await AssertRejected(endpoint.SubmitAsync("REQ-OTHER", []));
     }
 
     [Fact]
@@ -280,6 +269,99 @@ public sealed class CapeTownEvidenceTests
         return new SourceBasisPin("contracts", recordId, 1, content,
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant());
     }
+
+    private static async Task AssertRejected(Task<HttpResponseMessage> responseTask)
+    {
+        using var response = await responseTask;
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
+    private sealed class AssessmentEndpointScenario : IAsyncDisposable
+    {
+        private const string CaseId = "cape-town-endpoint-case";
+        private const string Owner = "cape-town-presenter";
+        private readonly string _statePath = Path.Combine(Path.GetTempPath(), $"cape-town-endpoint-{Guid.NewGuid():N}.json");
+        private readonly CaseStateStore _caseStore;
+        private readonly AssessmentStore _assessments;
+        private readonly HttpClient _client;
+        private readonly DemoSession _session;
+        private readonly WebApplication _app;
+
+        public AssessmentEndpointScenario()
+        {
+            _caseStore = new CaseStateStore(_statePath);
+            _caseStore.CreateCase(CaseId, Owner);
+            _assessments = new AssessmentStore(_caseStore);
+            var inbox = new MockRequestInbox();
+            var sessions = new DemoSessionStore(TimeProvider.System);
+            _session = sessions.Create(new DemoUser(
+                Owner, "Cape Town Presenter", EvidenceEndpoints.PresenterRole, [CaseId]));
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseTestServer();
+            builder.Services.AddSingleton<DemoSessionStore>(sessions);
+            builder.Services.AddSingleton<ICaseStateStore>(_caseStore);
+            builder.Services.AddSingleton(_assessments);
+            builder.Services.AddSingleton(inbox);
+            builder.Services.AddSingleton(new AssessmentExecutionService(_caseStore, inbox, _assessments));
+            _app = builder.Build();
+            _app.UseDeveloperExceptionPage();
+            _app.MapAssessmentEndpoints();
+            _app.StartAsync().GetAwaiter().GetResult();
+            _client = _app.GetTestClient();
+        }
+
+        public async Task<HttpResponseMessage> SubmitAsync(
+            string? relatedRequirementId,
+            IReadOnlyList<SpecialistReviewFlag> flags,
+            bool? relianceField = null)
+        {
+            var pins = new List<SourceBasisPin> { CreateInterestPin() };
+            pins.AddRange(flags.Select(CreateFlagPin));
+            _assessments.SetCurrentBasis(CaseId, new AssessmentBasis(
+                "basis-cape-town-endpoint",
+                1,
+                "2026-10-01T00:00:00Z",
+                new ProcessingCoverage(1, 1, 0, 0),
+                false,
+                new Dictionary<string, BasisDocument>
+                {
+                    ["doc-1"] = BasisDocument.Create("doc-1", [Quote]),
+                },
+                pins));
+
+            var claim = new Dictionary<string, object?>
+            {
+                ["kind"] = "MissingRequirement",
+                ["value"] = "return package",
+                ["component"] = "Engine",
+                ["serialNumber"] = "ENG-1",
+                ["witnesses"] = Array.Empty<object>(),
+                ["relatedRequirementId"] = relatedRequirementId,
+            };
+            if (relianceField is not null)
+                claim["reliesOnCapeTownEvidence"] = relianceField.Value;
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post, $"/api/cases/{CaseId}/assessments")
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { claims = new[] { claim } }),
+                    Encoding.UTF8,
+                    "application/json"),
+            };
+            request.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={_session.Id}");
+            request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, _session.CsrfToken);
+            return await _client.SendAsync(request, TestContext.Current.CancellationToken);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            _client.Dispose();
+            await _app.DisposeAsync();
+            foreach (var file in new[] { _statePath, _statePath + ".lock", _statePath + ".tmp" })
+                if (File.Exists(file)) File.Delete(file);
+        }
+    }
+
     private sealed class AssessmentScenario(string path, AssessmentRecord record, MockRequestInbox inbox) : IDisposable
     {
         public AssessmentRecord Record { get; } = record;
