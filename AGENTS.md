@@ -1,7 +1,7 @@
 <!-- ai-sdlc-pipeline:start (managed by wesback/engineeringpipelinev3 scripts/onboard-repo.sh) -->
 ## Issues for the AI-SDLC pipeline
 
-This repository is worked by an autonomous pipeline (wesback/engineeringpipelinev3): Copilot implements an issue,
+This repository is worked by an autonomous pipeline: Copilot implements an issue,
 three Codex reviewers check it, and AI-SDLC merges it when every gate passes. An issue is picked up when it has the
 label `ai-eligible`, passes AI-SDLC's Definition-of-Ready gate, and every issue it depends on is closed. When you
 (a person or an assistant) write an issue for it, follow these rules.
@@ -79,23 +79,23 @@ Each rule comes from a story that stopped for a person because it was missing (D
   fixture, a sign-off, a real-world run), put the line `Merge: person (<why a person decides>)` in the story, with the reason in the brackets: the reason is shown to the person on the pull request and the dashboard. The pipeline then stops the finished pull
   request for that person and never merges it.
 - **No automated pixel or contrast measurement in a browser.** A criterion never asks for a Chromium test that samples rendered
-  pixels or measures contrast ratios (butlercompass removed that suite on 2026-10-16: slow, fragile, a personal application).
+  pixels or measures contrast ratios (such suites are slow and fragile).
   State the requirement as a CSS or markup contract a unit test can read (a token, a rule, an attribute), or as `Verified by review`.
 - **A test input that looks like a link is not written as a link.** The Definition-of-Ready gate fetches every `http://` or
-  `https://` address in the story and refuses it when one does not resolve (fluxion #84: `https://evil.example` in an
+  `https://` address in the story and refuses it when one does not resolve (for example `https://evil.example` in an
   injection test). Write the address as parts (the URL formed by `https:` followed by `//evil.example`) or without the scheme,
   and let the test build the string.
 - **A fact outside the repository is verified by CI or by evidence recorded in the repository, never "by review".** Reviewers read the
-  diff; they cannot query a package registry, a deployed service or another repository (fluxion #104 and #105 stopped three times
+  diff; they cannot query a package registry, a deployed service or another repository (a story stopped three times
   on "the pinned release is not published"). A criterion that depends on such a fact names the CI job that fails when it is wrong
   (`npm ci` for a pinned version), or the table the change records it in, and says reviewers check the table for completeness.
 - **A change to a token, selector, style or behaviour lists the existing tests that assert the old one.** Search the repository's
-  tests for the old value and name them in the story with "updated in this story" (butlercompass #931 stopped because five existing
-  tests asserted the glass and gold look the story removed, and a fix round may not edit tests). A criterion that contradicts an
+  tests for the old value and name them in the story with "updated in this story" (a story stopped because five existing
+  tests asserted the look it removed, and a fix round may not edit tests). A criterion that contradicts an
   existing test says which of the two wins.
 - **Few checks, and each one matters.** A criterion that audits a long list (more than about 15 selectors, properties, files or regular
   expressions) invites one new finding per review round, and a fixer that cannot satisfy it without breaking an older test
-  (butlercompass #931: about 60 properties; four hours). State the rule once ("no Dossier rule uses a colour literal") and let the test
+  (one story audited about 60 properties and took four hours). State the rule once ("no rule uses a colour literal") and let the test
   enumerate the cases from the code or a fixture; the criterion names that test and the cases that must be rejected, not every selector.
 
 ### Before you finish (the implementing and fixing agent)
@@ -109,6 +109,30 @@ The reviewers fail a pull request on the same few things, so check them before y
 5. **Stay on the Files line.** If the change needs another file, say so in your final message instead of editing it.
 6. **No wishlist words** (TBD, TODO, "placeholder") in anything you write.
 7. **Run the full test command** and make it pass before you finish.
+
+### Rules by language (D203)
+
+Apply the ones for the files you touch. They come from the stops this pipeline has had; each is a way a pull request failed review or CI.
+
+**C# / .NET**
+- Run the whole test project (`dotnet test`), not only the new tests: a change to a shared service, endpoint or fixture breaks tests elsewhere.
+- A test host that maps an endpoint must register every service the handler takes (an unregistered one is inferred as a request body and the host throws).
+- Signed or checksummed fixtures (a data file with a manifest and a detached signature): update the fixture and the manifest's hash and counts; never write or edit the signature. Say in your final message that the key holder must re-sign.
+- Parsers and validators: list the accepted and rejected inputs in a `[Theory]` table, and include the encoded forms (escapes, comments, mixed case, empty and oversized values). A case that is not in the table will come back as a new review finding.
+- Keep loops linear: no rescan of the whole input per item.
+
+**JavaScript / CSS / HTML**
+- Run the full `npm test`: browser tests measure computed styles and fail on a flat colour where a gradient was.
+- When you replace a legacy design token, search `tests/` for the old token name and update only assertions about the code you changed; say which ones you updated.
+- A source-level guard (a test that scans CSS or JS) needs negative fixtures for each bypass: a selector inside `:not()`/`:is()`, a comment, an alternate spelling.
+- Keep contrast at 4.5:1 for text on the colour it sits on, in both themes.
+
+**Terraform**
+- Update the matching `.tftest.hcl` when you add a resource, grant or output.
+- Never `git add` provider directories (`.terraform/`) or state; stage the files you edited by path.
+
+**Shell and workflows**
+- Quote variables, use `set -euo pipefail`, and do not edit a script another process is running in place.
 
 ### Story template
 
