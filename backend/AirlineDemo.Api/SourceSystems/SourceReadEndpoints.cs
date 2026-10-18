@@ -3,6 +3,7 @@ using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.SourceSystems;
 public static class SourceReadEndpoints
@@ -22,14 +23,17 @@ public static class SourceReadEndpoints
     private static IResult RejectGetMutation(int version, string caseId, string sourceId, string recordId) =>
         Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
     private static Task<IResult> List(int version, string caseId, string sourceId, HttpContext http, DemoSessionStore sessions,
-        ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time) =>
-        Read(version, caseId, sourceId, null, http, sessions, cases, modes, budget, time);
+        ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time, ILogger<SourceReadBudget> logger,
+        IHostEnvironment environment) =>
+        Read(version, caseId, sourceId, null, http, sessions, cases, modes, budget, time, logger, environment);
 
     private static Task<IResult> Get(int version, string caseId, string sourceId, string recordId, HttpContext http,
-        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time) =>
-        Read(version, caseId, sourceId, recordId, http, sessions, cases, modes, budget, time);
+        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time,
+        ILogger<SourceReadBudget> logger, IHostEnvironment environment) =>
+        Read(version, caseId, sourceId, recordId, http, sessions, cases, modes, budget, time, logger, environment);
     private static async Task<IResult> Read(int version, string caseId, string sourceId, string? recordId, HttpContext http,
-        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time)
+        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time,
+        ILogger<SourceReadBudget> logger, IHostEnvironment environment)
     {
         if (version != 1) return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version");
 
@@ -41,16 +45,32 @@ public static class SourceReadEndpoints
         if (session is null) return Error(StatusCodes.Status401Unauthorized, "unauthenticated");
 
         var scope = TechnicalReviewPolicy.ScopeFor(cases, session.User.CaseScopes, caseId);
-        if (scope is null) return Results.NotFound();
-        if (!Allowed(session.User.Role, sourceId)) return Error(StatusCodes.Status403Forbidden, "forbidden");
+        if (scope is null)
+        {
+            if (cases.OwnerOf(caseId) is not null && !session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
+                SourceSystemDiagnostics.CrossCaseReadDenied(logger, environment.EnvironmentName);
+            return Results.NotFound();
+        }
+        if (!Allowed(session.User.Role, sourceId))
+        {
+            SourceSystemDiagnostics.OutOfRoleReadDenied(logger, environment.EnvironmentName);
+            return Error(StatusCodes.Status403Forbidden, "forbidden");
+        }
         if (http.Request.Query.Count != 0) return Error(StatusCodes.Status400BadRequest, "invalid_request");
         var mode = modes.ModesFor(cases.Read(scope))[sourceId];
 
         Guid? leaseId;
         try { leaseId = await budget.TryAcquireAsync(session.Id, caseId, receivedAt, linked.Token); }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested && !http.RequestAborted.IsCancellationRequested)
-        { return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout"); }
-        if (leaseId is null) return Error(StatusCodes.Status429TooManyRequests, "source_read_limit");
+        {
+            SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName);
+            return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
+        }
+        if (leaseId is null)
+        {
+            SourceSystemDiagnostics.ReadLimited(logger, environment.EnvironmentName);
+            return Error(StatusCodes.Status429TooManyRequests, "source_read_limit");
+        }
 
         try
         {
@@ -59,8 +79,15 @@ public static class SourceReadEndpoints
                 var outcome = recordId is null
                     ? await ListSource(http.RequestServices, sourceId, caseId, mode, linked.Token)
                     : await GetSource(http.RequestServices, sourceId, caseId, recordId, mode, linked.Token);
-                if (deadline.IsCancellationRequested) return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
+                if (deadline.IsCancellationRequested)
+                {
+                    SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName);
+                    return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
+                }
                 if (outcome.ErrorCode is not null)
+                {
+                    if (outcome.ErrorCode == "source_unavailable")
+                        SourceSystemDiagnostics.SourceUnavailable(logger, environment.EnvironmentName);
                     return Error(outcome.ErrorCode switch
                     {
                         "record_not_found" => StatusCodes.Status404NotFound,
@@ -68,13 +95,19 @@ public static class SourceReadEndpoints
                         "source_case_mismatch" => StatusCodes.Status502BadGateway,
                         _ => StatusCodes.Status503ServiceUnavailable,
                     }, outcome.ErrorCode);
-                if (recordId is null && outcome.Count > 100) return Error(StatusCodes.Status422UnprocessableEntity, "source_record_limit");
+                }
+                if (recordId is null && outcome.Count > 100)
+                {
+                    SourceSystemDiagnostics.RecordLimitRejected(logger, environment.EnvironmentName);
+                    return Error(StatusCodes.Status422UnprocessableEntity, "source_record_limit");
+                }
                 if (recordId is null)
                     return Results.Ok(new { contractVersion = 1, caseId, sourceId, records = outcome.Value });
                 return Results.Ok(new { contractVersion = 1, caseId, sourceId, record = outcome.Value });
             }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested && !http.RequestAborted.IsCancellationRequested)
             {
+                SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName);
                 return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
             }
         }

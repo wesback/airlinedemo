@@ -4,6 +4,8 @@ using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.SourceSystems;
 
@@ -22,7 +24,8 @@ public static class SourceModeEndpoints
 
     // Actor and time come from the session and server clock; any actor, time or reason in the body is ignored.
     private static async Task<IResult> SetMode(string caseId, string sourceId, HttpContext http,
-        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes)
+        DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, ILogger<SourceModeStore> logger,
+        IHostEnvironment environment)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null) return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in.");
@@ -80,7 +83,19 @@ public static class SourceModeEndpoints
             return Error(StatusCodes.Status422UnprocessableEntity, "invalid_mode", "Mode must be available, unavailable, stale or conflicting.");
         }
 
-        var result = modes.Set(scope, session.User.Id, body.CommandId, body.ExpectedRevision.Value, sourceId, body.Mode);
+        SourceModeResult result;
+        try
+        {
+            result = modes.Set(scope, session.User.Id, body.CommandId, body.ExpectedRevision.Value, sourceId, body.Mode);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            SourceSystemDiagnostics.AuditWriteFailed(logger, environment.EnvironmentName);
+            return Error(StatusCodes.Status503ServiceUnavailable, "audit_write_failed", "The source mode could not be recorded.");
+        }
+
+        if (result.Outcome == SourceModeOutcome.Recorded)
+            SourceSystemDiagnostics.ModeChangeAccepted(logger, environment.EnvironmentName);
         return result.Outcome switch
         {
             SourceModeOutcome.Recorded or SourceModeOutcome.Replayed => Results.Ok(result.Receipt),

@@ -17,7 +17,7 @@ public static partial class TelemetryRedaction
         "event.name", "trace.id", "service.name", "service.version", "deployment.environment",
         "investigation.basis_version", "gen_ai.request.model", "investigation.model", "investigation.tools",
         "investigation.citations", "investigation.decision", "enduser.pseudo.id",
-        "investigation.outcome", "error.type",
+        "investigation.outcome", "error.type", "severity.text", "severity.number",
     };
 
     public static class SecurityEvents
@@ -27,9 +27,29 @@ public static partial class TelemetryRedaction
         public const string BudgetExhausted = "security.budget_exhausted";
     }
 
+    public static class SourceEvents
+    {
+        public const string ModeChangeAccepted = "source.mode_change.accepted";
+        public const string CrossCaseReadDenied = "source.read.denied_cross_case";
+        public const string OutOfRoleReadDenied = "source.read.denied_out_of_role";
+        public const string FixtureRejected = "source.fixture.rejected";
+        public const string SourceUnavailable = "source.read.unavailable";
+        public const string ReadLimited = "source.read.rate_or_concurrency_limited";
+        public const string RecordLimitRejected = "source.read.record_limit_rejected";
+        public const string ReadTimedOut = "source.read.timed_out";
+        public const string AuditWriteFailed = "source.mode_change.audit_write_failed";
+    }
+
     private static readonly HashSet<string> SecurityEventNames = new(StringComparer.Ordinal)
     {
         SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+    };
+
+    private static readonly HashSet<string> SourceEventNames = new(StringComparer.Ordinal)
+    {
+        SourceEvents.ModeChangeAccepted, SourceEvents.CrossCaseReadDenied, SourceEvents.OutOfRoleReadDenied,
+        SourceEvents.FixtureRejected, SourceEvents.SourceUnavailable, SourceEvents.ReadLimited,
+        SourceEvents.RecordLimitRejected, SourceEvents.ReadTimedOut, SourceEvents.AuditWriteFailed,
     };
 
     // Decisions are enumerated identifiers, never free text.
@@ -72,6 +92,8 @@ public static partial class TelemetryRedaction
     private static readonly HashSet<string> AllowedEventNames = new(StringComparer.Ordinal)
     {
         "investigation.completed", "review.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+        SourceEvents.ModeChangeAccepted, SourceEvents.CrossCaseReadDenied, SourceEvents.OutOfRoleReadDenied, SourceEvents.FixtureRejected,
+        SourceEvents.SourceUnavailable, SourceEvents.ReadLimited, SourceEvents.RecordLimitRejected, SourceEvents.ReadTimedOut, SourceEvents.AuditWriteFailed,
     };
 
     // Investigator read tools (CaseReadTools) plus the earlier tool identifiers.
@@ -112,6 +134,8 @@ public static partial class TelemetryRedaction
         ["enduser.pseudo.id"] = v => ActorRule.IsMatch(v),
         ["investigation.outcome"] = v => AllowedOutcomes.Contains(v),
         ["error.type"] = v => ErrorTypeRule.IsMatch(v),
+        ["severity.text"] = v => v is "INFO" or "WARN" or "ERROR",
+        ["severity.number"] = v => v is "9" or "13" or "17",
     };
 
     // Keeps only allowlisted keys, drops denylisted keys and replaces values that fail their key's rule.
@@ -200,9 +224,53 @@ public static partial class TelemetryRedaction
         Emit(logger, LogLevel.Warning, attributes);
     }
 
+    public static void EmitSourceSystemEvent(ILogger logger, string eventName, LogLevel level, string environment)
+    {
+        if (!SourceEventNames.Contains(eventName))
+        {
+            throw new ArgumentException("Unknown source-system event name.", nameof(eventName));
+        }
+
+        if (level is not (LogLevel.Information or LogLevel.Warning or LogLevel.Error))
+        {
+            throw new ArgumentOutOfRangeException(nameof(level), "Source-system events must use an approved severity.");
+        }
+
+        var attributes = Redact(new KeyValuePair<string, object?>[]
+        {
+            new("event.name", eventName),
+        });
+        var merged = new Dictionary<string, string>(attributes, StringComparer.Ordinal);
+        foreach (var (key, value) in ResourceAttributes(ServiceVersion, environment.ToLowerInvariant()))
+        {
+            merged[key] = value;
+        }
+        var severity = level switch
+        {
+            LogLevel.Information => ("INFO", 9),
+            LogLevel.Warning => ("WARN", 13),
+            LogLevel.Error => ("ERROR", 17),
+            _ => throw new ArgumentOutOfRangeException(nameof(level)),
+        };
+        Emit(logger, level, merged, severity.Item1, severity.Item2);
+    }
+
     private static void Emit(ILogger logger, LogLevel level, IReadOnlyDictionary<string, string> attributes)
+        => Emit(logger, level, attributes, null, null);
+
+    private static void Emit(
+        ILogger logger,
+        LogLevel level,
+        IReadOnlyDictionary<string, string> attributes,
+        string? severityText,
+        int? severityNumber)
     {
         var state = attributes.Select(kv => new KeyValuePair<string, object?>(kv.Key, kv.Value)).ToList();
+        if (severityText is not null && severityNumber is not null)
+        {
+            state.Add(new KeyValuePair<string, object?>("severity.text", severityText));
+            state.Add(new KeyValuePair<string, object?>("severity.number", severityNumber.Value));
+        }
         var eventName = attributes.TryGetValue("event.name", out var name) ? name : "telemetry";
         logger.Log(level, new EventId(0, eventName), state, null,
             static (s, _) => string.Join(" ", s.Select(kv => $"{kv.Key}={kv.Value}")));
