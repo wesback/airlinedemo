@@ -1,0 +1,248 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 361,
+  "branch": "ai-sdlc/issue-361",
+  "commitSha": "5506a3c3869d92cae838d3976ab48a90583ca11f",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The public assessment path allows claims through without an exact matching Cape Town specialist flag, contrary to the required fail-closed behavior. A new test also asserts that an unrelated claim succeeds, directly contradicting that requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 488,
+          "message": "The fail-closed requirement is bypassable through the public assessment path because claims default to `ReliesOnCapeTownEvidence: false` and a missing matching flag returns unmatched. Reject public claims without the exact matching flag (OWASP A04:2025, Insecure Design).",
+          "confidence": 0.93,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The public endpoint maps submissions through ToClaim without setting ReliesOnCapeTownEvidence, so it defaults to false. When the accepted basis contains Cape Town evidence but no exact matching cape_town flag exists, ResolveCapeTownEvidence returns unmatched and assessment continues.",
+            "failureScenario": "A public claim has a missing, mismatched, or other-topic flag, or is unrelated to Cape Town. Assessment accepts it despite the criterion requiring every public claim against a basis pinning Cape Town evidence to have an exact matching flag."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CapeTownEvidenceTests.cs",
+          "line": 173,
+          "message": "The test asserts behavior contrary to the acceptance criterion and does not prove the public path rejects unrelated claims or claims with missing, mismatched, and other-topic flags. Update it to exercise the public assessment endpoint and assert those cases are rejected.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "`UnrelatedPublicClaimDoesNotRequireCapeTownFlagWhenEvidenceIsPinned` maps an unrelated public claim and asserts assessment succeeds without a matching Cape Town flag.",
+            "failureScenario": "The implementation can continue accepting unrelated claims without a matching flag and this test passes, although the acceptance criterion explicitly requires such claims to be rejected. The public assessment test also exercises only the matching-flag case, not missing, mismatched, or other-topic flags through the endpoint."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The typed evidence parser and fixture coverage are present, but the assessment path does not enforce the acceptance criterion that every public claim must have an exact matching Cape Town specialist flag.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 489,
+          "message": "The fail-closed public flag requirement is bypassable: claims without an exact matching `cape_town` flag proceed when `ReliesOnCapeTownEvidence` is false. Enforce the exact match for every public claim when Cape Town evidence is pinned, and update the unrelated-claim test to assert rejection.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Public claims map with ReliesOnCapeTownEvidence false. ResolveCapeTownEvidence returns unmatched when no exact cape_town flag exists and the reliance flag is false, so assessment continues.",
+            "failureScenario": "With Cape Town evidence pinned, a public claim with a missing, mismatched, or other-topic specialist flag proceeds through assessment instead of being rejected. The unrelated-claim test also expects acceptance, contrary to the acceptance criterion that every public claim must match."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The evidence payload and fixture changes appear bounded, but the assessment path does not enforce the required flag for every public claim.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 488,
+          "message": "A public claim can bypass the required exact specialist flag check when the basis pins Cape Town evidence and no matching flag exists (OWASP A04:2025, Insecure Design).",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When the accepted basis contains Cape Town evidence, ResolveCapeTownEvidence looks for an exact matching cape_town flag. If none exists and ReliesOnCapeTownEvidence is false, it returns unmatched and assessment continues. The public mapping leaves that flag false, as confirmed by the changed endpoint test.",
+            "failureScenario": "A public claim is submitted against a basis pinning Cape Town interest evidence without a matching cape_town flag. Because the claim's reliance flag is false, assessment accepts it instead of rejecting it, violating the fail-closed acceptance criterion."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CapeTownEvidenceTests.cs",
+      "backend/AirlineDemo.Api.Tests/SpecialistReviewFlagTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
