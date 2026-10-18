@@ -22,6 +22,7 @@ if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEn
 
 var evaluationCommand = args.Length > 0 && args[0] == "--evaluate-v2";
 var builder = WebApplication.CreateBuilder(evaluationCommand ? [] : args);
+builder.Services.AddHostedService<TransportSecurityStartupValidator>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddAirlineDiagnostics(builder.Configuration);
 builder.Services.AddSingleton<DemoSessionStore>();
@@ -91,7 +92,6 @@ DemoFixture.LoadEmbedded();
 await using var app = builder.Build();
 if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error); return; }
 
-TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
 app.UseTransportSecurityHeaders();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
@@ -121,6 +121,19 @@ public partial class Program
             services.AddTransient<IEvaluationArmExecutor>(sp => new ProductionEvaluationArmExecutor(
                 arm, sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>()));
         }
+    }
+
+    internal sealed class TransportSecurityStartupValidator(
+        IConfiguration configuration,
+        IHostEnvironment environment) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            TransportSecurity.ValidateDeploymentConfiguration(configuration, environment);
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     internal static async Task<int> RunEvaluationCommandAsync(
