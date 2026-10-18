@@ -148,11 +148,10 @@ public static class RehearsalTraceCapture
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         if (response.StatusCode != HttpStatusCode.OK) throw new HttpRequestException(
             $"Stored trace endpoint returned {(int)response.StatusCode}.", null, response.StatusCode);
-        ValidateStoredTrace(response.Content, caseId, runId, investigationId);
-        return response.Content;
+        return SanitizeStoredTrace(response.Content, caseId, runId, investigationId);
     }
 
-    private static void ValidateStoredTrace(byte[] content, string caseId, string runId, string investigationId)
+    private static byte[] SanitizeStoredTrace(byte[] content, string caseId, string runId, string investigationId)
     {
         using var json = JsonDocument.Parse(content);
         var root = json.RootElement;
@@ -167,6 +166,20 @@ public static class RehearsalTraceCapture
             ExactProperties(step, StepProperties);
             if (step.GetProperty("sequence").GetInt32() != expected++) throw new InvalidDataException("Stored trace steps are not in append order.");
         }
+
+        using var sanitized = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(sanitized))
+        {
+            writer.WriteStartObject();
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.NameEquals("actorToken")) continue;
+                writer.WritePropertyName(property.Name);
+                property.Value.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+        return sanitized.ToArray();
     }
 
     private static void ExactProperties(JsonElement value, string[] expected)

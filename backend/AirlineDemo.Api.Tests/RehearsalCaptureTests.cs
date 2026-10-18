@@ -96,9 +96,12 @@ public sealed class RehearsalCaptureTests
         const string raw = """{"caseId":"case-a","runId":"run-1","investigationId":"inv-1","basisVersion":3,"modelDeploymentName":"dep","apiVersion":"v1","region":"r","contentFilterSetting":"on","decision":"approve","actorToken":"opaque","outcome":"done","steps":[{"sequence":1,"toolName":"lookup","documentId":"doc-1","pageNumber":1,"citationCheckOutcome":"verified","correctionCode":"None","policyHandover":"None"},{"sequence":2,"toolName":"policy","documentId":"None","pageNumber":0,"citationCheckOutcome":"None","correctionCode":"None","policyHandover":"deterministic-policy"}]}""";
         var reader = new FakeReader(new(HttpStatusCode.OK, System.Text.Encoding.UTF8.GetBytes(raw)));
         var captured = await Capture(reader);
-        Assert.Equal(raw, System.Text.Encoding.UTF8.GetString(captured!));
+        const string sanitized = """{"caseId":"case-a","runId":"run-1","investigationId":"inv-1","basisVersion":3,"modelDeploymentName":"dep","apiVersion":"v1","region":"r","contentFilterSetting":"on","decision":"approve","outcome":"done","steps":[{"sequence":1,"toolName":"lookup","documentId":"doc-1","pageNumber":1,"citationCheckOutcome":"verified","correctionCode":"None","policyHandover":"None"},{"sequence":2,"toolName":"policy","documentId":"None","pageNumber":0,"citationCheckOutcome":"None","correctionCode":"None","policyHandover":"deterministic-policy"}]}""";
+        Assert.Equal(sanitized, System.Text.Encoding.UTF8.GetString(captured!));
         Assert.Equal(1, reader.Reads); Assert.Equal(0, reader.ModelCalls);
         using var trace = JsonDocument.Parse(captured!);
+        Assert.False(trace.RootElement.TryGetProperty("actorToken", out _));
+        Assert.DoesNotContain("opaque", System.Text.Encoding.UTF8.GetString(captured!), StringComparison.Ordinal);
         Assert.Equal(new[] { 1, 2 }, trace.RootElement.GetProperty("steps").EnumerateArray().Select(step => step.GetProperty("sequence").GetInt32()));
         foreach (var deniedCase in new[] { "case-out-of-scope", "case-a" })
         {
@@ -116,6 +119,7 @@ public sealed class RehearsalCaptureTests
     {
         var root = Path.Combine(Path.GetTempPath(), "rehearsal-scripts-" + Guid.NewGuid().ToString("N"));
         var bin = Path.Combine(root, "bin");
+        var repositoryRoot = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(FindRootFile("backend/DemoCaseGenerator/DemoCaseGenerator.csproj"))))!;
         Directory.CreateDirectory(bin);
         try
         {
@@ -143,6 +147,60 @@ public sealed class RehearsalCaptureTests
                 Assert.Equal(19, process.ExitCode);
                 Assert.Equal(new[] { "run", "--no-build", "--project", "backend/DemoCaseGenerator", "--", item.Item2 }, File.ReadAllLines(log));
                 Assert.False(File.Exists(output)); Assert.False(File.Exists(tools));
+            }
+
+            var realDotnet = FindExecutable("dotnet", Environment.GetEnvironmentVariable("PATH")!);
+            Stub(bin, "dotnet", "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DOTNET_LOG\"\nexec \"$REAL_DOTNET\" \"$@\"\n");
+            var unavailableCases = new[]
+            {
+                ("aircraft-return-readiness-timing.sh", "capture-timing", "REHEARSAL_TIMING_OUTPUT", "missing-measurement"),
+                ("aircraft-return-readiness-trace-capture.sh", "capture-trace", "REHEARSAL_TRACE_OUTPUT", "endpoint-unavailable"),
+                ("aircraft-return-readiness-trace-capture.sh", "capture-trace", "REHEARSAL_TRACE_OUTPUT", "stored-trace-absent"),
+            };
+            foreach (var item in unavailableCases)
+            {
+                var log = Path.Combine(root, "actual-args.txt");
+                var tools = Path.Combine(root, "actual-tools.txt");
+                var output = Path.Combine(root, item.Item4 + "-actual.json");
+                using var process = new Process { StartInfo = new ProcessStartInfo("/bin/sh") };
+                process.StartInfo.ArgumentList.Add(Path.Combine(FindRootFile("docs/evidence/scripts/" + item.Item1)));
+                process.StartInfo.WorkingDirectory = repositoryRoot;
+                process.StartInfo.RedirectStandardInput = true;
+                process.StartInfo.RedirectStandardOutput = true;
+                process.StartInfo.RedirectStandardError = true;
+                process.StartInfo.Environment.Clear();
+                process.StartInfo.Environment["PATH"] = bin;
+                process.StartInfo.Environment["REAL_DOTNET"] = realDotnet;
+                process.StartInfo.Environment["DOTNET_LOG"] = log;
+                process.StartInfo.Environment["TOOL_LOG"] = tools;
+                process.StartInfo.Environment[item.Item3] = output;
+                if (item.Item4 == "endpoint-unavailable")
+                {
+                    process.StartInfo.Environment["REHEARSAL_BASE_URL"] = "http://127.0.0.1:1";
+                    AddTraceEnvironment(process.StartInfo.Environment);
+                }
+                else if (item.Item4 == "stored-trace-absent")
+                {
+                    using var server = new MissingTraceServer();
+                    process.StartInfo.Environment["REHEARSAL_BASE_URL"] = server.BaseUrl;
+                    AddTraceEnvironment(process.StartInfo.Environment);
+                    process.Start();
+                    process.StandardInput.Close();
+                    await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                    await server.AssertRequested();
+                    Assert.Equal(1, process.ExitCode);
+                    Assert.Equal(new[] { "run", "--no-build", "--project", "backend/DemoCaseGenerator", "--", item.Item2 }, File.ReadAllLines(log));
+                    Assert.False(File.Exists(output));
+                    Assert.False(File.Exists(tools));
+                    continue;
+                }
+                process.Start();
+                process.StandardInput.Close();
+                await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(1, process.ExitCode);
+                Assert.Equal(new[] { "run", "--no-build", "--project", "backend/DemoCaseGenerator", "--", item.Item2 }, File.ReadAllLines(log));
+                Assert.False(File.Exists(output));
+                Assert.False(File.Exists(tools));
             }
         }
         finally { Directory.Delete(root, true); }
@@ -174,6 +232,16 @@ public sealed class RehearsalCaptureTests
         var path = Path.Combine(bin, name); File.WriteAllText(path, text);
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
+    private static string FindExecutable(string name, string path) =>
+        path.Split(Path.PathSeparator).Select(directory => Path.Combine(directory, name)).FirstOrDefault(File.Exists)
+        ?? throw new FileNotFoundException($"Could not locate {name} in PATH.");
+    private static void AddTraceEnvironment(IDictionary<string, string?> environment)
+    {
+        environment["REHEARSAL_SESSION_COOKIE"] = "session";
+        environment["REHEARSAL_CASE_ID"] = "case-a";
+        environment["REHEARSAL_RUN_ID"] = "run-1";
+        environment["REHEARSAL_INVESTIGATION_ID"] = "inv-1";
+    }
     private sealed class FakeClock : TimeProvider
     {
         private long _ticks;
@@ -188,5 +256,34 @@ public sealed class RehearsalCaptureTests
         public int ModelCalls => 0;
         public Task<StoredTraceResponse> ReadAsync(Uri baseUri, string sessionCookie, string caseId, string runId, string investigationId, CancellationToken cancellationToken)
         { Reads++; return Task.FromResult(response); }
+    }
+    private sealed class MissingTraceServer : IDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener _listener = new(System.Net.IPAddress.Loopback, 0);
+        private readonly Task _request;
+        public string BaseUrl { get; }
+
+        public MissingTraceServer()
+        {
+            _listener.Start();
+            var endpoint = (System.Net.IPEndPoint)_listener.LocalEndpoint;
+            BaseUrl = $"http://127.0.0.1:{endpoint.Port}";
+            _request = RespondNotFound();
+        }
+
+        private async Task RespondNotFound()
+        {
+            using var client = await _listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+            await using var stream = client.GetStream();
+            using var reader = new StreamReader(stream, leaveOpen: true);
+            var request = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+            while (!string.IsNullOrEmpty(await reader.ReadLineAsync(TestContext.Current.CancellationToken))) { }
+            Assert.Equal("GET /api/cases/case-a/dashboard/traces/run-1/inv-1 HTTP/1.1", request);
+            var response = System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(response, TestContext.Current.CancellationToken);
+        }
+
+        public Task AssertRequested() => _request;
+        public void Dispose() => _listener.Stop();
     }
 }
