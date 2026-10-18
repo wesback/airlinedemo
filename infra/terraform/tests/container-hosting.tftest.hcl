@@ -101,12 +101,47 @@ run "private_dependency_references" {
   command = plan
 
   assert {
-    condition     = local.private_endpoints.acr.subresource == "registry" && local.private_endpoints.acr.zone == "acr" && strcontains(file("main.tf"), "resource_id = azurerm_container_registry.acr.id")
-    error_message = "The ACR private endpoint must target the ACR registry subresource and the ACR DNS zone mapping."
+    condition = (
+      local.private_endpoints.sql.subresource == "sqlServer" && local.private_endpoints.sql.zone == "sql" &&
+      local.private_endpoints.blob.subresource == "blob" && local.private_endpoints.blob.zone == "blob" &&
+      local.private_endpoints.model.subresource == "account" && local.private_endpoints.model.zone == "model" &&
+      local.private_endpoints.kv.subresource == "vault" && local.private_endpoints.kv.zone == "kv" &&
+      local.private_endpoints.acr.subresource == "registry" && local.private_endpoints.acr.zone == "acr" &&
+      can(regex("(?s)sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id", file("main.tf"))) &&
+      can(regex("(?s)blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id", file("main.tf"))) &&
+      can(regex("(?s)model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf"))) &&
+      can(regex("(?s)kv\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_key_vault\\.kv\\.id", file("main.tf"))) &&
+      can(regex("(?s)acr\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_container_registry\\.acr\\.id", file("main.tf")))
+    )
+    error_message = "Each private endpoint must target its configured resource, subresource, and DNS zone."
   }
   assert {
-    condition     = azurerm_private_dns_zone_virtual_network_link.demo["acr"].name == "link-acr" && can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-\\$\\{each\\.key\\}\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
-    error_message = "The ACR private endpoint must reference the configured ACR DNS zone through its mapped zone key."
+    condition = (
+      local.private_dns_zones == {
+        sql   = "privatelink.database.windows.net"
+        blob  = "privatelink.blob.core.windows.net"
+        model = "privatelink.openai.azure.com"
+        kv    = "privatelink.vaultcore.azure.net"
+        acr   = "privatelink.azurecr.io"
+      } &&
+      azurerm_private_dns_zone.demo["sql"].name == "privatelink.database.windows.net" &&
+      azurerm_private_dns_zone.demo["blob"].name == "privatelink.blob.core.windows.net" &&
+      azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" &&
+      azurerm_private_dns_zone.demo["kv"].name == "privatelink.vaultcore.azure.net" &&
+      azurerm_private_dns_zone.demo["acr"].name == "privatelink.azurecr.io" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["sql"].name == "link-sql" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["blob"].name == "link-blob" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["model"].name == "link-model" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["kv"].name == "link-kv" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["acr"].name == "link-acr" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["sql"].private_dns_zone_name == "privatelink.database.windows.net" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["blob"].private_dns_zone_name == "privatelink.blob.core.windows.net" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["kv"].private_dns_zone_name == "privatelink.vaultcore.azure.net" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["acr"].private_dns_zone_name == "privatelink.azurecr.io" &&
+      can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-\\$\\{each\\.key\\}\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
+    )
+    error_message = "Every private endpoint must reference the DNS zone configured for its dependency."
   }
   assert {
     condition     = azurerm_private_dns_zone_virtual_network_link.demo["acr"].private_dns_zone_name == "privatelink.azurecr.io" && can(regex("(?s)resource \"azurerm_private_endpoint\" \"demo\" \\{.*subnet_id\\s*=\\s*azurerm_subnet\\.private_endpoints\\.id.*private_connection_resource_id\\s*=\\s*each\\.value\\.resource_id", file("main.tf"))) && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*private_dns_zone_name\\s*=\\s*azurerm_private_dns_zone\\.demo\\[each\\.key\\]\\.name.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
