@@ -26,13 +26,16 @@ public sealed class IsolatedPdfParserOptions
     /// <summary>Called immediately before each worker start; tests count calls to prove a rejected input never reaches a worker.</summary>
     public Action? WorkerStarting { get; init; }
 
+    internal Action? PdfPigOpening { get; init; }
+
+    internal Func<int, Func<string>, string>? PageTextReading { get; init; }
+
     public static IsolatedPdfParserOptions Default { get; } = new();
 }
 
 /// <summary>
-/// Parses one PDF in a short-lived child process (the application's <c>--pdf-worker</c> entry point). The PDF is
-/// written to the child's standard input and the extracted text is read back as JSON from standard output. The
-/// parent never opens the PDF itself. The child is killed when it exceeds the memory or wall-clock limit.
+/// Applies bounded PDF preflight checks before extracting page text with PdfPig in the API process. The worker
+/// bootstrap and process-isolation helpers remain available for the standalone worker entry point.
 /// </summary>
 public static class IsolatedPdfParser
 {
@@ -40,9 +43,47 @@ public static class IsolatedPdfParser
 
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
+        IsolatedPdfParserOptions? options = null) =>
+        ParseDocument(content, "document.pdf", options);
+
+    internal static (EvidenceProcessingState State, string Reason, string Text) ParseDocument(
+        byte[] content,
+        string fileName,
+        IsolatedPdfParserOptions? options = null,
+        bool rejectUnsafeContent = false)
+    {
+        options ??= IsolatedPdfParserOptions.Default;
+        if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
+        {
+            return (EvidenceProcessingState.RejectedPermanent,
+                $"{fileName} is {content.LongLength} bytes; limit is {EvidenceIntake.MaxDocumentBytes}", string.Empty);
+        }
+
+        if (PreflightStreamFilters(content) is { } rejected) return rejected;
+        if (PreflightUnicodeGlyphExpansion(content) is { } oversizedUnicode) return oversizedUnicode;
+        if (PreflightPageContentSources(content) is { } oversizedText) return oversizedText;
+
+        return EvidenceIntake.ExtractTextInProcess(
+            content,
+            options.PdfPigOpening,
+            options.PageTextReading,
+            rejectUnsafeContent);
+    }
+
+    private static (EvidenceProcessingState State, string Reason, string Text) ParseUsingWorker(
+        byte[] content,
+        string fileName,
         IsolatedPdfParserOptions? options = null)
     {
         options ??= IsolatedPdfParserOptions.Default;
+        if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
+        {
+            return (
+                EvidenceProcessingState.RejectedPermanent,
+                $"{fileName} is {content.LongLength} bytes; limit is {EvidenceIntake.MaxDocumentBytes}",
+                string.Empty);
+        }
+
         if (PreflightStreamFilters(content) is { } rejected)
         {
             return rejected;

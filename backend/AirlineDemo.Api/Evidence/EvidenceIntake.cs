@@ -263,7 +263,7 @@ public static class EvidenceIntake
         var extracted = new List<(string Key, string Text)>(documents.Count);
         foreach (var document in documents)
         {
-            var outcome = IsolatedPdfParser.Parse(document.Content, parserOptions);
+            var outcome = IsolatedPdfParser.ParseDocument(document.Content, document.FileName, parserOptions, rejectUnsafeContent: true);
             if (outcome.State != EvidenceProcessingState.Complete)
             {
                 return new EvidenceIntakeResult(outcome.State, $"{document.FileName}: {outcome.Reason}", Array.Empty<EvidenceBasisVersion>());
@@ -326,7 +326,7 @@ public static class EvidenceIntake
         for (var i = 0; i < documents.Count; i++)
         {
             var document = documents[i];
-            var outcome = IsolatedPdfParser.Parse(document.Content, parserOptions);
+            var outcome = IsolatedPdfParser.ParseDocument(document.Content, document.FileName, parserOptions, rejectUnsafeContent: true);
             if (outcome.State == EvidenceProcessingState.Complete)
             {
                 accepted.Add((i, $"{caseId}/{document.FileName}", outcome.Text));
@@ -348,6 +348,53 @@ public static class EvidenceIntake
 
         var state = accepted.Count == documents.Count ? "complete" : accepted.Count == 0 ? "failed" : "partial";
         return new EvidencePackageOutcome(state, results);
+    }
+
+    /// <summary>
+    /// Extracts API evidence text in-process after bounded parser preflight checks. Non-text content is ignored;
+    /// only PdfPig's page text is stored.
+    /// </summary>
+    internal static (EvidenceProcessingState State, string Reason, string Text) ExtractTextInProcess(
+        byte[] content,
+        Action? pdfPigOpening = null,
+        Func<int, Func<string>, string>? pageTextReading = null,
+        bool rejectUnsafeContent = false)
+    {
+        try
+        {
+            pdfPigOpening?.Invoke();
+            using var pdf = PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
+
+            if (pdf.NumberOfPages > MaxPagesPerDocument)
+            {
+                return (EvidenceProcessingState.RejectedRetryable, $"{pdf.NumberOfPages} pages; limit is {MaxPagesPerDocument}", "");
+            }
+
+            if (rejectUnsafeContent && HasEmbeddedFilesOrForms(pdf))
+                return (EvidenceProcessingState.RejectedPermanent, "embedded files or form fields are not accepted", "");
+
+            var text = new StringBuilder();
+            var pageIndex = 0;
+            foreach (var page in pdf.GetPages())
+            {
+                if (rejectUnsafeContent && page.ExperimentalAccess.GetAnnotations().Any())
+                    return (EvidenceProcessingState.RejectedPermanent, "annotations are not accepted", "");
+
+                if (rejectUnsafeContent && page.GetImages().Any())
+                    return (EvidenceProcessingState.RejectedPermanent, "images are not accepted", "");
+
+                if (pageIndex > 0) text.Append(PageSeparator);
+                var pageText = pageTextReading is null
+                    ? page.Text
+                    : pageTextReading(pageIndex, () => page.Text);
+                if (!string.IsNullOrEmpty(pageText)) text.AppendLine(pageText);
+                pageIndex++;
+            }
+
+            return (EvidenceProcessingState.Complete, "accepted", text.ToString());
+        }
+        catch (OutOfMemoryException) { return (EvidenceProcessingState.RejectedRetryable, "exceeded the memory limit; retry is possible", ""); }
+        catch (Exception) { return (EvidenceProcessingState.RejectedRetryable, "PdfPig could not open or read the document; retry is possible", ""); }
     }
 
     /// <summary>
