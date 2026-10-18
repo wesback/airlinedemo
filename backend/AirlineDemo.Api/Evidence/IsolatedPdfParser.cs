@@ -1,12 +1,9 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.IO.Compression;
-using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
-using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 
 using AirlineDemo.Api.Evidence.PdfWorker;
 
@@ -26,1002 +23,91 @@ public sealed class IsolatedPdfParserOptions
 
     public IReadOnlyList<string> WorkerArguments { get; init; } = Array.Empty<string>();
 
+    /// <summary>Called immediately before each worker start; tests count calls to prove a rejected input never reaches a worker.</summary>
+    public Action? WorkerStarting { get; init; }
+
     public static IsolatedPdfParserOptions Default { get; } = new();
 }
 
 /// <summary>
-/// Parses PDF page text in a bounded worker process after checking compressed stream expansion.
+/// Parses one PDF in a short-lived child process (the application's <c>--pdf-worker</c> entry point). The PDF is
+/// written to the child's standard input and the extracted text is read back as JSON from standard output. The
+/// parent never opens the PDF itself. The child is killed when it exceeds the memory or wall-clock limit.
 /// </summary>
 public static class IsolatedPdfParser
 {
     private const int PollMilliseconds = 25;
-    private const int MaxDecodedStreamBytes = 8 * 1024 * 1024;
-    // Bound PdfPig's per-glyph allocations before any page text is materialized.
-    private const int MaxTextStreamBytes = 512 * 1024;
-    private const string PdfReadFailureReason = "PdfPig could not open or read the document; retry is possible";
-    private const string PdfStreamLimitReason = "PDF stream content exceeds 8388608 decoded bytes; retry is possible";
-    private const string PdfTextLimitReason = "PDF text source exceeds 524288 bytes; retry is possible";
-    private static readonly Regex DirectStreamLength = new(@"/Length\s+([0-9]+)\s*(?=/|>>)", RegexOptions.CultureInvariant);
-    private static readonly Regex EscapedPdfName = new(@"#[0-9A-Fa-f]{2}", RegexOptions.CultureInvariant);
-    private static readonly Regex SingleFlateFilter = new(
-        @"/Filter\s+(?:/FlateDecode|\[\s*/FlateDecode\s*\])(?:\s|/|>>|\[)",
-        RegexOptions.CultureInvariant);
-    private static readonly Regex CMapToken = new(@"<(?<value>[0-9A-Fa-f]+)>|(?<bracket>[\[\]])",
-        RegexOptions.CultureInvariant);
-
-    private readonly record struct PdfObjectReference(int Number, int Generation);
 
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         IsolatedPdfParserOptions? options = null)
-        => Parse(content, "document.pdf", options);
-
-    public static (EvidenceProcessingState State, string Reason, string Text) Parse(
-        byte[] content,
-        string fileName,
-        IsolatedPdfParserOptions? options = null)
-        => Parse(content, fileName, options ?? IsolatedPdfParserOptions.Default, startWorker: Process.Start);
-
-    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
-        byte[] content,
-        string fileName,
-        IsolatedPdfParserOptions options,
-        Func<ProcessStartInfo, Process?> startWorker)
     {
-        if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
+        options ??= IsolatedPdfParserOptions.Default;
+        if (PreflightStreamFilters(content) is { } rejected)
         {
-            return (EvidenceProcessingState.RejectedPermanent,
-                $"{fileName} is {content.LongLength} bytes; limit is {EvidenceIntake.MaxDocumentBytes}",
-                string.Empty);
+            return rejected;
         }
 
+        // Root bypasses the read-only mode of the working directory, so root without a drop to "nobody" fails closed.
+        if (CannotIsolateWorker(OperatingSystem.IsLinux(), options.WorkerFileName is not null, Environment.UserName, File.Exists(SetprivPath)))
+        {
+            return Retryable("worker cannot be isolated from its working directory; the document was not accepted, retry is possible");
+        }
+
+        var workingDirectory = ChooseWorkingDirectory();
         try
         {
-            var streamCheck = CheckStreamLimits(content);
-            if (streamCheck.TextExceeded)
+            Directory.CreateDirectory(workingDirectory);
+            RestrictWorkingDirectory(workingDirectory);
+
+            options.WorkerStarting?.Invoke();
+            using var process = Process.Start(CreateStartInfo(options, workingDirectory));
+            if (process is null)
             {
-                return Retryable(PdfTextLimitReason);
+                return Retryable("worker could not be started; retry is possible");
             }
 
-            if (streamCheck.Exceeded)
+            // Windows has no prlimit: a Job Object caps the child's committed memory in the kernel.
+            WindowsJobObject? memoryJob = null;
+            if (OperatingSystem.IsWindows() && !WindowsJobObject.TryAssign(process, options.MemoryLimitBytes, out memoryJob))
             {
-                return Retryable(PdfStreamLimitReason);
+                process.Kill();
+                return Retryable("worker memory limit could not be enforced; the document was not accepted, retry is possible");
             }
 
-            if (!streamCheck.Safe)
+            // Linux: a cgroup v2 limit caps total memory in the kernel where the host delegates one; otherwise
+            // prlimit --data plus the working-set check in Supervise enforce the limit.
+            using var memoryCgroup = OperatingSystem.IsLinux() ? LinuxCgroup.TryAssign(process, options.MemoryLimitBytes) : null;
+            using (memoryJob)
             {
-                return Retryable(PdfReadFailureReason);
-            }
-
-            if (CannotIsolateWorker(
-                OperatingSystem.IsLinux(),
-                options.WorkerFileName is not null,
-                Environment.UserName,
-                File.Exists(SetprivPath)))
-            {
-                return Retryable("worker cannot be isolated; retry is possible");
-            }
-
-            var workingDirectory = ChooseWorkingDirectory();
-            try
-            {
-                Directory.CreateDirectory(workingDirectory);
-                RestrictWorkingDirectory(workingDirectory);
-                using var process = startWorker(CreateStartInfo(options, workingDirectory));
-                if (process is null)
-                {
-                    return Retryable("worker could not be started; retry is possible");
-                }
-
-                if (OperatingSystem.IsWindows())
-                {
-                    if (!WindowsJobObject.TryAssign(process, options.MemoryLimitBytes, out var job))
-                    {
-                        return Terminate(process, "could not apply the memory limit");
-                    }
-
-                    using (job)
-                    {
-                        return Supervise(process, content, options);
-                    }
-                }
-
                 return Supervise(process, content, options);
             }
-            finally
-            {
-                if (Directory.Exists(workingDirectory))
-                {
-                    if (!OperatingSystem.IsWindows())
-                    {
-                        File.SetUnixFileMode(workingDirectory,
-                            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-                    }
-
-                    Directory.Delete(workingDirectory, recursive: true);
-                }
-            }
         }
-        catch (OutOfMemoryException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException
+            or System.ComponentModel.Win32Exception)
         {
-            return Retryable(PdfReadFailureReason);
+            return Retryable("worker could not be started; retry is possible");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-            or InvalidOperationException or System.ComponentModel.Win32Exception)
+        finally
         {
-            return Retryable(PdfReadFailureReason);
-        }
-    }
-
-    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
-        byte[] content,
-        string fileName,
-        Func<byte[], PdfDocument> openDocument) =>
-        ParseCore(content, fileName, openDocument, page => page.Text,
-            page => page.Letters.Select(letter => letter.Value));
-
-    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
-        byte[] content,
-        string fileName,
-        Func<byte[], PdfDocument> openDocument,
-        Func<Page, string> getPageText) =>
-        ParseCore(content, fileName, openDocument, getPageText, page => page.Letters.Select(letter => letter.Value));
-
-    internal static (EvidenceProcessingState State, string Reason, string Text) Parse(
-        byte[] content,
-        string fileName,
-        Func<byte[], PdfDocument> openDocument,
-        Func<Page, string> getPageText,
-        Func<Page, IEnumerable<string>> getTextParts) =>
-        ParseCore(content, fileName, openDocument, getPageText, getTextParts);
-
-    private static PdfDocument OpenDocument(byte[] content) =>
-        PdfDocument.Open(content, new ParsingOptions { UseLenientParsing = true });
-
-    private static (EvidenceProcessingState State, string Reason, string Text) ParseCore(
-        byte[] content,
-        string fileName,
-        Func<byte[], PdfDocument> openDocument,
-        Func<Page, string> getPageText,
-        Func<Page, IEnumerable<string>> getTextParts)
-    {
-        if (content.LongLength > EvidenceIntake.MaxDocumentBytes)
-        {
-            return (EvidenceProcessingState.RejectedPermanent,
-                $"{fileName} is {content.LongLength} bytes; limit is {EvidenceIntake.MaxDocumentBytes}",
-                string.Empty);
-        }
-
-        try
-        {
-            var streamCheck = CheckStreamLimits(content);
-            if (streamCheck.TextExceeded)
+            try
             {
-                return Retryable(PdfTextLimitReason);
-            }
-
-            if (streamCheck.Exceeded)
-            {
-                return Retryable(PdfStreamLimitReason);
-            }
-
-            if (!streamCheck.Safe)
-            {
-                return Retryable(PdfReadFailureReason);
-            }
-
-            using var pdf = openDocument(content);
-            if (pdf.NumberOfPages > EvidenceIntake.MaxPagesPerDocument)
-            {
-                return Retryable($"{pdf.NumberOfPages} pages; limit is {EvidenceIntake.MaxPagesPerDocument}");
-            }
-
-            var text = new System.Text.StringBuilder();
-            var pageIndex = 0;
-            foreach (var page in pdf.GetPages())
-            {
-                if (page.ExperimentalAccess.GetAnnotations().Any())
+                if (!OperatingSystem.IsWindows())
                 {
-                    return (EvidenceProcessingState.RejectedPermanent, "annotations are not accepted", string.Empty);
+                    // The directory was made read-only before the run; the owner must be able to write again to delete it.
+                    File.SetUnixFileMode(workingDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                 }
 
-                if (pageIndex++ > 0)
-                {
-                    text.Append(EvidenceIntake.PageSeparator);
-                }
-
-                if (!CanMaterializePageText(getTextParts(page), text.Length))
-                {
-                    return Retryable(PdfStreamLimitReason);
-                }
-
-                var pageText = getPageText(page);
-                if (pageText.Length > MaxDecodedStreamBytes - text.Length)
-                {
-                    return Retryable(PdfStreamLimitReason);
-                }
-
-                text.Append(pageText);
+                Directory.Delete(workingDirectory, recursive: true);
             }
-
-            return (EvidenceProcessingState.Complete, "accepted", text.ToString());
-        }
-        catch (OutOfMemoryException)
-        {
-            return Retryable(PdfReadFailureReason);
-        }
-        catch (Exception)
-        {
-            return Retryable(PdfReadFailureReason);
-        }
-    }
-
-    // Reject ambiguous stream layouts and cap decoded bytes before PdfPig can materialize page content.
-    private static (bool Safe, bool Exceeded, bool TextExceeded) CheckStreamLimits(byte[] content)
-    {
-        var decodedBytes = 0;
-        var textStreams = new List<(PdfObjectReference Reference, int Bytes)>();
-        var streamRanges = new List<(int Start, int End)>();
-        var streamReferences = new HashSet<PdfObjectReference>();
-        var offset = 0;
-        while ((offset = FindPdfToken(content, "stream", offset)) >= 0)
-        {
-            var streamStart = offset;
-            var objectBoundary = LastIndexOfPdfToken(content, "endobj", streamStart);
-            var objectSearchStart = objectBoundary < 0 ? 0 : objectBoundary + "endobj".Length;
-            var objectStart = FindPdfToken(content, "obj", objectSearchStart);
-            if (objectStart <= objectBoundary)
+            catch (IOException)
             {
-                offset = streamStart + "stream".Length;
-                continue;
             }
-
-            var headerStart = objectStart + "obj".Length;
-            var header = Encoding.Latin1.GetString(content, headerStart, streamStart - headerStart);
-            if (!TryGetObjectReferenceBefore(content, objectStart, out var streamReference))
+            catch (UnauthorizedAccessException)
             {
-                return (false, false, false);
-            }
-
-            streamReferences.Add(streamReference);
-            if (!header.TrimEnd().EndsWith(">>", StringComparison.Ordinal))
-            {
-                return (false, false, false);
-            }
-
-            if (EscapedPdfName.IsMatch(header))
-            {
-                return (false, false, false);
-            }
-
-            var hasFilter = header.Contains("/Filter", StringComparison.Ordinal);
-            var lengthMatch = DirectStreamLength.Match(header);
-            var streamLength = -1;
-            var hasDirectLength = lengthMatch.Success
-                && int.TryParse(lengthMatch.Groups[1].Value, out streamLength)
-                && streamLength >= 0;
-            if (hasFilter && !SingleFlateFilter.IsMatch(header))
-            {
-                return (false, false, false);
-            }
-
-            if (hasFilter && SingleFlateFilter.IsMatch(header)
-                && (CountOccurrences(header, "<<") != 1
-                    || CountOccurrences(header, "/Length") != 1
-                    || CountOccurrences(header, "/Filter") != 1))
-            {
-                return (false, false, false);
-            }
-
-            if (!hasDirectLength)
-            {
-                return (false, false, false);
-            }
-
-            var dataStart = streamStart + "stream".Length;
-            if (dataStart < content.Length && content[dataStart] == '\r') dataStart++;
-            if (dataStart < content.Length && content[dataStart] == '\n') dataStart++;
-            var length = streamLength;
-            if (length > content.Length - dataStart)
-            {
-                return (false, false, false);
-            }
-
-            var textBytes = 0;
-            if (hasFilter)
-            {
-                using var compressed = new MemoryStream(content, dataStart, length, writable: false);
-                using var inflater = new ZLibStream(compressed, CompressionMode.Decompress);
-                using var decoded = new MemoryStream();
-                var buffer = new byte[8192];
-                while (true)
-                {
-                    var read = inflater.Read(buffer, 0, Math.Min(buffer.Length, MaxDecodedStreamBytes - decodedBytes + 1));
-                    if (read == 0) break;
-                    decodedBytes += read;
-                    if (decodedBytes > MaxDecodedStreamBytes) return (true, true, false);
-                    decoded.Write(buffer, 0, read);
-                }
-
-                var decodedContent = decoded.GetBuffer().AsSpan(0, (int)decoded.Length);
-                if (!HasBoundedCMapExpansion(decodedContent)) return (false, false, false);
-                if (!header.Contains("/Subtype /Image", StringComparison.Ordinal)
-                    && HasTextShowingOperator(decodedContent))
-                {
-                    textBytes = (int)decoded.Length;
-                }
-            }
-            else
-            {
-                decodedBytes += length;
-                if (decodedBytes > MaxDecodedStreamBytes) return (true, true, false);
-                var streamContent = content.AsSpan(dataStart, length);
-                if (!HasBoundedCMapExpansion(streamContent)) return (false, false, false);
-                if (!header.Contains("/Subtype /Image", StringComparison.Ordinal)
-                    && HasTextShowingOperator(streamContent))
-                {
-                    textBytes = length;
-                }
-            }
-
-            if (header.Contains("/Subtype /Form", StringComparison.Ordinal))
-            {
-                // Form XObjects can execute repeatedly through Do operators without repeated object references.
-                return (false, false, false);
-            }
-            if (header.Contains("/Type /ObjStm", StringComparison.Ordinal))
-            {
-                // Compressed dictionaries cannot be reference-counted by the bounded source scanner.
-                return (false, false, false);
-            }
-
-            var afterData = dataStart + length;
-            var end = FindPdfToken(content, "endstream", afterData);
-            if (end < 0) return (false, false, false);
-            for (var i = afterData; i < end; i++)
-            {
-                if (!IsPdfWhitespace(content[i])) return (false, false, false);
-            }
-
-            streamRanges.Add((dataStart, end + "endstream".Length));
-            if (textBytes > 0)
-            {
-                textStreams.Add((streamReference, textBytes));
-            }
-
-            offset = end + "endstream".Length;
-        }
-
-        var (referenceCounts, referencesAreSafe) =
-            CountIndirectReferences(content, streamRanges, streamReferences);
-        if (!referencesAreSafe) return (false, false, false);
-
-        long expandedTextBytes = 0;
-        foreach (var (reference, bytes) in textStreams)
-        {
-            var executions = referenceCounts.TryGetValue(reference, out var count) ? count : 1;
-            expandedTextBytes += (long)bytes * executions;
-            if (expandedTextBytes > MaxTextStreamBytes)
-            {
-                return (false, false, true);
-            }
-        }
-
-        return (true, false, false);
-    }
-
-    private static bool TryGetObjectReferenceBefore(
-        byte[] content,
-        int objectTokenStart,
-        out PdfObjectReference reference)
-    {
-        reference = default;
-        var position = objectTokenStart - 1;
-        while (position >= 0 && IsPdfWhitespace(content[position])) position--;
-        var generationEnd = position + 1;
-        while (position >= 0 && content[position] is >= (byte)'0' and <= (byte)'9') position--;
-        if (generationEnd == position + 1) return false;
-        var generationStart = position + 1;
-
-        while (position >= 0 && IsPdfWhitespace(content[position])) position--;
-        var numberEnd = position + 1;
-        while (position >= 0 && content[position] is >= (byte)'0' and <= (byte)'9') position--;
-        if (numberEnd == position + 1
-            || !int.TryParse(Encoding.ASCII.GetString(content, generationStart, generationEnd - generationStart),
-                NumberStyles.None, CultureInfo.InvariantCulture, out var generation)
-            || !int.TryParse(Encoding.ASCII.GetString(content, position + 1, numberEnd - position - 1),
-                NumberStyles.None, CultureInfo.InvariantCulture, out var number))
-        {
-            return false;
-        }
-
-        reference = new PdfObjectReference(number, generation);
-        return true;
-    }
-
-    private static (Dictionary<PdfObjectReference, long> Counts, bool Safe) CountIndirectReferences(
-        byte[] content,
-        IReadOnlyList<(int Start, int End)> streamRanges,
-        IReadOnlySet<PdfObjectReference> streamReferences)
-    {
-        var counts = new Dictionary<PdfObjectReference, long>();
-        var rangeIndex = 0;
-        string? previous = null;
-        string? beforePrevious = null;
-        var readingContentsReference = false;
-        var contentsReferencePart = 0;
-        var contentsObjectNumber = 0;
-        var contentsGeneration = 0;
-        var inContentsArray = false;
-        var currentObjectIsPage = false;
-        var currentObjectHasUnsafeContents = false;
-        var readingTypeName = false;
-        var referencesAreSafe = true;
-        var index = 0;
-        while (index < content.Length)
-        {
-            while (rangeIndex < streamRanges.Count && index >= streamRanges[rangeIndex].End) rangeIndex++;
-            if (rangeIndex < streamRanges.Count
-                && index >= streamRanges[rangeIndex].Start
-                && index < streamRanges[rangeIndex].End)
-            {
-                index = streamRanges[rangeIndex].End;
-                previous = null;
-                beforePrevious = null;
-                continue;
-            }
-
-            var value = content[index];
-            if (IsPdfWhitespace(value))
-            {
-                index++;
-                continue;
-            }
-
-            if (value == '%')
-            {
-                while (index < content.Length && content[index] is not (10 or 13)) index++;
-                continue;
-            }
-
-            if (value == '(')
-            {
-                if (readingContentsReference)
-                {
-                    currentObjectHasUnsafeContents = true;
-                    readingContentsReference = false;
-                }
-
-                SkipLiteralString(content, ref index);
-                beforePrevious = previous;
-                previous = null;
-                continue;
-            }
-
-            if (value == '<' && (index + 1 >= content.Length || content[index + 1] != '<'))
-            {
-                if (readingContentsReference)
-                {
-                    currentObjectHasUnsafeContents = true;
-                    readingContentsReference = false;
-                }
-
-                index++;
-                while (index < content.Length && content[index] != '>') index++;
-                if (index < content.Length) index++;
-                beforePrevious = previous;
-                previous = null;
-                continue;
-            }
-
-            if (value == '/')
-            {
-                index++;
-                var nameStart = index;
-                while (index < content.Length && !IsPdfDelimiter(content[index])) index++;
-                var name = Encoding.ASCII.GetString(content, nameStart, index - nameStart);
-                if (name.Contains('#')) referencesAreSafe = false;
-                if (readingContentsReference)
-                {
-                    currentObjectHasUnsafeContents = true;
-                    readingContentsReference = false;
-                }
-
-                if (readingTypeName)
-                {
-                    currentObjectIsPage |= name == "Page";
-                    readingTypeName = false;
-                }
-
-                if (name == "Type") readingTypeName = true;
-                if (name == "Contents")
-                {
-                    readingContentsReference = true;
-                    contentsReferencePart = 0;
-                }
-
-                beforePrevious = previous;
-                previous = null;
-                continue;
-            }
-
-            if (IsPdfDelimiter(value))
-            {
-                if (value == (byte)'[' && readingContentsReference)
-                {
-                    readingContentsReference = false;
-                    inContentsArray = true;
-                }
-                else if (value == (byte)']' && inContentsArray)
-                {
-                    inContentsArray = false;
-                }
-                else if (readingContentsReference)
-                {
-                    currentObjectHasUnsafeContents = true;
-                    readingContentsReference = false;
-                }
-
-                index += value == (byte)'<' && index + 1 < content.Length && content[index + 1] == (byte)'<'
-                    || value == (byte)'>' && index + 1 < content.Length && content[index + 1] == (byte)'>'
-                    ? 2
-                    : 1;
-                beforePrevious = previous;
-                previous = null;
-                continue;
-            }
-
-            var tokenStart = index;
-            while (index < content.Length && !IsPdfDelimiter(content[index])) index++;
-            var token = Encoding.ASCII.GetString(content, tokenStart, index - tokenStart);
-            if (token == "endobj")
-            {
-                if (currentObjectIsPage && currentObjectHasUnsafeContents) referencesAreSafe = false;
-                currentObjectIsPage = false;
-                currentObjectHasUnsafeContents = false;
-                readingTypeName = false;
-                readingContentsReference = false;
-                inContentsArray = false;
-            }
-            else if (token == "obj")
-            {
-                currentObjectIsPage = false;
-                currentObjectHasUnsafeContents = false;
-                readingTypeName = false;
-                readingContentsReference = false;
-                inContentsArray = false;
-            }
-
-            if (readingContentsReference)
-            {
-                if (contentsReferencePart == 0
-                    && int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out contentsObjectNumber))
-                {
-                    contentsReferencePart = 1;
-                }
-                else if (contentsReferencePart == 1
-                    && int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out contentsGeneration))
-                {
-                    contentsReferencePart = 2;
-                }
-                else if (contentsReferencePart == 2 && token == "R")
-                {
-                    if (!streamReferences.Contains(new PdfObjectReference(contentsObjectNumber, contentsGeneration)))
-                    {
-                        currentObjectHasUnsafeContents = true;
-                    }
-
-                    readingContentsReference = false;
-                }
-                else
-                {
-                    currentObjectHasUnsafeContents = true;
-                    readingContentsReference = false;
-                }
-            }
-
-            if (token == "R"
-                && int.TryParse(beforePrevious, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
-                && int.TryParse(previous, NumberStyles.None, CultureInfo.InvariantCulture, out var generation))
-            {
-                var reference = new PdfObjectReference(number, generation);
-                if (inContentsArray && !streamReferences.Contains(reference))
-                {
-                    currentObjectHasUnsafeContents = true;
-                }
-
-                counts[reference] = counts.TryGetValue(reference, out var current) ? current + 1 : 1;
-            }
-
-            beforePrevious = previous;
-            previous = token;
-        }
-
-        if (currentObjectIsPage && currentObjectHasUnsafeContents) referencesAreSafe = false;
-        return (counts, referencesAreSafe);
-    }
-
-    private static void SkipLiteralString(byte[] content, ref int index)
-    {
-        var depth = 1;
-        index++;
-        while (index < content.Length && depth > 0)
-        {
-            if (content[index] == (byte)'\\')
-            {
-                index += Math.Min(2, content.Length - index);
-            }
-            else if (content[index++] == (byte)'(')
-            {
-                depth++;
-            }
-            else if (content[index - 1] == (byte)')')
-            {
-                depth--;
             }
         }
     }
-
-    private static bool HasBoundedCMapExpansion(ReadOnlySpan<byte> stream)
-    {
-        var text = Encoding.Latin1.GetString(stream);
-        var clean = text.ToCharArray();
-        var index = 0;
-        var bodyStart = 0;
-        var kind = 0;
-        while (index < text.Length)
-        {
-            var value = text[index];
-            if (value == '%')
-            {
-                while (index < text.Length && text[index] is not ('\r' or '\n')) clean[index++] = ' ';
-                continue;
-            }
-
-            if (value == '(')
-            {
-                var depth = 1;
-                index++;
-                while (index < text.Length && depth > 0)
-                {
-                    if (text[index] == '\\') index = Math.Min(index + 2, text.Length);
-                    else if (text[index++] == '(') depth++;
-                    else if (text[index - 1] == ')') depth--;
-                }
-
-                if (depth != 0 && kind != 0) return false;
-                continue;
-            }
-
-            if (value == '<')
-            {
-                if (index + 1 < text.Length && text[index + 1] == '<') index += 2;
-                else
-                {
-                    index++;
-                    while (index < text.Length && text[index] != '>') index++;
-                    if (index == text.Length) return kind == 0;
-                    index++;
-                }
-
-                continue;
-            }
-
-            if (value == '/')
-            {
-                index++;
-                while (index < text.Length && !IsPdfDelimiter((byte)text[index])) index++;
-                continue;
-            }
-
-            if (IsPdfDelimiter((byte)value))
-            {
-                index++;
-                continue;
-            }
-
-            var tokenStart = index;
-            while (index < text.Length && !IsPdfDelimiter((byte)text[index])) index++;
-            var token = text.AsSpan(tokenStart, index - tokenStart);
-            var startsChar = token.SequenceEqual("beginbfchar");
-            var startsRange = token.SequenceEqual("beginbfrange");
-            var endsChar = token.SequenceEqual("endbfchar");
-            var endsRange = token.SequenceEqual("endbfrange");
-            if (kind == 0)
-            {
-                if (endsChar || endsRange) return false;
-                if (startsChar || startsRange)
-                {
-                    kind = startsChar ? 1 : 2;
-                    bodyStart = index;
-                }
-            }
-            else if (startsChar || startsRange || (endsChar || endsRange) && (endsChar ? kind != 1 : kind != 2))
-            {
-                return false;
-            }
-            else if (kind == 1 && endsChar || kind == 2 && endsRange)
-            {
-                if (!IsBoundedCMapBody(new string(clean, bodyStart, tokenStart - bodyStart), kind)) return false;
-                kind = 0;
-            }
-        }
-
-        return kind == 0;
-    }
-
-    private static bool IsBoundedCMapBody(string body, int kind)
-    {
-        var tokens = CMapToken.Matches(body);
-        if (!string.IsNullOrWhiteSpace(CMapToken.Replace(body, string.Empty))) return false;
-        if (kind == 1)
-        {
-            if (tokens.Count % 2 != 0) return false;
-            for (var i = 0; i < tokens.Count; i += 2)
-            {
-                if (!TryGetHexToken(tokens[i], out var source) || !TryGetHexToken(tokens[i + 1], out var target)
-                    || !IsBoundedUnicodeMapping(source, source, target, false)) return false;
-            }
-
-            return true;
-        }
-
-        var tokenIndex = 0;
-        while (tokenIndex < tokens.Count)
-        {
-            if (!TryGetHexToken(tokens[tokenIndex++], out var sourceStart) || tokenIndex >= tokens.Count
-                || !TryGetHexToken(tokens[tokenIndex++], out var sourceEnd)
-                || sourceStart.Length != sourceEnd.Length || sourceStart.Length == 0
-                || sourceStart.Length > 8 || sourceStart.Length % 2 != 0
-                || !uint.TryParse(sourceStart, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var start)
-                || !uint.TryParse(sourceEnd, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var end)
-                || start > end || tokenIndex >= tokens.Count) return false;
-
-            if (tokens[tokenIndex].Groups["bracket"].Value == "[")
-            {
-                tokenIndex++;
-                var hasValue = false;
-                while (tokenIndex < tokens.Count && tokens[tokenIndex].Groups["bracket"].Value != "]")
-                {
-                    if (!TryGetHexToken(tokens[tokenIndex++], out var target)
-                        || !IsBoundedUnicodeMapping(sourceStart, sourceEnd, target, false)) return false;
-                    hasValue = true;
-                }
-
-                if (!hasValue || tokenIndex >= tokens.Count) return false;
-                tokenIndex++;
-            }
-            else if (!TryGetHexToken(tokens[tokenIndex++], out var target)
-                || !IsBoundedUnicodeMapping(sourceStart, sourceEnd, target, true)) return false;
-        }
-
-        return true;
-    }
-
-    private static bool TryGetHexToken(Match token, out string value)
-    {
-        value = token.Groups["value"].Value;
-        return value.Length > 0;
-    }
-
-    private static bool IsBoundedUnicodeMapping(string sourceStart, string sourceEnd, string target, bool incrementing)
-    {
-        var sourceBytes = sourceStart.Length / 2;
-        if (sourceBytes == 0 || sourceStart.Length % 2 != 0 || target.Length == 0 || target.Length % 4 != 0
-            || target.Length / 4 > sourceBytes) return false;
-        if (!incrementing || sourceBytes != 1 || target.Length != 4) return true;
-        return ushort.TryParse(target, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var first)
-            && uint.TryParse(sourceStart, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var start)
-            && uint.TryParse(sourceEnd, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var end)
-            && first + end - start <= ushort.MaxValue;
-    }
-
-    private static bool HasTextShowingOperator(ReadOnlySpan<byte> stream)
-    {
-        var index = 0;
-        while (index < stream.Length)
-        {
-            var value = stream[index];
-            if (IsPdfWhitespace(value))
-            {
-                index++;
-                continue;
-            }
-
-            if (value == '%')
-            {
-                while (index < stream.Length && stream[index] is not (10 or 13)) index++;
-                continue;
-            }
-
-            if (value == '(')
-            {
-                var depth = 1;
-                index++;
-                while (index < stream.Length && depth > 0)
-                {
-                    if (stream[index] == '\\')
-                    {
-                        index += Math.Min(2, stream.Length - index);
-                    }
-                    else
-                    {
-                        var literalValue = stream[index++];
-                        if (literalValue == '(') depth++;
-                        else if (literalValue == ')') depth--;
-                    }
-                }
-
-                continue;
-            }
-
-            if (value == '<')
-            {
-                if (index + 1 < stream.Length && stream[index + 1] == '<')
-                {
-                    index += 2;
-                }
-                else
-                {
-                    index++;
-                    while (index < stream.Length && stream[index] != '>') index++;
-                    if (index < stream.Length) index++;
-                }
-
-                continue;
-            }
-
-            if (value == '/')
-            {
-                index++;
-                while (index < stream.Length && !IsPdfDelimiter(stream[index])) index++;
-                continue;
-            }
-
-            if (value is (byte)'\'' or (byte)'"') return true;
-            if (IsPdfDelimiter(value))
-            {
-                index += value == (byte)'>' && index + 1 < stream.Length
-                    && stream[index + 1] == (byte)'>' ? 2 : 1;
-                continue;
-            }
-
-            var tokenStart = index;
-            while (index < stream.Length && !IsPdfDelimiter(stream[index])) index++;
-            var token = stream.Slice(tokenStart, index - tokenStart);
-            if (token.SequenceEqual("Tj"u8) || token.SequenceEqual("TJ"u8)) return true;
-        }
-
-        return false;
-    }
-
-    private static bool CanMaterializePageText(IEnumerable<string> textParts, int existingTextLength)
-    {
-        long maximumTextLength = existingTextLength;
-        foreach (var textPart in textParts)
-        {
-            maximumTextLength += textPart.Length + 4L;
-            if (maximumTextLength > MaxDecodedStreamBytes)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static int CountOccurrences(string value, string match)
-    {
-        var count = 0;
-        var offset = 0;
-        while ((offset = value.IndexOf(match, offset, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            offset += match.Length;
-        }
-
-        return count;
-    }
-
-    private static int FindPdfToken(byte[] content, string token, int start)
-    {
-        var tokenBytes = Encoding.ASCII.GetBytes(token);
-        var literalDepth = 0;
-        var index = Math.Max(start, 0);
-        while (index <= content.Length - tokenBytes.Length)
-        {
-            if (SkipPdfCommentOrLiteral(content, content.Length, ref index, ref literalDepth)) continue;
-
-            if (HasPdfTokenAt(content, tokenBytes, index)) return index;
-            index++;
-        }
-
-        return -1;
-    }
-
-    private static int LastIndexOfPdfToken(byte[] content, string token, int before)
-    {
-        var tokenBytes = Encoding.ASCII.GetBytes(token);
-        var limit = Math.Min(before, content.Length);
-        var literalDepth = 0;
-        var lastMatch = -1;
-        var index = 0;
-        while (index < limit)
-        {
-            if (SkipPdfCommentOrLiteral(content, limit, ref index, ref literalDepth)) continue;
-
-            if (index <= limit - tokenBytes.Length && HasPdfTokenAt(content, tokenBytes, index))
-            {
-                lastMatch = index;
-            }
-
-            index++;
-        }
-
-        return lastMatch;
-    }
-
-    private static bool SkipPdfCommentOrLiteral(
-        byte[] content,
-        int limit,
-        ref int index,
-        ref int literalDepth)
-    {
-        if (literalDepth > 0)
-        {
-            if (content[index] == '\\')
-            {
-                index++;
-                if (index < limit && content[index] == '\r'
-                    && index + 1 < limit && content[index + 1] == '\n')
-                {
-                    index++;
-                }
-
-                index++;
-            }
-            else
-            {
-                if (content[index] == '(') literalDepth++;
-                else if (content[index] == ')') literalDepth--;
-                index++;
-            }
-
-            return true;
-        }
-
-        if (content[index] == '%')
-        {
-            while (index < limit && content[index] is not (10 or 13)) index++;
-            return true;
-        }
-
-        if (content[index] == '(')
-        {
-            literalDepth = 1;
-            index++;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool HasPdfTokenAt(byte[] content, byte[] token, int index)
-    {
-        if (index > 0 && !IsPdfDelimiter(content[index - 1])) return false;
-        if (index + token.Length < content.Length && !IsPdfDelimiter(content[index + token.Length])) return false;
-        for (var i = 0; i < token.Length; i++)
-        {
-            if (content[index + i] != token[i]) return false;
-        }
-
-        return true;
-    }
-
-    private static bool IsPdfDelimiter(byte value) =>
-        value is 0 or 9 or 10 or 12 or 13 or 32 or 37 or 40 or 41 or 47 or 60 or 62 or 91 or 93 or 123 or 125;
-
-    private static bool IsPdfWhitespace(byte value) => value is 0 or 9 or 10 or 12 or 13 or 32;
 
     /// <summary>
     /// Builds the child's start info: no shell, no inherited environment, redirected stdin/stdout. On Linux the child
@@ -1352,6 +438,90 @@ public static class IsolatedPdfParser
             {
             }
         }
+    }
+
+    /// <summary>Largest decoded size of one Flate stream the parent lets reach a worker.</summary>
+    internal const long DecodedStreamLimitBytes = 8L * 1024 * 1024;
+
+    private static readonly Regex FilterValue = new(@"/Filter\s*(\[[^\]]*\]|/[^\s/<>\[\]()%]+)", RegexOptions.CultureInvariant);
+    private static readonly Regex NameWithEscape = new(@"/[^\s/<>\[\]()%]*#[0-9A-Fa-f]{2}[^\s/<>\[\]()%]*", RegexOptions.CultureInvariant);
+    private static readonly Regex FirstName = new(@"/[^\s/<>\[\]()%]+", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Before any worker starts, inflates each Flate stream up to <see cref="DecodedStreamLimitBytes"/> and rejects the
+    /// document when one expands further. The scan visits every byte of the input once. A filter name spelled with a
+    /// <c>#</c> escape is not resolved here, so the document is treated as unreadable.
+    /// </summary>
+    internal static (EvidenceProcessingState State, string Reason, string Text)? PreflightStreamFilters(byte[] content)
+    {
+        var streamKeyword = "stream"u8;
+        var endKeyword = "endstream"u8;
+        var position = 0;
+        var dictionaryFloor = 0;
+        while (position < content.Length)
+        {
+            var found = content.AsSpan(position).IndexOf(streamKeyword);
+            if (found < 0) break;
+            var keyword = position + found;
+            position = keyword + streamKeyword.Length;
+            if (keyword >= 3 && content.AsSpan(keyword - 3, 3).SequenceEqual("end"u8)) continue;
+
+            var dictionaryStart = content.AsSpan(dictionaryFloor, keyword - dictionaryFloor).LastIndexOf("obj"u8);
+            dictionaryStart = dictionaryStart < 0 ? dictionaryFloor : dictionaryFloor + dictionaryStart + 3;
+            var dictionary = Encoding.Latin1.GetString(content, dictionaryStart, keyword - dictionaryStart);
+
+            var dataStart = position;
+            if (dataStart < content.Length && content[dataStart] == '\r') dataStart++;
+            if (dataStart < content.Length && content[dataStart] == '\n') dataStart++;
+            var end = content.AsSpan(dataStart).IndexOf(endKeyword);
+            var dataEnd = end < 0 ? content.Length : dataStart + end;
+            position = dataEnd;
+            dictionaryFloor = dataEnd;
+
+            if (NameWithEscape.Matches(dictionary).Any(m => IsFlateOrFilterName(Unescape(m.Value))))
+            {
+                return Retryable("PdfPig could not open or read the document; retry is possible");
+            }
+
+            var filter = FilterValue.Match(dictionary);
+            if (!filter.Success) continue;
+            var first = FirstName.Match(filter.Groups[1].Value);
+            if (!first.Success || first.Value is not ("/FlateDecode" or "/Fl")) continue;
+
+            if (InflatedBytesExceedLimit(content, dataStart, dataEnd - dataStart))
+            {
+                return Retryable($"PDF stream content exceeds {DecodedStreamLimitBytes} decoded bytes; retry is possible");
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsFlateOrFilterName(string name) => name is "/Filter" or "/FlateDecode" or "/Fl";
+
+    private static string Unescape(string name) =>
+        Regex.Replace(name, "#([0-9A-Fa-f]{2})", m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+
+    private static bool InflatedBytesExceedLimit(byte[] content, int offset, int length)
+    {
+        try
+        {
+            using var zlib = new ZLibStream(new MemoryStream(content, offset, length), CompressionMode.Decompress);
+            var buffer = new byte[81920];
+            long total = 0;
+            int read;
+            while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                total += read;
+                if (total > DecodedStreamLimitBytes) return true;
+            }
+        }
+        catch (InvalidDataException)
+        {
+            // Damaged data is the worker's to reject.
+        }
+
+        return false;
     }
 
     private static (EvidenceProcessingState State, string Reason, string Text) Retryable(string reason) =>
