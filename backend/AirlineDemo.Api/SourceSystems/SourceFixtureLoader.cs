@@ -3,6 +3,8 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.SourceSystems;
 
@@ -64,8 +66,19 @@ public static class SourceFixtureLoader
     private static readonly JsonSerializerOptions ManifestOptions = new() { PropertyNameCaseInsensitive = true };
 
     // Production registration: verifies the complete set against the pinned application key only.
-    public static IReadOnlyDictionary<string, VerifiedSourceFixture> LoadPinned(string directory) =>
-        Load(directory, Convert.FromBase64String(PinnedPublicKeySpkiBase64));
+    public static IReadOnlyDictionary<string, VerifiedSourceFixture> LoadPinned(
+        string directory, ILogger? logger = null, string environment = "production")
+    {
+        try
+        {
+            return Load(directory, Convert.FromBase64String(PinnedPublicKeySpkiBase64));
+        }
+        catch
+        {
+            if (logger is not null) SourceSystemDiagnostics.FixtureRejected(logger, environment);
+            throw;
+        }
+    }
 
     // Test seam: the trust key is supplied explicitly. A missing key refuses every source.
     internal static IReadOnlyDictionary<string, VerifiedSourceFixture> Load(string directory, byte[]? trustKeySpki)
@@ -102,10 +115,36 @@ public static class SourceFixtureLoader
         string directory,
         byte[]? trustKeySpki,
         SourceFixtureStore store,
-        Action<PublishedFixtureState>? beforeCommit = null)
+        Action<PublishedFixtureState>? beforeCommit = null,
+        ILogger? logger = null,
+        string environment = "production")
+    {
+        try
+        {
+            return LoadAndPublishCore(directory, trustKeySpki, store, beforeCommit);
+        }
+        catch
+        {
+            if (logger is not null) SourceSystemDiagnostics.FixtureRejected(logger, environment);
+            throw;
+        }
+    }
+
+    internal static SourceFixturePublication LoadPinnedAndPublish(
+        string directory,
+        SourceFixtureStore store,
+        Action<PublishedFixtureState>? beforeCommit,
+        ILogger logger,
+        string environment) =>
+        LoadAndPublish(directory, Convert.FromBase64String(PinnedPublicKeySpkiBase64), store, beforeCommit, logger, environment);
+
+    private static SourceFixturePublication LoadAndPublishCore(
+        string directory,
+        byte[]? trustKeySpki,
+        SourceFixtureStore store,
+        Action<PublishedFixtureState>? beforeCommit)
     {
         var verified = Load(directory, trustKeySpki);
-
         var versions = verified.Values.Select(fixture => fixture.Manifest.SourceFixtureVersion).Distinct(StringComparer.Ordinal).ToList();
         if (versions.Count != 1)
         {

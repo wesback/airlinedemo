@@ -1,0 +1,272 @@
+using System.Net;
+using System.Net.Http.Json;
+using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Requests;
+using AirlineDemo.Api.SourceSystems;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using OpenTelemetry;
+using OpenTelemetry.Logs;
+
+namespace AirlineDemo.Api.Tests;
+
+public sealed class SourceSystemTelemetryContractTests
+{
+    private const string CaseId = "source-telemetry-case";
+    private const string OtherCaseId = "source-telemetry-other";
+    private const string PayloadCanary = "SOURCE-PAYLOAD-CANARY";
+    private static readonly DateTimeOffset Now = new(2026, 10, 18, 12, 0, 0, TimeSpan.Zero);
+
+    private sealed class FixedTime : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private sealed class ControlledSource : ISourceSystem<TechnicalPayload>
+    {
+        public bool Unavailable { get; set; }
+        public bool WaitUntilCancelled { get; set; }
+        public int RecordCount { get; set; } = 1;
+
+        public async Task<SourceReadResult<IReadOnlyList<SourceRecord<TechnicalPayload>>>> ListAsync(
+            string caseId, CancellationToken cancellationToken = default, int? maxRecords = null)
+        {
+            if (WaitUntilCancelled) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            if (Unavailable) return new SourceUnavailable<IReadOnlyList<SourceRecord<TechnicalPayload>>>("technical");
+            return new SourceReadSucceeded<IReadOnlyList<SourceRecord<TechnicalPayload>>>(
+                Enumerable.Range(1, RecordCount).Select(index => new SourceRecord<TechnicalPayload>
+                {
+                    SourceId = "technical",
+                    RecordId = $"record-{index}",
+                    RecordVersion = 1,
+                    AsOf = new DateOnly(2026, 10, 1),
+                    CaseId = caseId,
+                    Kind = "telemetry-test",
+                    Payload = new TechnicalPayload(new Dictionary<string, string> { ["value"] = PayloadCanary }),
+                }).ToArray());
+        }
+
+        public Task<SourceReadResult<SourceRecord<TechnicalPayload>>> GetAsync(
+            string caseId, string recordId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<SourceReadResult<SourceRecord<TechnicalPayload>>>(new SourceRecordNotFound<SourceRecord<TechnicalPayload>>(recordId));
+    }
+
+    private sealed class ControlledAdmission : ISourceReadAdmissionStore
+    {
+        public bool Reject { get; set; }
+
+        public Task<Guid?> TryAcquireAsync(string sessionId, string caseId, DateTimeOffset requestedAt, CancellationToken cancellationToken) =>
+            Task.FromResult(Reject ? (Guid?)null : Guid.NewGuid());
+
+        public Task<bool> ReleaseAsync(Guid leaseId, DateTimeOffset releasedAt, CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+    }
+
+    private sealed class AuditFailingCaseStore(ICaseStateStore inner) : ICaseStateStore
+    {
+        public bool FailAudit { get; set; } = true;
+
+        public CaseScope AuthorizeCase(string caseId, string owner) => inner.AuthorizeCase(caseId, owner);
+        public string? OwnerOf(string caseId) => inner.OwnerOf(caseId);
+        public CaseScope CreateCase(string caseId, string owner) => inner.CreateCase(caseId, owner);
+        public CaseState Read(CaseScope scope) => inner.Read(scope);
+        public BasisVersion GetBasisVersion(CaseScope scope, int version) => inner.GetBasisVersion(scope, version);
+        public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => inner.ReadAudit(scope);
+        public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
+        {
+            if (FailAudit && commit.Action == SourceModes.Action) throw new IOException("simulated audit storage failure");
+            return inner.Commit(scope, expectedRevision, commit);
+        }
+        public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope) => inner.ListWorkItems(scope);
+        public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor) =>
+            inner.CreateWorkItem(scope, expectedRevision, draft, actor);
+        public CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor) =>
+            inner.ChangeWorkItemState(scope, expectedRevision, itemId, state, actor);
+        public void AppendTrace(CaseScope scope, InvestigationTrace trace) => inner.AppendTrace(scope, trace);
+        public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId) =>
+            inner.FindTrace(scope, caseId, runId, investigationId);
+    }
+
+    private sealed record CapturedEvent(
+        string Name,
+        string? SeverityText,
+        int SeverityNumber,
+        IReadOnlyList<KeyValuePair<string, object?>> Attributes,
+        string? Body);
+
+    private sealed class EventCapture(List<CapturedEvent> events) : BaseProcessor<LogRecord>
+    {
+        public override void OnEnd(LogRecord data)
+        {
+            var attributes = (data.Attributes ?? []).ToList();
+            var name = attributes.FirstOrDefault(attribute => attribute.Key == "event.name").Value?.ToString() ?? string.Empty;
+            var severityText = attributes.FirstOrDefault(attribute => attribute.Key == "severity.text").Value?.ToString();
+            var severityNumber = Convert.ToInt32(attributes.FirstOrDefault(attribute => attribute.Key == "severity.number").Value);
+            events.Add(new CapturedEvent(name, severityText, severityNumber, attributes, data.Body));
+        }
+    }
+
+    [Fact]
+    public async Task SourceEventsUseExactSeverityTextAndNumbers()
+    {
+        var events = new List<CapturedEvent>();
+        var source = new ControlledSource();
+        var admission = new ControlledAdmission();
+        var statePath = Path.Combine(Path.GetTempPath(), $"source-telemetry-{Guid.NewGuid():N}.json");
+        await using var factory = CreateFactory(statePath, events, source, admission, auditFailure: true);
+        var cases = factory.Services.GetRequiredService<ICaseStateStore>();
+        cases.CreateCase(CaseId, "owner");
+        cases.CreateCase(OtherCaseId, "other-owner");
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var reviewer = sessions.Create(new DemoUser("reviewer", "Reviewer", "technical-reviewer", [CaseId]));
+        var outOfRole = sessions.Create(new DemoUser("legal", "Legal", "legal-reviewer", [CaseId]));
+        var presenter = sessions.Create(new DemoUser("presenter", "Presenter", "presenter", [CaseId]));
+        using var client = factory.CreateClient();
+        var auditStore = Assert.IsType<AuditFailingCaseStore>(cases);
+        using (var response = await Get(client, reviewer, $"/api/v1/cases/{OtherCaseId}/sources/technical/records"))
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using (var response = await Get(client, outOfRole, $"/api/v1/cases/{CaseId}/sources/technical/records"))
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        source.Unavailable = true;
+        using (var response = await Get(client, reviewer, $"/api/v1/cases/{CaseId}/sources/technical/records"))
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        source.Unavailable = false;
+        admission.Reject = true;
+        using (var response = await Get(client, reviewer, $"/api/v1/cases/{CaseId}/sources/technical/records"))
+            Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        admission.Reject = false;
+        source.RecordCount = 101;
+        using (var response = await Get(client, reviewer, $"/api/v1/cases/{CaseId}/sources/technical/records"))
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        source.RecordCount = 1;
+        source.WaitUntilCancelled = true;
+        using (var response = await Get(client, reviewer, $"/api/v1/cases/{CaseId}/sources/technical/records"))
+            Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
+        source.WaitUntilCancelled = false;
+        auditStore.FailAudit = false;
+        using (var response = await PostMode(client, presenter, CaseId, "accepted-mode-change", 0, "unavailable"))
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        auditStore.FailAudit = true;
+        using (var response = await PostMode(client, presenter, CaseId, "failed-mode-change", 1, "available"))
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var logger = factory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-fixture-test");
+        var environmentName = factory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName;
+        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadPinned(
+            Path.Combine(Path.GetTempPath(), $"missing-source-fixtures-{Guid.NewGuid():N}"),
+            logger,
+            environmentName));
+        Assert.Throws<IOException>(() => SourceFixtureLoader.LoadPinnedAndPublish(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
+            new SourceFixtureStore(PublishedFixtureState.Empty),
+            _ => throw new IOException("simulated fixture publication failure"),
+            logger,
+            environmentName));
+        var expected = new Dictionary<string, (string Severity, int Number)>(StringComparer.Ordinal)
+        {
+            ["source.mode_change.accepted"] = ("INFO", 9),
+            ["source.read.denied_cross_case"] = ("WARN", 13),
+            ["source.read.denied_out_of_role"] = ("WARN", 13),
+            ["source.fixture.rejected"] = ("ERROR", 17),
+            ["source.read.unavailable"] = ("WARN", 13),
+            ["source.read.rate_or_concurrency_limited"] = ("WARN", 13),
+            ["source.read.record_limit_rejected"] = ("WARN", 13),
+            ["source.read.timed_out"] = ("WARN", 13),
+            ["source.mode_change.audit_write_failed"] = ("ERROR", 17),
+        };
+        foreach (var (name, severity) in expected)
+        {
+            var matches = events.Where(item => item.Name == name).ToArray();
+            var expectedCount = name == "source.fixture.rejected" ? 2 : 1;
+            Assert.True(matches.Length == expectedCount, $"Expected {expectedCount} '{name}' event(s), captured: {string.Join(" | ", events.Select(item => $"{item.Name} [{string.Join(", ", item.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}"))}]"))}");
+            foreach (var record in matches)
+            {
+                Assert.Equal(severity.Severity, record.SeverityText);
+                Assert.Equal(severity.Number, record.SeverityNumber);
+                var contractAttributes = record.Attributes
+                    .Where(attribute => attribute.Key is "deployment.environment" or "event.name" or "severity.number"
+                        or "severity.text" or "service.name" or "service.version")
+                    .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+                Assert.Equal(
+                    new[] { "deployment.environment", "event.name", "severity.number", "severity.text", "service.name", "service.version" }
+                        .OrderBy(key => key, StringComparer.Ordinal),
+                    contractAttributes.Keys.OrderBy(key => key, StringComparer.Ordinal));
+                Assert.Equal(name, contractAttributes["event.name"]);
+                Assert.Equal(severity.Severity, contractAttributes["severity.text"]);
+                Assert.Equal(severity.Number, Convert.ToInt32(contractAttributes["severity.number"]));
+                Assert.Equal(TelemetryRedaction.ServiceName, contractAttributes["service.name"]);
+                Assert.Equal(TelemetryRedaction.ServiceVersion, contractAttributes["service.version"]);
+                Assert.Equal(environmentName.ToLowerInvariant(), contractAttributes["deployment.environment"]);
+            }
+        }
+        var output = string.Join("\n", events.SelectMany(item =>
+            item.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}").Append(item.Body ?? string.Empty)));
+        Assert.DoesNotContain(PayloadCanary, output);
+        Assert.DoesNotContain(reviewer.Id, output);
+        Assert.DoesNotContain(reviewer.CsrfToken, output);
+        Assert.DoesNotContain(presenter.Id, output);
+        Assert.DoesNotContain(presenter.CsrfToken, output);
+        Assert.DoesNotContain("source.id", output);
+        Assert.DoesNotContain("case.id", output);
+        Assert.DoesNotContain("event.outcome", output);
+        Assert.DoesNotContain("duration", output);
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory(
+        string statePath, List<CapturedEvent> events, ControlledSource source, ControlledAdmission admission, bool auditFailure) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CaseState:Path"] = statePath,
+                ["Demo:Passcode"] = "telemetry-test-passcode",
+            }));
+            builder.ConfigureLogging(logging => logging.AddOpenTelemetry(options =>
+            {
+                options.IncludeScopes = true;
+                options.AddRedaction();
+                options.AddProcessor(new EventCapture(events));
+            }));
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(new FixedTime());
+                services.RemoveAll<ISourceSystem<TechnicalPayload>>();
+                services.AddSingleton<ISourceSystem<TechnicalPayload>>(source);
+                services.RemoveAll<ISourceReadAdmissionStore>();
+                services.AddSingleton<ISourceReadAdmissionStore>(admission);
+                if (auditFailure)
+                {
+                    services.RemoveAll<ICaseStateStore>();
+                    services.AddSingleton<ICaseStateStore>(_ => new AuditFailingCaseStore(new CaseStateStore(statePath)));
+                }
+            });
+        });
+
+    private static Task<HttpResponseMessage> Get(HttpClient client, DemoSession session, string path)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Add("Cookie", $"__Host-demo-session={session.Id}");
+        return client.SendAsync(request);
+    }
+
+    private static Task<HttpResponseMessage> PostMode(
+        HttpClient client, DemoSession session, string caseId, string commandId, long revision, string mode)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/cases/{caseId}/sources/technical/mode")
+        {
+            Content = JsonContent.Create(new { commandId, expectedRevision = revision, mode }),
+        };
+        request.Headers.Add("Cookie", $"__Host-demo-session={session.Id}");
+        request.Headers.Add("X-CSRF-Token", session.CsrfToken);
+        return client.SendAsync(request);
+    }
+}

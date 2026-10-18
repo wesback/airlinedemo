@@ -80,8 +80,7 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
 });
 Program.RegisterProductionEvaluationExecutors(builder.Services);
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
-// Sources register only after the complete signed fixture set verifies; any refusal stops startup.
-SourceFixtureLoader.LoadPinned(System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"));
+// Source implementations are registered here; pinned fixtures are verified before the app accepts requests.
 builder.Services.AddSingleton<ISourceSystem<TechnicalPayload>, TechnicalSource>();
 builder.Services.AddSingleton<ISourceSystem<FinancePayload>, FinanceSource>();
 builder.Services.AddSingleton<ISourceSystem<MaintenancePayload>, MaintenanceSource>();
@@ -90,6 +89,10 @@ builder.Services.AddSingleton<ISourceSystem<ContractsPayload>, ContractsSource>(
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();
 await using var app = builder.Build();
+SourceFixtureLoader.LoadPinned(
+    System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
+    app.Logger,
+    app.Environment.EnvironmentName);
 if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error); return; }
 
 app.UseTransportSecurityHeaders();
