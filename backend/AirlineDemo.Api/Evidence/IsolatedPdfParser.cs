@@ -567,34 +567,23 @@ public static class IsolatedPdfParser
                 var filters = FirstName.Matches(filter.Groups[1].Value)
                     .Select(match => match.Value)
                     .ToArray();
-                if (filters.Length == 0) continue;
-                if (filters[0] is "/FlateDecode" or "/Fl")
+                if (filters.Length == 0)
                 {
-                    try
-                    {
-                        using var input = new MemoryStream(cmapBytes, writable: false);
-                        using var zlib = new ZLibStream(input, CompressionMode.Decompress);
-                        using var output = new MemoryStream();
-                        var buffer = new byte[81920];
-                        int read;
-                        while ((read = zlib.Read(buffer, 0, buffer.Length)) > 0)
-                        {
-                            if (output.Length > DecodedStreamLimitBytes - read)
-                            {
-                                return Retryable(UnreadableDocumentReason);
-                            }
-                            output.Write(buffer, 0, read);
-                        }
-                        cmapBytes = output.ToArray();
-                    }
-                    catch (InvalidDataException)
-                    {
-                        continue;
-                    }
+                    return Retryable(UnreadableDocumentReason);
                 }
-                else
+
+                foreach (var streamFilter in filters)
                 {
-                    continue;
+                    if (!TryDecodeContentFilter(
+                        streamFilter,
+                        cmapBytes,
+                        DecodedStreamLimitBytes,
+                        out cmapBytes,
+                        out var exceededLimit)
+                        || exceededLimit)
+                    {
+                        return Retryable(UnreadableDocumentReason);
+                    }
                 }
             }
 

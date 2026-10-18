@@ -295,6 +295,32 @@ public class IsolatedPdfParserTests
     }
 
     [Fact]
+    public void UnicodeGlyphExpansionRejectsUninspectableFilteredCMapBeforeStartingWorker()
+    {
+        var oversizedCMap = Encoding.ASCII.GetBytes(
+            $"1 beginbfchar\n<41> <{string.Concat(Enumerable.Repeat("0041", 1024))}>\nendbfchar");
+        var asciiHexCMap = Encoding.ASCII.GetBytes($"{Convert.ToHexString(oversizedCMap)}>");
+        var cases = new[]
+        {
+            (CMap: asciiHexCMap, Filter: "/ASCIIHexDecode"),
+            (CMap: Encoding.ASCII.GetBytes("1 beginbfchar\n<41> <0041>\nendbfchar"), Filter: "/DCTDecode"),
+        };
+
+        foreach (var testCase in cases)
+        {
+            var starts = new[] { 0 };
+            var outcome = IsolatedPdfParser.Parse(
+                CMapPdf(testCase.CMap, filter: testCase.Filter),
+                CountingWorker(starts));
+
+            Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+            Assert.Equal(UnreadableReason, outcome.Reason);
+            Assert.Equal(string.Empty, outcome.Text);
+            Assert.Equal(0, starts[0]);
+        }
+    }
+
+    [Fact]
     public void LargeTextStreamIsRejectedBeforeStartingWorker()
     {
         var starts = new[] { 0 };
@@ -439,9 +465,10 @@ public class IsolatedPdfParserTests
         return compressed.ToArray();
     }
 
-    private static byte[] CMapPdf(byte[] cmap, bool flate = false)
+    private static byte[] CMapPdf(byte[] cmap, bool flate = false, string? filter = null)
     {
         var cmapBytes = flate ? Flate(cmap) : cmap;
+        var filterEntry = filter ?? (flate ? "/FlateDecode" : null);
         using var pdf = new MemoryStream();
         var offsets = new List<long>();
         void Object(string header)
@@ -460,7 +487,7 @@ public class IsolatedPdfParserTests
         Write(pdf, "\n");
         Write(pdf, "endstream endobj\n");
         Object("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >> endobj\n");
-        Object($"6 0 obj << /Length {cmapBytes.Length}{(flate ? " /Filter /FlateDecode" : string.Empty)} >> stream\n");
+        Object($"6 0 obj << /Length {cmapBytes.Length}{(filterEntry is null ? string.Empty : $" /Filter {filterEntry}")} >> stream\n");
         pdf.Write(cmapBytes);
         Write(pdf, "\nendstream endobj\n");
 
