@@ -238,6 +238,67 @@ public class IsolatedPdfParserTests
     }
 
     [Fact]
+    public void UnicodeGlyphExpansionIsRejectedBeforeOpeningPdfPig()
+    {
+        var target = string.Concat(Enumerable.Repeat("0041", 1024));
+        var text = $"BT <{string.Concat(Enumerable.Repeat("41", 9000))}> Tj ET";
+        byte[] Compress(byte[] data)
+        {
+            using var compressed = new MemoryStream();
+            using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+            {
+                zlib.Write(data);
+            }
+
+            return compressed.ToArray();
+        }
+
+        var cmaps = new[]
+        {
+            $"1 beginbfchar\n<41> <{target}>\nendbfchar",
+            $"1 beginbfrange\n<41> <41> <{target}>\nendbfrange",
+        };
+        foreach (var cmap in cmaps)
+        {
+            var cmapBytes = Encoding.ASCII.GetBytes(cmap);
+            foreach (var (cmapData, filter) in new[]
+            {
+                (cmapBytes, string.Empty),
+                (Compress(cmapBytes), "/Filter /FlateDecode"),
+            })
+            {
+                using var pdf = new MemoryStream();
+                Write(pdf, "%PDF-1.4\n");
+
+                void AddStream(int objectId, byte[] data, string streamFilter = "")
+                {
+                    Write(pdf, $"{objectId} 0 obj << /Length {data.Length} {streamFilter} >> stream\n");
+                    pdf.Write(data);
+                    Write(pdf, "\nendstream endobj\n");
+                }
+
+                AddStream(1, cmapData, filter);
+                AddStream(2, Encoding.ASCII.GetBytes(text));
+
+                var opens = 0;
+                var outcome = IsolatedPdfParser.Parse(
+                    pdf.ToArray(),
+                    "expanded-glyphs.pdf",
+                    _ =>
+                    {
+                        opens++;
+                        return PdfDocument.Open(MinimalPdf(1), new ParsingOptions { UseLenientParsing = true });
+                    });
+
+                Assert.Equal(0, opens);
+                Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+                Assert.Equal("PdfPig could not open or read the document; retry is possible", outcome.Reason);
+                Assert.Equal(string.Empty, outcome.Text);
+            }
+        }
+    }
+
+    [Fact]
     public void MalformedPdfFailuresAreRetryableWithoutPartialText()
     {
         foreach (var (name, content) in new[]

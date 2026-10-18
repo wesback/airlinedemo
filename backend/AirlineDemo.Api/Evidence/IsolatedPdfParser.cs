@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -43,6 +44,12 @@ public static class IsolatedPdfParser
     private static readonly Regex SingleFlateFilter = new(
         @"/Filter\s+(?:/FlateDecode|\[\s*/FlateDecode\s*\])(?:\s|/|>>|\[)",
         RegexOptions.CultureInvariant);
+    private static readonly Regex CMapBlock = new(
+        @"begin(?<kind>bfchar|bfrange)\b(?<body>.*?)end\k<kind>\b",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline);
+    private static readonly Regex CMapToken = new(@"<(?<value>[0-9A-Fa-f]+)>|(?<bracket>[\[\]])",
+        RegexOptions.CultureInvariant);
+    private static readonly Regex PdfComment = new(@"%[^\r\n]*", RegexOptions.CultureInvariant);
 
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
@@ -227,6 +234,7 @@ public static class IsolatedPdfParser
             {
                 using var compressed = new MemoryStream(content, dataStart, length, writable: false);
                 using var inflater = new ZLibStream(compressed, CompressionMode.Decompress);
+                using var decoded = new MemoryStream();
                 var buffer = new byte[8192];
                 while (true)
                 {
@@ -234,12 +242,16 @@ public static class IsolatedPdfParser
                     if (read == 0) break;
                     decodedBytes += read;
                     if (decodedBytes > MaxDecodedStreamBytes) return (true, true);
+                    decoded.Write(buffer, 0, read);
                 }
+
+                if (!HasBoundedCMapExpansion(decoded.GetBuffer().AsSpan(0, (int)decoded.Length))) return (false, false);
             }
             else
             {
                 decodedBytes += length;
                 if (decodedBytes > MaxDecodedStreamBytes) return (true, true);
+                if (!HasBoundedCMapExpansion(content.AsSpan(dataStart, length))) return (false, false);
             }
 
             var afterData = dataStart + length;
@@ -254,6 +266,129 @@ public static class IsolatedPdfParser
         }
 
         return (true, false);
+    }
+
+    private static bool HasBoundedCMapExpansion(ReadOnlySpan<byte> stream)
+    {
+        if (stream.IndexOf("beginbfchar"u8) < 0 && stream.IndexOf("beginbfrange"u8) < 0)
+        {
+            return true;
+        }
+
+        var text = Encoding.Latin1.GetString(stream);
+        var blocks = CMapBlock.Matches(text);
+        if (blocks.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (Match block in blocks)
+        {
+            var body = PdfComment.Replace(block.Groups["body"].Value, string.Empty);
+            var tokens = CMapToken.Matches(body);
+            if (!string.IsNullOrWhiteSpace(CMapToken.Replace(body, string.Empty)))
+            {
+                return false;
+            }
+
+            if (block.Groups["kind"].Value == "bfchar")
+            {
+                if (tokens.Count % 2 != 0)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < tokens.Count; i += 2)
+                {
+                    if (!TryGetHexToken(tokens[i], out var source)
+                        || !TryGetHexToken(tokens[i + 1], out var target)
+                        || !IsBoundedUnicodeMapping(source, source, target, incrementing: false))
+                    {
+                        return false;
+                    }
+                }
+
+                continue;
+            }
+
+            var tokenIndex = 0;
+            while (tokenIndex < tokens.Count)
+            {
+                if (!TryGetHexToken(tokens[tokenIndex++], out var sourceStart)
+                    || tokenIndex >= tokens.Count
+                    || !TryGetHexToken(tokens[tokenIndex++], out var sourceEnd)
+                    || tokenIndex >= tokens.Count
+                    || sourceStart.Length != sourceEnd.Length
+                    || sourceStart.Length == 0
+                    || sourceStart.Length > 8
+                    || sourceStart.Length % 2 != 0
+                    || !uint.TryParse(sourceStart, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var start)
+                    || !uint.TryParse(sourceEnd, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var end)
+                    || start > end)
+                {
+                    return false;
+                }
+
+                if (tokens[tokenIndex].Groups["bracket"].Value == "[")
+                {
+                    tokenIndex++;
+                    var hasArrayValue = false;
+                    while (tokenIndex < tokens.Count && tokens[tokenIndex].Groups["bracket"].Value != "]")
+                    {
+                        if (!TryGetHexToken(tokens[tokenIndex++], out var target)
+                            || !IsBoundedUnicodeMapping(sourceStart, sourceEnd, target, incrementing: false))
+                        {
+                            return false;
+                        }
+
+                        hasArrayValue = true;
+                    }
+
+                    if (!hasArrayValue || tokenIndex >= tokens.Count)
+                    {
+                        return false;
+                    }
+
+                    tokenIndex++;
+                }
+                else
+                {
+                    if (!TryGetHexToken(tokens[tokenIndex++], out var target)
+                        || !IsBoundedUnicodeMapping(sourceStart, sourceEnd, target, incrementing: true))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryGetHexToken(Match token, out string value)
+    {
+        value = token.Groups["value"].Value;
+        return value.Length > 0;
+    }
+
+    private static bool IsBoundedUnicodeMapping(string sourceStart, string sourceEnd, string target, bool incrementing)
+    {
+        var sourceBytes = sourceStart.Length / 2;
+        if (sourceBytes == 0 || sourceStart.Length % 2 != 0 || target.Length == 0 || target.Length % 4 != 0
+            || target.Length / 4 > sourceBytes)
+        {
+            return false;
+        }
+
+        if (!incrementing || sourceBytes != 1 || target.Length != 4)
+        {
+            return true;
+        }
+
+        return ushort.TryParse(target, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var first)
+            && uint.TryParse(sourceStart, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var start)
+            && uint.TryParse(sourceEnd, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var end)
+            && first + end - start <= ushort.MaxValue;
     }
 
     private static bool CanMaterializePageText(IEnumerable<string> textParts, int existingTextLength)
