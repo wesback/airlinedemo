@@ -476,7 +476,9 @@ public sealed class AssessmentExecutionService(
         IReadOnlyList<SpecialistReviewFlag> flags,
         IReadOnlyList<PinnedCapeTownEvidence> evidence)
     {
-        if (evidence.Count == 0 || string.IsNullOrWhiteSpace(claim.RelatedRequirementId))
+        if (evidence.Count == 0
+            || string.IsNullOrWhiteSpace(claim.RelatedRequirementId)
+            || !claim.Value.Contains("Cape Town", StringComparison.OrdinalIgnoreCase))
             return new CapeTownClaimResolution(null, false, []);
 
         var flag = flags.FirstOrDefault(item =>

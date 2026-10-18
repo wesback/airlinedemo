@@ -50,6 +50,7 @@ public sealed class CapeTownEvidenceTests
     {
         var source = new ContractsSource();
         var published = ReadAll(source);
+        var publishedContents = published.Select(SerializeRecord).ToArray();
         Assert.Equal(ContractsSource.CoreManifest.RecordCounts["contracts"], published.Count);
         foreach (var field in new[] { "priority", "remedy", "outcome", "recoverability" })
         {
@@ -58,8 +59,14 @@ public sealed class CapeTownEvidenceTests
             var values = json.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.Clone());
             values[field] = JsonSerializer.SerializeToElement("synthetic conclusion");
             Assert.Throws<InvalidDataException>(() => ParseFixture(JsonSerializer.Serialize(values)));
+
+            var current = ReadAll(source);
+            Assert.Equal(published.Count, current.Count);
+            for (var index = 0; index < published.Count; index++)
+                Assert.Same(published[index], current[index]);
+            Assert.Equal(publishedContents, current.Select(SerializeRecord));
         }
-        Assert.Equal(ContractsSource.CoreManifest.RecordCounts["contracts"], published.Count);
+        Assert.Equal(ContractsSource.CoreManifest.RecordCounts["contracts"], ReadAll(source).Count);
     }
 
     [Fact]
@@ -83,6 +90,18 @@ public sealed class CapeTownEvidenceTests
         Assert.Throws<InvalidDataException>(() => Assess(new SpecialistReviewFlag(RequirementId, "other", "specialist_review_required"), RequirementId));
         Assert.Throws<InvalidDataException>(() => Assess(new SpecialistReviewFlag("REQ-CAPE-TOWN-OTHER", "cape_town", "specialist_review_required"), RequirementId));
         Assert.Throws<InvalidDataException>(() => Assess(new SpecialistReviewFlag(RequirementId, "cape_town", "specialist_review_required"), "req-cape-town"));
+
+        using var unrelated = Assess(
+            null,
+            RequirementId,
+            "The return package needs review.",
+            "The return package needs review.");
+        Assert.Equal("Request", unrelated.Record.Outcome);
+        Assert.Equal("single supported missing requirement on current basis", unrelated.Record.Reason);
+        Assert.Equal(RequirementId, Assert.Single(unrelated.Record.Claims).RelatedRequirementId);
+        Assert.Null(unrelated.Record.Claims.Single().SpecialistResult);
+        Assert.Null(unrelated.Record.Claims.Single().CapeTownEvidence);
+        Assert.Single(unrelated.Inbox.Requests);
     }
 
     [Fact]
@@ -121,7 +140,26 @@ public sealed class CapeTownEvidenceTests
             .SelectMany(caseId => Assert.IsType<SourceReadSucceeded<IReadOnlyList<SourceRecord<ContractsPayload>>>>(
                 source.ListAsync(caseId).GetAwaiter().GetResult()).Value)
             .ToArray();
-    private static AssessmentScenario Assess(SpecialistReviewFlag? flag, string relatedRequirementId)
+    private static string SerializeRecord(SourceRecord<ContractsPayload> record) =>
+        JsonSerializer.Serialize(new
+        {
+            record.SourceId,
+            record.RecordId,
+            record.RecordVersion,
+            record.AsOf,
+            record.CaseId,
+            record.Kind,
+            record.Stale,
+            record.Synthetic,
+            Fields = record.Payload.Fields.OrderBy(field => field.Key, StringComparer.Ordinal),
+            record.Payload.CapeTownInterest,
+        });
+
+    private static AssessmentScenario Assess(
+        SpecialistReviewFlag? flag,
+        string relatedRequirementId,
+        string claimValue = Quote,
+        string witnessQuote = Quote)
     {
         var path = Path.Combine(Path.GetTempPath(), $"cape-town-evidence-{Guid.NewGuid():N}.json");
         var store = new CaseStateStore(path);
@@ -133,13 +171,13 @@ public sealed class CapeTownEvidenceTests
             pins.Add(CreateFlagPin(flag));
         var basis = new AssessmentBasis("basis-cape-town", 1, "2026-10-01T00:00:00Z",
             new ProcessingCoverage(1, 1, 0, 0), false,
-            new Dictionary<string, BasisDocument> { ["doc-1"] = BasisDocument.Create("doc-1", [Quote]) },
+            new Dictionary<string, BasisDocument> { ["doc-1"] = BasisDocument.Create("doc-1", [witnessQuote]) },
             pins);
         assessments.SetCurrentBasis(scope.CaseId, basis);
         var claims = new[]
         {
-            new AssessmentClaim(ClaimKind.MissingRequirement, "Cape Town counsel review", "Engine", "ENG-1",
-                [new DocumentWitness("doc-1", 1, Quote)], relatedRequirementId),
+            new AssessmentClaim(ClaimKind.MissingRequirement, claimValue, "Engine", "ENG-1",
+                [new DocumentWitness("doc-1", 1, witnessQuote)], relatedRequirementId),
         };
         try
         {
