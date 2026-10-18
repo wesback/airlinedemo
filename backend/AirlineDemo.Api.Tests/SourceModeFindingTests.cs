@@ -107,6 +107,9 @@ public sealed class SourceModeFindingTests
                         Assert.Equal([1, 2], conflicting.Value.Select(record => record.RecordVersion));
                         Assert.Equal([SourceSerial, SourceSerial],
                             conflicting.Value.Select(record => record.Payload.Fields["serialNumber"]));
+                        Assert.Equal(
+                            conflicting.Value[0].Payload.Fields.OrderBy(field => field.Key),
+                            conflicting.Value[1].Payload.Fields.OrderBy(field => field.Key));
                         break;
                 }
                 var documentSerial = mode == "conflicting" ? DocumentSerial : SourceSerial;
@@ -130,6 +133,34 @@ public sealed class SourceModeFindingTests
                     };
                     Assert.Equal(expectedWitnesses, Assert.Single(assessment.Claims).Witnesses);
                 }
+            }
+            finally { Delete(scenario.Path); }
+        }
+    }
+
+    [Fact]
+    public void OtherUnavailableSourcesDoNotMaskTechnicalStaleOrConflictFindings()
+    {
+        foreach (var mode in new[] { "stale", "conflicting" })
+        {
+            var scenario = CreateScenario(mode, SourceSerial, $"technical-{mode}", documentSerial: DocumentSerial);
+            try
+            {
+                var state = scenario.Store.Read(scenario.Scope);
+                Assert.Equal(SourceModeOutcome.Recorded,
+                    scenario.Modes.Set(scenario.Scope, "presenter", $"maintenance-unavailable-{mode}",
+                        state.Revision, "maintenance", "unavailable").Outcome);
+                var assessment = scenario.Execution.Assess(
+                    scenario.Scope, scenario.Basis, [Claim(DocumentSerial)]);
+                Assert.Equal((AssessmentExecutionService.Review,
+                    mode == "stale" ? "source_stale" : "source_conflict"),
+                    (assessment.Outcome, assessment.Reason));
+                AssessedWitness[] expectedWitnesses = mode == "conflicting"
+                    ? [new AssessedWitness(DocumentId, 1), SourceWitness(1), SourceWitness(2)]
+                    : [new AssessedWitness(DocumentId, 1), SourceWitness(1)];
+                Assert.Equal(
+                    expectedWitnesses,
+                    Assert.Single(assessment.Claims).Witnesses);
             }
             finally { Delete(scenario.Path); }
         }

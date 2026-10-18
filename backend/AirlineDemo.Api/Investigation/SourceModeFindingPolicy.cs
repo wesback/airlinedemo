@@ -23,14 +23,47 @@ public static class SourceModeFindingPolicy
         ArgumentNullException.ThrowIfNull(modes);
         ArgumentNullException.ThrowIfNull(pins);
         var sourceMode = modes.GetValueOrDefault("technical", SourceModes.Available);
-        var reason = (string?)null;
-        var witnesses = new Dictionary<int, IReadOnlyList<AssessedWitness>>();
         var sourceRecords = sourceMode == "unavailable"
             ? []
             : pins.Where(pin => pin.SourceId == "technical")
                 .Select(pin => (Pin: pin, Identity: ReadTechnicalIdentity(pin.Content)))
                 .Where(record => record.Identity.SerialNumber is not null)
+                .Select(record => (
+                    record.Identity.SerialNumber,
+                    record.Identity.Position,
+                    Witness: new AssessedWitness(
+                        $"source:{record.Pin.SourceId}:{record.Pin.RecordId}:v{record.Pin.RecordVersion}",
+                        0)))
                 .ToArray();
+        return AssessRecords(claims, modes, sourceRecords);
+    }
+
+    public static SourceModeFindingResult AssessTechnicalRecords(IReadOnlyList<AssessmentClaim> claims,
+        IReadOnlyDictionary<string, string> modes, IReadOnlyList<SourceRecord<TechnicalPayload>> records)
+    {
+        ArgumentNullException.ThrowIfNull(claims);
+        ArgumentNullException.ThrowIfNull(modes);
+        ArgumentNullException.ThrowIfNull(records);
+        var sourceRecords = records
+            .Select(record => (
+                SerialNumber: record.Payload.Fields.GetValueOrDefault("serialNumber"),
+                Position: record.Payload.Fields.GetValueOrDefault("position"),
+                Witness: new AssessedWitness(
+                    $"source:{record.SourceId}:{record.RecordId}:v{record.RecordVersion}",
+                    0)))
+            .Where(record => record.SerialNumber is not null)
+            .ToArray();
+        return AssessRecords(claims, modes, sourceRecords);
+    }
+
+    private static SourceModeFindingResult AssessRecords(
+        IReadOnlyList<AssessmentClaim> claims,
+        IReadOnlyDictionary<string, string> modes,
+        (string? SerialNumber, string? Position, AssessedWitness Witness)[] sourceRecords)
+    {
+        var sourceMode = modes.GetValueOrDefault("technical", SourceModes.Available);
+        var reason = (string?)null;
+        var witnesses = new Dictionary<int, IReadOnlyList<AssessedWitness>>();
         for (var index = 0; index < claims.Count; index++)
         {
             var claim = claims[index];
@@ -41,7 +74,7 @@ public static class SourceModeFindingPolicy
                     && witness.Quote.Contains(claim.SerialNumber, StringComparison.Ordinal)))
                 continue;
             var relevantRecords = sourceRecords
-                .Where(record => MatchesComponent(record.Identity.Position, claim.Component))
+                .Where(record => MatchesComponent(record.Position, claim.Component))
                 .ToArray();
             if (sourceMode == "unavailable")
             {
@@ -51,9 +84,7 @@ public static class SourceModeFindingPolicy
             if (relevantRecords.Length > 0)
             {
                 witnesses[index] = relevantRecords
-                    .Select(record => new AssessedWitness(
-                        $"source:{record.Pin.SourceId}:{record.Pin.RecordId}:v{record.Pin.RecordVersion}",
-                        0))
+                    .Select(record => record.Witness)
                     .ToArray();
             }
             if (sourceMode == "stale" && relevantRecords.Length > 0)
@@ -62,7 +93,7 @@ public static class SourceModeFindingPolicy
             }
             else if (relevantRecords.Length > 0 &&
                      (sourceMode == "conflicting" ||
-                      relevantRecords.Any(record => !string.Equals(record.Identity.SerialNumber, claim.SerialNumber, StringComparison.Ordinal))))
+                      relevantRecords.Any(record => !string.Equals(record.SerialNumber, claim.SerialNumber, StringComparison.Ordinal))))
             {
                 reason ??= "source_conflict";
             }

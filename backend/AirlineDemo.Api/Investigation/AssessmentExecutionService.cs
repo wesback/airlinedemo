@@ -101,7 +101,25 @@ public sealed class AssessmentExecutionService(
             }
             else
             {
-                sourceModeFinding = SourceModeFindingPolicy.Assess(claims, modes, []);
+                if (modes["technical"] == "unavailable")
+                {
+                    sourceModeFinding = SourceModeFindingPolicy.Assess(claims, modes, []);
+                }
+                else
+                {
+                    var technicalRead = SourceModeFindingPolicy.Apply(technical!, "technical", modes["technical"])
+                        .ListAsync(scope.CaseId).GetAwaiter().GetResult();
+                    var technicalRecords = technicalRead switch
+                    {
+                        SourceReadSucceeded<IReadOnlyList<SourceRecord<TechnicalPayload>>> succeeded => succeeded.Value,
+                        SourceUnavailable<IReadOnlyList<SourceRecord<TechnicalPayload>>> unavailable =>
+                            throw new InvalidOperationException($"Source '{unavailable.SourceId}' is unavailable; its records cannot be assessed."),
+                        UnknownSource<IReadOnlyList<SourceRecord<TechnicalPayload>>> unknown =>
+                            throw new InvalidOperationException($"Source '{unknown.SourceId}' is not registered; its records cannot be assessed."),
+                        _ => throw new InvalidOperationException("Technical source read did not return a successful record list."),
+                    };
+                    sourceModeFinding = SourceModeFindingPolicy.AssessTechnicalRecords(claims, modes, technicalRecords);
+                }
             }
         }
 
