@@ -27,7 +27,7 @@ public sealed class SourceReadTools(
     private IReadOnlyList<AIFunction>? _functions;
     private readonly HashSet<SourceRecordWitness> _readWitnesses = [];
     private readonly HashSet<string> _markedPersonalDataFields = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _markedPersonalDataValues = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _markedPersonalDataValues = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _witnessGate = new();
 
     internal IReadOnlyCollection<SourceRecordWitness> ReadWitnesses
@@ -46,7 +46,7 @@ public sealed class SourceReadTools(
         lock (_witnessGate)
         {
             return _markedPersonalDataFields.Any(field => text.Contains(field, StringComparison.OrdinalIgnoreCase))
-                || _markedPersonalDataValues.Any(value => text.Contains(value, StringComparison.Ordinal));
+                || _markedPersonalDataValues.Any(value => text.Contains(value, StringComparison.OrdinalIgnoreCase));
         }
     }
 

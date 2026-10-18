@@ -352,6 +352,8 @@ public sealed class SourceInvestigatorToolsTests
     [InlineData("licenseNumber")]
     [InlineData("SYN-PERSON-NAME-01")]
     [InlineData("SYN-LICENSE-NUMBER-01")]
+    [InlineData("syn-person-name-01")]
+    [InlineData("syn-license-number-01")]
     public async Task MarkedPersonalDataIsRejectedFromReturnedClaims(string markedText)
     {
         const string caseId = "case-001";
