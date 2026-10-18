@@ -67,6 +67,48 @@ public class IsolatedPdfParserTests
         return padToBytes > unpadded.Length ? Build(padToBytes - unpadded.Length) : unpadded;
     }
 
+    private static byte[] SharedContentPdf(int pages, string content, bool indirectContentsArray = false)
+    {
+        var pdf = new StringBuilder("%PDF-1.4\n");
+        var offsets = new List<int>();
+        void Add(string value)
+        {
+            offsets.Add(pdf.Length);
+            pdf.Append(offsets.Count).Append(" 0 obj ").Append(value).Append('\n');
+        }
+
+        var arrayId = pages + 3;
+        var contentId = indirectContentsArray ? pages + 4 : arrayId;
+        var fontId = contentId + 1;
+        var firstNonPageId = pages + 3;
+        var kids = string.Join(" ", Enumerable.Range(3, pages).Select(pageId => $"{pageId} 0 R"));
+        Add("<< /Type /Catalog /Pages 2 0 R >> endobj");
+        Add($"<< /Type /Pages /Count {pages} /Kids [{kids}] >> endobj");
+        for (var pageId = 3; pageId < firstNonPageId; pageId++)
+        {
+            var contentsReference = indirectContentsArray ? arrayId : contentId;
+            Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentsReference} 0 R /Resources << /Font << /F1 {fontId} 0 R >> >> >> endobj");
+        }
+
+        if (indirectContentsArray)
+        {
+            Add($"[{contentId} 0 R] endobj");
+        }
+
+        Add($"<< /Length {content.Length} >> stream\n{content}\nendstream endobj");
+        Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj");
+        var xrefPosition = pdf.Length;
+        pdf.Append("xref\n0 ").Append(offsets.Count + 1).Append("\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            pdf.Append(offset.ToString("D10")).Append(" 00000 n \n");
+        }
+
+        pdf.Append("trailer << /Size ").Append(offsets.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n")
+            .Append(xrefPosition.ToString("D10")).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(pdf.ToString());
+    }
+
     /// <summary>A one-page PDF whose content stream expands beyond the parser's decoded-stream limit.</summary>
     private static byte[] FlateBomb(string filter = "/Filter /FlateDecode")
     {
@@ -325,6 +367,57 @@ public class IsolatedPdfParserTests
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
         Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
         Assert.Equal(string.Empty, outcome.Text);
+    }
+
+    [Fact]
+    public void RepeatedPageContentReferencesAreBoundedBeforeOpeningPdfPig()
+    {
+        var content = $"BT /F1 12 Tf 72 720 Td ({new string('x', 500 * 1024)}) Tj ET";
+        var boundedOpens = 0;
+        var bounded = IsolatedPdfParser.Parse(
+            SharedContentPdf(1, content),
+            "single-reference.pdf",
+            _ =>
+            {
+                boundedOpens++;
+                return PdfDocument.Open(MinimalPdf(1), new ParsingOptions { UseLenientParsing = true });
+            },
+            _ => "bounded text",
+            _ => Array.Empty<string>());
+
+        Assert.Equal(1, boundedOpens);
+        Assert.Equal(EvidenceProcessingState.Complete, bounded.State);
+        Assert.Equal("bounded text", bounded.Text);
+
+        var repeatedOpens = 0;
+        var repeated = IsolatedPdfParser.Parse(
+            SharedContentPdf(200, content),
+            "repeated-content.pdf",
+            _ =>
+            {
+                repeatedOpens++;
+                throw new InvalidOperationException("Repeated content must not reach PdfPig.");
+            });
+
+        Assert.Equal(0, repeatedOpens);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, repeated.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", repeated.Reason);
+        Assert.Equal(string.Empty, repeated.Text);
+
+        var indirectArrayOpens = 0;
+        var indirectArray = IsolatedPdfParser.Parse(
+            SharedContentPdf(200, content, indirectContentsArray: true),
+            "indirect-content-array.pdf",
+            _ =>
+            {
+                indirectArrayOpens++;
+                throw new InvalidOperationException("Indirect content arrays must not reach PdfPig.");
+            });
+
+        Assert.Equal(0, indirectArrayOpens);
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, indirectArray.State);
+        Assert.Equal("PdfPig could not open or read the document; retry is possible", indirectArray.Reason);
+        Assert.Equal(string.Empty, indirectArray.Text);
     }
 
     [Fact]

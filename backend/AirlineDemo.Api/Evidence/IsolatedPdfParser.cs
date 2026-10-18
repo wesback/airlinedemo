@@ -49,6 +49,9 @@ public static class IsolatedPdfParser
         RegexOptions.CultureInvariant);
     private static readonly Regex CMapToken = new(@"<(?<value>[0-9A-Fa-f]+)>|(?<bracket>[\[\]])",
         RegexOptions.CultureInvariant);
+
+    private readonly record struct PdfObjectReference(int Number, int Generation);
+
     public static (EvidenceProcessingState State, string Reason, string Text) Parse(
         byte[] content,
         IsolatedPdfParserOptions? options = null)
@@ -175,7 +178,9 @@ public static class IsolatedPdfParser
     private static (bool Safe, bool Exceeded, bool TextExceeded) CheckStreamLimits(byte[] content)
     {
         var decodedBytes = 0;
-        var textStreamBytes = 0;
+        var textStreams = new List<(PdfObjectReference Reference, int Bytes)>();
+        var streamRanges = new List<(int Start, int End)>();
+        var streamReferences = new HashSet<PdfObjectReference>();
         var offset = 0;
         while ((offset = FindPdfToken(content, "stream", offset)) >= 0)
         {
@@ -191,6 +196,12 @@ public static class IsolatedPdfParser
 
             var headerStart = objectStart + "obj".Length;
             var header = Encoding.Latin1.GetString(content, headerStart, streamStart - headerStart);
+            if (!TryGetObjectReferenceBefore(content, objectStart, out var streamReference))
+            {
+                return (false, false, false);
+            }
+
+            streamReferences.Add(streamReference);
             if (!header.TrimEnd().EndsWith(">>", StringComparison.Ordinal))
             {
                 return (false, false, false);
@@ -234,6 +245,7 @@ public static class IsolatedPdfParser
                 return (false, false, false);
             }
 
+            var textBytes = 0;
             if (hasFilter)
             {
                 using var compressed = new MemoryStream(content, dataStart, length, writable: false);
@@ -254,8 +266,7 @@ public static class IsolatedPdfParser
                 if (!header.Contains("/Subtype /Image", StringComparison.Ordinal)
                     && HasTextShowingOperator(decodedContent))
                 {
-                    textStreamBytes += (int)decoded.Length;
-                    if (textStreamBytes > MaxTextStreamBytes) return (false, false, true);
+                    textBytes = (int)decoded.Length;
                 }
             }
             else
@@ -267,9 +278,19 @@ public static class IsolatedPdfParser
                 if (!header.Contains("/Subtype /Image", StringComparison.Ordinal)
                     && HasTextShowingOperator(streamContent))
                 {
-                    textStreamBytes += length;
-                    if (textStreamBytes > MaxTextStreamBytes) return (false, false, true);
+                    textBytes = length;
                 }
+            }
+
+            if (header.Contains("/Subtype /Form", StringComparison.Ordinal))
+            {
+                // Form XObjects can execute repeatedly through Do operators without repeated object references.
+                return (false, false, false);
+            }
+            if (header.Contains("/Type /ObjStm", StringComparison.Ordinal))
+            {
+                // Compressed dictionaries cannot be reference-counted by the bounded source scanner.
+                return (false, false, false);
             }
 
             var afterData = dataStart + length;
@@ -280,10 +301,283 @@ public static class IsolatedPdfParser
                 if (!IsPdfWhitespace(content[i])) return (false, false, false);
             }
 
+            streamRanges.Add((dataStart, end + "endstream".Length));
+            if (textBytes > 0)
+            {
+                textStreams.Add((streamReference, textBytes));
+            }
+
             offset = end + "endstream".Length;
         }
 
+        var (referenceCounts, referencesAreSafe) =
+            CountIndirectReferences(content, streamRanges, streamReferences);
+        if (!referencesAreSafe) return (false, false, false);
+
+        long expandedTextBytes = 0;
+        foreach (var (reference, bytes) in textStreams)
+        {
+            var executions = referenceCounts.TryGetValue(reference, out var count) ? count : 1;
+            expandedTextBytes += (long)bytes * executions;
+            if (expandedTextBytes > MaxTextStreamBytes)
+            {
+                return (false, false, true);
+            }
+        }
+
         return (true, false, false);
+    }
+
+    private static bool TryGetObjectReferenceBefore(
+        byte[] content,
+        int objectTokenStart,
+        out PdfObjectReference reference)
+    {
+        reference = default;
+        var position = objectTokenStart - 1;
+        while (position >= 0 && IsPdfWhitespace(content[position])) position--;
+        var generationEnd = position + 1;
+        while (position >= 0 && content[position] is >= (byte)'0' and <= (byte)'9') position--;
+        if (generationEnd == position + 1) return false;
+        var generationStart = position + 1;
+
+        while (position >= 0 && IsPdfWhitespace(content[position])) position--;
+        var numberEnd = position + 1;
+        while (position >= 0 && content[position] is >= (byte)'0' and <= (byte)'9') position--;
+        if (numberEnd == position + 1
+            || !int.TryParse(Encoding.ASCII.GetString(content, generationStart, generationEnd - generationStart),
+                NumberStyles.None, CultureInfo.InvariantCulture, out var generation)
+            || !int.TryParse(Encoding.ASCII.GetString(content, position + 1, numberEnd - position - 1),
+                NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+        {
+            return false;
+        }
+
+        reference = new PdfObjectReference(number, generation);
+        return true;
+    }
+
+    private static (Dictionary<PdfObjectReference, long> Counts, bool Safe) CountIndirectReferences(
+        byte[] content,
+        IReadOnlyList<(int Start, int End)> streamRanges,
+        IReadOnlySet<PdfObjectReference> streamReferences)
+    {
+        var counts = new Dictionary<PdfObjectReference, long>();
+        var rangeIndex = 0;
+        string? previous = null;
+        string? beforePrevious = null;
+        var readingContentsReference = false;
+        var contentsReferencePart = 0;
+        var contentsObjectNumber = 0;
+        var contentsGeneration = 0;
+        var inContentsArray = false;
+        var currentObjectIsPage = false;
+        var currentObjectHasUnsafeContents = false;
+        var readingTypeName = false;
+        var referencesAreSafe = true;
+        var index = 0;
+        while (index < content.Length)
+        {
+            while (rangeIndex < streamRanges.Count && index >= streamRanges[rangeIndex].End) rangeIndex++;
+            if (rangeIndex < streamRanges.Count
+                && index >= streamRanges[rangeIndex].Start
+                && index < streamRanges[rangeIndex].End)
+            {
+                index = streamRanges[rangeIndex].End;
+                previous = null;
+                beforePrevious = null;
+                continue;
+            }
+
+            var value = content[index];
+            if (IsPdfWhitespace(value))
+            {
+                index++;
+                continue;
+            }
+
+            if (value == '%')
+            {
+                while (index < content.Length && content[index] is not (10 or 13)) index++;
+                continue;
+            }
+
+            if (value == '(')
+            {
+                if (readingContentsReference)
+                {
+                    currentObjectHasUnsafeContents = true;
+                    readingContentsReference = false;
+                }
+
+                SkipLiteralString(content, ref index);
+                beforePrevious = previous;
+                previous = null;
+                continue;
+            }
+
+            if (value == '<' && (index + 1 >= content.Length || content[index + 1] != '<'))
+            {
+                if (readingContentsReference)
+                {
+                    currentObjectHasUnsafeContents = true;
+                    readingContentsReference = false;
+                }
+
+                index++;
+                while (index < content.Length && content[index] != '>') index++;
+                if (index < content.Length) index++;
+                beforePrevious = previous;
+                previous = null;
+                continue;
+            }
+
+            if (value == '/')
+            {
+                index++;
+                var nameStart = index;
+                while (index < content.Length && !IsPdfDelimiter(content[index])) index++;
+                var name = Encoding.ASCII.GetString(content, nameStart, index - nameStart);
+                if (name.Contains('#')) referencesAreSafe = false;
+                if (readingContentsReference)
+                {
+                    currentObjectHasUnsafeContents = true;
+                    readingContentsReference = false;
+                }
+
+                if (readingTypeName)
+                {
+                    currentObjectIsPage |= name == "Page";
+                    readingTypeName = false;
+                }
+
+                if (name == "Type") readingTypeName = true;
+                if (name == "Contents")
+                {
+                    readingContentsReference = true;
+                    contentsReferencePart = 0;
+                }
+
+                beforePrevious = previous;
+                previous = null;
+                continue;
+            }
+
+            if (IsPdfDelimiter(value))
+            {
+                if (value == (byte)'[' && readingContentsReference)
+                {
+                    readingContentsReference = false;
+                    inContentsArray = true;
+                }
+                else if (value == (byte)']' && inContentsArray)
+                {
+                    inContentsArray = false;
+                }
+                else if (readingContentsReference)
+                {
+                    currentObjectHasUnsafeContents = true;
+                    readingContentsReference = false;
+                }
+
+                index += value == (byte)'<' && index + 1 < content.Length && content[index + 1] == (byte)'<'
+                    || value == (byte)'>' && index + 1 < content.Length && content[index + 1] == (byte)'>'
+                    ? 2
+                    : 1;
+                beforePrevious = previous;
+                previous = null;
+                continue;
+            }
+
+            var tokenStart = index;
+            while (index < content.Length && !IsPdfDelimiter(content[index])) index++;
+            var token = Encoding.ASCII.GetString(content, tokenStart, index - tokenStart);
+            if (token == "endobj")
+            {
+                if (currentObjectIsPage && currentObjectHasUnsafeContents) referencesAreSafe = false;
+                currentObjectIsPage = false;
+                currentObjectHasUnsafeContents = false;
+                readingTypeName = false;
+                readingContentsReference = false;
+                inContentsArray = false;
+            }
+            else if (token == "obj")
+            {
+                currentObjectIsPage = false;
+                currentObjectHasUnsafeContents = false;
+                readingTypeName = false;
+                readingContentsReference = false;
+                inContentsArray = false;
+            }
+
+            if (readingContentsReference)
+            {
+                if (contentsReferencePart == 0
+                    && int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out contentsObjectNumber))
+                {
+                    contentsReferencePart = 1;
+                }
+                else if (contentsReferencePart == 1
+                    && int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out contentsGeneration))
+                {
+                    contentsReferencePart = 2;
+                }
+                else if (contentsReferencePart == 2 && token == "R")
+                {
+                    if (!streamReferences.Contains(new PdfObjectReference(contentsObjectNumber, contentsGeneration)))
+                    {
+                        currentObjectHasUnsafeContents = true;
+                    }
+
+                    readingContentsReference = false;
+                }
+                else
+                {
+                    currentObjectHasUnsafeContents = true;
+                    readingContentsReference = false;
+                }
+            }
+
+            if (token == "R"
+                && int.TryParse(beforePrevious, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+                && int.TryParse(previous, NumberStyles.None, CultureInfo.InvariantCulture, out var generation))
+            {
+                var reference = new PdfObjectReference(number, generation);
+                if (inContentsArray && !streamReferences.Contains(reference))
+                {
+                    currentObjectHasUnsafeContents = true;
+                }
+
+                counts[reference] = counts.TryGetValue(reference, out var current) ? current + 1 : 1;
+            }
+
+            beforePrevious = previous;
+            previous = token;
+        }
+
+        if (currentObjectIsPage && currentObjectHasUnsafeContents) referencesAreSafe = false;
+        return (counts, referencesAreSafe);
+    }
+
+    private static void SkipLiteralString(byte[] content, ref int index)
+    {
+        var depth = 1;
+        index++;
+        while (index < content.Length && depth > 0)
+        {
+            if (content[index] == (byte)'\\')
+            {
+                index += Math.Min(2, content.Length - index);
+            }
+            else if (content[index++] == (byte)'(')
+            {
+                depth++;
+            }
+            else if (content[index - 1] == (byte)')')
+            {
+                depth--;
+            }
+        }
     }
 
     private static bool HasBoundedCMapExpansion(ReadOnlySpan<byte> stream)
