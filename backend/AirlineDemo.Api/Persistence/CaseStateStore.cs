@@ -539,6 +539,10 @@ public sealed class CaseStateStore : ICaseStateStore
                     throw new BasisIntegrityException("Basis content or chain digest does not match.");
                 }
 
+                if (commit.Action == "source-basis.gathered")
+                {
+                    ValidateSourceBasisContent(next.Content);
+                }
                 basis.Add(next);
             }
 
@@ -809,4 +813,69 @@ public sealed class CaseStateStore : ICaseStateStore
 
     private static string Digest(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static void ValidateSourceBasisContent(string content)
+    {
+        const string formatName = "source-record-pins-v1";
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(content);
+        }
+        catch (JsonException ex)
+        {
+            throw new BasisIntegrityException($"A gathered source basis pin document is malformed: {ex.Message}");
+        }
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || Text(root, "format") != formatName)
+                throw new BasisIntegrityException("A gathered source basis must use the source-record-pins-v1 format.");
+            if (!root.TryGetProperty("pins", out var pins) || pins.ValueKind != JsonValueKind.Array || pins.GetArrayLength() == 0)
+                throw new BasisIntegrityException("A source basis must contain at least one immutable source pin.");
+            var identities = new HashSet<(string SourceId, string RecordId, int Version)>();
+            foreach (var pin in pins.EnumerateArray())
+            {
+                var sourceId = Text(pin, "sourceId");
+                var recordId = Text(pin, "recordId");
+                var snapshot = Text(pin, "content");
+                var digest = Text(pin, "contentDigest");
+                var version = pin.TryGetProperty("recordVersion", out var value) && value.TryGetInt32(out var number) ? number : 0;
+                if (sourceId is not ("technical" or "maintenance" or "finance" or "records" or "contracts")
+                    || recordId is null || snapshot is null || digest is null || version < 1
+                    || !string.Equals(digest, Digest(snapshot).ToLowerInvariant(), StringComparison.Ordinal)
+                    || !identities.Add((sourceId, recordId, version)))
+                    throw new BasisIntegrityException("A source basis contains an invalid or duplicate source pin.");
+                JsonDocument record;
+                try
+                {
+                    record = JsonDocument.Parse(snapshot);
+                }
+                catch (JsonException ex)
+                {
+                    throw new BasisIntegrityException($"A source pin record envelope is malformed: {ex.Message}");
+                }
+                using (record)
+                {
+                    var envelope = record.RootElement;
+                    if (envelope.ValueKind != JsonValueKind.Object
+                        || Text(envelope, "sourceId") != sourceId || Text(envelope, "recordId") != recordId
+                        || !envelope.TryGetProperty("recordVersion", out var recordVersion)
+                        || !recordVersion.TryGetInt32(out var envelopeVersion) || envelopeVersion != version
+                        || Text(envelope, "asOf") is null || Text(envelope, "caseId") is null || Text(envelope, "kind") is null
+                        || !envelope.TryGetProperty("stale", out var stale) || stale.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                        || !envelope.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object
+                        || !payload.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object
+                        || !envelope.TryGetProperty("synthetic", out var synthetic) || synthetic.ValueKind != JsonValueKind.True)
+                        throw new BasisIntegrityException("A source pin does not contain a complete synthetic source-record envelope.");
+                }
+            }
+        }
+    }
+
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+                ? value.GetString()
+                : null;
 }

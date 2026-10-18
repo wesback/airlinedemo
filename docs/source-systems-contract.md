@@ -31,6 +31,15 @@ The port is read-only. It has no write, update or delete members, and it has no 
 
 `SourceRecord<TPayload>.Validate(requestedCaseId)` returns every violation. An empty list means the record is valid. A record whose `caseId` differs from `requestedCaseId` is rejected and must never be returned.
 
+## Technical payloads
+
+| Kind | Field | Type and accepted values |
+|---|---|---|
+| `utilization` | `periodStart` | String date, `YYYY-MM-DD`; first day of the reserve month. |
+| `utilization` | `periodEnd` | String date, `YYYY-MM-DD`; last day of the reserve month. |
+| `utilization` | `hours` | Non-negative decimal string; flight-hour utilization. |
+| `utilization` | `cycles` | Non-negative decimal string; cycle utilization. |
+
 ## Finance payloads
 
 `FinancePayload` is shared by exactly four finance kinds. Every value is a string; a payload must contain exactly the fields listed for its kind.
@@ -44,6 +53,35 @@ The port is read-only. It has no write, update or delete members, and it has no 
 
 `FinanceRecordValidator` rejects unknown kinds, missing fields and fields not listed for that kind. Reserve drafts consume only `maintenance_reserve` and `reserve_reimbursement`: billed is `recordedAmount`, collected is `collectedAmount`, underbilled is the non-negative difference, and overdue is underbilled when `dueDate` is before the draft period's last calendar day. Reimbursable is `recordedAmount` only for an approved or paid reimbursement. The draft total is the sum of underbilled amounts; it makes no profit, revenue or cash-recognition claim.
 
+The source-fed reserve calculation reads `rateBasis` (`per_flight_hour` or `per_cycle`) and `rate` (a non-negative decimal string) from pinned `maintenance_reserve` records. It multiplies the matching pinned technical `hours` or `cycles` by that rate, rounds each calculation line to cents with midpoints away from zero, and then sums the rounded lines. `reserve_reimbursement` records remain separate finance lines with their own `claimId` (non-empty string) and `status` (`claimed`, `approved` or `paid`); billed, collected, underbilled, overdue and reimbursable remain separate values. Each calculated reserve line cites both the technical utilization record and the finance rate record by `(sourceId, recordId, recordVersion)`. A missing or non-available required source blocks the draft rather than treating its value as zero.
+
+## Contracts payloads
+
+The obligation evaluator consumes `obligation_clause` records from the latest committed source-basis pins. The `payload` contains these string fields:
+
+| Field | Type and meaning |
+|---|---|
+| `clauseId` | String identifier of the contract clause. |
+| `obligation` | String obligation name. |
+| `noticeWindowStart` | String date in `YYYY-MM-DD` format; inclusive first day of the notice window. |
+| `noticeWindowEnd` | String date in `YYYY-MM-DD` format; inclusive last day of the notice window. |
+| `noticeWindowDays` | String number of days in the notice window. |
+
+The evaluator uses the pinned record envelope's `asOf` date for the scenario date and cites the clause by its exact `(sourceId, recordId, recordVersion)` tuple. It does not read live contracts records or send notices.
+
+### Specialist review flags
+
+The `specialist_flag` kind contains exactly the following string fields:
+
+| Field | Accepted values |
+|---|---|
+| `relatedRequirementId` | Non-empty requirement identifier, matched ordinally and case-sensitively. |
+| `topic` | `sanctions`, `cape_town`, `ifrs16`, `gdpr` or `other`. |
+| `result` | `specialist_review_required` or `not_assessed`. |
+| `regime` | Required only for `sanctions`; exactly `EU`, `US` or `UK`. It is absent for all other topics. |
+
+Unknown or missing fields, empty base values, unsupported topic/result values and regime fields on non-sanctions flags invalidate the contracts source during fixture initialization. An assessment is related to a flag only through an explicit, exact `relatedRequirementId`. A matching `specialist_review_required` or `not_assessed` result routes to internal review without creating a mock request or acceptance event. Sanctions results apply only to the named regime; a different regime remains `not_assessed`. These outcomes are not clearance, compliance, recoverability, legal, financial or accounting conclusions. In particular, an `ifrs16` flag does not classify a lease, assess impairment or recognize an accounting amount.
+
 ## Signed fixture cases
 
 Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `contracts`) ships one fixture file under `backend/AirlineDemo.Api/Fixtures/sources/`, with a manifest (`<source>.manifest.json`) and a detached signature (`<source>.manifest.sig`). The manifest lists `owningCaseIds` (`case-001`, `case-a`, `case-b`, `case-c`), the SHA-256 digest of the fixture file and the record count of every source. Every record's `caseId` must be one of the owning IDs, and each source holds at least one record for each case.
@@ -56,6 +94,8 @@ Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `con
 | `case-c` | A baseline in all five sources and a records entry for the blocked document. | `records`: `SYN-DOCC003`, `parseStatus` `blocked` |
 
 The new finance records use the typed kind `maintenance_reserve` with the common fields (`recordedAmount`, `collectedAmount`, `currency`, `period`, `dueDate`, `rateBasis`, `rate`). The `case-001` finance records keep their earlier kinds.
+
+The contracts fixture contains seven synthetic `specialist_flag` records: one each for `cape_town`, `ifrs16`, `gdpr` and `other`, and three for `sanctions` (regimes `EU`, `US` and `UK`). Each record has a distinct related requirement identifier and one of the accepted result values.
 
 ### Signing
 
@@ -81,6 +121,20 @@ Each outcome is a distinct type.
 | `SourceRecordNotFound<TSuccess>` | The source is available, but no record in this case has the requested `recordId`. | not found |
 
 `source_unavailable` is never represented as an empty successful list. Callers must handle each outcome separately.
+
+## Source-mode reads and dependent findings
+
+Reads apply each case mode without changing fixture data: `available` returns the fixture result, `unavailable` returns
+`SourceUnavailable<T>` without calling the port, `stale` sets `asOf: 2026-09-30` and `stale: true`, and `conflicting`
+returns each record plus a simulated alternate version whose `recordVersion` is one greater; the list preserves both, and get returns the alternate.
+
+Assessments compare technical serials cited by document witnesses with source serials for the claimed component
+(for example, `Engine` matches `engine_1`, not `apu_1`). Unavailable or stale dependent
+findings route to `Review` with reason `source_unavailable` or `source_stale`; mismatch or conflicting mode routes to
+`Review` with reason `source_conflict`. Claims retain document witnesses and source witnesses named
+`source:<sourceId>:<recordId>:v<recordVersion>`. Non-available modes create no mock requests or accepted events. Only available
+mode refreshes pinned basis content; stale/conflicting reads are assessment-only. Basis history uses the append-only
+`ICaseStateStore.Commit(scope, expectedRevision, ...)` operation.
 
 ## Records envelopes
 
@@ -111,6 +165,12 @@ source error details, record payloads or case data. An unauthenticated request
 returns a coded 401; an out-of-scope or missing case returns the same bodyless
 404. POST to either records path returns a bodyless 405 without accessing a
 source.
+
+## Source pins in a case basis
+
+Gathered source basis content is JSON with `format: "source-record-pins-v1"` and a non-empty `pins` array. Each pin has the exact `sourceId`, `recordId`, `recordVersion` tuple, a complete source-record envelope in `content`, and `contentDigest` (lowercase SHA-256 of the UTF-8 content). Envelope JSON is compact; object properties are recursively sorted ordinally and array order is preserved. Pins are sorted by source ID, record ID, then numeric version. The store rejects empty, malformed or duplicate pins and verifies the envelope tuple and digest.
+
+Identical gathered inputs do not append a version. Changed record content or version appends a later `BasisVersion` through `ICaseStateStore.Commit(scope, expectedRevision, ...)`, which validates pins and the append-only digest chain under the store lock. Earlier content and digests are never rewritten. A stale revision rejects the whole commit without adding a basis or audit event.
 
 ## Source-mode command
 

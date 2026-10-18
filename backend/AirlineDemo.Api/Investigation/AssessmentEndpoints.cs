@@ -13,7 +13,9 @@ public sealed record AssessmentClaimSubmission(
     string? Value,
     string? Component,
     string? SerialNumber,
-    IReadOnlyList<AssessmentWitnessSubmission?>? Witnesses);
+    IReadOnlyList<AssessmentWitnessSubmission?>? Witnesses,
+    string? RelatedRequirementId = null,
+    string? Regime = null);
 
 public sealed record AssessmentWitnessSubmission(string? DocumentId, int Page, string? Quote);
 
@@ -68,7 +70,9 @@ public static class AssessmentEndpoints
                 !Enum.GetNames<ClaimKind>().Contains(kindName, StringComparer.Ordinal) ||
                 string.IsNullOrWhiteSpace(submitted.Value) ||
                 string.IsNullOrWhiteSpace(submitted.Component) ||
-                string.IsNullOrWhiteSpace(submitted.SerialNumber))
+                string.IsNullOrWhiteSpace(submitted.SerialNumber) ||
+                (submitted.RelatedRequirementId is not null && string.IsNullOrWhiteSpace(submitted.RelatedRequirementId)) ||
+                (submitted.Regime is not null && !new[] { "EU", "US", "UK" }.Contains(submitted.Regime, StringComparer.Ordinal)))
             {
                 return Results.BadRequest(new { error = "Assessment claim fields are invalid." });
             }
@@ -84,7 +88,7 @@ public static class AssessmentEndpoints
                 }
             }
 
-            claims.Add(new AssessmentClaim(kind, submitted.Value, submitted.Component, submitted.SerialNumber, witnesses));
+            claims.Add(ToClaim(submitted, kind, witnesses));
         }
 
         var basis = assessments.CurrentBasis(caseId);
@@ -170,6 +174,13 @@ public static class AssessmentEndpoints
     }
 
     private sealed record AuthorizedCase(DemoSession Session, CaseScope Scope);
+
+    internal static AssessmentClaim ToClaim(
+        AssessmentClaimSubmission submitted,
+        ClaimKind kind,
+        IReadOnlyList<DocumentWitness> witnesses) =>
+        new(kind, submitted.Value!, submitted.Component!, submitted.SerialNumber!, witnesses,
+            submitted.RelatedRequirementId, submitted.Regime);
 
     private static object View(string id, AssessmentRecord record) => new
     {

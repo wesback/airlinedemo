@@ -1,0 +1,204 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 353,
+  "branch": "ai-sdlc/issue-353",
+  "commitSha": "4b56996b33901c337cc801543cd799ced559b900",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The pinning path can reject ordinary evidence containing the format name, and it can alter source payload field names in the stored snapshots.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 814,
+          "message": "Detect the pin format by parsing the JSON and checking its root format property. A substring in ordinary evidence currently makes the store reject that basis.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Every new basis passes through ValidateSourceBasisContent, which checks for the format name anywhere in the content before parsing it as JSON.",
+            "failureScenario": "An ordinary uploaded evidence document contains the text \"source-record-pins-v1\". The content is not JSON, so committing that evidence throws BasisIntegrityException and rejects the upload."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "line": 105,
+          "message": "The serializer can rewrite payload dictionary keys while creating a supposedly exact source snapshot. Preserve dictionary keys verbatim when serializing pins.",
+          "confidence": 0.83,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "SerializeRecord serializes the payload fields dictionary using SourceRecordJsonOptions created with JsonSerializerDefaults.Web.",
+            "failureScenario": "A source record contains a field key such as \"EngineID\". Web JSON defaults camel-case dictionary keys, so the pinned content contains a different key and no longer reproduces the source snapshot."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The three new tests exercise the named acceptance criteria, including deterministic pins, changed and unchanged reassessments, and a stale revision conflict. The workflow runs `dotnet test AirlineDemo.sln`, which includes the named .NET tests and the existing `SourceReadEndpointTests`.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 1,
+        "suggestion": 0
+      },
+      "summary": "The source-pin validation can reject otherwise ordinary evidence when its text contains the format marker. I found no other security vulnerability in the changed code.",
+      "findingList": [
+        {
+          "severity": "minor",
+          "file": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "line": 816,
+          "message": "The substring check misclassifies ordinary evidence text as source-pin JSON. Detect the format from a parsed JSON object and exact `format` property so document content cannot trigger a parsing failure. OWASP A10:2025 (Mishandling of Exceptional Conditions).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Every basis content string is checked for the source format marker before being parsed as JSON.",
+            "failureScenario": "A presenter uploads a document whose extracted text contains `source-record-pins-v1` as ordinary prose. The text is not JSON, so the store rejects the basis and the evidence submission fails."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceBasisPinningTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

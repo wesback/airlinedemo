@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Obligations;
+using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Reviews;
+using AirlineDemo.Api.SourceSystems;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
@@ -47,12 +51,12 @@ public sealed class FinanceEndpointsTests
 
     private static Obligation Obligation() => new(
         "OBL-1",
-        2,
+        1,
         new DateOnly(2026, 10, 10),
         new DateOnly(2026, 10, 14),
         new DateTimeOffset(2026, 10, 20, 0, 0, 0, TimeSpan.Zero),
-        [new LinkedRequirement("REQ-1", RequirementEvidence.Satisfied, 2)],
-        new TechnicalReview("reviewer-1", true, 2));
+        [new LinkedRequirement("REQ-1", RequirementEvidence.Satisfied, 1)],
+        new TechnicalReview("reviewer-1", true, 1));
 
     [Fact]
     public async Task Scoped_gets_return_reserve_data()
@@ -97,13 +101,12 @@ public sealed class FinanceEndpointsTests
     {
         await using var factory = CreateFactory();
         using var client = factory.CreateClient();
+        await CommitSourceBasisAsync(factory, Case);
         var obligation = Obligation();
         var store = factory.Services.GetRequiredService<FinanceInputStore>();
         store.Set(Case, new FinanceInputs(null, null, obligation, []));
         store.Set("case-999", new FinanceInputs(null, null, obligation, []));
         store.Set("case-002", new FinanceInputs(null, null, obligation, []));
-        var expected = ObligationEvaluator.Evaluate(obligation, AsOf, []);
-
         using var unauthenticated = await client.GetAsync($"/api/cases/{Case}/obligations");
         Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
 
@@ -113,10 +116,10 @@ public sealed class FinanceEndpointsTests
 
         var evaluation = await response.Content.ReadFromJsonAsync<ObligationEvaluation>();
         Assert.NotNull(evaluation);
-        Assert.Equal(expected.State, evaluation!.State);
-        Assert.Equal(expected.Reasons, evaluation.Reasons);
+        Assert.Equal(ObligationState.Accepted, evaluation!.State);
+        Assert.Equal(new ObligationSourceCitation("contracts", "con-clause-return-notice-001", 1), evaluation.Citation);
         Assert.Empty(evaluation.Drafts);
-        Assert.Equal(expected.NewDraft is null, evaluation.NewDraft is null);
+        Assert.Null(evaluation.NewDraft);
 
         using var outOfScope = await SendAsync(client, "/api/cases/case-999/obligations", cookie);
         Assert.Equal(HttpStatusCode.NotFound, outOfScope.StatusCode);
@@ -131,11 +134,78 @@ public sealed class FinanceEndpointsTests
     {
         await using var factory = CreateFactory(fixedTime: false);
         using var client = factory.CreateClient();
-        factory.Services.GetRequiredService<FinanceInputStore>().Set(Case, new FinanceInputs(null, null, Obligation(), []));
+        var contract = new SourceRecord<ContractsPayload>
+        {
+            SourceId = "contracts",
+            RecordId = "fixed-date-clause",
+            RecordVersion = 4,
+            AsOf = new DateOnly(2026, 10, 1),
+            CaseId = Case,
+            Kind = "obligation_clause",
+            Payload = new ContractsPayload(new Dictionary<string, string>
+            {
+                ["clauseId"] = "SYN-FIXED-DATE",
+                ["obligation"] = "return_condition_report",
+                ["noticeWindowStart"] = "2026-10-01",
+                ["noticeWindowEnd"] = "2026-10-01",
+                ["noticeWindowDays"] = "1",
+            }),
+        };
+        await CommitSourceBasisAsync(factory, Case, contract);
+        var obligation = Obligation() with
+        {
+            Requirements = [new LinkedRequirement("REQ-1", RequirementEvidence.Missing, null)],
+            Review = null,
+        };
+        factory.Services.GetRequiredService<FinanceInputStore>().Set(Case, new FinanceInputs(null, null, obligation, []));
 
         var cookie = await SignInCookieAsync(client, "presenter");
         using var response = await SendAsync(client, $"/api/cases/{Case}/obligations", cookie);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var evaluation = await response.Content.ReadFromJsonAsync<ObligationEvaluation>();
+        Assert.NotNull(evaluation);
+        Assert.Equal(ObligationState.AtRisk, evaluation!.State);
+        Assert.Equal(new ObligationSourceCitation("contracts", "fixed-date-clause", 4), evaluation.Citation);
+        Assert.Equal(new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero), evaluation.NewDraft!.CreatedUtc);
+    }
+
+    private static async Task CommitSourceBasisAsync(WebApplicationFactory<Program> factory, string caseId,
+        SourceRecord<ContractsPayload>? contractsOverride = null)
+    {
+        var services = factory.Services;
+        var store = services.GetRequiredService<ICaseStateStore>();
+        var owner = store.OwnerOf(caseId);
+        var scope = owner is null ? store.CreateCase(caseId, "presenter") : store.AuthorizeCase(caseId, owner);
+        var state = store.Read(scope);
+        var contracts = contractsOverride is null
+            ? services.GetRequiredService<ISourceSystem<ContractsPayload>>()
+            : new StaticSource<ContractsPayload>("contracts", [contractsOverride]);
+        var gathered = await EvidenceIntake.GatherSourceBasisAsync(caseId,
+            services.GetRequiredService<ISourceSystem<TechnicalPayload>>(),
+            services.GetRequiredService<ISourceSystem<MaintenancePayload>>(),
+            services.GetRequiredService<ISourceSystem<FinancePayload>>(),
+            services.GetRequiredService<ISourceSystem<RecordsPayload>>(),
+            contracts);
+        var previous = state.Basis.LastOrDefault();
+        var version = (previous?.Version ?? 0) + 1;
+        store.Commit(scope, state.Revision, new CaseCommit(
+            CaseStateStore.CreateBasisVersion(version, gathered.Content, previous?.BasisDigest ?? string.Empty),
+            null, "presenter", "source-basis.gathered", "finance endpoint test"));
+    }
+
+    private sealed class StaticSource<TPayload>(string sourceId, IReadOnlyList<SourceRecord<TPayload>> records)
+        : ISourceSystem<TPayload> where TPayload : class
+    {
+        public Task<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>> ListAsync(
+            string caseId, CancellationToken cancellationToken = default, int? maxRecords = null) =>
+            Task.FromResult<SourceReadResult<IReadOnlyList<SourceRecord<TPayload>>>>(
+                new SourceReadSucceeded<IReadOnlyList<SourceRecord<TPayload>>>(records
+                    .Where(record => record.SourceId == sourceId && record.CaseId == caseId)
+                    .Take(maxRecords ?? int.MaxValue).ToArray()));
+
+        public Task<SourceReadResult<SourceRecord<TPayload>>> GetAsync(
+            string caseId, string recordId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private static async Task<HttpResponseMessage> SendAsync(HttpClient client, string path, string cookie)

@@ -50,7 +50,8 @@ public sealed class RemainingSourceTests
             new[] { ("SYN-DOC0011", "1", false), ("SYN-DOC0012", "1", true), ("SYN-DOC0013", "1", false) },
             records.Select(r => (r.Payload.DocumentId, r.Payload.DocumentVersion, r.Payload.ContainsPersonalData)).ToArray());
 
-        var contracts = await ListOk(new ContractsSource(), CoreCase);
+        // The specialist_flag records are asserted in SpecialistReviewFlagTests; this test covers the clause.
+        var contracts = (await ListOk(new ContractsSource(), CoreCase)).Where(r => r.Kind == "obligation_clause").ToList();
         Assert.Equal(
             new[] { ("con-clause-return-notice-001", 1, CoreCase, "obligation_clause") },
             contracts.Select(r => (r.RecordId, r.RecordVersion, r.CaseId, r.Kind)).ToArray());

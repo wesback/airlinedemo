@@ -1,3 +1,11 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using AirlineDemo.Api.Evidence;
+using AirlineDemo.Api.SourceSystems;
+
 namespace AirlineDemo.Api.Obligations;
 
 public enum ObligationState
@@ -42,13 +50,23 @@ public sealed record NoticeDraft(
     IReadOnlyList<string> EvidenceRequirementIds,
     DateTimeOffset CreatedUtc,
     NoticeDraftStatus Status,
-    string Body);
+    string Body)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ObligationSourceCitation? Citation { get; init; }
+}
 
 public sealed record ObligationEvaluation(
     ObligationState State,
     IReadOnlyList<string> Reasons,
     IReadOnlyList<NoticeDraft> Drafts,
-    NoticeDraft? NewDraft);
+    NoticeDraft? NewDraft)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ObligationSourceCitation? Citation { get; init; }
+}
+
+public sealed record ObligationSourceCitation(string SourceId, string RecordId, int RecordVersion);
 
 public sealed record LegalReviewRecord(
     string DraftId,
@@ -67,6 +85,13 @@ public interface INoticeSender
 
 public static class ObligationEvaluator
 {
+    private const string SourceBasisFormat = "source-record-pins-v1";
+    private static readonly JsonSerializerOptions PinnedSourceJson = new(JsonSerializerDefaults.Web);
+
+    private sealed record SourcePinDocument(string Format, IReadOnlyList<SourceBasisPin> Pins);
+    private sealed class PinnedContractsClauseMissingException() : Exception { }
+    private sealed class PinnedContractsConflictException() : Exception { }
+
     private static readonly ObligationState[] Precedence =
     [
         ObligationState.Blocked,
@@ -143,6 +168,129 @@ public static class ObligationEvaluator
 
         return new ObligationEvaluation(state, reasons, updated, newDraft);
     }
+
+    /// <summary>Evaluates an obligation against its committed contracts clause, never a live source read.</summary>
+    public static ObligationEvaluation EvaluateFromPinnedContracts(
+        Obligation obligation,
+        string caseId,
+        int currentBasisVersion,
+        string? basisContent,
+        IReadOnlyDictionary<string, string> sourceModes,
+        IReadOnlyList<NoticeDraft> drafts,
+        INoticeSender? sender = null)
+    {
+        ArgumentNullException.ThrowIfNull(obligation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(caseId);
+        ArgumentNullException.ThrowIfNull(sourceModes);
+        ArgumentNullException.ThrowIfNull(drafts);
+
+        var mode = sourceModes.GetValueOrDefault("contracts", "available");
+        if (mode != "available")
+        {
+            var reason = mode switch
+            {
+                "unavailable" => "source_unavailable",
+                "stale" => "source_stale",
+                "conflicting" => "source_conflict",
+                _ => "source_conflict",
+            };
+            return Blocked(reason, drafts);
+        }
+
+        if (currentBasisVersion < 1 || string.IsNullOrWhiteSpace(basisContent))
+            return Blocked("source_basis_missing", drafts);
+
+        SourceRecord<ContractsPayload> clause;
+        try
+        {
+            clause = ReadPinnedClause(basisContent, caseId);
+        }
+        catch (PinnedContractsClauseMissingException)
+        {
+            return Blocked("contracts_record_missing", drafts);
+        }
+        catch (PinnedContractsConflictException)
+        {
+            return Blocked("source_conflict", drafts);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
+        {
+            return Blocked("source_basis_invalid", drafts);
+        }
+
+        if (clause.Stale)
+            return Blocked("source_stale", drafts);
+
+        var fields = clause.Payload.Fields;
+        if (fields is null)
+            return Blocked("contracts_clause_invalid", drafts);
+        if (!HasText(fields, "clauseId") || !HasText(fields, "obligation") || !HasText(fields, "noticeWindowDays"))
+            return Blocked("contracts_clause_invalid", drafts);
+        if (!fields.TryGetValue("noticeWindowStart", out var startText)
+            || !DateOnly.TryParseExact(startText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
+            return Blocked("notice_window_start_missing_or_invalid", drafts);
+        if (!fields.TryGetValue("noticeWindowEnd", out var endText)
+            || !DateOnly.TryParseExact(endText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var end))
+            return Blocked("notice_window_end_missing_or_invalid", drafts);
+        if (end < start || !int.TryParse(fields["noticeWindowDays"], NumberStyles.None, CultureInfo.InvariantCulture, out var windowDays)
+            || windowDays < 1)
+            return Blocked("contracts_clause_invalid", drafts);
+
+        var citation = new ObligationSourceCitation(clause.SourceId, clause.RecordId, clause.RecordVersion);
+        var scenarioAsOf = new DateTimeOffset(clause.AsOf.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+        var sourceObligation = obligation with
+        {
+            CurrentBasisVersion = currentBasisVersion,
+            NoticeWindowStartUtc = start,
+            NoticeWindowEndUtc = end,
+        };
+        var evaluation = Evaluate(sourceObligation, scenarioAsOf, drafts);
+        var citedDraft = evaluation.NewDraft is null ? null : evaluation.NewDraft with { Citation = citation };
+        var citedDrafts = evaluation.Drafts.Select(draft => draft with { Citation = citation }).ToArray();
+
+        // The sender is an observation seam only; evaluating a draft never sends a notice.
+        _ = sender;
+        return evaluation with { Drafts = citedDrafts, NewDraft = citedDraft, Citation = citation };
+    }
+
+    private static ObligationEvaluation Blocked(string reason, IReadOnlyList<NoticeDraft> drafts) =>
+        new(ObligationState.Blocked, [reason], drafts, null);
+
+    private static SourceRecord<ContractsPayload> ReadPinnedClause(string basisContent, string caseId)
+    {
+        var basis = JsonSerializer.Deserialize<SourcePinDocument>(basisContent, PinnedSourceJson);
+        if (basis is null || basis.Format != SourceBasisFormat || basis.Pins is null || basis.Pins.Count == 0)
+            throw new InvalidDataException("Committed source basis is invalid.");
+
+        var clauses = new List<SourceRecord<ContractsPayload>>();
+        foreach (var pin in basis.Pins)
+        {
+            if (pin is null) throw new InvalidDataException("Source basis contains a null pin.");
+            if (pin.SourceId != "contracts") continue;
+            if (pin.RecordVersion < 1 || string.IsNullOrWhiteSpace(pin.RecordId) || string.IsNullOrWhiteSpace(pin.Content)
+                || !string.Equals(pin.ContentDigest, Digest(pin.Content), StringComparison.Ordinal))
+                throw new InvalidDataException("Contracts source pin is invalid.");
+
+            var record = JsonSerializer.Deserialize<SourceRecord<ContractsPayload>>(pin.Content, PinnedSourceJson);
+            if (record is null || record.SourceId != pin.SourceId || record.RecordId != pin.RecordId
+                || record.RecordVersion != pin.RecordVersion || record.Validate(caseId).Count > 0)
+                throw new InvalidDataException("Contracts source pin does not match its envelope.");
+            if (record.Kind == "obligation_clause") clauses.Add(record);
+        }
+
+        return clauses.Count switch
+        {
+            0 => throw new PinnedContractsClauseMissingException(),
+            1 => clauses[0],
+            _ => throw new PinnedContractsConflictException(),
+        };
+    }
+
+    private static bool HasText(IReadOnlyDictionary<string, string> fields, string name) =>
+        fields.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value);
+
+    private static string Digest(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     // Records a simulated legal decision only. The sender is never invoked, and the obligation state is not changed.
     public static LegalReviewRecord RecordLegalDecision(
