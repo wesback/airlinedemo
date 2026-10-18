@@ -72,10 +72,11 @@ public sealed class TransportSecurityTests
     {
         using var factory = CreateFactory("Production", bypass: "true");
 
-        var ex = Record.Exception(() => factory.CreateClient());
+        var ex = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
 
-        Assert.NotNull(ex);
-        Assert.Contains(TransportSecurity.LocalIdentityBypassKey, ex!.ToString());
+        Assert.Equal(
+            "Demo:LocalIdentityBypass must not be enabled in deployed mode (environment 'Production').",
+            ex.Message);
     }
 
     [Fact]
