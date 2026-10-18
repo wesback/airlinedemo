@@ -2,7 +2,7 @@
 prd_id: "aircraft-source-systems"
 title: "Synthetic Source-System Stubs and Read-Only Source Port"
 status: "draft"
-version: "0.8.0"
+version: "0.9.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-16"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Synthetic Source-System Stubs and Read-Only Source Port
 
-> **aircraft-source-systems** | Status: Draft | Version: 0.8.0 | Last Updated: 2026-10-16
+> **aircraft-source-systems** | Status: Draft | Version: 0.9.0 | Last Updated: 2026-10-16
 
 ## Executive Summary
 
@@ -88,6 +88,7 @@ All systems, records, actors and decisions are synthetic or simulated.
 | DD-025 | After Telemetry Foundations approves the proposed additions and the approval is recorded in `docs/telemetry/source-system-proposed-additions.md`, source-specific structured logs may use source.id, case.id, event.outcome, and duration; these fields are never metric dimensions, and raw record identifiers and payloads remain excluded. |
 | DD-026 | DD-026: A source coverage flag is true only when the source mode is available and at least one in-scope record from that source is present; otherwise it is false. |
 | DD-027 | DD-027: For Cases A, B, and C, the signed source fixtures are the canonical identifier set; any Aircraft Case Pack artifact for those scenarios uses the same case, document, and component identifiers. |
+| DD-028 | DD-028: For repeated exports of the same recorded decision, serialized bytes are identical after removing the `exportedAt` field; `contentHash` covers every other field except `contentHash` itself. This rule follows AC-024 and DD-016. |
 
 ## Product Goals
 
