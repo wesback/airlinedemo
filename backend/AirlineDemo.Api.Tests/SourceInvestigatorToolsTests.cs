@@ -97,11 +97,11 @@ public sealed class SourceInvestigatorToolsTests
         public InvestigationSourceSystems Ports => new(Technical, Maintenance, Finance, Records, Contracts);
     }
 
-    private sealed class CaseSource : ICaseReadSource
+    private sealed class CaseSource(string pageText = "Return readiness is pending reserve approval.") : ICaseReadSource
     {
         public IReadOnlyList<string> GetInventory(string caseId) => ["return-status"];
         public string? GetApprovedRequirements(string caseId) => null;
-        public string? GetSourcePage(string caseId, string documentId, int page) => page == 1 ? "Return readiness is pending reserve approval." : null;
+        public string? GetSourcePage(string caseId, string documentId, int page) => page == 1 ? pageText : null;
         public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) => [];
         public string? GetProcessingStatus(string caseId) => null;
     }
@@ -161,6 +161,186 @@ public sealed class SourceInvestigatorToolsTests
 
     private static string Expected<TPayload>(TPayload value) =>
         $"{BoundedInvestigator.UntrustedBegin}\n{JsonSerializer.Serialize(value, JsonOptions)}\n{BoundedInvestigator.UntrustedEnd}";
+
+    private static ChatResponse Calls(params FunctionCallContent[] calls) =>
+        new(new ChatMessage(ChatRole.Assistant, calls));
+
+    private static string CompleteRequestText(ScriptedChatClient model) =>
+        string.Join("\n", model.Requests.SelectMany(request => request)
+            .SelectMany(message => message.Contents)
+            .Select(content => content switch
+            {
+                TextContent text => text.Text ?? string.Empty,
+                FunctionResultContent result => result.Result?.ToString() ?? string.Empty,
+                _ => content.ToString() ?? string.Empty,
+            }));
+
+    private static string CompleteSerializedRequest(ScriptedChatClient model) =>
+        JsonSerializer.Serialize(new
+        {
+            messages = model.Requests.Select(request => request.Select(message => new
+            {
+                role = message.Role.ToString(),
+                contents = message.Contents.Select(content =>
+                    JsonSerializer.Serialize(content, content.GetType(), AIJsonUtilities.DefaultOptions)).ToArray(),
+            })),
+            options = model.Options.Select(option => new
+            {
+                instructions = option?.Instructions,
+                tools = option?.Tools?.Select(tool => new
+                {
+                    tool.Name,
+                    tool.Description,
+                    schema = tool is AIFunctionDeclaration declaration ? declaration.JsonSchema.GetRawText() : null,
+                }).ToArray(),
+            }),
+        }, JsonOptions);
+
+    [Fact]
+    public async Task InjectionAndUnpinnedCitationCannotExpandInvestigatorAuthority()
+    {
+        const string caseId = "case-001";
+        var sources = CreateSources(caseId: caseId);
+        var seeded = Assert.IsType<SourceReadSucceeded<SourceRecord<MaintenancePayload>>>(
+            await new MaintenanceSource().GetAsync(caseId, "mx-task-card-001"));
+        var taskCard = seeded.Value;
+        var maintenance = new CountingSource<MaintenancePayload>(taskCard);
+        var ports = new InvestigationSourceSystems(sources.Technical, maintenance, sources.Finance, sources.Records, sources.Contracts);
+        var unauthorizedNames = new[] { "set_source_mode", "fetch_url", "approve", "send_to_recipient", "create_mock_request", "accept" };
+        var calls = 0;
+        var model = new ScriptedChatClient((_, _) => ++calls switch
+        {
+            1 => Calls(
+                new FunctionCallContent("task-card", SourceReadTools.GetTool,
+                    new Dictionary<string, object?> { ["sourceId"] = "maintenance", ["recordId"] = taskCard.RecordId }),
+                new FunctionCallContent("page", CaseReadTools.SourcePageTool,
+                    new Dictionary<string, object?> { ["documentId"] = "return-status", ["page"] = 1 })),
+            2 => Calls(
+                unauthorizedNames.Select((name, index) =>
+                    new FunctionCallContent($"unauthorized-{index}", name, new Dictionary<string, object?>())).Append(
+                    new FunctionCallContent("out-of-case", SourceReadTools.GetTool,
+                        new Dictionary<string, object?>
+                        {
+                            ["sourceId"] = "other-case",
+                            ["recordId"] = taskCard.RecordId,
+                            ["caseId"] = "another-case",
+                        })).ToArray()),
+            _ => Reply(
+                """[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"return-status","page":1,"quote":"Return readiness is pending reserve approval."}],"sourceWitnesses":[{"sourceId":"maintenance","recordId":"not-read-record","recordVersion":1}]}]"""),
+        });
+        var investigator = new BoundedInvestigator(caseId, new CaseSource(Evidence), Approved(),
+            SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model,
+            role: "technical-reviewer", sourceSystems: ports);
+
+        var error = await Record.ExceptionAsync(() => investigator.InvestigateAsync([Evidence]));
+
+        Assert.IsType<InvestigationOutputException>(error);
+        Assert.Equal("source record witness is not in the current basis", error!.Message);
+        var declaredNames = model.Options[0]!.Tools!.Select(tool => tool.Name).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(new[]
+        {
+            CaseReadTools.InventoryTool,
+            CaseReadTools.RequirementsTool,
+            CaseReadTools.SourcePageTool,
+            CaseReadTools.SearchTool,
+            CaseReadTools.StatusTool,
+            SourceReadTools.GetTool,
+            SourceReadTools.ListTool,
+        }.Order(StringComparer.Ordinal).ToArray(), declaredNames);
+        var requestText = CompleteRequestText(model);
+        Assert.Contains(Expected(taskCard), requestText, StringComparison.Ordinal);
+        Assert.Contains(
+            $"{BoundedInvestigator.UntrustedBegin}\n{Evidence}\n{BoundedInvestigator.UntrustedEnd}",
+            requestText,
+            StringComparison.Ordinal);
+        Assert.Equal((caseId, taskCard.RecordId, 1), (maintenance.LastGetCase, maintenance.LastRecordId, maintenance.GetCalls));
+        Assert.Equal(0, sources.Technical.ListCalls + sources.Technical.GetCalls
+            + maintenance.ListCalls + sources.Finance.ListCalls + sources.Finance.GetCalls
+            + sources.Records.ListCalls + sources.Records.GetCalls + sources.Contracts.ListCalls + sources.Contracts.GetCalls);
+    }
+
+    [Theory]
+    [InlineData("technical", "record-1", 1, ClaimStatus.Supported, null)]
+    [InlineData("maintenance", "record-1", 1, ClaimStatus.Downgraded, "source record witness is not in the current basis")]
+    [InlineData("technical", "record-2", 1, ClaimStatus.Downgraded, "source record witness is not in the current basis")]
+    [InlineData("technical", "record-1", 2, ClaimStatus.Downgraded, "source record witness is not in the current basis")]
+    [InlineData(null, null, 0, ClaimStatus.Downgraded, "no source record witness")]
+    public void SourceClaimsRequireExactPinnedTuple(
+        string? sourceId,
+        string? recordId,
+        int recordVersion,
+        ClaimStatus expectedStatus,
+        string? expectedReason)
+    {
+        var pinned = new SourceRecordWitness("technical", "record-1", 1);
+        IReadOnlyList<SourceRecordWitness> witnesses = sourceId is null
+            ? []
+            : [new SourceRecordWitness(sourceId, recordId!, recordVersion)];
+        var claim = new InvestigationClaim(
+            "approved",
+            [new DocumentWitness("document-1", 1, "approved")],
+            witnesses);
+        var result = ClaimValidator.Validate(
+            claim,
+            ClaimKind.Baseline,
+            new Dictionary<string, BasisDocument>(StringComparer.Ordinal)
+            {
+                ["document-1"] = BasisDocument.Create("document-1", ["approved"]),
+            },
+            "approved",
+            [pinned]);
+
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal(expectedReason, result.Reason);
+    }
+
+    [Fact]
+    public async Task MarkedFieldsStayOutOfModelAndSourceClaims()
+    {
+        const string caseId = "case-001";
+        const string recordId = "rec-doc-arr-0012";
+        var sources = CreateSources(caseId: caseId);
+        var markedRecord = new SourceRecord<RecordsPayload>
+        {
+            SourceId = "records",
+            RecordId = recordId,
+            RecordVersion = 1,
+            AsOf = new DateOnly(2026, 10, 1),
+            CaseId = caseId,
+            Kind = "document_index",
+            Payload = new RecordsPayload(new Dictionary<string, string>
+            {
+                ["documentId"] = "SYN-DOC0012",
+                ["documentVersion"] = "1",
+                ["containsPersonalData"] = "true",
+                ["subjectName"] = "SYN-PERSON-NAME-01",
+                ["licenseNumber"] = "SYN-LICENSE-NUMBER-01",
+            }),
+        };
+        var records = new CountingSource<RecordsPayload>(markedRecord);
+        var ports = new InvestigationSourceSystems(sources.Technical, sources.Maintenance, sources.Finance, records, sources.Contracts);
+        var calls = 0;
+        var model = new ScriptedChatClient((_, _) => ++calls == 1
+            ? Calls(new FunctionCallContent("marked-record", SourceReadTools.GetTool,
+                new Dictionary<string, object?> { ["sourceId"] = "records", ["recordId"] = recordId }))
+            : Reply(Claims));
+        var investigator = new BoundedInvestigator(caseId, new CaseSource(), Approved(),
+            SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model,
+            role: "technical-reviewer", sourceSystems: ports);
+
+        var result = await investigator.InvestigateAsync([Evidence]);
+
+        var completeRequest = CompleteSerializedRequest(model);
+        var completeClaims = JsonSerializer.Serialize(result.Claims, JsonOptions);
+        foreach (var sensitive in new[] { "subjectName", "licenseNumber", "SYN-PERSON-NAME-01", "SYN-LICENSE-NUMBER-01" })
+        {
+            Assert.DoesNotContain(sensitive, completeRequest, StringComparison.Ordinal);
+            Assert.DoesNotContain(sensitive, completeClaims, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(Expected(markedRecord), CompleteRequestText(model), StringComparison.Ordinal);
+        Assert.Equal((1, caseId, recordId), (records.GetCalls, records.LastGetCase, records.LastRecordId));
+    }
 
     [Fact]
     public async Task SourceToolAllowlistHasOnlyTwoCaseBoundReadOperations()

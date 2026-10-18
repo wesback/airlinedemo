@@ -48,7 +48,8 @@ public sealed record ValidatedClaim
 /// <summary>
 /// Checks each investigator claim against the current basis. A claim is supported only when its typed value appears
 /// in every witness quote, and every witness names a document in the inventory whose current content still matches
-/// its recorded digest, on an existing page, with a quote that appears verbatim there. Anything else is downgraded.
+/// its recorded digest, on an existing page, with a quote that appears verbatim there. Source-backed claims also
+/// require every exact source record tuple to appear in the current source basis. Anything else is downgraded.
 /// Claim text is never interpreted.
 /// </summary>
 public static class ClaimValidator
@@ -57,7 +58,8 @@ public static class ClaimValidator
         InvestigationClaim claim,
         ClaimKind kind,
         IReadOnlyDictionary<string, BasisDocument> basis,
-        string typedValue)
+        string typedValue,
+        IReadOnlyCollection<SourceRecordWitness>? sourceBasis = null)
     {
         ArgumentNullException.ThrowIfNull(claim);
         ArgumentNullException.ThrowIfNull(basis);
@@ -81,7 +83,43 @@ public static class ClaimValidator
             }
         }
 
+        var sourceProblem = SourceWitnessProblem(claim.SourceWitnesses, sourceBasis ?? claim.VerifiedSourceBasis);
+        if (sourceProblem is not null)
+        {
+            return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, sourceProblem);
+        }
+
         return new ValidatedClaim(claim, kind, ClaimStatus.Supported, null);
+    }
+
+    internal static string? SourceWitnessProblem(
+        IReadOnlyList<SourceRecordWitness>? witnesses,
+        IReadOnlyCollection<SourceRecordWitness>? sourceBasis)
+    {
+        if (witnesses is null)
+        {
+            return null;
+        }
+
+        if (witnesses.Count == 0)
+        {
+            return "no source record witness";
+        }
+
+        if (sourceBasis is null)
+        {
+            return "source record witness is not in the current basis";
+        }
+
+        foreach (var witness in witnesses)
+        {
+            if (witness is null || !sourceBasis.Contains(witness))
+            {
+                return "source record witness is not in the current basis";
+            }
+        }
+
+        return null;
     }
 
     private static string? WitnessProblem(DocumentWitness? witness, IReadOnlyDictionary<string, BasisDocument> basis, string typedValue)
