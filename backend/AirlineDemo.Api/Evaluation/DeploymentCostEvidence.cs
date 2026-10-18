@@ -21,6 +21,31 @@ public sealed record DeploymentCostEvidence(
         "case-study stipulation", "external evidence", "scenario assumption", "architectural decision",
         "synthetic demonstration result", "unvalidated target", "derived"
     ];
+    private static readonly string[] Scopes = ["A", "B", "C", "D", "transition", "deployment"];
+    private static readonly string[] Categories =
+        ["cost-per-page", "cost-per-case", "transition-cost", "active", "idle", "residual"];
+    private static readonly HashSet<string> Iso4217Currencies =
+    [
+        "AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AUD", "AWG", "AZN",
+        "BAM", "BBD", "BDT", "BGN", "BHD", "BIF", "BMD", "BND", "BOB", "BOV",
+        "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF", "CHE", "CHF",
+        "CHW", "CLF", "CLP", "CNY", "COP", "COU", "CRC", "CUC", "CUP", "CVE",
+        "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD",
+        "FKP", "GBP", "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD",
+        "HNL", "HTG", "HUF", "IDR", "ILS", "INR", "IQD", "IRR", "ISK", "JMD",
+        "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD",
+        "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA",
+        "MKD", "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MXV",
+        "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB",
+        "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB",
+        "RWF", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SLL",
+        "SOS", "SRD", "SSP", "STN", "SVC", "SYP", "SZL", "THB", "TJS", "TMT",
+        "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "USN",
+        "UYI", "UYU", "UYW", "UZS", "VED", "VES", "VND", "VUV", "WST", "XAF",
+        "XAG", "XAU", "XBA", "XBB", "XBC", "XBD", "XCD", "XCG", "XDR", "XOF",
+        "XPD", "XPF", "XPT", "XSU", "XTS", "XUA", "XXX", "YER", "ZAR", "ZMW",
+        "ZWG"
+    ];
 
     public static DeploymentCostEvidence Parse(string json)
     {
@@ -78,6 +103,25 @@ public sealed record DeploymentCostEvidence(
                 observation.PlannedEvidenceLabel, "planned", PlannedLabels);
             ValidateAmount(observation.ObservedAmount, observation.ObservedEvidenceReference,
                 observation.ObservedEvidenceLabel, "observed", ["external evidence"]);
+            var allUnmeasured = !observation.PlannedAmount.IsMeasured &&
+                !observation.ObservedAmount.IsMeasured && !observation.VarianceAmount.IsMeasured;
+            if (!Scopes.Contains(observation.Scope) && !(allUnmeasured && observation.Scope == "not measured"))
+                throw new ArgumentException("Scope must be an allowed value.");
+            if (!Categories.Contains(observation.Category) && !(allUnmeasured && observation.Category == "not measured"))
+                throw new ArgumentException("Category must be an allowed value.");
+            if ((observation.Currency == "not measured") != allUnmeasured ||
+                (!allUnmeasured && !Iso4217Currencies.Contains(observation.Currency)))
+                throw new ArgumentException("Currency must be an uppercase ISO 4217 alphabetic code or not measured when all amounts are unmeasured.");
+
+            DateTimeOffset? periodStart = null;
+            DateTimeOffset? periodEnd = null;
+            if (!allUnmeasured || observation.PeriodStartUtc != "not measured")
+                periodStart = ParseUtc(observation.PeriodStartUtc);
+            if (!allUnmeasured || observation.PeriodEndUtc != "not measured")
+                periodEnd = ParseUtc(observation.PeriodEndUtc);
+            if (periodStart is not null && periodEnd is not null && periodEnd <= periodStart)
+                throw new ArgumentException("Period end must be later than period start.");
+
             if (observation.VarianceAmount.IsMeasured)
             {
                 if (!observation.PlannedAmount.IsMeasured || !observation.ObservedAmount.IsMeasured ||
@@ -114,6 +158,14 @@ public sealed record DeploymentCostEvidence(
         else if (reference != "not measured" || label != "not measured")
             throw new ArgumentException($"Unmeasured {name} amount requires not measured reference and label.");
     }
+
+    private static DateTimeOffset ParseUtc(string value) =>
+        DateTimeOffset.TryParseExact(value, "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : throw new ArgumentException("Period values must be UTC timestamps.");
 
     private static void RequireFields(JsonElement element, IReadOnlyCollection<string> expected)
     {
