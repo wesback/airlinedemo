@@ -15,7 +15,9 @@ public sealed record AssessmentClaim(
     IReadOnlyList<DocumentWitness> Witnesses,
     string? RelatedRequirementId = null,
     string? Regime = null,
-    bool ReliesOnCapeTownEvidence = false);
+    bool ReliesOnCapeTownEvidence = false,
+    string? RequirementId = null,
+    string? EvidenceRegime = null);
 
 /// <summary>The accepted evidence basis an assessment runs against, with its completeness and identity state.</summary>
 public sealed record AssessmentBasis(
@@ -37,7 +39,13 @@ public sealed record AssessedClaim(
     IReadOnlyList<AssessedWitness> Witnesses,
     string? RelatedRequirementId = null,
     string? SpecialistResult = null,
-    IReadOnlyList<CapeTownInterestEvidence>? CapeTownEvidence = null);
+    IReadOnlyList<CapeTownInterestEvidence>? CapeTownEvidence = null,
+    string? RequirementId = null,
+    string? EvidenceRegime = null,
+    string? RequirementStatus = null,
+    RequirementApplicability? Applicability = null);
+
+public sealed record RequirementApplicability(string? Regime, string? ResponsibleParty);
 
 /// <summary>
 /// The stored result of one assessment. It holds typed values and source identifiers only: no witness quote,
@@ -141,6 +149,10 @@ public sealed class AssessmentExecutionService(
         var documents = isCurrent ? current!.Documents : NoDocuments;
         var specialistFlags = isCurrent ? ReadSpecialistFlags(current!.SourcePins ?? []) : [];
         var capeTownEvidence = isCurrent ? ReadCapeTownInterestEvidence(current!.SourcePins ?? []) : [];
+        IReadOnlyDictionary<string, IReadOnlyList<RequirementApplicability>> applicability = isCurrent
+            ? ReadRequirementApplicability(current!.SourcePins ?? [])
+            : new Dictionary<string, IReadOnlyList<RequirementApplicability>>(StringComparer.Ordinal);
+        var applicabilityByClaim = claims.Select(claim => ResolveRequirementApplicability(claim, applicability)).ToArray();
         var capeTownClaims = claims.Select(claim =>
             ResolveCapeTownEvidence(claim, specialistFlags, capeTownEvidence)).ToArray();
         var specialistClaims = claims.Select((claim, index) => capeTownClaims[index].Matched
@@ -161,7 +173,11 @@ public sealed class AssessmentExecutionService(
                 specialistClaims[index].Result,
                 capeTownClaims[index].Matched
                     ? capeTownClaims[index].Evidence.Select(item => item.Evidence).ToArray()
-                    : null))
+                    : null,
+                claim.RequirementId,
+                claim.EvidenceRegime,
+                applicabilityByClaim[index].Status,
+                applicabilityByClaim[index].Applicability))
             .ToArray();
         assessed = assessed.Select((claim, index) =>
         {
@@ -186,7 +202,7 @@ public sealed class AssessmentExecutionService(
         var (outcome, reason) = isCurrent
             ? sourceModeFinding.Reason is { } sourceReason
                 ? (Review, sourceReason)
-                : specialistRoute ?? Route(current!, validated)
+                : specialistRoute ?? Route(current!, validated, applicabilityByClaim)
             : (Review, "supplied basis is not the current accepted basis");
         string? requestId = null;
         string? workItemId = null;
@@ -367,7 +383,10 @@ public sealed class AssessmentExecutionService(
             assessment.WorkItemId,
             assessment.AssessmentId);
 
-    private static (string Outcome, string Reason) Route(AssessmentBasis basis, IReadOnlyList<ValidatedClaim> validated)
+    private static (string Outcome, string Reason) Route(
+        AssessmentBasis basis,
+        IReadOnlyList<ValidatedClaim> validated,
+        IReadOnlyList<RequirementApplicabilityResolution> applicability)
     {
         if (!basis.Coverage.IsComplete)
         {
@@ -395,12 +414,104 @@ public sealed class AssessmentExecutionService(
             return (Review, validated.Count == 0 ? "no claim" : "ambiguous: multiple claims");
         }
 
-        return validated[0].Kind switch
+        if (validated[0].Kind == ClaimKind.MissingRequirement)
         {
-            ClaimKind.Baseline => (Baseline, "supported baseline"),
-            ClaimKind.MissingRequirement => (Request, "single supported missing requirement on current basis"),
-            _ => (Review, "unsupported claim kind"),
-        };
+            var requirement = applicability[0];
+            return requirement.CanRequest
+                ? (Request, "single supported missing requirement on current basis")
+                : (Review, requirement.Reason ?? "requirement applicability needs review");
+        }
+
+        return validated[0].Kind == ClaimKind.Baseline
+            ? (Baseline, "supported baseline")
+            : (Review, "unsupported claim kind");
+    }
+
+    private sealed record RequirementApplicabilityResolution(
+        bool CanRequest,
+        string? Status,
+        string? Reason,
+        RequirementApplicability? Applicability);
+
+    private static RequirementApplicabilityResolution ResolveRequirementApplicability(
+        AssessmentClaim claim,
+        IReadOnlyDictionary<string, IReadOnlyList<RequirementApplicability>> applicability)
+    {
+        if (claim.Kind != ClaimKind.MissingRequirement)
+            return new RequirementApplicabilityResolution(false, null, null, null);
+
+        if (string.IsNullOrWhiteSpace(claim.RequirementId)
+            || !applicability.TryGetValue(claim.RequirementId, out var matches))
+        {
+            return NeedsReview("requirement applicability record not found");
+        }
+
+        if (matches.Count != 1)
+            return NeedsReview("multiple requirement applicability records found");
+
+        var match = matches[0];
+        var missing = new List<string>(2);
+        if (string.IsNullOrWhiteSpace(match.Regime)) missing.Add("regime");
+        if (string.IsNullOrWhiteSpace(match.ResponsibleParty)) missing.Add("responsibleParty");
+        if (missing.Count > 0)
+            return NeedsReview($"missing applicability tags: {string.Join(", ", missing)}", match);
+
+        if (!string.Equals(claim.EvidenceRegime, match.Regime, StringComparison.Ordinal))
+            return NeedsReview("evidenceRegime does not match applicability regime", match);
+
+        return new RequirementApplicabilityResolution(true, null, null, match);
+
+        static RequirementApplicabilityResolution NeedsReview(
+            string reason,
+            RequirementApplicability? match = null) =>
+            new(false, "needs_review", reason, match);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<RequirementApplicability>> ReadRequirementApplicability(
+        IReadOnlyList<SourceBasisPin> pins)
+    {
+        var applicability = new Dictionary<string, List<RequirementApplicability>>(StringComparer.Ordinal);
+        foreach (var pin in pins.Where(pin => pin.SourceId == "technical"))
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(pin.Content);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("kind", out var kind) || kind.GetString() != "applicability")
+                continue;
+            if (!root.TryGetProperty("payload", out var payload)
+                || !payload.TryGetProperty("fields", out var fields)
+                || fields.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !fields.TryGetProperty("requirementId", out var requirementId)
+                || requirementId.ValueKind != System.Text.Json.JsonValueKind.String
+                || string.IsNullOrWhiteSpace(requirementId.GetString()))
+            {
+                throw new InvalidDataException("Pinned applicability payload is invalid.");
+            }
+
+            var record = new RequirementApplicability(
+                ReadOptionalString(fields, "regime"),
+                ReadOptionalString(fields, "responsibleParty"));
+            var id = requirementId.GetString()!;
+            if (!applicability.TryGetValue(id, out var records))
+            {
+                records = [];
+                applicability.Add(id, records);
+            }
+            records.Add(record);
+        }
+
+        return applicability.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<RequirementApplicability>)pair.Value.AsReadOnly(),
+            StringComparer.Ordinal);
+
+        static string? ReadOptionalString(System.Text.Json.JsonElement fields, string name)
+        {
+            if (!fields.TryGetProperty(name, out var value))
+                return null;
+            if (value.ValueKind != System.Text.Json.JsonValueKind.String)
+                throw new InvalidDataException("Pinned applicability payload is invalid.");
+            return value.GetString();
+        }
     }
 
     private sealed record SpecialistClaimResolution(string? Result, bool Matched, bool RelatedToUnmatchedRegime = false);

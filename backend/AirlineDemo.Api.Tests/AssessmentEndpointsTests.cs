@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
@@ -23,6 +26,7 @@ public sealed class AssessmentEndpointsTests
     private const string Owner = "demo-owner";
     private const string Value = "pending reserve approval";
     private const string QuoteSentinel = "QUOTE-SENTINEL-77";
+    private const string RequirementId = "SYN-REQ-014";
     private const string DocumentSentinel = "DOCUMENT-TEXT-SENTINEL-55";
     private const string PromptSentinel = "PROMPT-SENTINEL-99";
     private const string ScenarioTime = "2026-10-14T00:00:00Z";
@@ -31,9 +35,9 @@ public sealed class AssessmentEndpointsTests
     private const string Quote = QuoteSentinel + " " + Value;
     private static readonly ProcessingCoverage Complete = new(2, 2, 0, 0);
 
-    private sealed record Session(string Cookie, string Csrf);
+    internal sealed record Session(string Cookie, string Csrf);
 
-    private sealed class Harness : IAsyncDisposable
+    internal sealed class Harness : IAsyncDisposable
     {
         private readonly string _statePath = Path.Combine(Path.GetTempPath(), $"assessment-endpoints-{Guid.NewGuid():N}.json");
         private readonly CaseStateStore _caseStore;
@@ -75,12 +79,33 @@ public sealed class AssessmentEndpointsTests
             new Dictionary<string, BasisDocument>
             {
                 ["doc-17"] = BasisDocument.Create("doc-17", [Quote, DocumentSentinel + " " + PromptSentinel]),
-            });
+            },
+            [ApplicabilityPin()]);
 
         public AssessmentClaim Claim() =>
-            new(ClaimKind.MissingRequirement, Value, "Engine", "ENG-123", [new DocumentWitness("doc-17", 1, Quote)]);
+            new(ClaimKind.MissingRequirement, Value, "Engine", "ENG-123", [new DocumentWitness("doc-17", 1, Quote)],
+            RequirementId: RequirementId, EvidenceRegime: "EASA");
 
         public CaseScope Scope(string caseId = CaseId) => Cases.AuthorizeCase(caseId, Owner);
+
+        private static SourceBasisPin ApplicabilityPin()
+        {
+            var content = JsonSerializer.Serialize(new
+            {
+                kind = "applicability",
+                payload = new
+                {
+                    fields = new Dictionary<string, string>
+                    {
+                        ["requirementId"] = RequirementId,
+                        ["regime"] = "EASA",
+                        ["responsibleParty"] = "lessee-operator",
+                    },
+                },
+            });
+            var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+            return new SourceBasisPin("technical", "app-req-014", 1, content, digest);
+        }
 
         public async ValueTask DisposeAsync()
         {
@@ -90,7 +115,7 @@ public sealed class AssessmentEndpointsTests
         }
     }
 
-    private static async Task<Session> SignInAsync(HttpClient client, string userId)
+    internal static async Task<Session> SignInAsync(HttpClient client, string userId)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var response = await client.PostAsJsonAsync(
@@ -115,6 +140,8 @@ public sealed class AssessmentEndpointsTests
                     component = "Engine",
                     serialNumber = "ENG-123",
                     witnesses = new[] { new { documentId = "doc-17", page = 1, quote = Quote } },
+                    requirementId = RequirementId,
+                    evidenceRegime = "EASA",
                 },
             },
         });
@@ -127,7 +154,7 @@ public sealed class AssessmentEndpointsTests
         return request;
     }
 
-    private static async Task<HttpResponseMessage> SendAsync(
+    internal static async Task<HttpResponseMessage> SendAsync(
         HttpClient client, HttpMethod method, string path, Session? session = null, bool withToken = true, string? token = null)
     {
         using var request = Request(method, path, session, withToken, token);
@@ -171,6 +198,8 @@ public sealed class AssessmentEndpointsTests
         Assert.Equal(Value, claim.GetProperty("value").GetString());
         Assert.Equal("Engine", claim.GetProperty("component").GetString());
         Assert.Equal("ENG-123", claim.GetProperty("serialNumber").GetString());
+        Assert.Equal(RequirementId, claim.GetProperty("requirementId").GetString());
+        Assert.Equal("EASA", claim.GetProperty("evidenceRegime").GetString());
         var witness = Assert.Single(claim.GetProperty("witnesses").EnumerateArray());
         Assert.Equal("doc-17", witness.GetProperty("documentId").GetString());
         Assert.Equal(1, witness.GetProperty("page").GetInt32());
