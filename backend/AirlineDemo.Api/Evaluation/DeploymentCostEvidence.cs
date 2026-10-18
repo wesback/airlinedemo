@@ -21,6 +21,9 @@ public sealed record DeploymentCostEvidence(
         "case-study stipulation", "external evidence", "scenario assumption", "architectural decision",
         "synthetic demonstration result", "unvalidated target", "derived"
     ];
+    private static readonly string[] Scopes = ["A", "B", "C", "D", "transition", "deployment"];
+    private static readonly string[] Categories =
+        ["cost-per-page", "cost-per-case", "transition-cost", "active", "idle", "residual"];
 
     public static DeploymentCostEvidence Parse(string json)
     {
@@ -78,6 +81,25 @@ public sealed record DeploymentCostEvidence(
                 observation.PlannedEvidenceLabel, "planned", PlannedLabels);
             ValidateAmount(observation.ObservedAmount, observation.ObservedEvidenceReference,
                 observation.ObservedEvidenceLabel, "observed", ["external evidence"]);
+            var allUnmeasured = !observation.PlannedAmount.IsMeasured &&
+                !observation.ObservedAmount.IsMeasured && !observation.VarianceAmount.IsMeasured;
+            if (!Scopes.Contains(observation.Scope) && !(allUnmeasured && observation.Scope == "not measured"))
+                throw new ArgumentException("Scope must be an allowed value.");
+            if (!Categories.Contains(observation.Category) && !(allUnmeasured && observation.Category == "not measured"))
+                throw new ArgumentException("Category must be an allowed value.");
+            if ((observation.Currency == "not measured") != allUnmeasured ||
+                (!allUnmeasured && !System.Text.RegularExpressions.Regex.IsMatch(observation.Currency, @"\A[A-Z]{3}\z")))
+                throw new ArgumentException("Currency must be an uppercase ISO 4217 alphabetic code or not measured when all amounts are unmeasured.");
+
+            DateTimeOffset? periodStart = null;
+            DateTimeOffset? periodEnd = null;
+            if (!allUnmeasured || observation.PeriodStartUtc != "not measured")
+                periodStart = ParseUtc(observation.PeriodStartUtc);
+            if (!allUnmeasured || observation.PeriodEndUtc != "not measured")
+                periodEnd = ParseUtc(observation.PeriodEndUtc);
+            if (periodStart is not null && periodEnd is not null && periodEnd <= periodStart)
+                throw new ArgumentException("Period end must be later than period start.");
+
             if (observation.VarianceAmount.IsMeasured)
             {
                 if (!observation.PlannedAmount.IsMeasured || !observation.ObservedAmount.IsMeasured ||
@@ -114,6 +136,14 @@ public sealed record DeploymentCostEvidence(
         else if (reference != "not measured" || label != "not measured")
             throw new ArgumentException($"Unmeasured {name} amount requires not measured reference and label.");
     }
+
+    private static DateTimeOffset ParseUtc(string value) =>
+        DateTimeOffset.TryParseExact(value, "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : throw new ArgumentException("Period values must be UTC timestamps.");
 
     private static void RequireFields(JsonElement element, IReadOnlyCollection<string> expected)
     {

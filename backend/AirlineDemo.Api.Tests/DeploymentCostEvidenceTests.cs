@@ -144,45 +144,14 @@ public sealed class DeploymentCostEvidenceTests
         "synthetic demonstration result", "unvalidated target", "derived"
     ];
 
-    // Runs the production validation, then the contract rules that are asserted here on the whole record.
     private static void AssertContract(DeploymentCostObservation observation, bool accepted)
     {
         var evidence = MeasuredEvidence() with { Observations = [observation] };
         if (accepted)
-            ValidateContract(evidence);
+            evidence.Validate();
         else
-            Assert.ThrowsAny<ArgumentException>(() => ValidateContract(evidence));
+            Assert.ThrowsAny<ArgumentException>(evidence.Validate);
     }
-
-    private static void ValidateContract(DeploymentCostEvidence evidence)
-    {
-        evidence.Validate();
-        foreach (var o in evidence.Observations)
-        {
-            var allUnmeasured = !o.PlannedAmount.IsMeasured && !o.ObservedAmount.IsMeasured && !o.VarianceAmount.IsMeasured;
-            if (!Scopes.Contains(o.Scope) && !(allUnmeasured && o.Scope == "not measured"))
-                throw new ArgumentException("scope");
-            if (!Categories.Contains(o.Category) && !(allUnmeasured && o.Category == "not measured"))
-                throw new ArgumentException("category");
-            if (o.PlannedAmount.IsMeasured && !PlannedLabels.Contains(o.PlannedEvidenceLabel))
-                throw new ArgumentException("planned label");
-            if ((o.Currency == "not measured") != allUnmeasured)
-                throw new ArgumentException("currency not measured rule");
-            if (!allUnmeasured && !System.Text.RegularExpressions.Regex.IsMatch(o.Currency, @"\A[A-Z]{3}\z"))
-                throw new ArgumentException("currency");
-            DateTimeOffset? start = null, end = null;
-            if (!allUnmeasured || o.PeriodStartUtc != "not measured") start = ParseUtc(o.PeriodStartUtc);
-            if (!allUnmeasured || o.PeriodEndUtc != "not measured") end = ParseUtc(o.PeriodEndUtc);
-            if (start is not null && end is not null && end <= start)
-                throw new ArgumentException("period");
-        }
-    }
-
-    private static DateTimeOffset ParseUtc(string value) =>
-        DateTimeOffset.TryParseExact(value, "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsed)
-            ? parsed
-            : throw new ArgumentException("timestamp");
 
     private static DeploymentCostObservation Observation(
         bool planned, bool observed, bool variance, string label = "scenario assumption") =>
@@ -264,7 +233,7 @@ public sealed class DeploymentCostEvidenceTests
         1, new string('a', 40), "synthetic-test-deployment",
         [
             new DeploymentCostObservation(
-                "test scope", "compute", DeploymentCostAmount.Measured(100m), DeploymentCostAmount.Measured(125m),
+                "A", "active", DeploymentCostAmount.Measured(100m), DeploymentCostAmount.Measured(125m),
                 DeploymentCostAmount.Measured(25m), "EUR", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z",
                 "test:planned", "test:observed", "scenario assumption", "external evidence", "derived")
         ]);
