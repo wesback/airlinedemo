@@ -37,6 +37,7 @@ builder.Services.AddEvidenceBlobStore(builder.Configuration);
 builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<MockResponseService>();
 builder.Services.AddSingleton<SourceModeStore>();
+builder.Services.AddSingleton<SourceSummaryService>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
 builder.Services.AddSingleton<WorkloadAdmissionLimits>();
@@ -106,6 +107,7 @@ app.MapFinanceEndpoints();
 app.MapDemoRunReset();
 app.MapSourceModeEndpoints();
 app.MapSourceReadEndpoints();
+app.MapSourceSummaryEndpoints();
 app.MapStaticClient();
 
 app.Run();
