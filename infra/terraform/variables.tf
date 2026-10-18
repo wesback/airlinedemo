@@ -193,6 +193,7 @@ variable "container_app_name" {
 variable "image_digest" {
   description = "Immutable digest of the application image, for example sha256:<64 lowercase hex characters>."
   type        = string
+  nullable    = false
   validation {
     condition     = can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
     error_message = "image_digest must be a sha256 digest (sha256 followed by 64 lowercase hex characters), not a tag."
@@ -202,8 +203,5 @@ variable "image_digest" {
 variable "demo_passcode_secret_uri" {
   description = "Key Vault secret URI of the demo passcode. The Container App references it as a secret; the value is never inlined."
   type        = string
-  validation {
-    condition     = var.demo_passcode_secret_uri != null
-    error_message = "demo_passcode_secret_uri must be set to the Key Vault secret URI of the demo passcode."
-  }
+  nullable    = false
 }
