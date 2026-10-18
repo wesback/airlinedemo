@@ -66,6 +66,7 @@ public sealed class SourcePersonalDataTests
         builder.Services.AddSingleton<DemoSessionStore>();
         builder.Services.AddSingleton<ICaseStateStore>(_ => new CaseStateStore(Path.Combine(directory.Path, "case-state.json")));
         builder.Services.AddSingleton<ISourceReadAdmissionStore, InMemorySourceReadAdmissionStore>();
+        builder.Services.AddSingleton<SourceModeStore>();
         builder.Services.AddSingleton<SourceReadBudget>();
         builder.Services.AddSingleton<ISourceSystem<RecordsPayload>, RecordsSource>();
 
