@@ -105,10 +105,18 @@ public sealed class SpecialistReviewFlagTests
         Assert.Equal("specialist review required", result.Record.Reason);
         Assert.Equal("specialist_review_required", result.Record.Claims.Single().SpecialistResult);
         Assert.Empty(result.Inbox.Requests);
-        var output = JsonSerializer.Serialize(result.Record,
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-        foreach (var conclusion in new[] { "lease classification", "impairment", "accounting recognition", "recognized" })
-            Assert.DoesNotContain(conclusion, output, StringComparison.OrdinalIgnoreCase);
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var assessmentOutput = JsonSerializer.Serialize(result.Record, options);
+        var persisted = Assert.IsType<CaseAssessment>(
+            result.Store.FindAssessment(result.Scope, result.Record.AssessmentId!));
+        Assert.Equal(("Review", "specialist review required", "specialist_review_required"),
+            (persisted.Outcome, persisted.Reason, Assert.Single(persisted.Claims).SpecialistResult));
+        var persistedOutput = JsonSerializer.Serialize(persisted, options);
+        foreach (var output in new[] { assessmentOutput, persistedOutput })
+        {
+            foreach (var conclusion in new[] { "lease classification", "impairment", "accounting recognition", "recognized" })
+                Assert.DoesNotContain(conclusion, output, StringComparison.OrdinalIgnoreCase);
+        }
         using var unrelated = Assess(Flag("ifrs16", "specialist_review_required"), "OTHER-REQ");
         Assert.Equal("Request", unrelated.Record.Outcome);
         Assert.Single(unrelated.Inbox.Requests);
