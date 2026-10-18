@@ -151,6 +151,27 @@ mode refreshes pinned basis content; stale/conflicting reads are assessment-only
 
 ## Records envelopes
 
+`GET /api/v1/cases/{caseId}/sources` returns a read-only summary with exactly
+`contractVersion`, `fixtureVersion`, `caseId`, `caseRevision` and `sources`.
+`contractVersion` is `1`; `fixtureVersion` is the verified source-fixture version.
+The `sources` array contains exactly `technical`, `maintenance`, `finance`,
+`records` and `contracts`, in that order. Every status contains exactly
+`sourceId`, `mode`, `capabilityLabel` (`Simulated`) and `coverage`.
+Coverage is true only when the mode is `available` and at least one source record
+belongs to the requested case.
+
+Only a role allowed to read a source's records receives that status's integer
+`recordCount`, boolean `pinnedInBasis` and `recordsInUse`. The detail matrix is
+the same as the direct source-read matrix below. Each `recordsInUse` entry
+contains only `sourceId`, `recordId` and `recordVersion` from the current
+source-basis pins; source payloads and free-form text are never included.
+Presenters and executives receive summaries without those detail fields. An
+unknown role receives 403, while a missing or out-of-scope case is a bodyless
+404. A serialized summary larger than 65,536 bytes returns 422 with
+`error.code = source_payload_limit` and no partial summary. Unauthenticated
+requests return a coded 401; unsupported integer route versions return a coded
+400 with `error.code = unsupported_contract_version`.
+
 `GET /api/v1/cases/{caseId}/sources/{sourceId}/records` returns exactly
 `contractVersion`, `caseId`, `sourceId` and `records`. Each record contains exactly
 `sourceId`, `recordId`, `recordVersion`, `asOf`, `caseId`, `kind`, `stale`,
