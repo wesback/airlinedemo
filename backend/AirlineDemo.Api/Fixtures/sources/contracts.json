@@ -74,6 +74,20 @@
       "payload": { "relatedRequirementId": "REQ-CAPE-TOWN", "topic": "cape_town", "result": "specialist_review_required" }
     },
     {
+      "recordId": "con-cape-town-interest-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "cape_town_interest",
+      "synthetic": true,
+      "payload": {
+        "internationalInterestRef": "SYN-INT-CT-001",
+        "registrationRef": "SYN-REG-CT-001",
+        "idera": "not_recorded",
+        "stateDeclarationNoted": false
+      }
+    },
+    {
       "recordId": "con-specialist-ifrs16-001",
       "recordVersion": 1,
       "asOf": "2026-10-01",

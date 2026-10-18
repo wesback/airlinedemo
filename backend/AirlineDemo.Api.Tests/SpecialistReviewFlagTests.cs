@@ -148,11 +148,15 @@ public sealed class SpecialistReviewFlagTests
         var pinned = SourceFixtureLoader.LoadPinned(committed);
         Assert.Equal(5, pinned.Count);
         var contracts = pinned["contracts"];
-        Assert.Equal(11, contracts.Manifest.RecordCounts["contracts"]);
+        Assert.Equal(12, contracts.Manifest.RecordCounts["contracts"]);
         using (var fixture = JsonDocument.Parse(contracts.FixtureBytes))
         {
             var records = fixture.RootElement.GetProperty("records");
-            Assert.Equal(11, records.GetArrayLength());
+            Assert.Equal(12, records.GetArrayLength());
+            var capeTownRecord = Assert.Single(records.EnumerateArray()
+                .Where(record => record.GetProperty("kind").GetString() == "cape_town_interest"));
+            Assert.Equal("SYN-INT-CT-001", capeTownRecord.GetProperty("payload").GetProperty("internationalInterestRef").GetString());
+            Assert.False(capeTownRecord.GetProperty("payload").GetProperty("stateDeclarationNoted").GetBoolean());
             var flags = records.EnumerateArray()
                 .Where(record => record.GetProperty("kind").GetString() == "specialist_flag")
                 .ToArray();

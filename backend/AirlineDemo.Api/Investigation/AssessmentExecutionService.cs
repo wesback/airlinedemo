@@ -35,7 +35,8 @@ public sealed record AssessedClaim(
     string SerialNumber,
     IReadOnlyList<AssessedWitness> Witnesses,
     string? RelatedRequirementId = null,
-    string? SpecialistResult = null);
+    string? SpecialistResult = null,
+    IReadOnlyList<CapeTownInterestEvidence>? CapeTownEvidence = null);
 
 /// <summary>
 /// The stored result of one assessment. It holds typed values and source identifiers only: no witness quote,
@@ -138,7 +139,12 @@ public sealed class AssessmentExecutionService(
         // Evidence, coverage and identity come only from the stored accepted basis; the supplied basis is matched by identity.
         var documents = isCurrent ? current!.Documents : NoDocuments;
         var specialistFlags = isCurrent ? ReadSpecialistFlags(current!.SourcePins ?? []) : [];
-        var specialistClaims = claims.Select(claim => ResolveSpecialistFlag(claim, specialistFlags)).ToArray();
+        var capeTownEvidence = isCurrent ? ReadCapeTownInterestEvidence(current!.SourcePins ?? []) : [];
+        var capeTownClaims = claims.Select(claim =>
+            ResolveCapeTownEvidence(claim, specialistFlags, capeTownEvidence)).ToArray();
+        var specialistClaims = claims.Select((claim, index) => capeTownClaims[index].Matched
+            ? new SpecialistClaimResolution(capeTownClaims[index].Result, true)
+            : ResolveSpecialistFlag(claim, specialistFlags)).ToArray();
         var validated = claims
             .Select(claim => ClaimValidator.Validate(
                 new InvestigationClaim(claim.Value, claim.Witnesses), claim.Kind, documents, claim.Value))
@@ -151,16 +157,31 @@ public sealed class AssessmentExecutionService(
                 claim.SerialNumber,
                 (claim.Witnesses ?? []).Where(w => w is not null).Select(w => new AssessedWitness(w.DocumentId, w.Page)).ToArray(),
                 claim.RelatedRequirementId,
-                specialistClaims[index].Result))
+                specialistClaims[index].Result,
+                capeTownClaims[index].Matched
+                    ? capeTownClaims[index].Evidence.Select(item => item.Evidence).ToArray()
+                    : null))
             .ToArray();
         assessed = assessed.Select((claim, index) =>
         {
+            if (capeTownClaims[index].Matched)
+            {
+                claim = claim with
+                {
+                    Witnesses = claim.Witnesses.Concat(capeTownClaims[index].Evidence.Select(item =>
+                        new AssessedWitness(
+                            $"source:{item.Pin.SourceId}:{item.Pin.RecordId}:v{item.Pin.RecordVersion}",
+                            0))).ToArray(),
+                };
+            }
             if (!sourceModeFinding.WitnessesByClaim.TryGetValue(index, out var sourceWitnesses))
                 return claim;
             return claim with { Witnesses = claim.Witnesses.Concat(sourceWitnesses).ToArray() };
         }).ToArray();
 
-        var specialistRoute = RouteSpecialistFlags(specialistClaims);
+        var specialistRoute = capeTownClaims.Any(claim => claim.Matched)
+            ? (Review, "specialist review required")
+            : RouteSpecialistFlags(specialistClaims);
         var (outcome, reason) = isCurrent
             ? sourceModeFinding.Reason is { } sourceReason
                 ? (Review, sourceReason)
@@ -382,6 +403,11 @@ public sealed class AssessmentExecutionService(
     }
 
     private sealed record SpecialistClaimResolution(string? Result, bool Matched, bool RelatedToUnmatchedRegime = false);
+    private sealed record PinnedCapeTownEvidence(SourceBasisPin Pin, CapeTownInterestEvidence Evidence);
+    private sealed record CapeTownClaimResolution(
+        string? Result,
+        bool Matched,
+        IReadOnlyList<PinnedCapeTownEvidence> Evidence);
 
     private static SpecialistClaimResolution ResolveSpecialistFlag(
         AssessmentClaim claim,
@@ -443,5 +469,39 @@ public sealed class AssessmentExecutionService(
             flags.Add(SpecialistReviewFlag.Parse(values));
         }
         return flags;
+    }
+
+    private static CapeTownClaimResolution ResolveCapeTownEvidence(
+        AssessmentClaim claim,
+        IReadOnlyList<SpecialistReviewFlag> flags,
+        IReadOnlyList<PinnedCapeTownEvidence> evidence)
+    {
+        if (evidence.Count == 0 || string.IsNullOrWhiteSpace(claim.RelatedRequirementId))
+            return new CapeTownClaimResolution(null, false, []);
+
+        var flag = flags.FirstOrDefault(item =>
+            item.Topic == "cape_town"
+            && string.Equals(item.RelatedRequirementId, claim.RelatedRequirementId, StringComparison.Ordinal));
+        if (flag is null)
+            throw new InvalidDataException(
+                "A finding relying on cape_town_interest requires an exact matching cape_town specialist_flag.");
+        return new CapeTownClaimResolution(flag.Result, true, evidence);
+    }
+
+    private static IReadOnlyList<PinnedCapeTownEvidence> ReadCapeTownInterestEvidence(
+        IReadOnlyList<SourceBasisPin> pins)
+    {
+        var evidence = new List<PinnedCapeTownEvidence>();
+        foreach (var pin in pins.Where(pin => pin.SourceId == "contracts"))
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(pin.Content);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("kind", out var kind) || kind.GetString() != "cape_town_interest")
+                continue;
+            if (!root.TryGetProperty("payload", out var payload))
+                throw new InvalidDataException("Pinned cape_town_interest payload is invalid.");
+            evidence.Add(new PinnedCapeTownEvidence(pin, ContractsPayload.ParsePinnedCapeTownInterest(payload)));
+        }
+        return evidence.AsReadOnly();
     }
 }
