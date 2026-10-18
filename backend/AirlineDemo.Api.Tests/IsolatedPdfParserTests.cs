@@ -64,6 +64,51 @@ public class IsolatedPdfParserTests
         return pdf.ToArray();
     }
 
+    private static byte[] TextContentPdf(byte[] streamContent, int pageCount, bool indirectContentsArray = false)
+    {
+        using var pdf = new MemoryStream();
+        var offsets = new List<long>();
+        void Object(string header)
+        {
+            offsets.Add(pdf.Position);
+            Write(pdf, header);
+        }
+
+        var pageIds = Enumerable.Range(3, pageCount).ToArray();
+        var streamId = pageCount + 3;
+        var arrayId = streamId + 1;
+        var contentReference = indirectContentsArray ? arrayId : streamId;
+
+        Write(pdf, "%PDF-1.4\n");
+        Object("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        Object($"2 0 obj << /Type /Pages /Kids [{string.Join(' ', pageIds.Select(id => $"{id} 0 R"))}] /Count {pageCount} >> endobj\n");
+        foreach (var pageId in pageIds)
+        {
+            Object($"{pageId} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contentReference} 0 R >> endobj\n");
+        }
+
+        if (indirectContentsArray)
+        {
+            Object($"{arrayId} 0 obj [{streamId} 0 R] endobj\n");
+        }
+
+        Object($"{streamId} 0 obj << /Length {streamContent.Length} >> stream\n");
+        pdf.Write(streamContent);
+        Write(pdf, "\nendstream endobj\n");
+
+        var xrefOffset = pdf.Position;
+        var size = offsets.Count + 1;
+        var xref = new StringBuilder($"xref\n0 {size}\n0000000000 65535 f \n");
+        foreach (var offset in offsets)
+        {
+            xref.Append($"{offset:D10} 00000 n \n");
+        }
+
+        xref.Append($"trailer << /Root 1 0 R /Size {size} >>\nstartxref\n{xrefOffset}\n%%EOF\n");
+        Write(pdf, xref.ToString());
+        return pdf.ToArray();
+    }
+
     private static void Write(MemoryStream stream, string text)
     {
         var bytes = Encoding.ASCII.GetBytes(text);
@@ -168,6 +213,64 @@ public class IsolatedPdfParserTests
 
         Assert.Equal(BombReason, outcome.Reason);
         Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void LargeTextStreamIsRejectedBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(TextContentPdf(textSource, pageCount: 1), CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void RepeatedPageContentReferencesAreBoundedBeforeStartingWorker()
+    {
+        var boundedContent = Encoding.ASCII.GetBytes($"({new string('x', 500 * 1024)}) Tj");
+        var startsForOnePage = new[] { 0 };
+        var onePageOptions = new IsolatedPdfParserOptions
+        {
+            WorkerFileName = "/bin/sh",
+            WorkerArguments = new[]
+            {
+                "-c",
+                "cat >/dev/null; printf '%s' '{\"State\":\"Complete\",\"Reason\":\"accepted\",\"Text\":\"bounded text\"}'",
+            },
+            WorkerStarting = () => startsForOnePage[0]++,
+        };
+
+        var onePage = IsolatedPdfParser.Parse(TextContentPdf(boundedContent, pageCount: 1), onePageOptions);
+
+        Assert.Equal(EvidenceProcessingState.Complete, onePage.State);
+        Assert.Equal("accepted", onePage.Reason);
+        Assert.Equal("bounded text", onePage.Text);
+        Assert.Equal(1, startsForOnePage[0]);
+
+        var startsForSharedReference = new[] { 0 };
+        var sharedReference = IsolatedPdfParser.Parse(
+            TextContentPdf(boundedContent, pageCount: 200),
+            CountingWorker(startsForSharedReference));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, sharedReference.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", sharedReference.Reason);
+        Assert.Equal(string.Empty, sharedReference.Text);
+        Assert.Equal(0, startsForSharedReference[0]);
+
+        var startsForIndirectArray = new[] { 0 };
+        var indirectArray = IsolatedPdfParser.Parse(
+            TextContentPdf(boundedContent, pageCount: 200, indirectContentsArray: true),
+            CountingWorker(startsForIndirectArray));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, indirectArray.State);
+        Assert.Equal(UnreadableReason, indirectArray.Reason);
+        Assert.Equal(string.Empty, indirectArray.Text);
+        Assert.Equal(0, startsForIndirectArray[0]);
     }
 
     // AC-2: exceeding the 30 second wall-clock limit kills the child (tested here with a 2 second limit).
