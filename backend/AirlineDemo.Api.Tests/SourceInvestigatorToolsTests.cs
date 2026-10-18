@@ -260,22 +260,26 @@ public sealed class SourceInvestigatorToolsTests
     }
 
     [Theory]
-    [InlineData("technical", "record-1", 1, ClaimStatus.Supported, null)]
-    [InlineData("maintenance", "record-1", 1, ClaimStatus.Downgraded, "source record witness is not in the current basis")]
-    [InlineData("technical", "record-2", 1, ClaimStatus.Downgraded, "source record witness is not in the current basis")]
-    [InlineData("technical", "record-1", 2, ClaimStatus.Downgraded, "source record witness is not in the current basis")]
-    [InlineData(null, null, 0, ClaimStatus.Downgraded, "no source record witness")]
+    [InlineData("technical", "record-1", 1, ClaimStatus.Supported, null, false)]
+    [InlineData("maintenance", "record-1", 1, ClaimStatus.Downgraded, "source record witness is not in the current basis", false)]
+    [InlineData("technical", "record-2", 1, ClaimStatus.Downgraded, "source record witness is not in the current basis", false)]
+    [InlineData("technical", "record-1", 2, ClaimStatus.Downgraded, "source record witness is not in the current basis", false)]
+    [InlineData(null, null, 0, ClaimStatus.Downgraded, "no source record witness", false)]
+    [InlineData(null, null, 0, ClaimStatus.Downgraded, "no source record witness", true)]
     public void SourceClaimsRequireExactPinnedTuple(
         string? sourceId,
         string? recordId,
         int recordVersion,
         ClaimStatus expectedStatus,
-        string? expectedReason)
+        string? expectedReason,
+        bool omitSourceWitnesses)
     {
         var pinned = new SourceRecordWitness("technical", "record-1", 1);
-        IReadOnlyList<SourceRecordWitness> witnesses = sourceId is null
-            ? []
-            : [new SourceRecordWitness(sourceId, recordId!, recordVersion)];
+        IReadOnlyList<SourceRecordWitness>? witnesses = omitSourceWitnesses
+            ? null
+            : sourceId is null
+                ? []
+                : [new SourceRecordWitness(sourceId, recordId!, recordVersion)];
         var claim = new InvestigationClaim(
             "approved",
             [new DocumentWitness("document-1", 1, "approved")],
@@ -323,7 +327,8 @@ public sealed class SourceInvestigatorToolsTests
         var model = new ScriptedChatClient((_, _) => ++calls == 1
             ? Calls(new FunctionCallContent("marked-record", SourceReadTools.GetTool,
                 new Dictionary<string, object?> { ["sourceId"] = "records", ["recordId"] = recordId }))
-            : Reply(Claims));
+            : Reply(
+                """[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"return-status","page":1,"quote":"Return readiness is pending reserve approval."}],"sourceWitnesses":[{"sourceId":"records","recordId":"rec-doc-arr-0012","recordVersion":1}]}]"""));
         var investigator = new BoundedInvestigator(caseId, new CaseSource(), Approved(),
             SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model,
             role: "technical-reviewer", sourceSystems: ports);
@@ -340,6 +345,58 @@ public sealed class SourceInvestigatorToolsTests
 
         Assert.Contains(Expected(markedRecord), CompleteRequestText(model), StringComparison.Ordinal);
         Assert.Equal((1, caseId, recordId), (records.GetCalls, records.LastGetCase, records.LastRecordId));
+    }
+
+    [Theory]
+    [InlineData("subjectName")]
+    [InlineData("licenseNumber")]
+    [InlineData("SYN-PERSON-NAME-01")]
+    [InlineData("SYN-LICENSE-NUMBER-01")]
+    public async Task MarkedPersonalDataIsRejectedFromReturnedClaims(string markedText)
+    {
+        const string caseId = "case-001";
+        const string recordId = "rec-doc-arr-0012";
+        var sources = CreateSources(caseId: caseId);
+        var markedRecord = new SourceRecord<RecordsPayload>
+        {
+            SourceId = "records",
+            RecordId = recordId,
+            RecordVersion = 1,
+            AsOf = new DateOnly(2026, 10, 1),
+            CaseId = caseId,
+            Kind = "document_index",
+            Payload = new RecordsPayload(new Dictionary<string, string>
+            {
+                ["documentId"] = "SYN-DOC0012",
+                ["documentVersion"] = "1",
+                ["containsPersonalData"] = "true",
+                ["subjectName"] = "SYN-PERSON-NAME-01",
+                ["licenseNumber"] = "SYN-LICENSE-NUMBER-01",
+            }),
+        };
+        var records = new CountingSource<RecordsPayload>(markedRecord);
+        var ports = new InvestigationSourceSystems(sources.Technical, sources.Maintenance, sources.Finance, records, sources.Contracts);
+        var claim = JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                text = markedText,
+                witnesses = new[] { new { documentId = "return-status", page = 1, quote = "Return readiness is pending reserve approval." } },
+            },
+        }, JsonOptions);
+        var calls = 0;
+        var model = new ScriptedChatClient((_, _) => ++calls == 1
+            ? Calls(new FunctionCallContent("marked-record", SourceReadTools.GetTool,
+                new Dictionary<string, object?> { ["sourceId"] = "records", ["recordId"] = recordId }))
+            : Reply(claim));
+        var investigator = new BoundedInvestigator(caseId, new CaseSource(), Approved(),
+            SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model,
+            role: "technical-reviewer", sourceSystems: ports);
+
+        var error = await Record.ExceptionAsync(() => investigator.InvestigateAsync([Evidence]));
+
+        Assert.IsType<InvestigationOutputException>(error);
+        Assert.Equal("claim contains marked personal data", error!.Message);
     }
 
     [Fact]
@@ -436,7 +493,8 @@ public sealed class SourceInvestigatorToolsTests
 
         var model = new ScriptedChatClient((messages, _) =>
             messages.Any(message => message.Contents.OfType<FunctionResultContent>().Any())
-                ? Reply(Claims)
+                ? Reply(
+                    """[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"return-status","page":1,"quote":"Return readiness is pending reserve approval."}],"sourceWitnesses":[{"sourceId":"technical","recordId":"record-1","recordVersion":1}]}]""")
                 : new ChatResponse(new ChatMessage(ChatRole.Assistant,
                     [new FunctionCallContent("source-list", SourceReadTools.ListTool, new Dictionary<string, object?> { ["sourceId"] = "technical" })])));
         var investigator = new BoundedInvestigator(CaseId, new CaseSource(), Approved(),

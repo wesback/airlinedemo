@@ -26,6 +26,8 @@ public sealed class SourceReadTools(
 
     private IReadOnlyList<AIFunction>? _functions;
     private readonly HashSet<SourceRecordWitness> _readWitnesses = [];
+    private readonly HashSet<string> _markedPersonalDataFields = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _markedPersonalDataValues = new(StringComparer.Ordinal);
     private readonly object _witnessGate = new();
 
     internal IReadOnlyCollection<SourceRecordWitness> ReadWitnesses
@@ -36,6 +38,15 @@ public sealed class SourceReadTools(
             {
                 return _readWitnesses.ToArray();
             }
+        }
+    }
+
+    internal bool ContainsMarkedPersonalData(string text)
+    {
+        lock (_witnessGate)
+        {
+            return _markedPersonalDataFields.Any(field => text.Contains(field, StringComparison.OrdinalIgnoreCase))
+                || _markedPersonalDataValues.Any(value => text.Contains(value, StringComparison.Ordinal));
         }
     }
 
@@ -137,6 +148,7 @@ public sealed class SourceReadTools(
     private string AddWitnessAndSerialize<TPayload>(SourceRecord<TPayload> record) where TPayload : class
     {
         AddWitness(record);
+        TrackMarkedPersonalData(record);
         return Untrusted(SerializeRecord(record));
     }
 
@@ -145,9 +157,39 @@ public sealed class SourceReadTools(
         foreach (var record in records)
         {
             AddWitness(record);
+            TrackMarkedPersonalData(record);
         }
 
         return Untrusted("[" + string.Join(",", records.Select(SerializeRecord)) + "]");
+    }
+
+    private void TrackMarkedPersonalData<TPayload>(SourceRecord<TPayload> record) where TPayload : class
+    {
+        if (record.Payload is not RecordsPayload { ContainsPersonalData: true } payload)
+        {
+            return;
+        }
+
+        lock (_witnessGate)
+        {
+            foreach (var (field, value) in payload.Fields)
+            {
+                if (field is "documentId" or "documentVersion" or "containsPersonalData")
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(field))
+                {
+                    _markedPersonalDataFields.Add(field);
+                }
+
+                if (!string.IsNullOrEmpty(value))
+                {
+                    _markedPersonalDataValues.Add(value);
+                }
+            }
+        }
     }
 
     private static string SerializeRecord<TPayload>(SourceRecord<TPayload> record) where TPayload : class

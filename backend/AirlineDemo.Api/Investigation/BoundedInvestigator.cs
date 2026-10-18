@@ -126,7 +126,7 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationLimitExceededException(breach);
             }
 
-            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder, sourceTools?.ReadWitnesses), gate.Traces);
+            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder, sourceTools), gate.Traces);
             outcome = "approved";
             return result;
         }
@@ -210,8 +210,9 @@ public sealed class BoundedInvestigator(
     private IReadOnlyList<InvestigationClaim> VerifyClaims(
         string modelText,
         InvestigationTraceRecorder? traceRecorder,
-        IReadOnlyCollection<SourceRecordWitness>? sourceWitnesses)
+        SourceReadTools? sourceTools)
     {
+        var sourceWitnesses = sourceTools?.ReadWitnesses;
         List<ClaimDto>? dtos;
         try
         {
@@ -241,6 +242,11 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationOutputException("claim echoes the investigator prompt");
             }
 
+            if (sourceTools?.ContainsMarkedPersonalData(dto.Text) == true)
+            {
+                throw new InvestigationOutputException("claim contains marked personal data");
+            }
+
             if (ClaimValidator.SourceWitnessProblem(dto.SourceWitnesses, sourceWitnesses) is { } sourceProblem)
             {
                 throw new InvestigationOutputException(sourceProblem);
@@ -252,6 +258,11 @@ public sealed class BoundedInvestigator(
                 if (witness.DocumentId is null || !inventory.Contains(witness.DocumentId) || string.IsNullOrEmpty(witness.Quote))
                 {
                     throw new InvestigationOutputException("witness is not a document of this case");
+                }
+
+                if (sourceTools?.ContainsMarkedPersonalData(witness.Quote) == true)
+                {
+                    throw new InvestigationOutputException("claim contains marked personal data");
                 }
 
                 var page = source.GetSourcePage(caseId, witness.DocumentId, witness.Page);

@@ -98,7 +98,7 @@ public static class ClaimValidator
     {
         if (witnesses is null)
         {
-            return null;
+            return sourceBasis is { Count: > 0 } ? "no source record witness" : null;
         }
 
         if (witnesses.Count == 0)
