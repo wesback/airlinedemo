@@ -600,15 +600,15 @@ public static class IsolatedPdfParser
     {
         length = 0;
         lengthReference = null;
-        var key = FindPdfToken(dictionary, "/Length"u8, 0);
+        var key = FindPdfDictionaryToken(dictionary, "/Length"u8);
         if (key < 0) return false;
-        var cursor = SkipWhitespace(dictionary, key + "/Length"u8.Length);
+        var cursor = SkipPdfWhitespaceAndComments(dictionary, key + "/Length"u8.Length);
         if (!TryReadInteger(dictionary, ref cursor, out length)) return false;
-        cursor = SkipWhitespace(dictionary, cursor);
+        cursor = SkipPdfWhitespaceAndComments(dictionary, cursor);
         if (cursor < dictionary.Length && IsDigit(dictionary[cursor]))
         {
             if (!TryReadInteger(dictionary, ref cursor, out var generation)) return false;
-            cursor = SkipWhitespace(dictionary, cursor);
+            cursor = SkipPdfWhitespaceAndComments(dictionary, cursor);
             if (IsPdfToken(dictionary, cursor, "R"u8))
             {
                 lengthReference = (length, generation);
@@ -617,6 +617,74 @@ public static class IsolatedPdfParser
         }
 
         return cursor == dictionary.Length || IsPdfDelimiterOrWhitespace(dictionary[cursor]);
+    }
+
+    private static int FindPdfDictionaryToken(ReadOnlySpan<byte> source, ReadOnlySpan<byte> token)
+    {
+        for (var position = 0; position < source.Length;)
+        {
+            if (source[position] == '%')
+            {
+                while (position < source.Length && source[position] is not (byte)'\r' and not (byte)'\n') position++;
+                continue;
+            }
+
+            if (source[position] == '(')
+            {
+                position = SkipLiteralString(source, position);
+                continue;
+            }
+
+            if (source[position] == '<')
+            {
+                if (position + 1 < source.Length && source[position + 1] == '<')
+                {
+                    position += 2;
+                }
+                else
+                {
+                    position++;
+                    while (position < source.Length && source[position] != '>') position++;
+                    if (position < source.Length) position++;
+                }
+
+                continue;
+            }
+
+            var after = position + token.Length;
+            if (after <= source.Length
+                && source.Slice(position, token.Length).SequenceEqual(token)
+                && (position == 0 || IsPdfDelimiterOrWhitespace(source[position - 1]))
+                && (after == source.Length || IsPdfDelimiterOrWhitespace(source[after])))
+            {
+                return position;
+            }
+
+            position++;
+        }
+
+        return -1;
+    }
+
+    private static int SkipPdfWhitespaceAndComments(ReadOnlySpan<byte> source, int position)
+    {
+        while (position < source.Length)
+        {
+            if (IsPdfWhitespace(source[position]))
+            {
+                position++;
+            }
+            else if (source[position] == '%')
+            {
+                while (position < source.Length && source[position] is not (byte)'\r' and not (byte)'\n') position++;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return position;
     }
 
     private static void ResolveIndirectStreamLengths(

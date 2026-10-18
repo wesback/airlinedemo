@@ -69,7 +69,8 @@ public class IsolatedPdfParserTests
         int pageCount,
         bool indirectContentsArray = false,
         string streamDictionaryEntries = "",
-        bool indirectStreamLength = false)
+        bool indirectStreamLength = false,
+        string streamDictionaryPrefix = "")
     {
         using var pdf = new MemoryStream();
         var offsets = new List<long>();
@@ -99,7 +100,7 @@ public class IsolatedPdfParserTests
             Object($"{arrayId} 0 obj [{streamId} 0 R] endobj\n");
         }
 
-        Object($"{streamId} 0 obj << /Length {streamLength} {streamDictionaryEntries} >> stream\n");
+        Object($"{streamId} 0 obj << {streamDictionaryPrefix}/Length {streamLength} {streamDictionaryEntries} >> stream\n");
         pdf.Write(streamContent);
         Write(pdf, "\nendstream endobj\n");
         if (indirectStreamLength)
@@ -233,6 +234,22 @@ public class IsolatedPdfParserTests
         var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
 
         var outcome = IsolatedPdfParser.Parse(TextContentPdf(textSource, pageCount: 1), CountingWorker(starts));
+
+        Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
+        Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
+        Assert.Equal(string.Empty, outcome.Text);
+        Assert.Equal(0, starts[0]);
+    }
+
+    [Fact]
+    public void CommentedLengthEntryCannotBypassTextSourceLimitBeforeStartingWorker()
+    {
+        var starts = new[] { 0 };
+        var textSource = Encoding.ASCII.GetBytes($"({new string('x', 512 * 1024)}) Tj");
+
+        var outcome = IsolatedPdfParser.Parse(
+            TextContentPdf(textSource, pageCount: 1, streamDictionaryPrefix: "% /Length 1\n"),
+            CountingWorker(starts));
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, outcome.State);
         Assert.Equal("PDF text source exceeds 524288 bytes; retry is possible", outcome.Reason);
