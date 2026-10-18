@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "repositoryRevision": "ca30f880c8e02f93a0bce49a99068ecf88cbad41",
+  "deploymentId": "not measured",
+  "observations": [
+    {
+      "scope": "not measured",
+      "category": "not measured",
+      "plannedAmount": "not measured",
+      "observedAmount": "not measured",
+      "varianceAmount": "not measured",
+      "currency": "not measured",
+      "periodStartUtc": "not measured",
+      "periodEndUtc": "not measured",
+      "plannedEvidenceReference": "not measured",
+      "observedEvidenceReference": "not measured",
+      "plannedEvidenceLabel": "not measured",
+      "observedEvidenceLabel": "not measured",
+      "varianceEvidenceLabel": "not measured"
+    }
+  ]
+}
