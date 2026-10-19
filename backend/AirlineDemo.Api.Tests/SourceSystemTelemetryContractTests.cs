@@ -115,6 +115,7 @@ public sealed class SourceSystemTelemetryContractTests
         IReadOnlyList<KeyValuePair<string, object?>> Attributes,
         string? Body,
         bool HasTimestamp,
+        bool HasAttributes,
         bool HasOtelSeverityText,
         bool HasOtelSeverityNumber,
         string? OtelSeverityText,
@@ -154,6 +155,7 @@ public sealed class SourceSystemTelemetryContractTests
                 attributes,
                 data.Body,
                 data.Timestamp != default,
+                data.Attributes is not null,
                 !string.IsNullOrWhiteSpace(otelSeverityText),
                 otelSeverityNumber.HasValue,
                 otelSeverityText,
@@ -320,19 +322,37 @@ public sealed class SourceSystemTelemetryContractTests
             "telemetry.sdk.version",
         };
 
-        foreach (var captured in new[] { outsideSpan, insideSpan })
+        foreach (var (captured, expectedName) in new[]
+        {
+            (outsideSpan, TelemetryRedaction.SourceEvents.SourceUnavailable),
+            (insideSpan, TelemetryRedaction.SourceEvents.ReadLimited),
+        })
         {
             Assert.True(captured.HasTimestamp);
+            Assert.True(captured.HasAttributes);
             Assert.True(captured.HasOtelSeverityText);
             Assert.True(captured.HasOtelSeverityNumber);
             Assert.Equal("Warning", captured.OtelSeverityText);
             Assert.Equal(13, captured.OtelSeverityNumber);
             Assert.Equal("diagnostic event", captured.Body);
-            Assert.NotEmpty(captured.Attributes);
+            var attributes = captured.Attributes.ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+            Assert.Equal(expectedName, attributes["event.name"]);
+            Assert.Equal(TelemetryRedaction.ServiceName, attributes["service.name"]);
+            Assert.Equal(TelemetryRedaction.ServiceVersion, attributes["service.version"]);
+            Assert.Equal(environmentName.ToLowerInvariant(), attributes["deployment.environment"]);
+            Assert.Equal("WARN", attributes["severity.text"]);
+            Assert.Equal(13, Convert.ToInt32(attributes["severity.number"]));
             Assert.Equal(
                 expectedResourceKeys,
                 captured.Resource.Select(attribute => attribute.Key).OrderBy(key => key, StringComparer.Ordinal));
             Assert.All(captured.Resource, attribute => Assert.NotNull(attribute.Value));
+            var resource = captured.Resource.ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+            Assert.Equal(TelemetryRedaction.ServiceName, resource["service.name"]);
+            Assert.Equal(TelemetryRedaction.ServiceVersion, resource["service.version"]);
+            Assert.Equal(environmentName.ToLowerInvariant(), resource["deployment.environment"]);
+            Assert.Equal("opentelemetry", resource["telemetry.sdk.name"]);
+            Assert.Equal("dotnet", resource["telemetry.sdk.language"]);
+            Assert.False(string.IsNullOrWhiteSpace(resource["telemetry.sdk.version"]?.ToString()));
         }
 
         Assert.Null(outsideSpan.TraceId);
@@ -387,21 +407,59 @@ public sealed class SourceSystemTelemetryContractTests
             new KeyValuePair<string, object?>(attribute, "approval-fixture-value")));
         Assert.Empty(defaultFilteredAttributes);
 
-        var events = new List<CapturedEvent>();
-        await using var factory = CreateFactory(
+        var sourceAttributeValues = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["source.id"] = "technical",
+            ["case.id"] = CaseId,
+            ["event.outcome"] = "unavailable",
+            ["duration"] = 42,
+        };
+        var approvedAttributeValues = permittedAttributes.ToDictionary(
+            attribute => attribute,
+            attribute => sourceAttributeValues[attribute],
+            StringComparer.Ordinal);
+        var approvedEvents = new List<CapturedEvent>();
+        await using var approvedFactory = CreateFactory(
             Path.Combine(temporaryDirectory.Path, "case-state.json"),
-            events,
+            approvedEvents,
             new ControlledSource(),
             new ControlledAdmission(),
             auditFailure: false);
-        var logger = factory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-approval-test");
-        SourceSystemDiagnostics.SourceUnavailable(
-            logger,
-            factory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
+        var approvedLogger = approvedFactory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-approval-test");
+        using (approvedLogger.BeginScope(approvedAttributeValues))
+        {
+            SourceSystemDiagnostics.SourceUnavailable(
+                approvedLogger,
+                approvedFactory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
+        }
 
-        var sourceEvent = Assert.Single(events, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
-        var emittedAttributeNames = sourceEvent.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
-        Assert.Empty(permittedAttributes.Intersect(emittedAttributeNames, StringComparer.Ordinal));
+        var approvedSourceEvent = Assert.Single(approvedEvents, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
+        var emittedApprovedAttributes = approvedSourceEvent.Attributes
+            .Where(attribute => expectedPermittedAttributes.Contains(attribute.Key, StringComparer.Ordinal))
+            .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+        Assert.Equal(
+            expectedPermittedAttributes.OrderBy(attribute => attribute, StringComparer.Ordinal),
+            emittedApprovedAttributes.Keys.OrderBy(attribute => attribute, StringComparer.Ordinal));
+        foreach (var (key, value) in approvedAttributeValues)
+        {
+            Assert.Equal(value, emittedApprovedAttributes[key]);
+        }
+
+        var defaultEvents = new List<CapturedEvent>();
+        await using var defaultFactory = CreateFactory(
+            Path.Combine(temporaryDirectory.Path, "default-case-state.json"),
+            defaultEvents,
+            new ControlledSource(),
+            new ControlledAdmission(),
+            auditFailure: false);
+        var defaultLogger = defaultFactory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-default-approval-test");
+        SourceSystemDiagnostics.SourceUnavailable(
+            defaultLogger,
+            defaultFactory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
+
+        var defaultSourceEvent = Assert.Single(defaultEvents, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
+        var defaultEmittedAttributeNames = defaultSourceEvent.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
+        Assert.Empty(expectedPermittedAttributes.Intersect(defaultEmittedAttributeNames, StringComparer.Ordinal));
     }
 
     private static string FindRepositoryRoot()
@@ -428,7 +486,13 @@ public sealed class SourceSystemTelemetryContractTests
             }));
             builder.ConfigureLogging(logging => logging.AddOpenTelemetry(options =>
             {
-                var resourceBuilder = ResourceBuilder.CreateEmpty().AddAttributes(TestResourceAttributes());
+                var resourceAttributes = TelemetryRedaction.ResourceAttributes(
+                        TelemetryRedaction.ServiceVersion,
+                        (builder.GetSetting(WebHostDefaults.EnvironmentKey) ?? Environments.Development).ToLowerInvariant())
+                    .Select(attribute => new KeyValuePair<string, object>(attribute.Key, attribute.Value));
+                var resourceBuilder = ResourceBuilder.CreateEmpty()
+                    .AddTelemetrySdk()
+                    .AddAttributes(resourceAttributes);
                 options.SetResourceBuilder(resourceBuilder);
                 options.IncludeScopes = true;
                 options.AddRedaction();
@@ -449,22 +513,6 @@ public sealed class SourceSystemTelemetryContractTests
                 }
             });
         });
-
-    private static IReadOnlyList<KeyValuePair<string, object>> TestResourceAttributes()
-    {
-        var attributes = TelemetryRedaction.ResourceAttributes(
-                TelemetryRedaction.ServiceVersion,
-                "test")
-            .Select(attribute => new KeyValuePair<string, object>(attribute.Key, attribute.Value))
-            .ToList();
-        attributes.AddRange(
-        [
-            new("telemetry.sdk.language", "dotnet"),
-            new("telemetry.sdk.name", "opentelemetry"),
-            new("telemetry.sdk.version", typeof(LogRecord).Assembly.GetName().Version?.ToString(3) ?? "0.0.0"),
-        ]);
-        return attributes;
-    }
 
     private static Task<HttpResponseMessage> Get(HttpClient client, DemoSession session, string path)
     {
