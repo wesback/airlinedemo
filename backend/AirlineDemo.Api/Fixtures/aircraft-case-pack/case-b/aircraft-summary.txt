@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-SYNTHETIC EVIDENCE: Regional demonstration aircraft CP-B-001.
-=======
 Synthetic Case B aircraft summary, scenario date 2026-10-14.
 Fictional regional passenger aircraft registration N-CPBX.
 No actual aircraft, operator, manufacturer, or registration is represented.
->>>>>>> origin/main

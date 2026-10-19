@@ -32,6 +32,8 @@ public sealed class CasePackAdversarialTests
     {
         using var state = new StateHarness();
         var files = CasePackFixture.ReadDocuments(CasePackFixture.ReadFixture());
+        files["case-b/document-instructions.txt"] = File.ReadAllText(
+            Path.Combine(CasePackFixture.Root(), "case-b", "document-instructions.txt"));
         var source = new CaseBSource(files);
         var model = new HostileClient(AttackClaims);
         var text = files["case-b/document-instructions.txt"].Trim();
@@ -69,7 +71,7 @@ public sealed class CasePackAdversarialTests
     {
         var fixture = CasePackFixture.ReadFixture();
         var files = CasePackFixture.ReadDocuments(fixture);
-        var validQuote = files["case-b/llp-history-gap.txt"].Trim();
+        var validQuote = files["case-b/engine-history-index.txt"].Trim();
         var cases = new (string Input, string Reason)[]
         {
             ("inventory", "document not in current inventory"),
@@ -178,10 +180,15 @@ public sealed class CasePackAdversarialTests
         Assert.Equal(["Claims"], typeof(AssessmentSubmission).GetProperties().Select(property => property.Name));
         using (var state = new StateHarness())
         {
-            var filesSource = new CaseBSource(files);
+            var investigatorFiles = new Dictionary<string, string>(files, StringComparer.Ordinal)
+            {
+                ["case-b/document-instructions.txt"] = File.ReadAllText(
+                    Path.Combine(CasePackFixture.Root(), "case-b", "document-instructions.txt")),
+            };
+            var filesSource = new CaseBSource(investigatorFiles);
             var investigator = Investigator(filesSource, new HostileClient("not-json"));
             await Assert.ThrowsAsync<InvestigationOutputException>(() =>
-                investigator.InvestigateAsync([files["case-b/document-instructions.txt"].Trim()]));
+                investigator.InvestigateAsync([investigatorFiles["case-b/document-instructions.txt"].Trim()]));
             Assert.Empty(state.Assessments.List(CasePackFixture.CaseId));
             Assert.Empty(state.Inbox.Requests);
         }
