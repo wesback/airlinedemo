@@ -25,6 +25,7 @@ public sealed class AircraftCasePackCaseCTests
     {
         var root = FixtureRoot();
         var fixture = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "case-c.json")))!.AsObject();
+        Assert.Equal(8, Documents(fixture).Count);
         var manifestJson = File.ReadAllText(Path.Combine(root, "manifest.json"));
         var manifest = AircraftCasePackManifest.Parse(manifestJson, ReadPackFiles(root,
             JsonSerializer.Deserialize<AircraftCasePackManifest>(manifestJson, WebJson)!));
