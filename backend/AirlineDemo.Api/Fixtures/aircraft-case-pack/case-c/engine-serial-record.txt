@@ -1,0 +1,3 @@
+Synthetic engine installation record.
+Engine serial ENG-CP-C-001 is installed on fictional wide-body AIRFRAME-CP-C-003.
+The serial agrees with the aircraft summary and engine history index.

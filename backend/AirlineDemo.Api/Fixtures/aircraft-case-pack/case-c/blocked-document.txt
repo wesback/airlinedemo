@@ -1,0 +1,3 @@
+Synthetic main-landing-gear inspection report for AIRFRAME-CP-C-003.
+The recorded inspection is complete and has no open findings.
+The blocked variant models retryable processing failure, not an absent inspection.

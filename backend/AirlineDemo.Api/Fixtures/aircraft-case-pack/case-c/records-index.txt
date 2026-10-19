@@ -1,0 +1,3 @@
+Synthetic records index for fictional case CP-WB-003.
+It lists the aircraft summary, engine records, maintenance log, blocked-document report, and work card.
+Every listed item belongs to the same fictional aircraft evidence set.

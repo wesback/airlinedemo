@@ -1,0 +1,3 @@
+Synthetic engine history index for ENG-CP-C-001 on AIRFRAME-CP-C-003.
+The index links the serial record, shop visit, and scheduled maintenance records.
+No identity conflict is recorded in this fictional evidence set.
