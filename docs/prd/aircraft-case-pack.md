@@ -2,7 +2,7 @@
 prd_id: "aircraft-case-pack"
 title: "Aircraft Synthetic Case Pack and Scene Projection API"
 status: "draft"
-version: "0.2.1"
+version: "0.3.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-14"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Synthetic Case Pack and Scene Projection API
 
-> **aircraft-case-pack** | Status: Draft | Version: 0.2.1 | Last Updated: 2026-10-14
+> **aircraft-case-pack** | Status: Draft | Version: 0.3.0 | Last Updated: 2026-10-14
 
 ## Executive Summary
 
@@ -70,6 +70,10 @@ All aircraft, records, actors, and decisions are synthetic or simulated.
 | DD-010 | Status vocabulary: a case status is the ARR assessment, review, request, and acceptance state shown by ARR:FR-008. The projection reuses those states and adds none. |
 | DD-011 | IDs are local to each PRD: `FR-001`, `AC-001`, `NFR-001`, `CON-001`, `DD-001`, and `GOAL-001`. Cross-document references use `ARR:FR-001`, `CP:FR-001`, or `HG:FR-001`, with the corresponding PRD path. Version 0.2.0 removes the draft `CP-` prefixes before any implementation stories exist. |
 | DD-012 | The current pipeline creates dependencies only within one PRD plan. The product owner enforces ARR then CP then HG by staging PRD merges, not by relying on prose to create cross-plan issue dependencies. A named person reviews each PRD pull request; no pipeline change is part of this feature. |
+| DD-013 | The Aircraft Case Pack integrates against ARR v0.9.2, the contract represented by the companion ARR PRD and default-branch implementation; this replaces the CP PRD's ARR v0.7.0 references. |
+| DD-014 | CP API limits: each user may make at most 30 case-list requests per minute, 30 scene requests per minute, and 3 reset requests per minute; commandId accepts 1-64 ASCII letters, digits, hyphens, or underscores. A request above a limit returns 429 without mutation. |
+| DD-015 | The executive observer uses a dedicated read-only ARR role scoped to Case A, Case B, and Case C; this decision supersedes the no-new-roles scope boundary only for that role. |
+| DD-016 | Complete older-run/current-run history and exact historical evidence remain available through an authenticated ARR read contract that supports case, run, and basis selection; CP adds no separate history endpoint, and implementation waits until the ARR route is present and documented on the default branch. |
 
 ## Product Goals
 
