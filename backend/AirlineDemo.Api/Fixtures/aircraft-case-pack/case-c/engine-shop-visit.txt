@@ -1,0 +1,3 @@
+Synthetic shop-visit release for ENG-CP-C-001.
+The fictional visit record confirms return to service after the listed inspection.
+No unresolved shop findings are recorded.

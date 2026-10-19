@@ -1,0 +1,3 @@
+Synthetic aircraft summary for fictional wide-body CP-WB-003.
+Airframe AIRFRAME-CP-C-003 is configured as an A350-900 passenger aircraft.
+The installed engine serial is ENG-CP-C-001; the records index identifies the supporting records.
