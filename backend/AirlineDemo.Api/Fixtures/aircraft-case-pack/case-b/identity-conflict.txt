@@ -1,0 +1,3 @@
+Synthetic identity conflict record for the fictional regional engine installation.
+Two source records identify the installed engine using conflicting serials ENG-CP-B-001 and ENG-CP-B-009.
+Neither identifier is preferred by this record set; internal review is required.
