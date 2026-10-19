@@ -304,33 +304,93 @@ public sealed class SourceReadEndpointTests
     public async Task SequentialReadsMeetNfr001()
     {
         const string core = "case-001";
-        string[] fixtureCases = [core, "case-a", "case-b", "case-c"];
-        var records = fixtureCases.Select((caseId, index) => Record<TechnicalPayload>(index + 1, caseId)).ToArray();
-        var sources = AllSources();
-        var technical = new FakeSource<TechnicalPayload>(records);
-        sources = sources with { Technical = technical };
+        string[] cases = [core, "case-a", "case-b", "case-c"];
+        var sources = new Sources(
+            new FakeSource<TechnicalPayload>(cases.Select((caseId, index) => Record<TechnicalPayload>(index + 1, caseId)).ToArray()),
+            new FakeSource<MaintenancePayload>(cases.Select((caseId, index) => Record<MaintenancePayload>(index + 1, caseId)).ToArray()),
+            new FakeSource<FinancePayload>(cases.Select((caseId, index) => Record<FinancePayload>(index + 1, caseId)).ToArray()),
+            new FakeSource<RecordsPayload>(cases.Select((caseId, index) => Record<RecordsPayload>(index + 1, caseId)).ToArray()),
+            new FakeSource<ContractsPayload>(cases.Select((caseId, index) => Record<ContractsPayload>(index + 1, caseId)).ToArray()));
         await using var factory = Factory(TempPath(), sources);
-        EnsureCases(factory, fixtureCases);
+        EnsureCases(factory, cases);
         using var client = factory.CreateClient();
-        var session = Session(factory, scopes: fixtureCases);
-        var sessions = Enumerable.Range(0, 4)
-            .Select(_ => Session(factory, scopes: fixtureCases)).Prepend(session).ToArray();
-        var elapsed = new List<TimeSpan>(100);
-        for (var i = 0; i < 100; i++)
+
+        static string ExpectedEnvelope(string sourceId, string caseId, int n, bool isGet, bool recordsPayload)
         {
-            var caseIndex = i % fixtureCases.Length;
-            var caseId = fixtureCases[caseIndex];
-            var started = Stopwatch.GetTimestamp();
-            using var request = GetRequest(
-                $"/api/v1/cases/{caseId}/sources/technical/records/record-{caseIndex + 1}",
-                sessions[i % sessions.Length].Id);
-            using var response = await client.SendAsync(request);
-            elapsed.Add(Stopwatch.GetElapsedTime(started));
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var record = new JsonObject
+            {
+                ["sourceId"] = sourceId,
+                ["recordId"] = $"record-{n}",
+                ["recordVersion"] = 1,
+                ["asOf"] = "2026-10-01",
+                ["caseId"] = caseId,
+                ["kind"] = "test",
+                ["stale"] = false,
+                ["payload"] = recordsPayload
+                    ? new JsonObject
+                    {
+                        ["documentId"] = "",
+                        ["documentVersion"] = "",
+                        ["containsPersonalData"] = false,
+                    }
+                    : new JsonObject
+                    {
+                        ["fields"] = new JsonObject { ["value"] = n.ToString() },
+                    },
+                ["synthetic"] = true,
+            };
+            var envelope = new JsonObject
+            {
+                ["contractVersion"] = 1,
+                ["caseId"] = caseId,
+                ["sourceId"] = sourceId,
+            };
+            if (isGet) envelope["record"] = record;
+            else envelope["records"] = new JsonArray(record);
+            return envelope.ToJsonString();
         }
-        elapsed.Sort();
-        Assert.True(elapsed[(int)Math.Ceiling(0.95 * elapsed.Count) - 1] <= TimeSpan.FromSeconds(1),
-            "The measured 95th-percentile source read latency exceeded one second.");
+
+        (string Source, string Role, bool RecordsPayload)[] combinations =
+        [
+            ("technical", "technical-reviewer", false),
+            ("maintenance", "technical-reviewer", false),
+            ("finance", "finance-reviewer", false),
+            ("records", "technical-reviewer", true),
+            ("contracts", "legal-reviewer", false),
+        ];
+        foreach (var (source, role, recordsPayload) in combinations)
+        foreach (var isGet in new[] { false, true })
+        {
+            var sessions = Enumerable.Range(0, 5)
+                .Select(_ => Session(factory, role, cases)).ToArray();
+            string RouteFor(string caseId, int n) =>
+                $"/api/v1/cases/{caseId}/sources/{source}/records" + (isGet ? $"/record-{n}" : "");
+
+            using (var warmupRequest = GetRequest(RouteFor(core, 1), sessions[0].Id))
+            using (var warmupResponse = await client.SendAsync(warmupRequest))
+            {
+                Assert.Equal(HttpStatusCode.OK, warmupResponse.StatusCode);
+                AssertJsonEqual(ExpectedEnvelope(source, core, 1, isGet, recordsPayload),
+                    await warmupResponse.Content.ReadAsStringAsync());
+            }
+
+            var elapsed = new List<TimeSpan>(100);
+            for (var i = 0; i < 100; i++)
+            {
+                var caseId = cases[i % cases.Length];
+                var n = i % cases.Length + 1;
+                using var request = GetRequest(RouteFor(caseId, n), sessions[i % sessions.Length].Id);
+                var started = Stopwatch.GetTimestamp();
+                using var response = await client.SendAsync(request);
+                elapsed.Add(Stopwatch.GetElapsedTime(started));
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                AssertJsonEqual(ExpectedEnvelope(source, caseId, n, isGet, recordsPayload),
+                    await response.Content.ReadAsStringAsync());
+            }
+            elapsed.Sort();
+            Assert.True(elapsed[94] <= TimeSpan.FromSeconds(1),
+                $"The {source} {(isGet ? "get" : "list")} 95th-percentile read latency exceeded one second.");
+        }
 
         using var unauthenticatedRequest = GetRequest($"/api/v1/cases/{core}/sources/technical/records", null);
         using var unauthenticated = await client.SendAsync(unauthenticatedRequest);
