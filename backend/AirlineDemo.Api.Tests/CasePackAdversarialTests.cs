@@ -1,7 +1,16 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Policy;
 using AirlineDemo.Api.Requests;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.AI;
 
 namespace AirlineDemo.Api.Tests;
@@ -129,19 +138,28 @@ public sealed class CasePackAdversarialTests
         {
             const string script = "<script>send_to_recipient()</script>";
             var basis = CasePackFixture.Basis(files);
-            state.Assessments.SetCurrentBasis(CasePackFixture.CaseId, basis);
             var claim = CasePackFixture.MissingClaim(value: script, quote: script);
+            var documents = new Dictionary<string, BasisDocument>(basis.Documents, StringComparer.Ordinal)
+            {
+                [claim.Witnesses[0].DocumentId] = BasisDocument.Create(claim.Witnesses[0].DocumentId, [script]),
+            };
+            basis = basis with { Documents = documents };
+            state.Assessments.SetCurrentBasis(CasePackFixture.CaseId, basis);
             Assert.Equal(script, claim.Value);
             Assert.Equal(script, Assert.Single(claim.Witnesses).Quote);
             Assert.True(basis.Coverage.IsComplete);
             Assert.False(basis.IdentityAmbiguous);
             var validated = ClaimValidator.Validate(new InvestigationClaim(claim.Value, claim.Witnesses),
                 claim.Kind, basis.Documents, claim.Value);
+            Assert.Equal(ClaimStatus.Supported, validated.Status);
 
             var record = state.Service.Assess(state.Scope, basis, [claim]);
 
-            Assert.Equal(ClaimStatus.Downgraded, validated.Status);
             Assert.Equal("Review", record.Outcome);
+            Assert.Equal("script element in missing requirement claim", record.Reason);
+            var assessedScriptClaim = Assert.Single(record.Claims);
+            Assert.Equal("EASA", assessedScriptClaim.Applicability?.Regime);
+            Assert.Equal("lessee-operator", assessedScriptClaim.Applicability?.ResponsibleParty);
             Assert.Null(record.RequestId);
             Assert.Empty(state.Inbox.Requests);
             Assert.Empty(state.Store.ListRequestReceipts(state.Scope));
@@ -156,6 +174,65 @@ public sealed class CasePackAdversarialTests
                 investigator.InvestigateAsync([files["case-b/document-instructions.txt"].Trim()]));
             Assert.Empty(state.Assessments.List(CasePackFixture.CaseId));
             Assert.Empty(state.Inbox.Requests);
+        }
+
+        await using (var endpoint = new CaseBEndpointHarness(files))
+        {
+            var claim = CasePackFixture.MissingClaim(quote: validQuote);
+            var payload = JsonSerializer.Serialize(new
+            {
+                claims = new[]
+                {
+                    new
+                    {
+                        kind = nameof(ClaimKind.MissingRequirement),
+                        value = claim.Value,
+                        component = claim.Component,
+                        serialNumber = claim.SerialNumber,
+                        witnesses = claim.Witnesses.Select(witness => new
+                        {
+                            documentId = witness.DocumentId,
+                            page = witness.Page,
+                            quote = witness.Quote,
+                        }),
+                        requirementId = claim.RequirementId,
+                        evidenceRegime = claim.EvidenceRegime,
+                    },
+                },
+            });
+            using var payloadJson = JsonDocument.Parse(payload);
+            Assert.Equal(["claims"], payloadJson.RootElement.EnumerateObject().Select(property => property.Name));
+            var submittedClaim = Assert.Single(payloadJson.RootElement.GetProperty("claims").EnumerateArray());
+            Assert.Equal(
+                ["kind", "value", "component", "serialNumber", "witnesses", "requirementId", "evidenceRegime"],
+                submittedClaim.EnumerateObject().Select(property => property.Name));
+
+            var session = await AssessmentEndpointsTests.SignInAsync(endpoint.Client, "presenter");
+            var sessionId = session.Cookie[(session.Cookie.IndexOf('=') + 1)..];
+            endpoint.Factory.Services.GetRequiredService<DemoSessionStore>().GrantScope(
+                sessionId, CasePackFixture.CaseId);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post, $"/api/cases/{CasePackFixture.CaseId}/assessments")
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json"),
+            };
+            request.Headers.Add("Cookie", session.Cookie);
+            request.Headers.Add("X-CSRF-Token", session.Csrf);
+            using var response = await endpoint.Client.SendAsync(request, TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            using var assessment = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+            Assert.Equal("Request", assessment.RootElement.GetProperty("outcome").GetString());
+            Assert.Equal(endpoint.Basis.BasisId, assessment.RootElement.GetProperty("basisId").GetString());
+            Assert.Equal(endpoint.Basis.BasisVersion, assessment.RootElement.GetProperty("basisVersion").GetInt32());
+            Assert.Equal("single supported missing requirement on current basis", assessment.RootElement.GetProperty("reason").GetString());
+            var inboxReceipt = Assert.Single(endpoint.Inbox.Requests);
+            Assert.Equal(inboxReceipt.RequestId, assessment.RootElement.GetProperty("requestId").GetString());
+            var persistedReceipt = Assert.Single(endpoint.Store.ListRequestReceipts(endpoint.Scope));
+            Assert.Equal(inboxReceipt.RequestId, persistedReceipt.RequestId);
+            Assert.Equal(endpoint.Basis.BasisId, persistedReceipt.BasisId);
+            Assert.Equal(endpoint.Basis.BasisVersion, persistedReceipt.BasisVersion);
         }
     }
 
@@ -235,6 +312,64 @@ public sealed class CasePackAdversarialTests
         {
             foreach (var file in new[] { _path, _path + ".lock", _path + ".tmp" })
                 if (File.Exists(file)) File.Delete(file);
+        }
+    }
+
+    private sealed class CaseBEndpointHarness : IAsyncDisposable
+    {
+        private readonly string _path = Path.Combine(Path.GetTempPath(), $"case-pack-adversarial-endpoint-{Guid.NewGuid():N}.json");
+        private readonly CaseStateStore _store;
+        private readonly WebApplicationFactory<Program> _factory;
+
+        public CaseStateStore Store => _store;
+        public CaseScope Scope { get; }
+        public AssessmentBasis Basis { get; }
+        public HttpClient Client { get; }
+        public WebApplicationFactory<Program> Factory => _factory;
+        public MockRequestInbox Inbox => _factory.Services.GetRequiredService<MockRequestInbox>();
+        public AssessmentStore Assessments => _factory.Services.GetRequiredService<AssessmentStore>();
+
+        public CaseBEndpointHarness(IReadOnlyDictionary<string, string> files)
+        {
+            _store = new CaseStateStore(_path);
+            Scope = _store.CreateCase(CasePackFixture.CaseId, "presenter");
+            var initial = CaseStateStore.CreateBasisVersion(1, "Synthetic Case B endpoint basis.", string.Empty);
+            _store.Commit(Scope, 0,
+                new CaseCommit(initial, null, "presenter", "submit-evidence", "synthetic Case B basis"));
+
+            var stateStore = _store;
+            _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureAppConfiguration((_, config) =>
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Demo:Passcode"] = "test-passcode",
+                        ["CaseState:Path"] = _path,
+                    }));
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<ICaseStateStore>();
+                    services.AddSingleton<ICaseStateStore>(stateStore);
+                    services.RemoveAll<AssessmentStore>();
+                    services.AddSingleton(sp => new AssessmentStore(sp.GetRequiredService<ICaseStateStore>()));
+                    services.RemoveAll<AssessmentExecutionService>();
+                    services.AddSingleton(sp => new AssessmentExecutionService(
+                        sp.GetRequiredService<ICaseStateStore>(),
+                        sp.GetRequiredService<MockRequestInbox>(),
+                        sp.GetRequiredService<AssessmentStore>()));
+                });
+            });
+            Client = _factory.CreateClient();
+            Basis = CasePackFixture.Basis(files, basisId: "cp-case-b-basis-current");
+            Assessments.SetCurrentBasis(CasePackFixture.CaseId, Basis);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _factory.DisposeAsync();
+            foreach (var path in new[] { _path, _path + ".lock", _path + ".tmp" })
+                if (File.Exists(path)) File.Delete(path);
         }
     }
 }
