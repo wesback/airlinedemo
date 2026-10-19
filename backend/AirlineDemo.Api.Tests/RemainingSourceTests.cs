@@ -47,7 +47,7 @@ public sealed class RemainingSourceTests
             },
             records.Select(r => (r.RecordId, r.RecordVersion, r.CaseId, r.Kind)).ToArray());
         Assert.Equal(
-            new[] { ("SYN-DOC0011", "1", false), ("SYN-DOC0012", "1", true), ("SYN-DOC0013", "1", false) },
+            new[] { ("DOC-01", "1", false), ("DOC-03", "1", true), ("DOC-02", "1", false) },
             records.Select(r => (r.Payload.DocumentId, r.Payload.DocumentVersion, r.Payload.ContainsPersonalData)).ToArray());
 
         // The specialist_flag records are asserted in SpecialistReviewFlagTests; this test covers the clause.
@@ -105,7 +105,7 @@ public sealed class RemainingSourceTests
         AssertFields(
             new Dictionary<string, string>
             {
-                ["documentId"] = "SYN-DOC0012",
+                ["documentId"] = "DOC-03",
                 ["documentVersion"] = "1",
                 ["containsPersonalData"] = "true",
             },
@@ -114,7 +114,7 @@ public sealed class RemainingSourceTests
         AssertFields(
             new Dictionary<string, string>
             {
-                ["documentId"] = "SYN-DOC0011",
+                ["documentId"] = "DOC-01",
                 ["documentVersion"] = "1",
                 ["containsPersonalData"] = "false",
             },
@@ -123,7 +123,7 @@ public sealed class RemainingSourceTests
         AssertFields(
             new Dictionary<string, string>
             {
-                ["documentId"] = "SYN-DOC0013",
+                ["documentId"] = "DOC-02",
                 ["documentVersion"] = "1",
                 ["containsPersonalData"] = "false",
             },

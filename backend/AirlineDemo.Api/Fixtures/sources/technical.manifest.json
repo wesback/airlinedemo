@@ -3,6 +3,6 @@
   "sourceFixtureVersion": "2026.10.1",
   "scenarioDate": "2026-10-01",
   "owningCaseIds": ["case-001", "case-a", "case-b", "case-c"],
-  "sha256": "f91580362c0291381eee10954dce58407a94eb553d223e29e334e68b629e5923",
+  "sha256": "6ab94417003ffcf678ff6a15684c656ded931ffe37d773122952c60314eef744",
   "recordCounts": { "technical": 13, "maintenance": 6, "finance": 7, "records": 10, "contracts": 4 }
 }

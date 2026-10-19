@@ -66,7 +66,7 @@ public sealed class TechnicalFinanceSourceTests
             new[]
             {
                 "directive=SYN-AD-2026-014;directiveStatus=complied;status=airworthy",
-                "partNumber=SYN-ENG-7000-A;position=engine_1;serialNumber=SYN-SN-88412",
+                "partNumber=SYN-ENG-7000-A;position=engine_1;serialNumber=EN-SYN-7781",
                 "cycles=151;hours=198.0;periodEnd=2026-08-31;periodStart=2026-08-01",
                 "cycles=164;hours=212.5;periodEnd=2026-09-30;periodStart=2026-09-01",
                 "regime=EASA;requirementId=SYN-AD-2026-014;responsibleParty=lessee-operator",
@@ -114,9 +114,9 @@ public sealed class TechnicalFinanceSourceTests
         Assert.Equal("tech-component-001", component.RecordId);
         Assert.Equal(1, component.RecordVersion);
         Assert.Equal("component_identity", component.Kind);
-        Assert.Equal("partNumber=SYN-ENG-7000-A;position=engine_1;serialNumber=SYN-SN-88412", Flatten(component.Payload.Fields));
+        Assert.Equal("partNumber=SYN-ENG-7000-A;position=engine_1;serialNumber=EN-SYN-7781", Flatten(component.Payload.Fields));
         Assert.Equal(
-            "partNumber=SYN-ENG-7000-A;position=engine_1;serialNumber=SYN-SN-88412",
+            "partNumber=SYN-ENG-7000-A;position=engine_1;serialNumber=EN-SYN-7781",
             Flatten(Succeeded(await technical.GetAsync(CoreCase, "tech-component-001")).Payload.Fields));
 
         var rate = Succeeded(await finance.GetAsync(CoreCase, "fin-reserve-rate-hour-2026-10"));

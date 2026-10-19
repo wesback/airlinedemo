@@ -282,7 +282,7 @@ public sealed class TechnicalSource()
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
         SourceFixtureVersion = "2026.10.1",
         ScenarioDate = "2026-10-01",
-        Sha256 = "f91580362c0291381eee10954dce58407a94eb553d223e29e334e68b629e5923",
+        Sha256 = "6ab94417003ffcf678ff6a15684c656ded931ffe37d773122952c60314eef744",
         RecordCounts = new Dictionary<string, int>
         {
             ["technical"] = 13,
