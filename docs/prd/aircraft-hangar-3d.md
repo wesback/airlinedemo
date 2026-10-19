@@ -2,11 +2,11 @@
 prd_id: "aircraft-hangar-3d"
 title: "Aircraft Hangar 3D Presentation Layer"
 status: "draft"
-version: "0.2.1"
+version: "0.3.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-14"
-last_updated: "2026-10-14"
+last_updated: "2026-10-19"
 product_goal_ids: ["GOAL-001"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Hangar 3D Presentation Layer
 
-> **aircraft-hangar-3d** | Status: Draft | Version: 0.2.1 | Last Updated: 2026-10-14
+> **aircraft-hangar-3d** | Status: Draft | Version: 0.3.0 | Last Updated: 2026-10-19
 
 ## Executive Summary
 
@@ -35,13 +35,15 @@ This PRD defines a browser-based 3D hangar presentation layer for the Aircraft R
 
 The layer is a presentation surface over the server-owned case data and commands of the companion [Aircraft Return Readiness PRD](aircraft-return-readiness.md) (ARR, v0.7.0) and the read-only contracts defined in CP. It does not simulate aircraft operation, determine airworthiness, or grant authority. A non-3D equivalent, reduced-motion behavior, and keyboard access are part of the requirements. The renderer candidate is Three.js with React Three Fiber in the existing React client.
 
+Version 0.3.0 adds a Data Room: a 3D server rack with one unit for each of the five synthetic source systems of the [Synthetic Source-System Stubs PRD](aircraft-source-systems.md) (SS), and a small presenter avatar that the user walks across the hangar floor with the arrow keys. Standing in front of the rack opens a game-style menu of the aircraft in scope, each with its five-source coverage; confirming one with Enter draws a guide line from the avatar to that aircraft. The rack, avatar, menu and line are presentation controls over the SS source summary and grant no authority.
+
 Dependency order is enforced by staged PRD merges: ARR prerequisites are delivered first, then CP is merged and delivered, then HG is merged. Draft documents can be reviewed together but are not merged together. This is a draft proposal. Acceptance criteria describe future verification and do not claim that any scene, asset, or demo exists.
 
 ## Product Context
 
 The regular dashboard (ARR:FR-013) serves the work well, but it gives a presenter little help in showing several cases at once and how a finding on an aircraft or component leads to a review. The hangar offers a spatial overview and a memorable way into a case. Aircraft are selectable case entry points, not fleet objects. The three aircraft are not a representative fleet, and their statuses do not establish readiness, airworthiness, financial approval, legal approval, contractual acceptance, or aircraft release.
 
-The value hypothesis (AS-001) that a spatial overview aids comprehension is untested; the non-3D equivalent keeps the demo usable if it is false.
+The value hypothesis (AS-001) that a spatial overview aids comprehension is untested; the non-3D equivalent keeps the demo usable if it is false. The Data Room makes the five source systems that feed every case's dossier visible in the same space as the aircraft, so a presenter can show where the evidence comes from before going to an aircraft; the hypothesis that this aids discovery (AS-006) is also untested.
 
 The frontend today is a health-check stub. Almost everything the hangar relies on (dashboard, case, and evidence panels) is built by ARR stories first.
 
@@ -63,8 +65,8 @@ The frontend today is a health-check stub. Almost everything the hangar relies o
 | DD-003 | Aircraft and component geometry is illustrative: generic fictional silhouettes with no manufacturer marks and no claim of engineering accuracy. |
 | DD-004 | The scene shows the status, owner, next action, and capability label from the server projection. Color, position, animation, and client state never create or upgrade a status or enable a command. |
 | DD-005 | Detailed evidence, status, decisions, and next actions appear in semantic HTML panels and the regular case UI. No meaning is carried by color alone. |
-| DD-006 | Navigation is point-and-select, bounded orbit, preset camera positions and keyboard as specified under Camera controls. There is no free-roam or first-person movement. |
-| DD-007 | No points, scores, rewards, or game mechanics. |
+| DD-006 | Navigation is point-and-select, bounded orbit, preset camera positions and keyboard as specified under Camera controls. The camera has no free-roam or first-person movement. The only movement through the space is the Data Room walk (DD-017): a presenter avatar confined to the hangar's walkable floor, specified under Data Room walk. |
+| DD-007 | No points, scores, rewards, timers, progression, or game mechanics. The avatar, the rack menu and the guide line are presentation controls with a game-like look only: they decide no status, enable no command, and carry no objective that can be won or lost. |
 | DD-008 | Reduced motion is on when the browser reports `prefers-reduced-motion: reduce`, and the user can override it in either direction with an in-app control for the browser session. |
 | DD-009 | Diagnostics use the existing server diagnostics policy (ARR:DD-029). The client sends no telemetry. Render time, capability result, and fallback reason appear only in a local, in-app diagnostics panel for the presenter and are never transmitted. |
 | DD-010 | Scene assets are static, same-origin GLB version 2 files with embedded buffers and PNG/JPEG textures. The glTF extension allowlist is empty in the first release. External buffers/textures, Draco, KTX2, Basis, WebAssembly and parser plugins are not used. |
@@ -73,7 +75,12 @@ The frontend today is a health-check stub. Almost everything the hangar relies o
 | DD-013 | IDs are document-local canonical IDs, qualified as `CP:FR-007` or `ARR:FR-013` for cross-document references. Version 0.2.0 replaces the draft `HG-` prefixes before any implementation stories exist. |
 | DD-014 | The product owner accepted the minimum demo baseline and size budgets on 2026-10-14. They are acceptance targets, not measured performance results. Actual hardware, operating system, GPU and browser versions are recorded in each release check. |
 | DD-015 | The user-approved scene asset allowlist is project-authored models/textures with a recorded rights declaration, plus assets with a verified `CC0-1.0` grant. Attribution-required or unknown rights are not permitted in this release. This is separate from software package licences. |
-| DD-016 | The HG merge gate requires the complete CP behavior and fixture approval on the default branch, plus the named ARR endpoints used by the dashboard. Cross-PRD dependency prose is not treated as an automatically enforced issue dependency. |
+| DD-016 | The HG merge gate requires the complete CP behavior and fixture approval on the default branch, plus the named ARR endpoints used by the dashboard. Cross-PRD dependency prose is not treated as an automatically enforced issue dependency. Version 0.3.0 adds the delivered SS source summary (SS:FR-009) to that gate. |
+| DD-017 | The Data Room is part of Hangar mode: a server rack with exactly five units labelled with the SS source identifiers `technical`, `maintenance`, `finance`, `records` and `contracts`, a walkable presenter avatar, an interaction zone in front of the rack, a menu and a guide line. All are authored in the scene manifest; none is created from server data except the menu entries. |
+| DD-018 | The rack menu reads only the delivered SS source summary, `GET /api/v1/cases/{caseId}/sources` (SS:FR-009), once for each in-scope case from the CP case list. It shows each source's mode and coverage flag as text, and no record payload. It adds no endpoint and no command. Role and case scope are enforced by the server (SS:DD-023); a case that is out of scope never appears, and a client-supplied identifier grants nothing. Personal-data exclusion is the server's (SS:DD-022); the client additionally renders only the typed summary fields. |
+| DD-019 | The menu opens when the avatar enters the interaction zone, and also from a labelled "Open data rack" control for users who do not walk. Opening moves focus into the menu; closing restores focus to where it was. Closing with Escape does not reopen the menu until the avatar has left the zone and entered it again, or the control is activated. |
+| DD-020 | The guide line is informational. It is computed in the client from the scene manifest's walkable floor and footprints, carries no status, colour meaning or authority, and is never transmitted. Avatar position, menu state and route are client state and are not sent to the server or to diagnostics. |
+| DD-021 | The avatar is a generic fictional low-detail figure with no real person's likeness and no brand marks, and is an asset under DD-015. |
 
 ## Product Goals
 
@@ -112,6 +119,11 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 | FR-013 | Pin `three` and `@react-three/fiber` to exact versions with a committed lockfile and include them in the existing dependency audit. | Dependency change. | ARR:DD-017. | AC-019 | GOAL-001 |
 | FR-014 | Show a Case C reset control only when the server projection grants it; send `commandId`, `expectedRevision`, `variant: "blocked"` and the anti-forgery token, and refetch after acceptance. Reuse the same command identifier for retry of an uncertain result, not for a deliberate new reset. | Presenter selects or retries reset. | CP:FR-007, CP:FR-009, ARR:DD-028. | AC-024 | GOAL-001 |
 | FR-015 | Show the presenter a local diagnostics panel containing scene-load duration, graphics capability and explicit fallback reason, without transmitting diagnostics or granting workflow authority. | Presenter opens local diagnostics. | ARR:DD-029, DD-009. | AC-026 | GOAL-001 |
+| FR-016 | Render a server rack in the scene with exactly five units, one for each SS source identifier (`technical`, `maintenance`, `finance`, `records`, `contracts`), from the scene manifest, with a labelled keyboard-operable equivalent that opens the rack menu. | Scene loads. | SS:FR-009, FR-002. | AC-033, AC-042, AC-043 | GOAL-001 |
+| FR-017 | Show a presenter avatar that the user moves with the arrow keys in the walk region, confined to the walkable floor and blocked by aircraft and rack footprints, as specified under Data Room walk, without trapping Tab or moving the camera. | User presses arrow keys in the walk region. | FR-004, FR-010. | AC-034, AC-035 | GOAL-001 |
+| FR-018 | Open a game-style rack menu when the avatar enters the interaction zone or the "Open data rack" control is activated, listing the in-scope aircraft with each one's five-source mode and coverage from the SS source summary; Up/Down/Home/End/Enter/Escape operate it, and a failed or unsupported summary shows "source summary unavailable" without inferred coverage. | Avatar enters the zone, or user activates the control. | SS:FR-009, SS:DD-023, CP:FR-006, ARR:DD-014. | AC-036, AC-037, AC-038, AC-044 | GOAL-001 |
+| FR-019 | On confirming a menu entry, draw a guide line over the walkable floor from the avatar to the selected aircraft's marker, keep it current as the avatar moves, state distance and direction in a live region, and on arrival clear it and select the aircraft through the shared selection handler. | User presses Enter on a menu entry. | FR-003, FR-017, FR-018. | AC-039, AC-040, AC-043, AC-044 | GOAL-001 |
+| FR-020 | Provide the non-3D equivalent of the Data Room: a list of in-scope cases with the same five-source coverage text as the menu, whose activation selects the case. | User chooses regular mode or 3D is unavailable. | FR-008, FR-018, SS:FR-009. | AC-041 | GOAL-001 |
 
 ## Scope Boundaries
 
@@ -122,13 +134,16 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 - Bounded orbit, preset cameras, keyboard control, reduced motion, and an in-app motion override.
 - Guided journeys for Cases A, B, and C, built from server data.
 - A non-3D equivalent, a local diagnostics panel, and the presenter reset control.
+- The Data Room: a server rack of five source units, a bounded walkable presenter avatar, a rack menu of in-scope aircraft with their five-source coverage, and a guide line to the selected aircraft.
 - Static scene assets with provenance and licence records.
 
 ### Out of scope
 
 - Fixtures, case-list and projection APIs, scope, and reset command (see CP).
 - Real customer, airline, aircraft, maintenance, or personal data; real partner communications.
-- Aircraft physics, flight simulation, engineering-accurate geometry, multiplayer, free-roam movement, scoring, or progression.
+- Aircraft physics, flight simulation, engineering-accurate geometry, multiplayer, free-roam camera or first-person movement, scoring, or progression.
+- Avatar jumping, running, physics beyond footprint blocking, non-player characters, or any objective, timer or reward.
+- Showing source record payloads or dossier contents on the rack, and issuing any command from the rack or menu. The existing SS and ARR controls open dossiers and records.
 - Fleet management or a separate game-engine runtime.
 - A client telemetry endpoint.
 - Licensed manufacturer liveries or photorealistic models.
@@ -139,9 +154,21 @@ For the active target, let `R` be the positive radius of its bounding sphere. Th
 
 Only a focused, labelled camera-control region handles keys: Left/Right change azimuth by 10 degrees, Up/Down change polar angle by 5 degrees, `+` divides radius by 1.1 and `-` multiplies it by 1.1, with the same clamps as pointer orbit. Tab moves to ordinary semantic controls and is never captured. Inputs, buttons and evidence panels outside that region receive their normal keyboard behavior. WASD and pointer-lock do not move the camera. Nonessential camera transitions have zero duration when reduced motion is active.
 
+### Data Room walk
+
+Scene units are illustrative metres. The scene manifest defines the walkable floor as a closed polygon, a footprint for each of the three aircraft and for the rack, one interaction zone, and for each aircraft a marker point on the floor beside it. The overview preset (Camera controls) frames the whole walkable floor and the rack.
+
+The avatar has a collision radius of 0.3. A labelled, focusable walk region handles the arrow keys, separate from the camera-control region; only the focused region reacts, and Tab is never captured. In the walk region, Up/Down/Left/Right move the avatar 0.5 in the four floor directions of the current overview orientation, once for each key press and again for each key repeat. A step that would leave the walkable floor or enter a footprint expanded by the avatar radius is refused and the avatar stays where it was; no step is partially applied. WASD and pointer-lock do not move the avatar. With reduced motion active an applied step is shown immediately, with no tween. The camera does not follow the avatar in this release.
+
+The interaction zone is a circle of radius 1.5 centred 1.5 in front of the rack's front face. The avatar is inside it when its centre is within that circle.
+
+**Rack menu.** Entries are the in-scope cases, in the case-list order. Up/Down move the highlighted entry and wrap, Home/End jump to the first/last, Enter confirms, Escape closes. Each entry shows the aircraft name, category and, for each of the five sources, the source name with its mode and coverage flag as text. If the summary request for a case fails or its `contractVersion` is unsupported, the entry stays selectable and shows "source summary unavailable" in place of the five sources; coverage is never inferred. Confirming an entry closes the menu and starts the guide line to that aircraft's marker.
+
+**Guide line.** The route is the shortest path over the walkable floor, avoiding footprints expanded by the avatar radius, from the avatar to the aircraft's marker, computed on a 0.25 grid. It is recomputed after each applied step. An unreachable marker shows a visible message and no line. The line is complete when the avatar is within 1.5 of the marker: it is cleared, arrival is announced in a live region, and the aircraft is selected through the same selection handler as a pointer or keyboard selection (FR-003). Escape in the walk region, or confirming another entry, clears or replaces the line. While a line exists, a live region states the distance and the direction in words (ahead, behind, left, right), updated after each applied step. With reduced motion active the line is static.
+
 ### Asset and contract validation
 
-The release contains three GLB model files, one for each aircraft category, with labelled engine and two component nodes; all textures and buffers are embedded. Each model must match the authored scene manifest. Mesh/node identifiers map to CP `objectId`, never to a guessed case identifier. A shared, renderer-independent scene descriptor supplies both the canvas component and semantic controls; its real mappings and activation handler are exercised by Vitest without WebGL.
+The release contains five GLB model files: one for each aircraft category, with labelled engine and two component nodes, one server rack with five labelled unit nodes, and one avatar; all textures and buffers are embedded. Each model must match the authored scene manifest, which also holds the walkable floor, footprints, interaction zone and aircraft markers. Mesh/node identifiers map to CP `objectId`, never to a guessed case identifier. A shared, renderer-independent scene descriptor supplies both the canvas component and semantic controls; its real mappings and activation handler are exercised by Vitest without WebGL.
 
 GLB validation checks the version-2 header, declared byte length, aligned chunk bounds, a single first JSON chunk and an embedded binary chunk before a renderer loader sees the bytes. JSON is parsed only after enforcing its byte limit. `extensionsUsed` and `extensionsRequired` must be absent or empty. Buffer/image URI fields are absent: all data is embedded, with images identified by buffer view and PNG/JPEG MIME type. Buffer-view and accessor ranges must remain inside the declared buffer; malformed or out-of-range references fail visibly. Unknown nodes cannot dispatch a case action. These checks do not claim to prove geometry accuracy; the visual check remains manual.
 
@@ -157,13 +184,14 @@ The client accepts only CP contract version 1 and validates the typed scene enve
 - Runtime network: no third-party fetch at presentation time (fonts, textures, models, CDNs). The CSP and a build check both enforce this.
 - Diagnostics: no new client telemetry endpoint exists, so no client-to-server abuse surface is added. Server logging follows ARR:DD-029 and excludes document text, cookies, and tokens.
 - The reset control is only a client of the CP reset command; authorization stays on the server. A display label or color is never authorization or proof of approval.
+- Data Room: the rack menu issues only the SS source-summary reads for cases the user can list; authorization stays on the server (SS:DD-023). The client renders only the typed summary fields, so a payload or personal-data field present in a response is not displayed (AC-037). Avatar position, menu state and the route never leave the browser and add no diagnostics. The rack and avatar assets pass the same validation and provenance rules as the aircraft (AC-042). No CSP change.
 - Data handled: synthetic only. No credentials, personal data, or tracking in assets.
 
 ## Non-Functional Requirements
 
 ### Performance and Capacity
 
-**NFR-001 — Performance and Capacity.** The accepted baseline meets the startup and P95 selection thresholds under Demo baseline and measurement procedure. Hangar-only code/assets are not requested before entry. The total gzip size of all JavaScript chunks introduced solely by opening Hangar is at most 1.5 MiB (1,572,864 bytes), not just the largest chunk; all model/texture assets total at most 15 MiB. Verification: AC-025 and AC-027, Automated validators; production-build integration verified by review; timing is AC-020, Manual.
+**NFR-001 — Performance and Capacity.** The accepted baseline meets the startup and P95 selection thresholds under Demo baseline and measurement procedure. Hangar-only code/assets are not requested before entry. The total gzip size of all JavaScript chunks introduced solely by opening Hangar is at most 1.5 MiB (1,572,864 bytes), not just the largest chunk; all model/texture assets total at most 15 MiB. Verification: AC-025 and AC-027, Automated validators; production-build integration verified by review; timing is AC-020, Manual. The rack and avatar models count toward the same byte budgets.
 
 ### Reliability and Resilience
 
@@ -210,6 +238,7 @@ The scene supports the three case-pack cases and their 12 modeled objects. No fl
 | CON-003 | Integrate into the existing React/Vite client and serve assets from the same origin. | Technical | ARR:DD-013, ARR:DD-028; engineering owner. |
 | CON-004 | Every visualized activity keeps the server capability label (AI agent, Rules-based, Simulated, Design-only, or Unknown). | Operational | ARR Capability labels; product owner; the authority/safety boundary is changed only by an ARR amendment. |
 | CON-005 | Merge this PRD only after ARR prerequisites and the complete CP behavior and approved fixture exist on the default branch. | Organizational | User decision on 2026-10-14; product owner; staged merges prevent unsupported dispatch and are not relaxed in this plan. |
+| CON-006 | The Data Room consumes SS:FR-009 as delivered and changes no SS contract. | Technical | SS:FR-009, SS:DD-023; engineering owner; the rack adds no endpoint or command. |
 
 ## Process Models
 
@@ -230,6 +259,11 @@ flowchart TD
     L --> M[Issue existing ARR command]
     M --> N[Refetch projection from server]
     N --> K
+    I --> R[Walk avatar to the rack]
+    R --> S[Rack menu: aircraft with five-source coverage]
+    S --> T[Confirm aircraft]
+    T --> U[Guide line to the aircraft]
+    U --> J
     C --> J
 ```
 
@@ -271,6 +305,18 @@ flowchart TD
 | AC-030 | Given focus in the camera region, when arrow and zoom keys are pressed, then the specified controller deltas apply; Tab is not captured, and keys focused in a text field/evidence control outside the region do not move the camera. | FR-004, FR-010 | Automated (vitest) | Not Started |
 | AC-031 | Given a failed refetch or an envelope with missing revision/permission/history or bad witness IDs, when refresh completes, then the UI shows a stale/error state and disables commands while preserving the last labelled server snapshot; no invalid response replaces it as current or starts a command, and a later valid refetch restores current state. | FR-006 | Automated (vitest) | Not Started |
 | AC-032 | Given `olderHistoryAvailable: true` after many runs, when the journey or non-3D list is used, then a labelled keyboard-operable control opens the case's delivered ARR history view for older runs/events and exact historical evidence; a window omission never becomes an assertion that the event did not occur, and an out-of-scope history rejection reveals no content. | FR-005, FR-008 | Automated (vitest; existing history-control adapter with injected read responses) | Not Started |
+| AC-033 | Given the scene manifest and descriptor builder, when the rack is built, then it has exactly five unit nodes mapped one-to-one to the SS source identifiers; a missing, duplicate, extra or unknown unit fails visibly, and activating the rack through its descriptor or its labelled control opens the rack menu. | FR-016 | Automated (vitest; descriptor and canvas-adapter wiring, no WebGL context) | Not Started |
+| AC-034 | Given a walkable polygon, footprints and the avatar radius 0.3, when arrow keys are sent to the focused walk region, then the avatar moves exactly 0.5 in the pressed direction; a step that would leave the floor or enter an expanded footprint leaves the position unchanged; a table of start positions and keys, including each aircraft footprint, the rack and each wall, gives the expected positions; keys outside the walk region, in a text field, WASD and pointer-lock do not move the avatar; Tab is not captured; and the camera state is unchanged. | FR-017 | Automated (vitest) | Not Started |
+| AC-035 | Given `prefers-reduced-motion: reduce` with no override, when the avatar moves, then the new position is applied in the same update and no animation duration above zero is scheduled; the in-app override of AC-012 applies in both directions. | FR-017 | Automated (vitest) | Not Started |
+| AC-036 | Given an avatar outside the interaction zone, when a step brings its centre inside the zone, then the menu opens exactly once and focus moves into it; Escape closes it and restores focus to the walk region; further steps inside the zone do not reopen it; leaving and re-entering the zone, or activating the "Open data rack" control, opens it again. | FR-018 | Automated (vitest) | Not Started |
+| AC-037 | Given a case list of three entries and source-summary responses for them, when the menu builds, then it has three entries in list order, each with name, category and the five sources with mode and coverage as text; a user with scope for one case sees one entry and no request is made for the others; a failed response or an unsupported `contractVersion` for one case shows "source summary unavailable" for that entry only, with no coverage shown; and a response carrying a payload canary or personal-data field renders neither. | FR-018 | Automated (vitest; injected summary reader) | Not Started |
+| AC-038 | Given an open menu with three entries, when Up, Down, Home, End, Enter and Escape are pressed, then the highlighted entry moves and wraps, Home/End jump to the first/last, Enter confirms the highlighted entry and Escape closes without confirming; every entry is reachable and operable by role and name, and the highlighted entry is exposed to assistive technology. | FR-018 | Automated (vitest) | Not Started |
+| AC-039 | Given a walkable floor with footprints, when an entry is confirmed, then the menu closes and a route over the 0.25 grid from the avatar to that aircraft's marker avoids every expanded footprint; a table of avatar positions and markers gives the expected route length within one grid cell; an unreachable marker shows a visible message and no route; the route is recomputed after each applied step; and with the avatar within 1.5 of the marker the line is cleared and the aircraft is selected through the same handler as FR-003, exactly once. | FR-019 | Automated (vitest) | Not Started |
+| AC-040 | Given an active route, when the avatar moves, then the live region states the distance and the direction in words and updates after each applied step; Escape in the walk region or confirming another entry clears or replaces the route; the line carries no status or colour meaning; with reduced motion active it is static; and menu, walk and route activity send no request other than the summary reads of AC-037 and no diagnostics. | FR-019 | Automated (vitest; injected transport) | Not Started |
+| AC-041 | Given 3D disabled, when the user opens the Data Room list, then it shows the same entries and five-source text as the menu for the same inputs, and activating one selects the case; an entry or datum present in the menu and missing in the list fails the test. | FR-020 | Automated (vitest) | Not Started |
+| AC-042 | Given the rack and avatar models and provenance records, when the validators of AC-017 and AC-018 run, then the rack and avatar pass the same structure, size, extension, URI, rights and checksum rules as the aircraft models, the avatar record carries a synthetic marker and a declaration that it depicts no real person, and a failing rack or avatar asset gives the visible fallback and the non-3D equivalent. | FR-012, FR-016 | Automated (vitest; tiny valid and malformed binary fixtures) | Not Started |
+| AC-043 | Given the release candidate on the demo baseline, when a first-time observer is asked to find the source data for one aircraft, then they walk to the rack, open the menu, confirm an aircraft and reach it by following the line without help, and judge the avatar, rack and line legible and clearly illustrative. | FR-016, FR-019 | Manual | Not Started |
+| AC-044 | Given a screen reader and keyboard only, when a tester opens the rack menu, confirms an aircraft and follows the spoken directions to arrival, then the menu, its entries, the directions and the arrival are announced and no keyboard trap exists. | FR-018, FR-019 | Manual | Not Started |
 
 ## Traceability Matrix
 
@@ -289,12 +335,17 @@ flowchart TD
 | FR-009 | AC-012 |
 | FR-010 | AC-013, AC-014, AC-023, AC-030 |
 | FR-011 | AC-015, AC-016, AC-025, AC-027 |
-| FR-012 | AC-017, AC-018 |
+| FR-012 | AC-017, AC-018, AC-042 |
 | FR-013 | AC-019 |
 | FR-014 | AC-024 |
 | FR-015 | AC-026 |
+| FR-016 | AC-033, AC-042, AC-043 |
+| FR-017 | AC-034, AC-035 |
+| FR-018 | AC-036, AC-037, AC-038, AC-044 |
+| FR-019 | AC-039, AC-040, AC-043, AC-044 |
+| FR-020 | AC-041 |
 
-Coverage: 15/15 FRs have one or more AC links (100%; target 80%).
+Coverage: 20/20 FRs have one or more AC links (100%; target 80%).
 
 ### FR-to-GOAL Alignment
 
@@ -315,26 +366,31 @@ Coverage: 15/15 FRs have one or more AC links (100%; target 80%).
 | FR-013 | GOAL-001 |
 | FR-014 | GOAL-001 |
 | FR-015 | GOAL-001 |
+| FR-016 | GOAL-001 |
+| FR-017 | GOAL-001 |
+| FR-018 | GOAL-001 |
+| FR-019 | GOAL-001 |
+| FR-020 | GOAL-001 |
 
-Coverage: 15/15 FRs have one or more GOAL links (100%; target 100%).
+Coverage: 20/20 FRs have one or more GOAL links (100%; target 100%).
 
 ### NFR verification links
 
 | NFR | Acceptance criteria |
 |---|---|
-| NFR-001 | AC-020, AC-025, AC-027; build wiring verified by review |
-| NFR-002 | AC-010, AC-024, AC-031, AC-032 |
-| NFR-003 | AC-016, AC-018, AC-024 and CP server tests |
-| NFR-004 | AC-015, AC-017, AC-026 and RC-007 |
-| NFR-005 | AC-009, AC-028 |
+| NFR-001 | AC-020, AC-025, AC-027, AC-042; build wiring verified by review |
+| NFR-002 | AC-010, AC-024, AC-031, AC-032, AC-037 |
+| NFR-003 | AC-016, AC-018, AC-024, AC-037 and CP and SS server tests |
+| NFR-004 | AC-015, AC-017, AC-026, AC-037, AC-040 and RC-007 |
+| NFR-005 | AC-009, AC-028, AC-033 |
 | NFR-006 | AC-026 |
-| NFR-007 | AC-012, AC-013, AC-014, AC-023, AC-030 |
+| NFR-007 | AC-012, AC-013, AC-014, AC-023, AC-030, AC-035, AC-036, AC-038, AC-040, AC-044 |
 | NFR-008 | AC-001, AC-009, AC-020, AC-029 and RC-006 |
 | NFR-009 | AC-015 and RC-006 |
 
 ## MVP and Release Framing
 
-The release contains FR-001 through FR-015. **Do not merge this PRD until CP is fully delivered and its case fixture is approved on the default branch.** The product owner checks code, contract documentation and behavior tests for CP:FR-001 through CP:FR-011, including real revision/permission/history/witness fields and the complete reset command. Verify the ARR dashboard and document/review/request/response endpoints required by FR-003 and FR-005. Closed issues alone do not prove delivery.
+The release contains FR-001 through FR-020. **Do not merge this PRD until CP is fully delivered and its case fixture is approved on the default branch.** The product owner checks code, contract documentation and behavior tests for CP:FR-001 through CP:FR-011, including real revision/permission/history/witness fields and the complete reset command. Verify the ARR dashboard and document/review/request/response endpoints required by FR-003 and FR-005, and the SS source summary `GET /api/v1/cases/{caseId}/sources` (SS:FR-009) required by FR-018 and FR-020, with its tests passing on the default branch. Closed issues alone do not prove delivery.
 
 ARR's amendment is merged first; CP's PRD is merged only after its ARR prerequisites are delivered; HG's PRD is merged only after CP delivery. A named person approves each PRD pull request. HG planning then creates dependencies only within the HG plan; it does not recreate ARR or CP work. Draft review can happen now without enabling automatic planning by merging this document early.
 
@@ -355,6 +411,13 @@ Story-split hints, in dependency order (each must stay well under 500 changed li
 13. Local presenter diagnostics with injected clock and transport assertions (FR-015).
 14. Real model/texture assets, scene manifest and canvas adapter, split by aircraft category if required (FR-002). Each story adds an automated mapping/activation/wiring test against the actual descriptors used by its renderer; manual silhouette/WebGL approval is additional, not its only acceptance.
 15. Aggregate gzip-budget checker and its invocation from `frontend/package.json`'s existing build command (FR-011, NFR-001). The checker has a plain exported validator tested with supplied artifact metadata; only the build invocation reads build output. Do not run npm or a browser inside Vitest.
+16. Walk controller: a pure function over the walkable polygon, footprints, avatar radius and key, with the position table (FR-017).
+17. Route planner: a pure function over the 0.25 grid with a route table, and the arrival rule (FR-019).
+18. Source-summary view model for the menu entries, including the unavailable and unsupported-contract cases and the payload canary test (FR-018).
+19. Rack menu controller: zone entry, focus handling, keys and the open control (FR-018), then the non-3D Data Room list as a second story (FR-020).
+20. Rack and avatar entries in the scene manifest and descriptor, with their assets and provenance, split into rack and avatar if required (FR-016, FR-012).
+21. Guide line adapter and the live-region directions, with the reduced-motion static line (FR-019).
+Each of stories 16 to 19 is a pure function or controller tested without WebGL; only story 20 and 21 touch the canvas adapter.
 
 Production source/asset paths are under `frontend/src/hangar/` and `frontend/src/assets/hangar/`; tests are under `frontend/tests/`. Provenance can live beside assets; release evidence lives under `docs/`. Do not plan `frontend/public/` or a top-level `scripts/` directory, which are outside the current implementer write scope. Every story names its exact files and behavior test; that test must fail against the pre-change default branch. Existing-behavior assertions belong in a separate tests-only story.
 
@@ -372,13 +435,14 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 | RC-004 | Visual silhouette review of the three aircraft and components (AC-021). | FR-002 |
 | RC-005 | Operating-system reduced-motion check (AC-023). | FR-010 |
 | RC-006 | Production WebGL render of all three cases under the exact CSP, local assets and same-origin network requests, with browser/device record; inspect dependency install/build/audit results and the budget check's build invocation. | FR-002, FR-011, FR-013 |
-| RC-007 | Product owner verifies original-asset rights declarations or CC0 grant sources and synthetic content; unknown or attribution-required rights block HG asset approval/release, not CP fixture freeze. | FR-012 |
+| RC-007 | Product owner verifies original-asset rights declarations or CC0 grant sources and synthetic content, including the rack and the avatar; unknown or attribution-required rights block HG asset approval/release, not CP fixture freeze. | FR-012 |
+| RC-008 | Data Room walkthrough on the demo baseline: a first-time observer walks to the rack, opens the menu, confirms an aircraft and follows the line to it (AC-043); keyboard and screen-reader pass of the same flow (AC-044); record the observer's feedback on legibility. | FR-016, FR-018, FR-019 |
 
 ## Success Metrics
 
 | Goal | Indicator | Baseline | Target | Measurement window | Evidence |
 |---|---|---|---|---|---|
-| GOAL-001 | Automated HG criteria (27 of 32: all except AC-014, AC-020, AC-021, AC-022, AC-023); release checks (7). | No hangar behavior or release evidence is accepted yet. | 27 of 27 automated criteria pass; 7 of 7 release checks pass with actual evidence; no scene/server mismatch; rehearsal at most 5 minutes. | Each release-candidate revision and recorded rehearsal. | Test results and review/checklist evidence with browser/device details. |
+| GOAL-001 | Automated HG criteria (37 of 44: all except AC-014, AC-020, AC-021, AC-022, AC-023, AC-043, AC-044); release checks (8). | No hangar behavior or release evidence is accepted yet. | 37 of 37 automated criteria pass; 8 of 8 release checks pass with actual evidence; no scene/server mismatch; rehearsal at most 5 minutes. | Each release-candidate revision and recorded rehearsal. | Test results and review/checklist evidence with browser/device details. |
 
 ## Risks and Assumptions
 
@@ -391,6 +455,8 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 | AS-003 | Generic silhouettes can meet the accepted 1.5 MiB gzip/15 MiB asset/5 MiB per-model limits. | Targets accepted; runtime/build results pending | Assets need simplification to meet the targets. | Size validator and RC-001; changing a target requires a PRD amendment. | User decision, 2026-10-14 |
 | AS-004 | `@react-three/fiber` 9.8.1 works with React 19.3.0 and the chosen `three` version. | Supported by the package peer range (verified 2026-10-14); integration unbuilt. | Version pin changes. | Dependency story installs and builds first. | npm registry |
 | AS-005 | Generic fictional geometry communicates aircraft and components. | Untested | Weak visual clarity. | AC-021 before HG asset approval/release, after CP fixture freeze. | Product hypothesis |
+| AS-006 | A walkable Data Room with a menu and a guide line helps a presenter show where case data comes from and reach an aircraft. | Untested | Added interaction without benefit, or distraction from evidence. | AC-043 and RC-008 with observers; the non-3D Data Room list and every other task stay complete without it. | Product owner request, 2026-10-19 |
+| AS-007 | SS:FR-009 is delivered on the default branch with the typed summary the menu needs (mode and coverage flag for each of the five sources). | Endpoint exists on the default branch (verified 2026-10-19); the contract may still change while SS stories are open | The menu reads a changed contract. | The client accepts only the supported `contractVersion` and shows "source summary unavailable" otherwise (AC-037). | Default branch |
 
 ### Research Finding Dispositions
 
@@ -412,6 +478,10 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 | A malformed asset or dependency flaw is exploited. | Low | High | Asset validator, exact pins, audit, restrictive CSP. |
 | Asset licensing is unclear. | Low | Medium | Provenance and licence check (AC-017). |
 | jsdom cannot test real rendering. | High | Medium | Logic tests plus manual WebGL check (RC-006). |
+| Walking and a game-style menu turn the demo into a game or distract from evidence (DD-007). | Medium | Medium | No score, timer or objective; the walk is bounded and optional; every task is available in the non-3D list; AC-043 and RC-008. |
+| Arrow keys are ambiguous between camera and avatar. | Medium | Medium | Two separate labelled focus regions, only the focused one reacts (AC-030, AC-034). |
+| The menu opening on its own steals focus. | Medium | Medium | Opens once per zone entry, Escape restores focus, an explicit control exists (AC-036). |
+| The source summary contract changes while SS stories are open. | Medium | Low | Supported-version check and per-entry unavailable state (AC-037, AS-007). |
 
 ## Glossary
 
@@ -422,7 +492,11 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 | Guided journey | An ordered explanation of a case built from server history and projection. |
 | Non-3D equivalent | The semantic list and panel interface that completes every hangar task without WebGL. |
 | Demo baseline | The laptop and browser configuration defined in this PRD for manual checks. |
-| CP / ARR | The Aircraft Case Pack PRD and the Aircraft Return Readiness PRD. |
+| Data Room | The part of Hangar mode with the server rack, the avatar, the rack menu and the guide line. |
+| Rack | The 3D server rack with one unit for each of the five SS source systems. |
+| Avatar | The small generic presenter figure the user walks across the hangar floor with the arrow keys. |
+| Guide line | The informational line over the floor from the avatar to the selected aircraft's marker. |
+| CP / ARR / SS | The Aircraft Case Pack PRD, the Aircraft Return Readiness PRD and the Synthetic Source-System Stubs PRD. |
 
 ## Sign-Off
 
@@ -452,7 +526,7 @@ This document defines draft requirements for a fictional, synthetic demonstrator
 
 * Template Version: 1.0.0.
 * Canonical Template: `docs/templates/prd-template.md`.
-* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.7.0); [Aircraft Case Pack](aircraft-case-pack.md) (CP, dependency).
+* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.7.0); [Aircraft Case Pack](aircraft-case-pack.md) (CP, dependency); [Synthetic Source-System Stubs](aircraft-source-systems.md) (SS, source summary dependency for the Data Room).
 * Derived from the untracked draft `aircraft-hangar-demo-mode` v0.1.0, which this PRD and CP replace.
 * License: CC-BY 4.0 (Microsoft HVE-Core).
 * Attribution: Microsoft HVE-Core Team.
