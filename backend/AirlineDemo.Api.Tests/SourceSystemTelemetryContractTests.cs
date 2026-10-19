@@ -189,11 +189,23 @@ public sealed class SourceSystemTelemetryContractTests
     [Fact]
     public async Task SourceEventsUseExactSeverityTextAndNumbers()
     {
+        using var temporaryDirectory = new TemporaryDirectory("source-telemetry-contract-");
+        var approvalPath = Path.Combine(temporaryDirectory.Path, "source-system-proposed-additions.md");
+        await File.WriteAllLinesAsync(approvalPath,
+        [
+            "source-specific-attributes",
+            "source.id",
+            "case.id",
+            "event.outcome",
+            "duration",
+            "metric-dimensions",
+        ]);
         var events = new List<CapturedEvent>();
         var source = new ControlledSource();
         var admission = new ControlledAdmission();
-        var statePath = Path.Combine(Path.GetTempPath(), $"source-telemetry-{Guid.NewGuid():N}.json");
-        await using var factory = CreateFactory(statePath, events, source, admission, auditFailure: true);
+        var statePath = Path.Combine(temporaryDirectory.Path, "case-state.json");
+        await using var factory = CreateFactory(statePath, events, source, admission, auditFailure: true,
+            sourceAttributeApprovalPath: approvalPath);
         var cases = factory.Services.GetRequiredService<ICaseStateStore>();
         cases.CreateCase(CaseId, "owner");
         cases.CreateCase(OtherCaseId, "other-owner");
@@ -253,6 +265,18 @@ public sealed class SourceSystemTelemetryContractTests
             ["source.read.timed_out"] = ("WARN", 13),
             ["source.mode_change.audit_write_failed"] = ("ERROR", 17),
         };
+        var expectedContext = new Dictionary<string, (string SourceId, string CaseId, string Outcome)>(StringComparer.Ordinal)
+        {
+            ["source.mode_change.accepted"] = ("technical", CaseId, "accepted"),
+            ["source.read.denied_cross_case"] = ("technical", OtherCaseId, "denied"),
+            ["source.read.denied_out_of_role"] = ("technical", CaseId, "denied"),
+            ["source.fixture.rejected"] = ("source-fixture-pack", "source-fixture-pack", "rejected"),
+            ["source.read.unavailable"] = ("technical", CaseId, "unavailable"),
+            ["source.read.rate_or_concurrency_limited"] = ("technical", CaseId, "limited"),
+            ["source.read.record_limit_rejected"] = ("technical", CaseId, "rejected"),
+            ["source.read.timed_out"] = ("technical", CaseId, "timed_out"),
+            ["source.mode_change.audit_write_failed"] = ("technical", CaseId, "failed"),
+        };
         foreach (var (name, severity) in expected)
         {
             var matches = events.Where(item => item.Name == name).ToArray();
@@ -264,10 +288,15 @@ public sealed class SourceSystemTelemetryContractTests
                 Assert.Equal(severity.Number, record.SeverityNumber);
                 var contractAttributes = record.Attributes
                     .Where(attribute => attribute.Key is "deployment.environment" or "event.name" or "severity.number"
-                        or "severity.text" or "service.name" or "service.version")
+                        or "severity.text" or "service.name" or "service.version"
+                        or "source.id" or "case.id" or "event.outcome" or "duration")
                     .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
                 Assert.Equal(
-                    new[] { "deployment.environment", "event.name", "severity.number", "severity.text", "service.name", "service.version" }
+                    new[]
+                    {
+                        "deployment.environment", "event.name", "severity.number", "severity.text", "service.name", "service.version",
+                        "source.id", "case.id", "event.outcome", "duration",
+                    }
                         .OrderBy(key => key, StringComparer.Ordinal),
                     contractAttributes.Keys.OrderBy(key => key, StringComparer.Ordinal));
                 Assert.Equal(name, contractAttributes["event.name"]);
@@ -276,6 +305,14 @@ public sealed class SourceSystemTelemetryContractTests
                 Assert.Equal(TelemetryRedaction.ServiceName, contractAttributes["service.name"]);
                 Assert.Equal(TelemetryRedaction.ServiceVersion, contractAttributes["service.version"]);
                 Assert.Equal(environmentName.ToLowerInvariant(), contractAttributes["deployment.environment"]);
+                var context = expectedContext[name];
+                Assert.Equal(context.SourceId, contractAttributes["source.id"]);
+                Assert.Equal(context.CaseId, contractAttributes["case.id"]);
+                Assert.Equal(context.Outcome, contractAttributes["event.outcome"]);
+                Assert.True(Assert.IsType<long>(contractAttributes["duration"]) >= 0);
+                Assert.DoesNotContain("source.raw_record_id", record.Attributes.Select(attribute => attribute.Key));
+                Assert.DoesNotContain("recordId", record.Attributes.Select(attribute => attribute.Key));
+                Assert.DoesNotContain("record.id", record.Attributes.Select(attribute => attribute.Key));
             }
         }
         var output = string.Join("\n", events.SelectMany(item =>
@@ -285,10 +322,12 @@ public sealed class SourceSystemTelemetryContractTests
         Assert.DoesNotContain(reviewer.CsrfToken, output);
         Assert.DoesNotContain(presenter.Id, output);
         Assert.DoesNotContain(presenter.CsrfToken, output);
-        Assert.DoesNotContain("source.id", output);
-        Assert.DoesNotContain("case.id", output);
-        Assert.DoesNotContain("event.outcome", output);
-        Assert.DoesNotContain("duration", output);
+        Assert.DoesNotContain($"__Host-demo-session={reviewer.Id}", output);
+        Assert.DoesNotContain($"__Host-demo-session={presenter.Id}", output);
+        Assert.DoesNotContain("record-1", output);
+        Assert.DoesNotContain("source.raw_record_id", output);
+        Assert.DoesNotContain("recordId", output);
+        Assert.DoesNotContain("record.id", output);
     }
 
     [Fact]
@@ -374,17 +413,29 @@ public sealed class SourceSystemTelemetryContractTests
     public void SourceEventsNeverCarryRecordIdentifiersOrPayloads()
     {
         using var temporaryDirectory = new TemporaryDirectory("source-telemetry-private-");
+        var approvalPath = Path.Combine(temporaryDirectory.Path, "source-system-proposed-additions.md");
+        File.WriteAllLines(approvalPath,
+        [
+            "source-specific-attributes",
+            "source.id",
+            "case.id",
+            "event.outcome",
+            "duration",
+            "metric-dimensions",
+        ]);
         var events = new List<CapturedEvent>();
         var capture = new EventCapture(events, TelemetryRedaction.SourceEvents.SourceUnavailable);
         var stateStore = new CaseStateStore(Path.Combine(temporaryDirectory.Path, "case-state.json"));
         stateStore.CreateCase(CaseId, "owner");
-        using var services = CreateProductionLoggerServices(capture);
+        using var services = CreateProductionLoggerServices(capture, approvalPath);
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("source-private-test");
         var environmentName = Environments.Development;
         const string RawRecordId = "SYN-SOURCE-RECORD-RAW-01";
         const string RecordId = "SYN-SOURCE-RECORD-ID-01";
         const string DottedRecordId = "SYN-SOURCE-RECORD-DOT-01";
         const string Payload = "SYN-SOURCE-PAYLOAD-01";
+        const string Cookie = "SYN-SOURCE-COOKIE-01";
+        const string Token = "SYN-SOURCE-TOKEN-01";
 
         using (logger.BeginScope(new Dictionary<string, object?>
         {
@@ -392,9 +443,11 @@ public sealed class SourceSystemTelemetryContractTests
             ["recordId"] = RecordId,
             ["record.id"] = DottedRecordId,
             ["payload"] = Payload,
+            ["cookie"] = Cookie,
+            ["token"] = Token,
         }))
         {
-            SourceSystemDiagnostics.SourceUnavailable(logger, environmentName);
+            SourceSystemDiagnostics.SourceUnavailable(logger, environmentName, "technical", CaseId, 42);
         }
 
         var emitted = Assert.Single(events, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
@@ -409,6 +462,12 @@ public sealed class SourceSystemTelemetryContractTests
         Assert.DoesNotContain(RecordId, output);
         Assert.DoesNotContain(DottedRecordId, output);
         Assert.DoesNotContain(Payload, output);
+        Assert.DoesNotContain(Cookie, output);
+        Assert.DoesNotContain(Token, output);
+        Assert.Equal("technical", emitted.Attributes.Single(attribute => attribute.Key == "source.id").Value);
+        Assert.Equal(CaseId, emitted.Attributes.Single(attribute => attribute.Key == "case.id").Value);
+        Assert.Equal("unavailable", emitted.Attributes.Single(attribute => attribute.Key == "event.outcome").Value);
+        Assert.Equal(42L, emitted.Attributes.Single(attribute => attribute.Key == "duration").Value);
     }
 
     [Fact]
@@ -564,15 +623,21 @@ public sealed class SourceSystemTelemetryContractTests
         List<CapturedEvent> events,
         ControlledSource source,
         ControlledAdmission admission,
-        bool auditFailure)
+        bool auditFailure,
+        string? sourceAttributeApprovalPath = null)
     {
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["CaseState:Path"] = statePath,
                 ["Demo:Passcode"] = "telemetry-test-passcode",
-            }));
+            };
+            if (sourceAttributeApprovalPath is not null)
+            {
+                settings[DiagnosticsSetup.SourceAttributeApprovalPathSetting] = sourceAttributeApprovalPath;
+            }
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(settings));
             builder.ConfigureLogging(logging => logging.AddOpenTelemetry(options =>
             {
                 var resourceAttributes = TelemetryRedaction.ResourceAttributes(

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
@@ -35,6 +36,7 @@ public static class SourceReadEndpoints
         DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time,
         ILogger<SourceReadBudget> logger, IHostEnvironment environment)
     {
+        var diagnosticStartedAt = Stopwatch.GetTimestamp();
         if (version != 1) return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version");
 
         var receivedAt = time.GetUtcNow();
@@ -48,12 +50,14 @@ public static class SourceReadEndpoints
         if (scope is null)
         {
             if (cases.OwnerOf(caseId) is not null && !session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
-                SourceSystemDiagnostics.CrossCaseReadDenied(logger, environment.EnvironmentName);
+                SourceSystemDiagnostics.CrossCaseReadDenied(logger, environment.EnvironmentName, sourceId, caseId,
+                    SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
             return Results.NotFound();
         }
         if (!Allowed(session.User.Role, sourceId))
         {
-            SourceSystemDiagnostics.OutOfRoleReadDenied(logger, environment.EnvironmentName);
+            SourceSystemDiagnostics.OutOfRoleReadDenied(logger, environment.EnvironmentName, sourceId, caseId,
+                SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
             return Error(StatusCodes.Status403Forbidden, "forbidden");
         }
         if (http.Request.Query.Count != 0) return Error(StatusCodes.Status400BadRequest, "invalid_request");
@@ -63,12 +67,14 @@ public static class SourceReadEndpoints
         try { leaseId = await budget.TryAcquireAsync(session.Id, caseId, receivedAt, linked.Token); }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested && !http.RequestAborted.IsCancellationRequested)
         {
-            SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName);
+            SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName, sourceId, caseId,
+                SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
             return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
         }
         if (leaseId is null)
         {
-            SourceSystemDiagnostics.ReadLimited(logger, environment.EnvironmentName);
+            SourceSystemDiagnostics.ReadLimited(logger, environment.EnvironmentName, sourceId, caseId,
+                SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
             return Error(StatusCodes.Status429TooManyRequests, "source_read_limit");
         }
 
@@ -81,13 +87,15 @@ public static class SourceReadEndpoints
                     : await GetSource(http.RequestServices, sourceId, caseId, recordId, mode, linked.Token);
                 if (deadline.IsCancellationRequested)
                 {
-                    SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName);
+                    SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName, sourceId, caseId,
+                        SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
                     return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
                 }
                 if (outcome.ErrorCode is not null)
                 {
                     if (outcome.ErrorCode == "source_unavailable")
-                        SourceSystemDiagnostics.SourceUnavailable(logger, environment.EnvironmentName);
+                        SourceSystemDiagnostics.SourceUnavailable(logger, environment.EnvironmentName, sourceId, caseId,
+                            SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
                     return Error(outcome.ErrorCode switch
                     {
                         "record_not_found" => StatusCodes.Status404NotFound,
@@ -98,7 +106,8 @@ public static class SourceReadEndpoints
                 }
                 if (recordId is null && outcome.Count > 100)
                 {
-                    SourceSystemDiagnostics.RecordLimitRejected(logger, environment.EnvironmentName);
+                    SourceSystemDiagnostics.RecordLimitRejected(logger, environment.EnvironmentName, sourceId, caseId,
+                        SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
                     return Error(StatusCodes.Status422UnprocessableEntity, "source_record_limit");
                 }
                 if (recordId is null)
@@ -107,7 +116,8 @@ public static class SourceReadEndpoints
             }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested && !http.RequestAborted.IsCancellationRequested)
             {
-                SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName);
+                SourceSystemDiagnostics.ReadTimedOut(logger, environment.EnvironmentName, sourceId, caseId,
+                    SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
                 return Error(StatusCodes.Status504GatewayTimeout, "source_read_timeout");
             }
         }
