@@ -124,8 +124,12 @@ public sealed class SourceSystemTelemetryContractTests
         string? TraceId,
         string? SpanId);
 
-    private sealed class EventCapture(List<CapturedEvent> events) : BaseProcessor<LogRecord>
+    private sealed class EventCapture(List<CapturedEvent> events, string? countedEventName = null) : BaseProcessor<LogRecord>
     {
+        private int capturedCount;
+
+        public int CapturedCount => Volatile.Read(ref capturedCount);
+
         public override void OnEnd(LogRecord data)
         {
             var attributes = (data.Attributes ?? []).ToList();
@@ -164,6 +168,10 @@ public sealed class SourceSystemTelemetryContractTests
                     new KeyValuePair<string, object?>(attribute.Key, attribute.Value)).ToArray(),
                 traceId.All(character => character == '0') ? null : traceId,
                 spanId.All(character => character == '0') ? null : spanId));
+            if (countedEventName is null || string.Equals(name, countedEventName, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref capturedCount);
+            }
         }
 
         private static object? ReadInternalLogRecordProperty(LogRecord record, string name)
@@ -282,18 +290,13 @@ public sealed class SourceSystemTelemetryContractTests
     }
 
     [Fact]
-    public async Task EventsContainRequiredOtelAndTraceFields()
+    public void EventsContainRequiredOtelAndTraceFields()
     {
-        using var temporaryDirectory = new TemporaryDirectory("source-telemetry-fields-");
         var events = new List<CapturedEvent>();
-        await using var factory = CreateFactory(
-            Path.Combine(temporaryDirectory.Path, "case-state.json"),
-            events,
-            new ControlledSource(),
-            new ControlledAdmission(),
-            auditFailure: false);
-        var logger = factory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-fields-test");
-        var environmentName = factory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName;
+        var capture = new EventCapture(events);
+        using var services = CreateProductionLoggerServices(capture);
+        var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("source-fields-test");
+        var environmentName = Environments.Development;
         var previousActivity = Activity.Current;
 
         try
@@ -314,9 +317,7 @@ public sealed class SourceSystemTelemetryContractTests
         var insideSpan = Assert.Single(events, item => item.Name == TelemetryRedaction.SourceEvents.ReadLimited);
         var expectedResourceKeys = new[]
         {
-            "deployment.environment",
             "service.name",
-            "service.version",
             "telemetry.sdk.language",
             "telemetry.sdk.name",
             "telemetry.sdk.version",
@@ -336,6 +337,10 @@ public sealed class SourceSystemTelemetryContractTests
             Assert.Equal(13, captured.OtelSeverityNumber);
             Assert.Equal("diagnostic event", captured.Body);
             var attributes = captured.Attributes.ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+            Assert.Equal(
+                new[] { "deployment.environment", "event.name", "severity.number", "severity.text", "service.name", "service.version" }
+                    .OrderBy(key => key, StringComparer.Ordinal),
+                attributes.Keys.OrderBy(key => key, StringComparer.Ordinal));
             Assert.Equal(expectedName, attributes["event.name"]);
             Assert.Equal(TelemetryRedaction.ServiceName, attributes["service.name"]);
             Assert.Equal(TelemetryRedaction.ServiceVersion, attributes["service.version"]);
@@ -347,9 +352,6 @@ public sealed class SourceSystemTelemetryContractTests
                 captured.Resource.Select(attribute => attribute.Key).OrderBy(key => key, StringComparer.Ordinal));
             Assert.All(captured.Resource, attribute => Assert.NotNull(attribute.Value));
             var resource = captured.Resource.ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
-            Assert.Equal(TelemetryRedaction.ServiceName, resource["service.name"]);
-            Assert.Equal(TelemetryRedaction.ServiceVersion, resource["service.version"]);
-            Assert.Equal(environmentName.ToLowerInvariant(), resource["deployment.environment"]);
             Assert.Equal("opentelemetry", resource["telemetry.sdk.name"]);
             Assert.Equal("dotnet", resource["telemetry.sdk.language"]);
             Assert.False(string.IsNullOrWhiteSpace(resource["telemetry.sdk.version"]?.ToString()));
@@ -359,6 +361,47 @@ public sealed class SourceSystemTelemetryContractTests
         Assert.Null(outsideSpan.SpanId);
         Assert.False(string.IsNullOrWhiteSpace(insideSpan.TraceId));
         Assert.False(string.IsNullOrWhiteSpace(insideSpan.SpanId));
+    }
+
+    [Fact]
+    public void SourceEventsNeverCarryRecordIdentifiersOrPayloads()
+    {
+        using var temporaryDirectory = new TemporaryDirectory("source-telemetry-private-");
+        var events = new List<CapturedEvent>();
+        var capture = new EventCapture(events, TelemetryRedaction.SourceEvents.SourceUnavailable);
+        var stateStore = new CaseStateStore(Path.Combine(temporaryDirectory.Path, "case-state.json"));
+        stateStore.CreateCase(CaseId, "owner");
+        using var services = CreateProductionLoggerServices(capture);
+        var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("source-private-test");
+        var environmentName = Environments.Development;
+        const string RawRecordId = "SYN-SOURCE-RECORD-RAW-01";
+        const string RecordId = "SYN-SOURCE-RECORD-ID-01";
+        const string DottedRecordId = "SYN-SOURCE-RECORD-DOT-01";
+        const string Payload = "SYN-SOURCE-PAYLOAD-01";
+
+        using (logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["source.raw_record_id"] = RawRecordId,
+            ["recordId"] = RecordId,
+            ["record.id"] = DottedRecordId,
+            ["payload"] = Payload,
+        }))
+        {
+            SourceSystemDiagnostics.SourceUnavailable(logger, environmentName);
+        }
+
+        var emitted = Assert.Single(events, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
+        Assert.Equal(1, capture.CapturedCount);
+        var attributeNames = emitted.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain("source.raw_record_id", attributeNames);
+        Assert.DoesNotContain("recordId", attributeNames);
+        Assert.DoesNotContain("record.id", attributeNames);
+        var output = string.Join("\n",
+            emitted.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}").Append(emitted.Body ?? string.Empty));
+        Assert.DoesNotContain(RawRecordId, output);
+        Assert.DoesNotContain(RecordId, output);
+        Assert.DoesNotContain(DottedRecordId, output);
+        Assert.DoesNotContain(Payload, output);
     }
 
     [Fact]
@@ -495,9 +538,27 @@ public sealed class SourceSystemTelemetryContractTests
         throw new DirectoryNotFoundException("Could not locate the repository root from the test output directory.");
     }
 
+    private static ServiceProvider CreateProductionLoggerServices(EventCapture processor)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [DiagnosticsSetup.ConnectionStringSetting] =
+                "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=http://127.0.0.1:1/",
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddAirlineDiagnostics(configuration);
+        services.AddLogging(logging => logging.AddOpenTelemetry(options => options.AddProcessor(processor)));
+        return services.BuildServiceProvider();
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(
-        string statePath, List<CapturedEvent> events, ControlledSource source, ControlledAdmission admission, bool auditFailure) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        string statePath,
+        List<CapturedEvent> events,
+        ControlledSource source,
+        ControlledAdmission admission,
+        bool auditFailure)
+    {
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -533,6 +594,7 @@ public sealed class SourceSystemTelemetryContractTests
                 }
             });
         });
+    }
 
     private static Task<HttpResponseMessage> Get(HttpClient client, DemoSession session, string path)
     {
