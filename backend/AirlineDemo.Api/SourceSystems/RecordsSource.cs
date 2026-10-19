@@ -44,7 +44,7 @@ public sealed class RecordsSource()
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
         SourceFixtureVersion = "2026.10.1",
         ScenarioDate = "2026-10-01",
-        Sha256 = "f51625cb1206f0ca90b56a75d8f24ba57534a8ccb3ebe37b3e9490632820e275",
+        Sha256 = "119f0945431845ff34c55dac02b49e9e059498f31adc4d73df745fdde2e03f21",
         RecordCounts = new Dictionary<string, int>
         {
             ["technical"] = 0,

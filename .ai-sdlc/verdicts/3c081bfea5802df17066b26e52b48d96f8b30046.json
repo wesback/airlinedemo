@@ -1,0 +1,250 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 408,
+  "branch": "ai-sdlc/issue-408",
+  "commitSha": "3c081bfea5802df17066b26e52b48d96f8b30046",
+  "round": 0,
+  "pipelineVersion": "c543f99-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "An omitted sourceWitnesses property bypasses source tuple validation, allowing a source-backed claim to be retained without the required pinned witness.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 100,
+          "message": "Treat an omitted sourceWitnesses property as missing provenance for a source-backed claim. The current null case bypasses the exact-tuple requirement; the theory covers an empty list but not an omitted property.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The model response is deserialized into a ClaimDto whose SourceWitnesses may be null. VerifyClaims passes that value to SourceWitnessProblem, which returns null immediately when witnesses is null, so ClaimValidator can mark the claim Supported without a source tuple.",
+            "failureScenario": "After reading a source record, the model returns a claim based on it but omits the sourceWitnesses property. The claim passes document-witness validation and is retained as Supported even though no exact pinned source tuple was supplied."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover the listed tuple mismatches, but the missing-witness case does not exercise the null value produced when the model omits sourceWitnesses. That omission allows a claim to bypass source tuple validation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 97,
+          "message": "The no-witness theory case uses an empty list, but an omitted sourceWitnesses field is null and bypasses validation. Reject null source witnesses too, and cover that input in the theory so a source-backed claim without a tuple is downgraded.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "A claim with an omitted sourceWitnesses property deserializes with SourceWitnesses null. SourceWitnessProblem returns null for that value, so Validate can mark the claim Supported without finding a pinned source tuple.",
+            "failureScenario": "The model returns a claim based on a source record but omits sourceWitnesses. The document witness passes validation, and the claim is retained as Supported despite having no source record witness."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Source witness validation can be bypassed by omitting the witness field, and returned claim text is not checked for marked personal data. Both paths can produce results that violate the story's security acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "line": 99,
+          "message": "A missing sourceWitnesses field bypasses exact source witness validation. Treat an omitted witness list as missing evidence for source-backed claims so claims derived from permitted source reads cannot be retained without the pinned tuple (OWASP A06:2025, Insecure Design).",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The model response is deserialized into ClaimDto.SourceWitnesses, then passed to SourceWitnessProblem. When the JSON omits sourceWitnesses, that value is null and the validator returns null without checking the source basis.",
+            "failureScenario": "After reading a source record, the model returns a claim supported by a document witness but omits sourceWitnesses. The claim passes validation and is retained even though it has no exact pinned source tuple."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 282,
+          "message": "Marked personal data is removed from the model's source-record payload, but claim text is accepted without a corresponding output check. Reject or redact claims containing the marked fields or values so they cannot appear in user-visible claims (OWASP A02:2025, Security Misconfiguration).",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "After validating document and source witnesses, the investigator copies dto.Text directly into InvestigationClaim. No check removes or rejects marked personal data values in the claim text.",
+            "failureScenario": "The model response contains a claim with a valid document witness and includes SYN-PERSON-NAME-01 or SYN-LICENSE-NUMBER-01 in its text. The claim is returned to the caller with that marked personal data."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceInvestigatorToolsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 87,
+      "total": 89,
+      "percent": 97.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 19,
+          "total": 19,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "covered": 20,
+          "total": 22,
+          "missed": [
+            110,
+            111
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/SourceReadTools.cs",
+          "covered": 48,
+          "total": 48,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

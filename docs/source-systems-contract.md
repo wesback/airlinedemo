@@ -106,6 +106,8 @@ Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `con
 | `case-b` | A technical record that disagrees with a document on engine identity: the technical record names engine serial `SYN-SN-77201`; the case-b release document in the evidence set states `SYN-SN-77210`. | `technical`: `tech-b-component-001`; `records`: component-release document `SYN-DOCB002` |
 | `case-c` | A baseline in all five sources and a records entry for the blocked document. | `records`: `SYN-DOCC003`, `parseStatus` `blocked` |
 
+The records source uses ARR's document identifiers and versions for the `case-001` evidence index: `release-to-service` is `DOC-01`, `shop-visit-record` is `DOC-02`, and `component-release` is `DOC-03`; each is version `1`.
+
 The new finance records use the typed kind `maintenance_reserve` with the common fields (`recordedAmount`, `collectedAmount`, `currency`, `period`, `dueDate`, `rateBasis`, `rate`). The `case-001` finance records keep their earlier kinds.
 
 The contracts fixture contains seven synthetic `specialist_flag` records: one each for `cape_town`, `ifrs16`, `gdpr` and `other`, and three for `sanctions` (regimes `EU`, `US` and `UK`). Each record has a distinct related requirement identifier and one of the accepted result values. It also contains one synthetic `cape_town_interest` record with reference-only values and no legal conclusion.

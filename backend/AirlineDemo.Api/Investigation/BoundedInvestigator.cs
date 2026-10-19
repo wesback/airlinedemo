@@ -40,7 +40,15 @@ public sealed class NoInvestigationLimits : IInvestigationLimits
 
 public sealed record DocumentWitness(string DocumentId, int Page, string Quote);
 
-public sealed record InvestigationClaim(string Text, IReadOnlyList<DocumentWitness> Witnesses);
+public sealed record SourceRecordWitness(string SourceId, string RecordId, int RecordVersion);
+
+public sealed record InvestigationClaim(
+    string Text,
+    IReadOnlyList<DocumentWitness> Witnesses,
+    IReadOnlyList<SourceRecordWitness>? SourceWitnesses = null)
+{
+    internal IReadOnlyCollection<SourceRecordWitness>? VerifiedSourceBasis { get; init; }
+}
 
 public sealed record InvestigationResult(IReadOnlyList<InvestigationClaim> Claims, IReadOnlyList<ModelCallTrace> ModelCalls);
 
@@ -95,9 +103,11 @@ public sealed class BoundedInvestigator(
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
         var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
         var functions = tools.Functions.AsEnumerable();
+        SourceReadTools? sourceTools = null;
         if (sourceSystems is not null)
         {
-            functions = functions.Concat(new SourceReadTools(caseId, role ?? string.Empty, sourceSystems, limits).Functions);
+            sourceTools = new SourceReadTools(caseId, role ?? string.Empty, sourceSystems, limits);
+            functions = functions.Concat(sourceTools.Functions);
         }
 
         var declaredTools = functions.ToArray();
@@ -116,7 +126,7 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationLimitExceededException(breach);
             }
 
-            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder), gate.Traces);
+            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder, sourceTools), gate.Traces);
             outcome = "approved";
             return result;
         }
@@ -180,7 +190,8 @@ public sealed class BoundedInvestigator(
 
     private static string BuildPrompt(IReadOnlyList<string> documents)
     {
-        var prompt = new StringBuilder("Investigate the case documents below and return the claims JSON.\n");
+        var prompt = new StringBuilder(
+            "Investigate the case documents below and return the claims JSON. For every source-backed claim, add sourceWitnesses entries using the exact sourceId, recordId and recordVersion returned by a permitted source tool.\n");
         foreach (var text in documents)
         {
             prompt.Append(UntrustedBegin).Append('\n').Append(text).Append('\n').Append(UntrustedEnd).Append('\n');
@@ -196,8 +207,12 @@ public sealed class BoundedInvestigator(
             .Where(part => part.Length >= 20)
             .Any(part => claimText.Contains(part, StringComparison.Ordinal));
 
-    private IReadOnlyList<InvestigationClaim> VerifyClaims(string modelText, InvestigationTraceRecorder? traceRecorder)
+    private IReadOnlyList<InvestigationClaim> VerifyClaims(
+        string modelText,
+        InvestigationTraceRecorder? traceRecorder,
+        SourceReadTools? sourceTools)
     {
+        var sourceWitnesses = sourceTools?.ReadWitnesses;
         List<ClaimDto>? dtos;
         try
         {
@@ -227,12 +242,27 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationOutputException("claim echoes the investigator prompt");
             }
 
+            if (sourceTools?.ContainsMarkedPersonalData(dto.Text) == true)
+            {
+                throw new InvestigationOutputException("claim contains marked personal data");
+            }
+
+            if (ClaimValidator.SourceWitnessProblem(dto.SourceWitnesses, sourceWitnesses) is { } sourceProblem)
+            {
+                throw new InvestigationOutputException(sourceProblem);
+            }
+
             var witnesses = new List<DocumentWitness>(dto.Witnesses.Count);
             foreach (var witness in dto.Witnesses)
             {
                 if (witness.DocumentId is null || !inventory.Contains(witness.DocumentId) || string.IsNullOrEmpty(witness.Quote))
                 {
                     throw new InvestigationOutputException("witness is not a document of this case");
+                }
+
+                if (sourceTools?.ContainsMarkedPersonalData(witness.Quote) == true)
+                {
+                    throw new InvestigationOutputException("claim contains marked personal data");
                 }
 
                 var page = source.GetSourcePage(caseId, witness.DocumentId, witness.Page);
@@ -260,7 +290,10 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationOutputException("claim text is not supported by its witness quote");
             }
 
-            claims.Add(new InvestigationClaim(dto.Text, witnesses));
+            claims.Add(new InvestigationClaim(dto.Text, witnesses, dto.SourceWitnesses)
+            {
+                VerifiedSourceBasis = sourceWitnesses,
+            });
         }
 
         return claims;
@@ -285,7 +318,7 @@ public sealed class BoundedInvestigator(
         }
     }
 
-    private sealed record ClaimDto(string? Text, List<WitnessDto>? Witnesses);
+    private sealed record ClaimDto(string? Text, List<WitnessDto>? Witnesses, List<SourceRecordWitness>? SourceWitnesses);
 
     private sealed record WitnessDto(string? DocumentId, int Page, string? Quote);
 

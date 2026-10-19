@@ -17,7 +17,7 @@
       "caseId": "case-001",
       "kind": "component_identity",
       "synthetic": true,
-      "payload": { "partNumber": "SYN-ENG-7000-A", "serialNumber": "SYN-SN-88412", "position": "engine_1" }
+      "payload": { "partNumber": "SYN-ENG-7000-A", "serialNumber": "EN-SYN-7781", "position": "engine_1" }
     },
     {
       "recordId": "tech-utilization-2026-08",
