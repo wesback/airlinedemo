@@ -1,0 +1,3 @@
+Synthetic maintenance log for AIRFRAME-CP-C-003 and ENG-CP-C-001.
+Scheduled wide-body maintenance is recorded as complete with no open work.
+The log references the engine shop-visit release and closed work card.

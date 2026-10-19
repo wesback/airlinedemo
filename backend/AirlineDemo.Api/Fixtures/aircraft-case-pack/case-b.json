@@ -5,6 +5,7 @@
   "aircraftCount": 1,
   "engineCount": 1,
   "components": [
+<<<<<<< HEAD
     {"componentId": "LLP-DISK-CP-B-017", "evidenceDocumentPaths": [
       "case-b/component-candidate-a.txt", "case-b/identity-reconciliation.txt", "case-b/llp-history-gap.txt"
     ]},
@@ -22,5 +23,67 @@
     {"path": "case-b/llp-history-gap.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
     {"path": "case-b/records-index.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
     {"path": "case-b/document-instructions.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"}
+=======
+    {
+      "componentId": "ENG-CP-B-001",
+      "evidenceDocumentPaths": [
+        "case-b/aircraft-summary.txt",
+        "case-b/engine-history-index.txt",
+        "case-b/engine-serial-record.txt",
+        "case-b/engine-shop-visit.txt",
+        "case-b/identity-conflict.txt"
+      ]
+    },
+    {
+      "componentId": "FAN-DISK-CP-B-021",
+      "evidenceDocumentPaths": [
+        "case-b/component-release.txt",
+        "case-b/maintenance-log.txt",
+        "case-b/records-index.txt"
+      ]
+    }
+  ],
+  "documents": [
+    {
+      "path": "case-b/aircraft-summary.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-b/engine-history-index.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-b/engine-serial-record.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-b/engine-shop-visit.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-b/maintenance-log.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-b/records-index.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-b/identity-conflict.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-b/component-release.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    }
+>>>>>>> origin/main
   ]
 }

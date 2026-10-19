@@ -1,1 +1,7 @@
+<<<<<<< HEAD
 SYNTHETIC EVIDENCE: Regional records index lists the available synthetic documents.
+=======
+Synthetic records index for Case B.
+The index links the engine installation, shop visit, and fan-disk release records.
+The engine serial discrepancy remains unresolved.
+>>>>>>> origin/main

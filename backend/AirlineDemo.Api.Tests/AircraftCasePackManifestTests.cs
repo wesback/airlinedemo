@@ -125,6 +125,46 @@ public sealed class AircraftCasePackManifestTests
         Assert.Empty(AircraftCasePackManifest.Compare(prior.Manifest, changedVersion, prior.Files, changedFiles));
     }
     [Fact]
+    public void ManifestHashUsesDeterministicManifestListedContent()
+    {
+        const string expectedHash = "ba766fe55dbc51fc96bee68a79230dd23207d5e3b45ef183df494e1022bf4509";
+        var pack = Pack();
+        var json = Json(pack);
+        var reversedJson = new JsonObject();
+        foreach (var property in json.Reverse())
+            reversedJson[property.Key] = property.Value?.DeepClone();
+
+        var parsed = AircraftCasePackManifest.Parse(json.ToJsonString(), pack.Files);
+        var reversed = AircraftCasePackManifest.Parse(reversedJson.ToJsonString(), pack.Files);
+        Assert.NotNull(parsed.Manifest);
+        Assert.NotNull(reversed.Manifest);
+        Assert.Equal(expectedHash, AircraftCasePackManifest.ComputeSha256(parsed.Manifest, pack.Files));
+        Assert.Equal(expectedHash, AircraftCasePackManifest.ComputeSha256(reversed.Manifest, pack.Files));
+
+        var listedPath = pack.Manifest.Files[0];
+        var changedContent = pack.Files[listedPath].ToArray();
+        changedContent[0] ^= 1;
+        var changedFiles = new Dictionary<string, byte[]>(pack.Files, StringComparer.Ordinal)
+        {
+            [listedPath] = changedContent
+        };
+        Assert.NotEqual(expectedHash, AircraftCasePackManifest.ComputeSha256(parsed.Manifest, changedFiles));
+
+        var filesWithUnlistedContent = new Dictionary<string, byte[]>(pack.Files, StringComparer.Ordinal)
+        {
+            ["unlisted.txt"] = Encoding.UTF8.GetBytes("unlisted")
+        };
+        Assert.Equal(expectedHash, AircraftCasePackManifest.ComputeSha256(parsed.Manifest, filesWithUnlistedContent));
+
+        var changedSha = parsed.Manifest with { Sha256 = new string('0', 64) };
+        Assert.Equal(expectedHash, AircraftCasePackManifest.ComputeSha256(changedSha, pack.Files));
+
+        json["sha256"] = new string('0', 64);
+        var mismatchingHash = AircraftCasePackManifest.Parse(json.ToJsonString(), pack.Files);
+        Assert.Null(mismatchingHash.Manifest);
+        Assert.Contains("sha256: does not match manifest and file contents", mismatchingHash.Errors);
+    }
+    [Fact]
     public void ManifestParsingFailsClosedForInvalidInputs()
     {
         var pack = Pack();

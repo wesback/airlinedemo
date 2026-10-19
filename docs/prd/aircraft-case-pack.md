@@ -2,13 +2,13 @@
 prd_id: "aircraft-case-pack"
 title: "Aircraft Synthetic Case Pack and Scene Projection API"
 status: "draft"
-version: "0.3.0"
+version: "0.3.1"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-14"
-last_updated: "2026-10-14"
+last_updated: "2026-10-19"
 product_goal_ids: ["GOAL-001", "GOAL-002"]
-product_goal_smart_status: "deferred"
+product_goal_smart_status: "scheduled"
 fr_to_ac_coverage_threshold_pct: 80.0
 fr_to_goal_coverage_threshold_pct: 100.0
 diagram_format: "mermaid"
@@ -31,7 +31,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 ## Executive Summary
 
-This PRD defines a versioned pack of three synthetic aircraft cases for the Aircraft Return Readiness Demonstrator, the server contracts that expose the pack, and one presenter-only scenario reset command. The pack supplements the single-aircraft core journey of the companion [Aircraft Return Readiness PRD](aircraft-return-readiness.md) (ARR, v0.7.0). ARR remains authoritative for case workflow, roles, permissions, audit, and capability labels.
+This PRD defines a versioned pack of three synthetic aircraft cases for the Aircraft Return Readiness Demonstrator, the server contracts that expose the pack, and one presenter-only scenario reset command. The pack supplements the single-aircraft core journey of the companion [Aircraft Return Readiness PRD](aircraft-return-readiness.md) (ARR, v0.9.2). ARR remains authoritative for case workflow, roles, permissions, audit, and capability labels.
 
 The pack holds a narrow-body case (Case A, complete missing-evidence request and response journey), a regional case (Case B, ambiguous component identity), and a wide-body case (Case C, complete baseline with one blocked-document variant). The server exposes a read-only, versioned case list and a read-only, versioned scene projection for each case. Demo users receive case scope across all three cases. A presenter can reset the Case C blocked variant through a server-authorized, anti-forgery-protected, audited command.
 
@@ -60,7 +60,7 @@ All aircraft, records, actors, and decisions are synthetic or simulated.
 |---|---|
 | DD-001 | The case pack is fixture data owned by the server. It is loaded by the existing ASP.NET Core application and never by the client. The pack adds no second workflow owner; cases run through the ARR workflow. |
 | DD-002 | The pack holds exactly three cases: Case A, Case B, Case C. Each has one aircraft, one engine, two modeled components, and 8–12 synthetic evidence documents. The pack therefore holds 24–36 documents. |
-| DD-003 | The pack is a supplement to the ARR core journey. The ARR scope lines for one aircraft and 8–12 documents apply to the core journey; the pack is governed by this PRD (ARR v0.7.0 addendum). |
+| DD-003 | The pack is a supplement to the ARR core journey. The ARR scope lines for one aircraft and 8–12 documents apply to the core journey; the pack is governed by this PRD (governed by ARR v0.9.2, DD-013). |
 | DD-004 | The pack manifest carries a `schemaVersion`, a `packVersion`, a `scenarioDate` (UTC date, fixed, never the system clock, as in ARR:DD-018), and a SHA-256 content hash. Any content change requires a new `packVersion`. The manifest specifies the hashed fields and files, excludes the hash field itself, and documents deterministic serialization. The merge of the fixture pull request, reviewed by the product owner, is the case-pack freeze (as in ARR:DD-033); it does not await HG geometry approval. |
 | DD-005 | Read contracts are versioned in the request path (`/api/v1/...`) and in the response body (`contractVersion`). An unsupported version returns an explicit error and no case data. |
 | DD-006 | The scene projection is a read-only server projection. It lists, per case, one aircraft object, one engine object, and two component objects, together with the authorized history, evidence witnesses, revision and action permissions defined under Read and command contracts. It is derived from one ARR case revision and carries no business state of its own. |
@@ -71,7 +71,7 @@ All aircraft, records, actors, and decisions are synthetic or simulated.
 | DD-011 | IDs are local to each PRD: `FR-001`, `AC-001`, `NFR-001`, `CON-001`, `DD-001`, and `GOAL-001`. Cross-document references use `ARR:FR-001`, `CP:FR-001`, or `HG:FR-001`, with the corresponding PRD path. Version 0.2.0 removes the draft `CP-` prefixes before any implementation stories exist. |
 | DD-012 | The current pipeline creates dependencies only within one PRD plan. The product owner enforces ARR then CP then HG by staging PRD merges, not by relying on prose to create cross-plan issue dependencies. A named person reviews each PRD pull request; no pipeline change is part of this feature. |
 | DD-013 | The Aircraft Case Pack integrates against ARR v0.9.2, the contract represented by the companion ARR PRD and default-branch implementation; this replaces the CP PRD's ARR v0.7.0 references. |
-| DD-014 | CP API limits: each user may make at most 30 case-list requests per minute, 30 scene requests per minute, and 3 reset requests per minute; commandId accepts 1-64 ASCII letters, digits, hyphens, or underscores. A request above a limit returns 429 without mutation. |
+| DD-014 | CP API limits: each user may make at most 30 case-list requests per minute, 30 scene requests per minute, and 3 reset requests per minute; commandId accepts 1-64 ASCII letters, digits, hyphens, or underscores. Limits are rolling 60-second windows per authenticated user and endpoint. Reset requests count every authenticated attempt, including denied-role, invalid and replayed ones. A request above a limit returns 429 with `error.code = rate_limit_exceeded` and no mutation. A `commandId` that does not match the rule returns 400 with `error.code = validation_error` and no mutation. |
 | DD-015 | The executive observer uses a dedicated read-only ARR role scoped to Case A, Case B, and Case C; this decision supersedes the no-new-roles scope boundary only for that role. |
 | DD-016 | Complete older-run/current-run history and exact historical evidence remain available through an authenticated ARR read contract that supports case, run, and basis selection; CP adds no separate history endpoint, and implementation waits until the ARR route is present and documented on the default branch. |
 
@@ -260,7 +260,7 @@ Verification values: **Automated** means a vitest, xUnit, or CI check that fails
 
 | ID | Given / When / Then acceptance intent | Covers | Verification | Status |
 |---|---|---|---|---|
-| AC-001 | Given the manifest, when the pack loads, then exactly three cases are seeded with `schemaVersion`, `packVersion`, `scenarioDate`, and a SHA-256 hash that matches the content; a manifest whose content differs from its hash is refused with an explicit error and seeds nothing. | FR-001 | Automated (xUnit) | Not Started |
+| AC-001 | Given the manifest, when the pack loads, then exactly three cases are seeded with `schemaVersion`, `packVersion`, `scenarioDate`, and a SHA-256 hash that matches the content; a manifest whose content differs from its hash is refused with an explicit error and seeds nothing. The hash covers exactly the files and fields the manifest lists and excludes the hash field itself; serialization is deterministic, so loading the same content twice, or with the manifest keys in a different order, gives identical bytes and hash; changing one byte of a listed file changes the hash, and an unlisted file or a changed hash field alone does not change the computed hash (the latter is refused as a mismatch). | FR-001 | Automated (xUnit) | Not Started |
 | AC-002 | Given an unsupported `schemaVersion` or case count other than three, when the pack loads, then an explicit error names the invalid field, no new pack is published, and all pre-existing case and blob data remains unchanged. | FR-001 | Automated (xUnit) | Not Started |
 | AC-003 | Given the fixture, when it is validated, then each case has one aircraft, one engine, two components, and 8–12 documents, with a total of 24–36; a case with 7 or 13 documents, a component without an evidence mapping, or a registration not marked fictional fails validation. | FR-002 | Automated (xUnit) | Not Started |
 | AC-004 | Given Case A processed through the ARR workflow, when the response is linked, then exactly one request with the ARR:DD-021 template exists, a new basis and reassessment exist, and prior basis history is retained; replaying the same events creates no second request. | FR-003 | Automated (xUnit) | Not Started |
@@ -288,6 +288,8 @@ Verification values: **Automated** means a vitest, xUnit, or CI check that fails
 | AC-026 | Given the scene response schema, when fixtures and responses are validated, then every required field has the declared type, and `history` preserves server sequence, run and basis witnesses; a missing revision, mistyped permission, duplicate object identifier or unresolved witness fails validation. | FR-007 | Automated (xUnit) | Not Started |
 | AC-027 | Given 100 retained prior runs and more than 20 events in the current run, when the scene is requested, then only the latest 20 authorized current-run events are returned in order with `olderHistoryAvailable: true`, required witnesses and a response within the byte budget; earlier runs/events remain reachable through the scoped ARR history controls, and excess payload returns 422 without silent citation loss or deleted history. | FR-007 | Automated (xUnit) | Not Started |
 | AC-028 | Given two versions of one document on different bases and a blocked document, when references are projected, then object mappings resolve the current-basis tuple while historical witnesses retain the older tuple; blocked references expose processing/retry state without witnesses, and unresolved, cross-case or tuple-mismatched references fail validation. | FR-007 | Automated (xUnit) | Not Started |
+| AC-029 | Given 30 case-list requests and 30 scene requests by one user within 60 seconds, when a 31st request of each kind is made, then it returns 429 `rate_limit_exceeded` with no case data; the 30th succeeds; once the oldest request leaves the rolling window a new request succeeds; limits are per user and per endpoint, so another user or the other endpoint is unaffected. A table-driven test with an injected clock covers 29, 30 and 31 requests and the window edge. | FR-006, FR-007 | Automated (xUnit) | Not Started |
+| AC-030 | Given the reset command, when `commandId` is empty, 65 characters long, or contains a character outside ASCII letters, digits, hyphen and underscore, then the response is 400 `validation_error` with no mutation and no audit record, and 1 and 64 valid characters are accepted; given 3 authenticated reset attempts by one user within 60 seconds (accepted, replayed, denied-role or invalid in any mix), when a 4th is made, then it returns 429 `rate_limit_exceeded` with no mutation, tested with an injected clock. | FR-009 | Automated (xUnit) | Not Started |
 
 ## Traceability Matrix
 
@@ -300,10 +302,10 @@ Verification values: **Automated** means a vitest, xUnit, or CI check that fails
 | FR-003 | AC-004 |
 | FR-004 | AC-005 |
 | FR-005 | AC-006 |
-| FR-006 | AC-007, AC-008, AC-020, AC-025 |
-| FR-007 | AC-009, AC-010, AC-011, AC-020, AC-024, AC-026, AC-027, AC-028 |
+| FR-006 | AC-007, AC-008, AC-020, AC-025, AC-029 |
+| FR-007 | AC-009, AC-010, AC-011, AC-020, AC-024, AC-026, AC-027, AC-028, AC-029 |
 | FR-008 | AC-012, AC-013 |
-| FR-009 | AC-014, AC-015, AC-016, AC-023 |
+| FR-009 | AC-014, AC-015, AC-016, AC-023, AC-030 |
 | FR-010 | AC-008, AC-017, AC-018, AC-019 |
 | FR-011 | AC-022 |
 
@@ -341,7 +343,7 @@ Coverage: 11/11 FRs have one or more GOAL links (100%; target 100%).
 
 ## MVP and Release Framing
 
-The release contains FR-001 through FR-011. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-003, ARR:FR-004, ARR:FR-005, ARR:FR-008, ARR:FR-010 and ARR:FR-013; ARR:DD-014/ARR:DD-023 sign-in and scopes; ARR:DD-027 persistence/audit; and ARR:DD-028/ARR:DD-029 request protection and filtered diagnostics. A closed issue alone is not delivery evidence. The ARR v0.7.0 amendment is merged first; this CP PRD is merged only after that prerequisite behavior is present.
+The release contains FR-001 through FR-011. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-003, ARR:FR-004, ARR:FR-005, ARR:FR-008, ARR:FR-010 and ARR:FR-013; ARR:DD-014/ARR:DD-023 sign-in and scopes; ARR:DD-027 persistence/audit; and ARR:DD-028/ARR:DD-029 request protection and filtered diagnostics. A closed issue alone is not delivery evidence. The ARR v0.9.2 PRD is the integration contract (DD-013) and is already merged; this CP PRD is merged only after that prerequisite behavior is present. The scene-projection story (FR-007) additionally waits for the ARR case-history reader: `GET /api/cases/{caseId}/history` with optional `runId` and `basisId` selectors must be on the default branch with passing behavior tests before that story starts (DD-016).
 
 Merging CP starts its automatic planning. All newly generated `Depends on #N` lines are within the CP plan; ARR is already delivered and is not recreated. Merge HG only after the entire CP pack, APIs, reset and diagnostics behavior is delivered, tested and fixture-approved on the default branch. Draft CP and HG may be reviewed together, but are not merged together. The PR descriptions identify the staged gate and that the ARR addendum adds no CP/HG implementation stories to the ARR plan.
 
@@ -374,10 +376,12 @@ These items are recorded by the product owner at each release candidate. They ar
 
 ## Success Metrics
 
+Target milestone: both goals are met at the release-candidate revision that precedes the Aircraft Hangar 3D merge gate (HG depends on the delivered pack and the frozen fixtures); no calendar date is set because delivery is paced by the pipeline, and the product owner records the revision in RC-001.
+
 | Goal | Indicator | Baseline | Target | Measurement window | Evidence |
 |---|---|---|---|---|---|
-| GOAL-001 | Automated criteria other than reset command criteria (AC-014, AC-015, AC-016, AC-023); cases reaching their expected outcomes. | No pack behavior is accepted yet. | All 23 applicable automated criteria pass; 3 of 3 cases reach their expected outcomes on 2 consecutive runs at the same revision; RC-001 is recorded. | Each release-candidate revision. | Test results, pack version/hash, review record. |
-| GOAL-002 | Reset command criteria (AC-014, AC-015, AC-016, AC-023); audit records for accepted resets. | No reset behavior is accepted yet. | 4 of 4 pass; one audit record per accepted reset and none added for replay or rejection. | Each release-candidate revision. | Test results, audit query. |
+| GOAL-001 | Automated criteria other than reset command criteria (AC-014, AC-015, AC-016, AC-023, AC-030); cases reaching their expected outcomes. | No pack behavior is accepted yet. | All 24 applicable automated criteria pass; 3 of 3 cases reach their expected outcomes on 2 consecutive runs at the same revision; RC-001 is recorded. | Each release-candidate revision. | Test results, pack version/hash, review record. |
+| GOAL-002 | Reset command criteria (AC-014, AC-015, AC-016, AC-023, AC-030); audit records for accepted resets. | No reset behavior is accepted yet. | 5 of 5 pass; one audit record per accepted reset and none added for replay or rejection. | Each release-candidate revision. | Test results, audit query. |
 
 ## Risks and Assumptions
 
@@ -436,7 +440,7 @@ None requested.
 
 ### Handoff Readiness
 
-Draft only. No implementation story is approved until the named person approves this PRD pull request, the ARR v0.7.0 amendment is merged, and the default-branch prerequisite delivery gate in MVP and Release Framing is satisfied. A later HG merge is a separate human gate after CP delivery and fixture review. This document records requirements, not a claim that either prerequisite gate has passed.
+Draft only. No implementation story is approved until the named person approves this PRD pull request, the ARR v0.9.2 integration contract is in place (DD-013), and the default-branch prerequisite delivery gate in MVP and Release Framing is satisfied. A later HG merge is a separate human gate after CP delivery and fixture review. This document records requirements, not a claim that either prerequisite gate has passed.
 
 ## Disclaimer
 
@@ -446,7 +450,7 @@ This document defines draft requirements for a fictional, synthetic demonstrator
 
 * Template Version: 1.0.0.
 * Canonical Template: `docs/templates/prd-template.md`.
-* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.7.0); [Aircraft Hangar 3D](aircraft-hangar-3d.md) (HG, consumer).
+* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.9.2); [Aircraft Hangar 3D](aircraft-hangar-3d.md) (HG, consumer).
 * Derived from the untracked draft `aircraft-hangar-demo-mode` v0.1.0, which this PRD and HG replace.
 * License: CC-BY 4.0 (Microsoft HVE-Core).
 * Attribution: Microsoft HVE-Core Team.
