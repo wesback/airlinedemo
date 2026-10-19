@@ -1,0 +1,26 @@
+{
+  "caseId": "cp-case-b",
+  "synthetic": true,
+  "generatorReference": "aircraft-case-pack-generator-v1",
+  "aircraftCount": 1,
+  "engineCount": 1,
+  "components": [
+    {"componentId": "LLP-DISK-CP-B-017", "evidenceDocumentPaths": [
+      "case-b/component-candidate-a.txt", "case-b/identity-reconciliation.txt", "case-b/llp-history-gap.txt"
+    ]},
+    {"componentId": "LLP-DISK-CP-B-071", "evidenceDocumentPaths": [
+      "case-b/component-candidate-b.txt", "case-b/identity-reconciliation.txt", "case-b/records-index.txt"
+    ]}
+  ],
+  "documents": [
+    {"path": "case-b/aircraft-summary.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/engine-identity-plate.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/engine-installation-log.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/component-candidate-a.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/component-candidate-b.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/identity-reconciliation.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/llp-history-gap.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/records-index.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"},
+    {"path": "case-b/document-instructions.txt", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1"}
+  ]
+}
