@@ -337,6 +337,8 @@ public sealed class CapeTownEvidenceTests
                 ["serialNumber"] = "ENG-1",
                 ["witnesses"] = Array.Empty<object>(),
                 ["relatedRequirementId"] = relatedRequirementId,
+                ["requirementId"] = RequirementId,
+                ["evidenceRegime"] = "EASA",
             };
             if (relianceField is not null)
                 claim["reliesOnCapeTownEvidence"] = relianceField.Value;

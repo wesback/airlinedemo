@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
+using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Policy;
@@ -14,6 +17,8 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
     private const string ScenarioTime = "2026-10-14T00:00:00Z";
     private const string BasisId = "basis-7";
     private const int BasisVersion = 3;
+    private const string RequirementId = "SYN-REQ-014";
+    private const string EvidenceRegime = "EASA";
 
     private static readonly ProcessingCoverage Complete = new(Inventory: 2, Processed: 2, Failed: 0, Partial: 0);
 
@@ -49,11 +54,28 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
         ProcessingCoverage? coverage = null,
         bool ambiguous = false,
         IReadOnlyDictionary<string, BasisDocument>? documents = null,
-        int version = BasisVersion) =>
-        new(BasisId, version, ScenarioTime, coverage ?? Complete, ambiguous, documents ?? Documents());
+        int version = BasisVersion,
+        IReadOnlyList<SourceBasisPin>? sourcePins = null) =>
+        new(BasisId, version, ScenarioTime, coverage ?? Complete, ambiguous, documents ?? Documents(),
+            sourcePins ?? [ApplicabilityPin(RequirementId, ("regime", EvidenceRegime), ("responsibleParty", "lessee-operator"))]);
 
-    private static AssessmentClaim Missing(string quote = Quote, string docId = "return-status", string value = Value) =>
-        new(ClaimKind.MissingRequirement, value, "Engine", "ENG-123", [new DocumentWitness(docId, 1, quote)]);
+    private static AssessmentClaim Missing(
+        string quote = Quote,
+        string docId = "return-status",
+        string value = Value,
+        string requirementId = RequirementId,
+        string evidenceRegime = EvidenceRegime) =>
+        new(ClaimKind.MissingRequirement, value, "Engine", "ENG-123", [new DocumentWitness(docId, 1, quote)],
+            RequirementId: requirementId, EvidenceRegime: evidenceRegime);
+
+    private static SourceBasisPin ApplicabilityPin(string requirementId, params (string Name, string Value)[] tags)
+    {
+        var fields = new Dictionary<string, string> { ["requirementId"] = requirementId };
+        foreach (var (name, value) in tags) fields.Add(name, value);
+        var content = JsonSerializer.Serialize(new { kind = "applicability", payload = new { fields } });
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+        return new SourceBasisPin("technical", $"app-{requirementId}", 1, content, digest);
+    }
 
     // AC-01: a single supported missing requirement with the exact typed value on the current basis creates one request.
     [Fact]
@@ -74,6 +96,45 @@ public sealed class AssessmentExecutionServiceTests : IDisposable
             "case-1:basis-7:3:assessment", "case-1", "assessment-3", BasisId, BasisVersion, ScenarioTime, "Engine", "ENG-123", Value);
         Assert.Equal(MockRequestTemplate.Render(expected, record.RequestId!), request.Body);
         Assert.Empty(_store.ListWorkItems(_scope));
+    }
+
+    [Fact]
+    public void RequirementApplicabilityUsesExactIdAndRegime()
+    {
+        var regimes = new[] { "EASA", "FAA-91", "FAA-121", "Other" };
+        var version = BasisVersion;
+        foreach (var recordRegime in regimes)
+        {
+            foreach (var evidenceRegime in regimes)
+            {
+                version++;
+                var basis = CurrentBasis(version: version, sourcePins:
+                    [ApplicabilityPin(RequirementId, ("regime", recordRegime), ("responsibleParty", "lessee-operator"))]);
+                _assessments.SetCurrentBasis("case-1", basis);
+                var requestsBefore = _inbox.Requests.Count;
+                var record = _service.Assess(_scope, basis, [Missing(evidenceRegime: evidenceRegime)]);
+
+                if (recordRegime == evidenceRegime)
+                {
+                    Assert.Equal("Request", record.Outcome);
+                    Assert.Equal(requestsBefore + 1, _inbox.Requests.Count);
+                }
+                else
+                {
+                    Assert.Equal("Review", record.Outcome);
+                    Assert.Equal(requestsBefore, _inbox.Requests.Count);
+                }
+            }
+        }
+
+        version++;
+        var otherRequirementBasis = CurrentBasis(version: version, sourcePins:
+            [ApplicabilityPin("SYN-OTHER-015", ("regime", EvidenceRegime), ("responsibleParty", "lessee-operator"))]);
+        _assessments.SetCurrentBasis("case-1", otherRequirementBasis);
+        var beforeWrongId = _inbox.Requests.Count;
+        var wrongId = _service.Assess(_scope, otherRequirementBasis, [Missing()]);
+        Assert.Equal("Review", wrongId.Outcome);
+        Assert.Equal(beforeWrongId, _inbox.Requests.Count);
     }
 
     // AC-01 negative: the typed value is absent from the cited quote, so the claim is downgraded and no request is created.

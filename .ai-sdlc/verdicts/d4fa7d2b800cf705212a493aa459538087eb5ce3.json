@@ -1,0 +1,194 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 398,
+  "branch": "ai-sdlc/issue-398",
+  "commitSha": "d4fa7d2b800cf705212a493aa459538087eb5ce3",
+  "round": 0,
+  "pipelineVersion": "c543f99-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation applies the new field requirement conditionally to MissingRequirement claims. The endpoint test does not protect that condition from regression.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApplicabilityTagTests.cs",
+          "line": 47,
+          "message": "Add a test showing that a non-MissingRequirement claim without requirementId or evidenceRegime is accepted; the named test does not verify the criterion's “only for MissingRequirement claims” behavior.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "MissingRequirementClaimsRequireIdAndEvidenceRegime sends only MissingRequirement claims.",
+            "failureScenario": "If endpoint validation were changed to require requirementId and evidenceRegime for every claim kind, this test would still pass, although the acceptance criterion says those fields are required only for MissingRequirement claims."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the listed missing-requirement validation cases, applicability matching, and missing-tag review behavior. The endpoint test does not verify that other claim kinds can omit the new fields.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ApplicabilityTagTests.cs",
+          "line": 58,
+          "message": "The test does not cover the criterion that these fields are required only for MissingRequirement claims. Add a non-MissingRequirement request without the fields and assert it passes validation.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "MissingRequirementClaimsRequireIdAndEvidenceRegime builds every request with ClaimBody(), which always sets kind to MissingRequirement.",
+            "failureScenario": "If endpoint validation is changed to require requirementId and evidenceRegime for every claim kind, a Baseline claim without those fields would be rejected, but this test would still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability is apparent in the changed code. Applicability data is read from pinned technical records, and claim fields are serialized as data.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ApplicabilityTagTests.cs",
+      "backend/AirlineDemo.Api.Tests/AssessmentEndpointsTests.cs",
+      "backend/AirlineDemo.Api.Tests/AssessmentExecutionServiceTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
