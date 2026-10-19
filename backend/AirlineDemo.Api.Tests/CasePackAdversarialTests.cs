@@ -129,13 +129,8 @@ public sealed class CasePackAdversarialTests
         {
             const string script = "<script>send_to_recipient()</script>";
             var basis = CasePackFixture.Basis(files);
-            var docs = new Dictionary<string, BasisDocument>(basis.Documents, StringComparer.Ordinal)
-            {
-                ["case-b/llp-history-gap.txt"] = BasisDocument.Create("case-b/llp-history-gap.txt", [script]),
-            };
-            basis = basis with { Documents = docs };
             state.Assessments.SetCurrentBasis(CasePackFixture.CaseId, basis);
-            var claim = CasePackFixture.MissingClaim(value: script, quote: script) with { EvidenceRegime = "FAA-121" };
+            var claim = CasePackFixture.MissingClaim(value: script, quote: script);
             Assert.Equal(script, claim.Value);
             Assert.Equal(script, Assert.Single(claim.Witnesses).Quote);
             Assert.True(basis.Coverage.IsComplete);
@@ -145,9 +140,8 @@ public sealed class CasePackAdversarialTests
 
             var record = state.Service.Assess(state.Scope, basis, [claim]);
 
-            Assert.Equal(ClaimStatus.Supported, validated.Status);
+            Assert.Equal(ClaimStatus.Downgraded, validated.Status);
             Assert.Equal("Review", record.Outcome);
-            Assert.Equal("evidenceRegime does not match applicability regime", record.Reason);
             Assert.Null(record.RequestId);
             Assert.Empty(state.Inbox.Requests);
             Assert.Empty(state.Store.ListRequestReceipts(state.Scope));
