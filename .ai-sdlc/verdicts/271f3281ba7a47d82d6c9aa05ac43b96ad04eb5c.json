@@ -1,0 +1,259 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 408,
+  "branch": "ai-sdlc/issue-408",
+  "commitSha": "271f3281ba7a47d82d6c9aa05ac43b96ad04eb5c",
+  "round": 0,
+  "pipelineVersion": "e461d54",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The marked-data matcher does not implement the required Unicode Form KC normalization, leaving a tested-in-scope compatibility variant able to bypass the filter.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/SourceReadTools.cs",
+          "line": 211,
+          "message": "Apply Unicode Form KC normalization before filtering and comparison. The implementation misses the explicitly required full-width variant, and SourceInvestigatorToolsTests.MarkedPersonalDataIsRejectedFromReturnedClaims does not include that case. This can expose marked data in a returned claim (OWASP LLM02:2025, Sensitive Information Disclosure).",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "NormalizePersonalDataMatch filters characters and uppercases them, but does not apply Unicode Form KC normalization. ContainsMarkedPersonalData uses that result to check claim text and witness quotes before accepting them.",
+            "failureScenario": "A marked value is SYN-PERSON-NAME-01. The model returns its full-width form, ＳＹＮ－ＰＥＲＳＯＮ－ＮＡＭＥ－０１, in a claim or cited quote. The matcher leaves those characters distinct from ASCII, misses the value, and the claim can reach the caller with marked personal data."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The marked-data matcher can miss Unicode compatibility variants, and the named theory does not cover the required full-width and control cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/SourceReadTools.cs",
+          "line": 211,
+          "message": "Marked personal-data matching does not implement the acceptance criterion’s Unicode Form KC normalization, and MarkedPersonalDataIsRejectedFromReturnedClaims does not test the full-width candidate or the required supported control. Add Form KC normalization and the specified table cases.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "NormalizePersonalDataMatch removes non-letter and non-digit characters and uppercases, but does not apply Unicode Form KC normalization. ContainsMarkedPersonalData uses it to compare marked values with claim text and witness quotes. The named theory has no full-width candidate or supported control row.",
+            "failureScenario": "A marked value is SYN-PERSON-NAME-01 and the model returns ＳＹＮ－ＰＥＲＳＯＮ－ＮＡＭＥ－０１ in a claim with a matching document quote. The full-width characters remain distinct from ASCII after normalization, so the marked-data check can miss the value and accept the claim."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The marked personal-data check does not implement the acceptance criterion’s Unicode Form KC normalization. A full-width compatibility form can bypass it and appear in a returned claim.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/SourceReadTools.cs",
+          "line": 211,
+          "message": "Apply Unicode Form KC normalization before comparing marked values with claim text and witness quotes. The current matcher misses full-width compatibility forms, allowing marked personal data through (OWASP LLM02:2025, Sensitive Information Disclosure).",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "NormalizePersonalDataMatch removes non-alphanumeric characters and uppercases text, but does not apply Unicode Form KC normalization. ContainsMarkedPersonalData uses this result to check claim text and witness quotes before accepting them.",
+            "failureScenario": "A marked value is SYN-PERSON-NAME-01. A case document contains its full-width form, ＳＹＮ－ＰＥＲＳＯＮ－ＮＡＭＥ－０１, and the model returns that form in both a claim and matching document quote. The matcher treats the forms as different, so the claim can reach the caller with marked personal data."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceInvestigatorToolsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 136,
+      "total": 140,
+      "percent": 97.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 26,
+          "total": 26,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/ClaimValidator.cs",
+          "covered": 20,
+          "total": 22,
+          "missed": [
+            110,
+            111
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/SourceReadTools.cs",
+          "covered": 90,
+          "total": 92,
+          "missed": [
+            48,
+            49
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
