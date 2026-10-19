@@ -210,7 +210,13 @@ public sealed class CasePackCaseATests : IAsyncDisposable
         Assert.Equal(2, state.Basis[1].Version);
         Assert.Equal(string.Join('\n', FixtureFiles().Values), state.Basis[0].Content);
         Assert.Contains(ResponseBody, state.Basis[1].Content, StringComparison.Ordinal);
-        Assert.Single(state.Audit, audit => audit.Action == MockResponseService.AcceptedAction);
+        var storedResponses = state.Audit
+            .Where(audit => audit.Action == MockResponseService.AcceptedAction)
+            .ToArray();
+        var storedResponse = Assert.Single(storedResponses);
+        using var storedResponseDetail = JsonDocument.Parse(storedResponse.Detail);
+        Assert.Equal(requestId,
+            storedResponseDetail.RootElement.GetProperty("receipt").GetProperty("requestId").GetString());
 
         var history = _factory.Services.GetRequiredService<AssessmentStore>().List(CaseId);
         Assert.Equal(2, history.Count);
