@@ -26,7 +26,8 @@ public enum TechnicalReviewOutcome { Recorded, Forbidden, NotFound, Stale, Inval
 
 public sealed record TechnicalReviewResult(TechnicalReviewOutcome Outcome, string? Error = null, TechnicalReviewDecision? Decision = null);
 
-internal sealed record DecisionDetail(string Decision, string Reason, int BasisVersion, string BasisDigest, string TraceId, string Outcome);
+internal sealed record DecisionDetail(string Decision, string Reason, int BasisVersion, string BasisDigest, string TraceId,
+    string Outcome, string BasisId, string PolicyVersion, string Role, string AuditEventId);
 
 /// <summary>
 /// Authorization and basis binding for technical-review decisions. Decisions are stored only as
@@ -35,6 +36,7 @@ internal sealed record DecisionDetail(string Decision, string Reason, int BasisV
 public static class TechnicalReviewPolicy
 {
     public const string DecisionAction = "technical-review.decided";
+    public const string Version = "technical-review-v1";
     public const int MaxReasonLength = 2000;
 
     public static TechnicalReviewResult Decide(ICaseStateStore store, IEnumerable<string> caseScopes, string role, string actorId,
@@ -59,7 +61,8 @@ public static class TechnicalReviewPolicy
         if (command.ExpectedBasisVersion != basis.Version) return new(TechnicalReviewOutcome.Stale);
 
         var detail = new DecisionDetail(command.Decision, reason, basis.Version, basis.BasisDigest, traceId,
-            command.Decision == "accept" ? "approved" : "rejected");
+            command.Decision == "accept" ? "approved" : "rejected", "basis-v" + basis.Version, Version,
+            role, "evt-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
         CommitResult committed;
         try
         {
