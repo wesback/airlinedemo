@@ -446,18 +446,19 @@ public sealed class SourceSystemTelemetryContractTests
         Assert.Equal(expectedMetricDimensions, metricDimensions);
         Assert.Empty(permittedAttributes.Intersect(metricDimensions, StringComparer.Ordinal));
 
-        var observedMetricDimensions = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        var observedMetricDimensions = new ConcurrentQueue<string[]>();
         using var meterListener = new MeterListener
         {
-            InstrumentPublished = (instrument, listener) => listener.EnableMeasurementEvents(instrument),
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == TelemetryRedaction.SourceSystemMeterName
+                    && instrument.Name == "source.system.events")
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            },
         };
-        CaptureMetricDimensionKeys<byte>(meterListener, observedMetricDimensions);
-        CaptureMetricDimensionKeys<short>(meterListener, observedMetricDimensions);
-        CaptureMetricDimensionKeys<int>(meterListener, observedMetricDimensions);
         CaptureMetricDimensionKeys<long>(meterListener, observedMetricDimensions);
-        CaptureMetricDimensionKeys<float>(meterListener, observedMetricDimensions);
-        CaptureMetricDimensionKeys<double>(meterListener, observedMetricDimensions);
-        CaptureMetricDimensionKeys<decimal>(meterListener, observedMetricDimensions);
         meterListener.Start();
 
         var sourceAttributeValues = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -493,7 +494,6 @@ public sealed class SourceSystemTelemetryContractTests
             Assert.Equal(sourceAttributeValues[key], emittedApprovedAttributes[key]);
         }
         AssertNoRecordIdentifiers(approvedSourceEvent);
-        Assert.Empty(expectedPermittedAttributes.Intersect(observedMetricDimensions.Keys, StringComparer.Ordinal));
 
         File.Delete(approvalPath);
         var defaultEvents = new List<CapturedEvent>();
@@ -510,19 +510,24 @@ public sealed class SourceSystemTelemetryContractTests
         var defaultAttributeNames = defaultSourceEvent.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
         Assert.Empty(expectedPermittedAttributes.Intersect(defaultAttributeNames, StringComparer.Ordinal));
         AssertNoRecordIdentifiers(defaultSourceEvent);
+        var emittedMetricDimensions = observedMetricDimensions.ToArray();
+        Assert.Equal(2, emittedMetricDimensions.Length);
+        Assert.All(emittedMetricDimensions, dimensions => Assert.Equal(expectedMetricDimensions, dimensions));
     }
 
     private static void CaptureMetricDimensionKeys<T>(
         MeterListener listener,
-        ConcurrentDictionary<string, byte> observedDimensions)
+        ConcurrentQueue<string[]> observedDimensions)
         where T : struct
     {
         listener.SetMeasurementEventCallback<T>((_, _, tags, _) =>
         {
+            var keys = new List<string>();
             foreach (var tag in tags)
             {
-                observedDimensions.TryAdd(tag.Key, 0);
+                keys.Add(tag.Key);
             }
+            observedDimensions.Enqueue(keys.OrderBy(key => key, StringComparer.Ordinal).ToArray());
         });
     }
 

@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,6 +11,11 @@ public static partial class TelemetryRedaction
 {
     public const string ServiceName = "airline-demo-api";
     public const string Redacted = "[redacted]";
+    internal const string SourceSystemMeterName = "airline-demo-api.source-systems";
+
+    private static readonly Meter SourceSystemMeter = new(SourceSystemMeterName);
+    private static readonly Counter<long> SourceSystemEventCounter =
+        SourceSystemMeter.CreateCounter<long>("source.system.events");
 
     // Only enumerated diagnostic fields are emitted; any other key (for example free-text "detail") is dropped.
     private static readonly HashSet<string> AllowedKeys = new(StringComparer.Ordinal)
@@ -264,6 +270,7 @@ public static partial class TelemetryRedaction
             LogLevel.Error => ("ERROR", 17),
             _ => throw new ArgumentOutOfRangeException(nameof(level)),
         };
+        SourceSystemEventCounter.Add(1);
         Emit(logger, level, merged, severity.Item1, severity.Item2);
     }
 
