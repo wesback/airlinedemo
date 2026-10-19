@@ -1,0 +1,246 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 417,
+  "branch": "ai-sdlc/issue-417",
+  "commitSha": "028b96f7afb91153cceda8b705cf27b46351b571",
+  "round": 0,
+  "pipelineVersion": "e461d54",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new field and trace assertions observe captured events, but the resource assertion uses a test-configured provider and can pass when the production resource setup is broken.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs",
+          "line": 506,
+          "message": "AC `EventsContainRequiredOtelAndTraceFields` requires capture through production logging and says the resource assertion must exclude application resource attributes configured by the test. This test supplies those attributes on its own provider, so it does not verify that production contract.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "CreateFactory adds a test OpenTelemetry provider, configures its ResourceBuilder with TelemetryRedaction.ResourceAttributes, and attaches EventCapture to that provider. The new test reads the resource from that provider.",
+            "failureScenario": "If the production logging registration omits a required application resource attribute, the test can still pass because its separate test provider supplies that attribute."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added field and trace test does not cover the required fail-closed record identifier and payload behavior. Its resource assertion also relies on resource attributes supplied by the test's provider setup.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs",
+          "line": 281,
+          "message": "Acceptance criterion SourceEventsNeverCarryRecordIdentifiersOrPayloads has no test in this change. Add the named test with the specified identifiers and payload canary.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added tests cover event fields and source attribute approval, but the diff adds no SourceEventsNeverCarryRecordIdentifiersOrPayloads test that emits the specified scope values and payload canary.",
+            "failureScenario": "If production logging starts emitting source.raw_record_id, recordId, record.id, or SYN-SOURCE-PAYLOAD-01 in event attributes or the body, no test added by this change catches it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs",
+          "line": 506,
+          "message": "The resource assertion uses application resource attributes configured by the test provider, so it does not verify the production provider setup required by the acceptance criterion.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "CreateFactory configures the captured OpenTelemetry provider with ResourceAttributes derived from TelemetryRedaction.ResourceAttributes; EventCapture then reads the resource from that same provider.",
+            "failureScenario": "If the production provider omits a required application resource attribute, EventsContainRequiredOtelAndTraceFields can still pass because the test configures that attribute on its own provider."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff adds no direct security vulnerability. The resource contract test does not verify the production application resource setup required by the acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs",
+          "line": 511,
+          "message": "AC `EventsContainRequiredOtelAndTraceFields` requires the resource assertion to cover attributes supplied by the production provider setup, excluding application resource attributes configured by the test. This test configures and asserts the application resource attributes itself, so it cannot detect that production resource configuration is broken.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "CreateFactory builds a ResourceBuilder with TelemetryRedaction.ResourceAttributes and passes it to the test OpenTelemetry provider. EventsContainRequiredOtelAndTraceFields then asserts those resource values on captured events.",
+            "failureScenario": "If the production logging registration omits or misconfigures service.name, service.version, or deployment.environment, the test can still pass because its own provider supplies and asserts those values."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "tests-only change: no production file touched",
+    "redKind": "",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 0,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
