@@ -138,10 +138,11 @@ public sealed class CasePackAdversarialTests
         {
             const string script = "<script>send_to_recipient()</script>";
             var basis = CasePackFixture.Basis(files);
-            var claim = CasePackFixture.MissingClaim(value: script, quote: script);
+            const string scriptDocumentId = "case-b/aircraft-summary.txt";
+            var claim = CasePackFixture.MissingClaim(value: script, documentId: scriptDocumentId, quote: script);
             var documents = new Dictionary<string, BasisDocument>(basis.Documents, StringComparer.Ordinal)
             {
-                [claim.Witnesses[0].DocumentId] = BasisDocument.Create(claim.Witnesses[0].DocumentId, [script]),
+                [scriptDocumentId] = BasisDocument.Create(scriptDocumentId, [script]),
             };
             basis = basis with { Documents = documents };
             state.Assessments.SetCurrentBasis(CasePackFixture.CaseId, basis);
@@ -163,6 +164,15 @@ public sealed class CasePackAdversarialTests
             Assert.Null(record.RequestId);
             Assert.Empty(state.Inbox.Requests);
             Assert.Empty(state.Store.ListRequestReceipts(state.Scope));
+
+            var validClaim = CasePackFixture.MissingClaim(quote: validQuote);
+            var validRecord = state.Service.Assess(state.Scope, basis, [validClaim]);
+
+            Assert.Equal("Request", validRecord.Outcome);
+            var request = Assert.Single(state.Inbox.Requests);
+            Assert.Equal(request.RequestId, validRecord.RequestId);
+            var receipt = Assert.Single(state.Store.ListRequestReceipts(state.Scope));
+            Assert.Equal(request.RequestId, receipt.RequestId);
         }
 
         Assert.Equal(["Claims"], typeof(AssessmentSubmission).GetProperties().Select(property => property.Name));
