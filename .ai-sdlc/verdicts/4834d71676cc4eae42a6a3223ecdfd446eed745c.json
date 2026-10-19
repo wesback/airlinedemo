@@ -1,0 +1,262 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 417,
+  "branch": "ai-sdlc/issue-417",
+  "commitSha": "4834d71676cc4eae42a6a3223ecdfd446eed745c",
+  "round": 1,
+  "pipelineVersion": "e461d54",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The resource assertion now checks the exact six keys through the production diagnostics registration, and the approval test drives the file-backed filtering path. The metric-dimension assertion remains vacuous because the test does not trigger a metric measurement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs",
+          "line": 506,
+          "message": "The test does not exercise metric emission, so its empty-dimensions assertion cannot prove the acceptance criterion that the four source attributes never become metric dimensions.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "SourceAttributesRequireApprovalAndNeverBecomeMetricDimensions installs a MeterListener, but its exercised production path calls SourceSystemDiagnostics.SourceUnavailable, which emits a log event. The test then checks observedMetricDimensions without recording or triggering a metric measurement.",
+            "failureScenario": "If production metrics use source.id, case.id, event.outcome, or duration as dimensions on a measurement path this test never invokes, observedMetricDimensions remains empty and the assertion passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 1,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "testing review could not be completed",
+      "findingList": [
+        {
+          "severity": "critical",
+          "message": "Review agent failed: grok stopped with cancelled: indings and the issue acceptance criteria. First I need the rest of the prompt and the code changed since the last review.The previous round flagged the resource key set and the approval-file path. I'll read the delta since that commit and check whether those tests now fail when the contracts break."
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changes add the required resource assertions and exercise approval through the production diagnostics registration, including a metric listener check. I found no concrete security vulnerability in the reviewed delta.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 66,
+      "total": 77,
+      "percent": 85.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "covered": 22,
+          "total": 22,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 6,
+          "total": 6,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 38,
+          "total": 49,
+          "missed": [
+            308,
+            309,
+            310,
+            324,
+            325,
+            326,
+            330,
+            331,
+            335,
+            336,
+            337
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
