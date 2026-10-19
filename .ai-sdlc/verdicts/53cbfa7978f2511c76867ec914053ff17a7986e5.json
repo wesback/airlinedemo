@@ -1,0 +1,366 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 377,
+  "branch": "ai-sdlc/issue-377",
+  "commitSha": "53cbfa7978f2511c76867ec914053ff17a7986e5",
+  "round": 0,
+  "pipelineVersion": "e461d54",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation appears to assemble the dossier from the stored decision and pinned basis, but three acceptance criteria require tests for changing state, denied-read counts, and zero commits that the added tests do not provide.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 90,
+          "message": "AC: AC-024, NFR-003, T-DATA-002, T-AIML-AI-003 is not adequately tested. Add the specified changing-state fake and table-driven mismatch cases; the named test currently cannot catch stale-source refresh or identity-binding failures.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "UsesOneExactSnapshotAndNeverRefreshesSourcePins seeds a fixed CaseStateStore and calls Export once; it does not change the basis after a snapshot is read or use a fake source.",
+            "failureScenario": "If export refreshed a newer source record or accepted a mismatched case ID, audit event identifier, sequence, basis version, digest, or content, the test would still pass because it checks only the seeded pins and their count."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 104,
+          "message": "AC: AC-025, NFR-003, T-IDENTITY-001 is missing its required counting-fake assertions that denied requests cause zero protected reads.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "RequiresMatchingRoleAndCaseScopeBeforeProtectedReads sends requests using the real WebApplicationFactory and asserts only the 404 response.",
+            "failureScenario": "If a denied request called ICaseStateStore.Read, ReadAudit, or the dossier service before returning 404, these assertions would still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 54,
+          "message": "AC: AC-024, NFR-008, T-AUDIT-001 requires an assertion that export makes zero ICaseStateStore.Commit calls; the named test does not verify that behavior.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HashesExactAuditEvidenceDeterministicallyAndMeetsFiftyPinLatency checks repeatability, hash changes, and latency using a real CaseStateStore, but does not count Commit calls.",
+            "failureScenario": "If Export committed a mutation while returning the same dossier and meeting the latency bound, this test would still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Several explicit acceptance-criterion checks are missing: version 0 handling, immutable snapshot and mismatch cases, denied-read counts and role coverage, and zero commits during export. The existing tests can pass if those required behaviors regress.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 67,
+          "message": "The test for AC: FR-011, AC-024, T-IDENTITY-001, T-PRIV-001 omits the required version 0 case.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "ReturnsExactDossierContractAndRejectsInvalidOrIncompleteInputs requests version 2, but does not request version 0.",
+            "failureScenario": "If version 0 starts returning a dossier instead of the required 400 response, the named contract test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 94,
+          "message": "The test for AC: AC-024, T-DATA-002, T-AIML-AI-003 does not exercise snapshot stability, zero live-source calls, or the specified mismatch cases.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "UsesOneExactSnapshotAndNeverRefreshesSourcePins exports from a seeded CaseStateStore whose basis remains unchanged; it does not use a fake that changes state after Read or count live-source calls.",
+            "failureScenario": "An implementation that rereads a newer basis or refreshes source records could still pass this test. The required mismatch cases for case ID, audit event identifier, sequence, basis version, basis digest, and basis content are also absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 108,
+          "message": "The authorization test does not prove the required zero protected-read behavior or cover all specified denied roles.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "RequiresMatchingRoleAndCaseScopeBeforeProtectedReads checks response status and body for four users, but uses the real store and does not count Read, ReadAudit, or dossier-service calls.",
+            "failureScenario": "If a future endpoint reads protected dossier data before denying an out-of-scope reviewer, the test still passes. It also does not cover executive or unknown roles required by AC: AC-025, NFR-003, T-IDENTITY-001."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 49,
+          "message": "The test does not assert that dossier export makes zero ICaseStateStore.Commit calls.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The hash and latency test exports dossiers and compares hashes, but uses a real CaseStateStore and does not count Commit calls.",
+            "failureScenario": "If export begins committing an audit event or otherwise mutating the store, the existing assertions can still pass, despite AC: AC-024, NFR-008, T-AUDIT-001 requiring zero Commit calls."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation limits the dossier to selected fields and applies role and case-scope checks. Several required acceptance-criterion tests are missing or do not exercise the specified failure cases, including snapshot consistency, denied-read behavior, error-response privacy, and zero commits.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 106,
+          "message": "AC: AC-024, T-DATA-002, T-AIML-AI-003 is not proved by UsesOneExactSnapshotAndNeverRefreshesSourcePins; add the required changing fake and table-driven mismatch cases.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test checks the output pin list from a normal store, but it does not use the required fake that changes the basis after Read returns, verify zero live-source calls, or exercise the specified mismatch cases.",
+            "failureScenario": "If export reads a newer basis or source record after taking its snapshot, or accepts a mismatched case ID, audit event identifier, sequence, basis version, digest, or content, this test can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 126,
+          "message": "AC: AC-025, NFR-003, T-IDENTITY-001 lacks the required test that proves denied requests perform zero protected reads; it also omits executive and unknown-role cases.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The authorization test sends requests for four users and checks 404 responses, but it does not use counting fakes or assert that denied requests cause zero store or dossier-service reads.",
+            "failureScenario": "If a denied request reads protected case or dossier data before returning 404, all assertions in this test can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 154,
+          "message": "AC: AC-025, AC-037, NFR-004, T-PRIV-001, T-OPS-001 is not independently proved by the named test: it does not assert that restricted property names and values are absent from error responses.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "ExcludesRestrictedFieldsAndCarriesSimulationLimitations delegates entirely to ReturnsExactDossierContractAndRejectsInvalidOrIncompleteInputs.",
+            "failureScenario": "That test searches for sentinel names and values in the successful dossier only; a response that includes restricted data in an error body would not be caught."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 82,
+          "message": "AC: FR-011, AC-024, T-IDENTITY-001, T-PRIV-001 is incompletely covered: add the version 0 case and the specified missing or inconsistent field cases.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The contract test checks unsupported version 2 but does not request version 0; it also does not exercise the listed missing or inconsistent dossier fields.",
+            "failureScenario": "If version 0 is accepted, or a decision with a missing audit event identifier or requirement field returns a partial dossier instead of 422, the named test can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs",
+          "line": 90,
+          "message": "AC: AC-024, NFR-008, T-AUDIT-001 is not fully proved; add a counting store assertion that export makes zero Commit calls.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The hash test checks repeatability, hash coverage, reason sensitivity, and latency, but never asserts that export makes zero ICaseStateStore.Commit calls.",
+            "failureScenario": "If Export commits state while returning the expected dossier and hash, every assertion in this test can still pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DecisionDossierTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 169,
+      "total": 185,
+      "percent": 91.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Decisions/DecisionDossierEndpoints.cs",
+          "covered": 26,
+          "total": 26,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Decisions/DecisionDossierService.cs",
+          "covered": 137,
+          "total": 153,
+          "missed": [
+            42,
+            50,
+            60,
+            67,
+            110,
+            111,
+            119,
+            120,
+            123,
+            124,
+            131,
+            135,
+            137,
+            155,
+            163,
+            171
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Reviews/TechnicalReviewEndpoints.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
