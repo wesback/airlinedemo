@@ -1,0 +1,2 @@
+Synthetic engine records index for fictional engine serial ENG-CP-A-001.
+The index references the 2026-10-14 shop visit and life-limited-parts records.

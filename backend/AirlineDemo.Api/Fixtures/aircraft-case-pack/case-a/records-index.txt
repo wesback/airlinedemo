@@ -1,0 +1,2 @@
+Synthetic records index for Case A.
+The index identifies the missing signed history record for LLP-DISK-CP-A-017.

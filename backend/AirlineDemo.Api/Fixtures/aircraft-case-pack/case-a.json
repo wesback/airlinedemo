@@ -1,0 +1,69 @@
+{
+  "caseId": "cp-case-a",
+  "synthetic": true,
+  "generatorReference": "aircraft-case-pack-generator-v1",
+  "aircraftCount": 1,
+  "engineCount": 1,
+  "components": [
+    {
+      "componentId": "ENG-CP-A-001",
+      "evidenceDocumentPaths": [
+        "case-a/aircraft-summary.txt",
+        "case-a/engine-history-index.txt",
+        "case-a/engine-shop-visit.txt",
+        "case-a/engine-serial-record.txt",
+        "case-a/maintenance-log.txt"
+      ]
+    },
+    {
+      "componentId": "LLP-DISK-CP-A-017",
+      "evidenceDocumentPaths": [
+        "case-a/llp-installation-record.txt",
+        "case-a/llp-history-gap.txt",
+        "case-a/records-index.txt"
+      ]
+    }
+  ],
+  "documents": [
+    {
+      "path": "case-a/aircraft-summary.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-a/engine-history-index.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-a/engine-shop-visit.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-a/engine-serial-record.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-a/llp-installation-record.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-a/llp-history-gap.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-a/maintenance-log.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    },
+    {
+      "path": "case-a/records-index.txt",
+      "synthetic": true,
+      "generatorReference": "aircraft-case-pack-generator-v1"
+    }
+  ]
+}
