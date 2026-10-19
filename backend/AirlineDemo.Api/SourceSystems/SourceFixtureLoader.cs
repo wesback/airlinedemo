@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -69,13 +70,16 @@ public static class SourceFixtureLoader
     public static IReadOnlyDictionary<string, VerifiedSourceFixture> LoadPinned(
         string directory, ILogger? logger = null, string environment = "production")
     {
+        var diagnosticStartedAt = Stopwatch.GetTimestamp();
         try
         {
             return Load(directory, Convert.FromBase64String(PinnedPublicKeySpkiBase64));
         }
         catch
         {
-            if (logger is not null) SourceSystemDiagnostics.FixtureRejected(logger, environment);
+            if (logger is not null)
+                SourceSystemDiagnostics.FixtureRejected(logger, environment,
+                    SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
             throw;
         }
     }
@@ -119,13 +123,16 @@ public static class SourceFixtureLoader
         ILogger? logger = null,
         string environment = "production")
     {
+        var diagnosticStartedAt = Stopwatch.GetTimestamp();
         try
         {
             return LoadAndPublishCore(directory, trustKeySpki, store, beforeCommit);
         }
         catch
         {
-            if (logger is not null) SourceSystemDiagnostics.FixtureRejected(logger, environment);
+            if (logger is not null)
+                SourceSystemDiagnostics.FixtureRejected(logger, environment,
+                    SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
             throw;
         }
     }

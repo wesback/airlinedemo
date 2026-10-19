@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AirlineDemo.Api.Auth;
@@ -27,6 +28,7 @@ public static class SourceModeEndpoints
         DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, ILogger<SourceModeStore> logger,
         IHostEnvironment environment)
     {
+        var diagnosticStartedAt = Stopwatch.GetTimestamp();
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null) return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in.");
         if (!string.Equals(session.User.Role, PresenterRole, StringComparison.Ordinal))
@@ -90,12 +92,14 @@ public static class SourceModeEndpoints
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DbUpdateException)
         {
-            SourceSystemDiagnostics.AuditWriteFailed(logger, environment.EnvironmentName);
+            SourceSystemDiagnostics.AuditWriteFailed(logger, environment.EnvironmentName, sourceId, caseId,
+                SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
             return Error(StatusCodes.Status503ServiceUnavailable, "audit_write_failed", "The source mode could not be recorded.");
         }
 
         if (result.Outcome == SourceModeOutcome.Recorded)
-            SourceSystemDiagnostics.ModeChangeAccepted(logger, environment.EnvironmentName);
+            SourceSystemDiagnostics.ModeChangeAccepted(logger, environment.EnvironmentName, sourceId, caseId,
+                SourceSystemDiagnostics.ElapsedMilliseconds(diagnosticStartedAt));
         return result.Outcome switch
         {
             SourceModeOutcome.Recorded or SourceModeOutcome.Replayed => Results.Ok(result.Receipt),

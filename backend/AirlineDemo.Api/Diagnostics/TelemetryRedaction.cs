@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -24,6 +25,7 @@ public static partial class TelemetryRedaction
         "investigation.basis_version", "gen_ai.request.model", "investigation.model", "investigation.tools",
         "investigation.citations", "investigation.decision", "enduser.pseudo.id",
         "investigation.outcome", "error.type", "severity.text", "severity.number",
+        "source.id", "case.id", "event.outcome", "duration",
     };
 
     public static class SecurityEvents
@@ -117,6 +119,14 @@ public static partial class TelemetryRedaction
         "source.id", "case.id", "event.outcome", "duration",
     };
 
+    private static readonly HashSet<string> AllowedSourceIds = new(StringComparer.Ordinal)
+    {
+        "technical", "maintenance", "finance", "records", "contracts", "source-fixture-pack",
+    };
+    private static readonly HashSet<string> AllowedSourceOutcomes = new(StringComparer.Ordinal)
+    {
+        "accepted", "denied", "failed", "limited", "rejected", "timed_out", "unavailable",
+    };
     private static readonly Regex TraceIdRule = new(@"^trace-[0-9a-f]{4,64}$", RegexOptions.CultureInvariant);
     private static readonly Regex BasisRule = new(@"^basis-v[0-9]{1,4}$", RegexOptions.CultureInvariant);
     private static readonly Regex DeploymentRule = new(@"^[a-z0-9][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
@@ -125,6 +135,7 @@ public static partial class TelemetryRedaction
     private static readonly Regex VersionRule = new(@"^[0-9]+\.[0-9]+\.[0-9]+([\-+][0-9A-Za-z.\-]+)?$", RegexOptions.CultureInvariant);
     private static readonly Regex EnvironmentRule = new(@"^[a-z][a-z0-9\-]{0,31}$", RegexOptions.CultureInvariant);
     private static readonly Regex ErrorTypeRule = new(@"^[a-z][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
+    private static readonly Regex CaseIdRule = new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant);
 
     public static bool IsAllowedErrorType(string value) => ErrorTypeRule.IsMatch(value);
 
@@ -154,6 +165,10 @@ public static partial class TelemetryRedaction
         ["error.type"] = v => ErrorTypeRule.IsMatch(v),
         ["severity.text"] = v => v is "INFO" or "WARN" or "ERROR",
         ["severity.number"] = v => v is "9" or "13" or "17",
+        ["source.id"] = v => AllowedSourceIds.Contains(v),
+        ["case.id"] = v => CaseIdRule.IsMatch(v),
+        ["event.outcome"] = v => AllowedSourceOutcomes.Contains(v),
+        ["duration"] = v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var duration) && duration >= 0,
     };
 
     // Keeps only allowlisted keys, drops denylisted keys and replaces values that fail their key's rule.
@@ -242,7 +257,15 @@ public static partial class TelemetryRedaction
         Emit(logger, LogLevel.Warning, attributes);
     }
 
-    public static void EmitSourceSystemEvent(ILogger logger, string eventName, LogLevel level, string environment)
+    public static void EmitSourceSystemEvent(
+        ILogger logger,
+        string eventName,
+        LogLevel level,
+        string environment,
+        string? sourceId = null,
+        string? caseId = null,
+        string? outcome = null,
+        long? durationMilliseconds = null)
     {
         if (!SourceEventNames.Contains(eventName))
         {
@@ -254,11 +277,29 @@ public static partial class TelemetryRedaction
             throw new ArgumentOutOfRangeException(nameof(level), "Source-system events must use an approved severity.");
         }
 
-        var attributes = Redact(new KeyValuePair<string, object?>[]
+        var hasSourceContext = sourceId is not null || caseId is not null || outcome is not null || durationMilliseconds is not null;
+        if (hasSourceContext && (sourceId is null || caseId is null || outcome is null || durationMilliseconds is null))
+        {
+            throw new ArgumentException("Source-system context must include source, case, outcome and duration.");
+        }
+        if (durationMilliseconds < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(durationMilliseconds), "Duration must be nonnegative.");
+        }
+
+        var sourceEventAttributes = new List<KeyValuePair<string, object?>>
         {
             new("event.name", eventName),
-        });
-        var merged = new Dictionary<string, string>(attributes, StringComparer.Ordinal);
+        };
+        if (hasSourceContext)
+        {
+            sourceEventAttributes.Add(new("source.id", sourceId));
+            sourceEventAttributes.Add(new("case.id", caseId));
+            sourceEventAttributes.Add(new("event.outcome", outcome));
+            sourceEventAttributes.Add(new("duration", durationMilliseconds));
+        }
+        var attributes = Redact(sourceEventAttributes);
+        var merged = attributes.ToDictionary(attribute => attribute.Key, attribute => (object?)attribute.Value, StringComparer.Ordinal);
         foreach (var (key, value) in ResourceAttributes(ServiceVersion, environment.ToLowerInvariant()))
         {
             merged[key] = value;
@@ -271,16 +312,28 @@ public static partial class TelemetryRedaction
             _ => throw new ArgumentOutOfRangeException(nameof(level)),
         };
         SourceSystemEventCounter.Add(1);
+        if (durationMilliseconds is not null && merged.ContainsKey("duration"))
+        {
+            merged["duration"] = durationMilliseconds.Value;
+        }
         Emit(logger, level, merged, severity.Item1, severity.Item2);
     }
 
     private static void Emit(ILogger logger, LogLevel level, IReadOnlyDictionary<string, string> attributes)
-        => Emit(logger, level, attributes, null, null);
+        => Emit(logger, level, attributes.ToDictionary(attribute => attribute.Key, attribute => (object?)attribute.Value, StringComparer.Ordinal), null, null);
 
     private static void Emit(
         ILogger logger,
         LogLevel level,
         IReadOnlyDictionary<string, string> attributes,
+        string? severityText,
+        int? severityNumber)
+        => Emit(logger, level, attributes.ToDictionary(attribute => attribute.Key, attribute => (object?)attribute.Value, StringComparer.Ordinal), severityText, severityNumber);
+
+    private static void Emit(
+        ILogger logger,
+        LogLevel level,
+        IReadOnlyDictionary<string, object?> attributes,
         string? severityText,
         int? severityNumber)
     {
@@ -290,7 +343,9 @@ public static partial class TelemetryRedaction
             state.Add(new KeyValuePair<string, object?>("severity.text", severityText));
             state.Add(new KeyValuePair<string, object?>("severity.number", severityNumber.Value));
         }
-        var eventName = attributes.TryGetValue("event.name", out var name) ? name : "telemetry";
+        var eventName = attributes.TryGetValue("event.name", out var name)
+            ? Convert.ToString(name, CultureInfo.InvariantCulture) ?? "telemetry"
+            : "telemetry";
         logger.Log(level, new EventId(0, eventName), state, null,
             static (s, _) => string.Join(" ", s.Select(kv => $"{kv.Key}={kv.Value}")));
     }
