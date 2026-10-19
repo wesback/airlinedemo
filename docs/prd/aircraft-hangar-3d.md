@@ -65,7 +65,7 @@ The frontend today is a health-check stub. Almost everything the hangar relies o
 | DD-003 | Aircraft and component geometry is illustrative: generic fictional silhouettes with no manufacturer marks and no claim of engineering accuracy. |
 | DD-004 | The scene shows the status, owner, next action, and capability label from the server projection. Color, position, animation, and client state never create or upgrade a status or enable a command. |
 | DD-005 | Detailed evidence, status, decisions, and next actions appear in semantic HTML panels and the regular case UI. No meaning is carried by color alone. |
-| DD-006 | Navigation is point-and-select, bounded orbit, preset camera positions and keyboard as specified under Camera controls. The camera has no free-roam or first-person movement. The only movement through the space is the Data Room walk (DD-017): a presenter avatar confined to the hangar's walkable floor, specified under Data Room walk. |
+| DD-006 | Navigation is point-and-select, bounded orbit, preset camera positions and keyboard as specified under Camera controls. The camera has no free-roam or first-person movement; in follow mode (DD-022) it orbits the avatar, within the same clamps as any orbit. The only movement through the space is the Data Room walk (DD-017): a presenter avatar confined to the hangar's walkable floor, specified under Data Room walk. |
 | DD-007 | No points, scores, rewards, timers, progression, or game mechanics. The avatar, the rack menu and the guide line are presentation controls with a game-like look only: they decide no status, enable no command, and carry no objective that can be won or lost. |
 | DD-008 | Reduced motion is on when the browser reports `prefers-reduced-motion: reduce`, and the user can override it in either direction with an in-app control for the browser session. |
 | DD-009 | Diagnostics use the existing server diagnostics policy (ARR:DD-029). The client sends no telemetry. Render time, capability result, and fallback reason appear only in a local, in-app diagnostics panel for the presenter and are never transmitted. |
@@ -81,6 +81,7 @@ The frontend today is a health-check stub. Almost everything the hangar relies o
 | DD-019 | The menu opens when the avatar enters the interaction zone, and also from a labelled "Open data rack" control for users who do not walk. Opening moves focus into the menu; closing restores focus to where it was. Closing with Escape does not reopen the menu until the avatar has left the zone and entered it again, or the control is activated. |
 | DD-020 | The guide line is informational. It is computed in the client from the scene manifest's walkable floor and footprints, carries no status, colour meaning or authority, and is never transmitted. Avatar position, menu state and route are client state and are not sent to the server or to diagnostics. |
 | DD-021 | The avatar is a generic fictional low-detail figure wearing a yellow safety hard hat, with no real person's likeness and no brand or company marks on the hat or clothing, and is an asset under DD-015. The hat is appearance only: its colour carries no meaning, never changes, and is not a status, role or permission (DD-004, DD-005). The hat is distinguished by its shape as well as its colour, so the avatar stays easy to find against the floor and aircraft for users who cannot rely on colour. |
+| DD-022 | The camera follows the avatar by default in the Data Room. Follow mode is an orbit whose target is the avatar's position, specified under Follow camera; it is a third-person view, never first-person, and it can be switched off with a labelled control. Choosing an overview or aircraft preset turns it off. |
 
 ## Product Goals
 
@@ -120,10 +121,11 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 | FR-014 | Show a Case C reset control only when the server projection grants it; send `commandId`, `expectedRevision`, `variant: "blocked"` and the anti-forgery token, and refetch after acceptance. Reuse the same command identifier for retry of an uncertain result, not for a deliberate new reset. | Presenter selects or retries reset. | CP:FR-007, CP:FR-009, ARR:DD-028. | AC-024 | GOAL-001 |
 | FR-015 | Show the presenter a local diagnostics panel containing scene-load duration, graphics capability and explicit fallback reason, without transmitting diagnostics or granting workflow authority. | Presenter opens local diagnostics. | ARR:DD-029, DD-009. | AC-026 | GOAL-001 |
 | FR-016 | Render a server rack in the scene with exactly five units, one for each SS source identifier (`technical`, `maintenance`, `finance`, `records`, `contracts`), from the scene manifest, with a labelled keyboard-operable equivalent that opens the rack menu. | Scene loads. | SS:FR-009, FR-002. | AC-033, AC-042, AC-043 | GOAL-001 |
-| FR-017 | Show a presenter avatar that the user moves with the arrow keys in the walk region, confined to the walkable floor and blocked by aircraft and rack footprints, as specified under Data Room walk, without trapping Tab or moving the camera. | User presses arrow keys in the walk region. | FR-004, FR-010. | AC-034, AC-035 | GOAL-001 |
+| FR-017 | Show a presenter avatar that the user moves with the arrow keys in the walk region, confined to the walkable floor and blocked by aircraft and rack footprints, as specified under Data Room walk, without trapping Tab; the camera moves only through follow mode (FR-021). | User presses arrow keys in the walk region. | FR-004, FR-010. | AC-034, AC-035 | GOAL-001 |
 | FR-018 | Open a game-style rack menu when the avatar enters the interaction zone or the "Open data rack" control is activated, listing the in-scope aircraft with each one's five-source mode and coverage from the SS source summary; Up/Down/Home/End/Enter/Escape operate it, and a failed or unsupported summary shows "source summary unavailable" without inferred coverage. | Avatar enters the zone, or user activates the control. | SS:FR-009, SS:DD-023, CP:FR-006, ARR:DD-014. | AC-036, AC-037, AC-038, AC-044 | GOAL-001 |
 | FR-019 | On confirming a menu entry, draw a guide line over the walkable floor from the avatar to the selected aircraft's marker, keep it current as the avatar moves, state distance and direction in a live region, and on arrival clear it and select the aircraft through the shared selection handler. | User presses Enter on a menu entry. | FR-003, FR-017, FR-018. | AC-039, AC-040, AC-043, AC-044 | GOAL-001 |
 | FR-020 | Provide the non-3D equivalent of the Data Room: a list of in-scope cases with the same five-source coverage text as the menu, whose activation selects the case. | User chooses regular mode or 3D is unavailable. | FR-008, FR-018, SS:FR-009. | AC-041 | GOAL-001 |
+| FR-021 | Provide a follow camera: a third-person orbit whose target is the avatar, on by default in the Data Room, with the default, clamps, easing and camera box specified under Follow camera, a labelled control to switch it off and on, and instant application under reduced motion. | Avatar steps, or the user toggles follow or picks a preset. | FR-004, FR-009, FR-017. | AC-045, AC-046, AC-047 | GOAL-001 |
 
 ## Scope Boundaries
 
@@ -154,11 +156,19 @@ For the active target, let `R` be the positive radius of its bounding sphere. Th
 
 Only a focused, labelled camera-control region handles keys: Left/Right change azimuth by 10 degrees, Up/Down change polar angle by 5 degrees, `+` divides radius by 1.1 and `-` multiplies it by 1.1, with the same clamps as pointer orbit. Tab moves to ordinary semantic controls and is never captured. Inputs, buttons and evidence panels outside that region receive their normal keyboard behavior. WASD and pointer-lock do not move the camera. Nonessential camera transitions have zero duration when reduced motion is active.
 
+### Follow camera
+
+Follow mode is on when Hangar mode opens the Data Room. The orbit target is the avatar's position at floor level plus 1.0 up; its azimuth is retained and its default values are radius 6 and polar angle 55 degrees. In follow mode the camera-control region still orbits: Left/Right and Up/Down change azimuth and polar angle as in Camera controls, and `+`/`-` change the radius, with polar angle clamped to [15, 85] degrees and radius to [4, 12] (the aircraft-based radius clamp does not apply, because the target is the avatar). If the computed camera position lies outside the manifest's camera box, the radius is reduced along the view ray until the position is inside, to a minimum of 2.
+
+After each applied avatar step the camera target moves to the new avatar position: it eases toward it and is within 0.05 of it within 400 ms, measured on an injected clock. With reduced motion active the target is applied in the same update, with no easing. A refused step does not move the camera.
+
+A labelled "Follow avatar" control shows the mode and switches it off and on. Choosing an overview or aircraft preset turns it off and applies that preset; switching it on again keeps the current azimuth and applies the default radius and polar angle. With follow off, the camera is unchanged by avatar steps. Follow mode never moves the avatar, changes no case state, and does not capture Tab.
+
 ### Data Room walk
 
 Scene units are illustrative metres. The scene manifest defines the walkable floor as a closed polygon, a footprint for each of the three aircraft and for the rack, one interaction zone, and for each aircraft a marker point on the floor beside it. The overview preset (Camera controls) frames the whole walkable floor and the rack.
 
-The avatar has a collision radius of 0.3. A labelled, focusable walk region handles the arrow keys, separate from the camera-control region; only the focused region reacts, and Tab is never captured. In the walk region, Up/Down/Left/Right move the avatar 0.5 in the four floor directions of the current overview orientation, once for each key press and again for each key repeat. A step that would leave the walkable floor or enter a footprint expanded by the avatar radius is refused and the avatar stays where it was; no step is partially applied. WASD and pointer-lock do not move the avatar. With reduced motion active an applied step is shown immediately, with no tween. The camera does not follow the avatar in this release.
+The avatar has a collision radius of 0.3. A labelled, focusable walk region handles the arrow keys, separate from the camera-control region; only the focused region reacts, and Tab is never captured. In the walk region, Up/Down/Left/Right move the avatar 0.5 in the four floor directions relative to the camera's current azimuth (Up moves away from the camera, Left moves to the camera's left), once for each key press and again for each key repeat. A step that would leave the walkable floor or enter a footprint expanded by the avatar radius is refused and the avatar stays where it was; no step is partially applied. WASD and pointer-lock do not move the avatar. With reduced motion active an applied step is shown immediately, with no tween. The camera follows the avatar as specified under Follow camera.
 
 The interaction zone is a circle of radius 1.5 centred 1.5 in front of the rack's front face. The avatar is inside it when its centre is within that circle.
 
@@ -306,7 +316,7 @@ flowchart TD
 | AC-031 | Given a failed refetch or an envelope with missing revision/permission/history or bad witness IDs, when refresh completes, then the UI shows a stale/error state and disables commands while preserving the last labelled server snapshot; no invalid response replaces it as current or starts a command, and a later valid refetch restores current state. | FR-006 | Automated (vitest) | Not Started |
 | AC-032 | Given `olderHistoryAvailable: true` after many runs, when the journey or non-3D list is used, then a labelled keyboard-operable control opens the case's delivered ARR history view for older runs/events and exact historical evidence; a window omission never becomes an assertion that the event did not occur, and an out-of-scope history rejection reveals no content. | FR-005, FR-008 | Automated (vitest; existing history-control adapter with injected read responses) | Not Started |
 | AC-033 | Given the scene manifest and descriptor builder, when the rack is built, then it has exactly five unit nodes mapped one-to-one to the SS source identifiers; a missing, duplicate, extra or unknown unit fails visibly, and activating the rack through its descriptor or its labelled control opens the rack menu. | FR-016 | Automated (vitest; descriptor and canvas-adapter wiring, no WebGL context) | Not Started |
-| AC-034 | Given a walkable polygon, footprints and the avatar radius 0.3, when arrow keys are sent to the focused walk region, then the avatar moves exactly 0.5 in the pressed direction; a step that would leave the floor or enter an expanded footprint leaves the position unchanged; a table of start positions and keys, including each aircraft footprint, the rack and each wall, gives the expected positions; keys outside the walk region, in a text field, WASD and pointer-lock do not move the avatar; Tab is not captured; and the camera state is unchanged. | FR-017 | Automated (vitest) | Not Started |
+| AC-034 | Given a walkable polygon, footprints and the avatar radius 0.3, when arrow keys are sent to the focused walk region, then the avatar moves exactly 0.5 in the pressed direction; a step that would leave the floor or enter an expanded footprint leaves the position unchanged; a table of start positions and keys, including each aircraft footprint, the rack and each wall, gives the expected positions; keys outside the walk region, in a text field, WASD and pointer-lock do not move the avatar; Tab is not captured; and, with follow off, the camera state is unchanged. The table includes camera azimuths of 0, 90 and 200 degrees to prove the directions are relative to the camera. | FR-017 | Automated (vitest) | Not Started |
 | AC-035 | Given `prefers-reduced-motion: reduce` with no override, when the avatar moves, then the new position is applied in the same update and no animation duration above zero is scheduled; the in-app override of AC-012 applies in both directions. | FR-017 | Automated (vitest) | Not Started |
 | AC-036 | Given an avatar outside the interaction zone, when a step brings its centre inside the zone, then the menu opens exactly once and focus moves into it; Escape closes it and restores focus to the walk region; further steps inside the zone do not reopen it; leaving and re-entering the zone, or activating the "Open data rack" control, opens it again. | FR-018 | Automated (vitest) | Not Started |
 | AC-037 | Given a case list of three entries and source-summary responses for them, when the menu builds, then it has three entries in list order, each with name, category and the five sources with mode and coverage as text; a user with scope for one case sees one entry and no request is made for the others; a failed response or an unsupported `contractVersion` for one case shows "source summary unavailable" for that entry only, with no coverage shown; and a response carrying a payload canary or personal-data field renders neither. | FR-018 | Automated (vitest; injected summary reader) | Not Started |
@@ -317,6 +327,9 @@ flowchart TD
 | AC-042 | Given the rack and avatar models and provenance records, when the validators of AC-017 and AC-018 run, then the rack and avatar pass the same structure, size, extension, URI, rights and checksum rules as the aircraft models, the avatar record carries a synthetic marker and a declaration that it depicts no real person and carries no brand marks, its model has a hard-hat node that the scene manifest names, a manifest in which the avatar has no hat node fails visibly, the hat colour is a fixed manifest value that no server field, role or status changes, and a failing rack or avatar asset gives the visible fallback and the non-3D equivalent. | FR-012, FR-016 | Automated (vitest; tiny valid and malformed binary fixtures) | Not Started |
 | AC-043 | Given the release candidate on the demo baseline, when a first-time observer is asked to find the source data for one aircraft, then they walk to the rack, open the menu, confirm an aircraft and reach it by following the line without help, and judge the avatar (including its yellow hard hat), rack and line legible and clearly illustrative. | FR-016, FR-019 | Manual | Not Started |
 | AC-044 | Given a screen reader and keyboard only, when a tester opens the rack menu, confirms an aircraft and follows the spoken directions to arrival, then the menu, its entries, the directions and the arrival are announced and no keyboard trap exists. | FR-018, FR-019 | Manual | Not Started |
+| AC-045 | Given follow on, when an avatar step is applied, then the camera target equals the avatar position plus 1.0 up, azimuth is retained, and the radius and polar angle stay within [4, 12] and [15, 85] degrees; defaults of 6 and 55 apply when follow is switched on; a refused step leaves the camera unchanged; an overview or aircraft preset turns follow off and applies the preset; with follow off, steps leave the camera unchanged; and keys in the camera-control region orbit the avatar within the clamps. | FR-021 | Automated (vitest) | Not Started |
+| AC-046 | Given an injected clock, when a step is applied with follow on, then the target is within 0.05 of the avatar within 400 ms; with `prefers-reduced-motion: reduce` and no override it is applied in the same update with no animation scheduled; a camera position outside the camera box is pulled in along the view ray to a radius of at least 2; and switching follow off or on never moves the avatar or sends a request. | FR-021 | Automated (vitest) | Not Started |
+| AC-047 | Given the release candidate on the demo baseline, when a first-time observer walks the avatar around the hangar for two minutes with follow on, then the view stays steady, the avatar stays visible and no disorientation or motion discomfort is reported; the observer finds the follow control and switches it off and on. | FR-021 | Manual | Not Started |
 
 ## Traceability Matrix
 
@@ -344,8 +357,9 @@ flowchart TD
 | FR-018 | AC-036, AC-037, AC-038, AC-044 |
 | FR-019 | AC-039, AC-040, AC-043, AC-044 |
 | FR-020 | AC-041 |
+| FR-021 | AC-045, AC-046, AC-047 |
 
-Coverage: 20/20 FRs have one or more AC links (100%; target 80%).
+Coverage: 21/21 FRs have one or more AC links (100%; target 80%).
 
 ### FR-to-GOAL Alignment
 
@@ -371,8 +385,9 @@ Coverage: 20/20 FRs have one or more AC links (100%; target 80%).
 | FR-018 | GOAL-001 |
 | FR-019 | GOAL-001 |
 | FR-020 | GOAL-001 |
+| FR-021 | GOAL-001 |
 
-Coverage: 20/20 FRs have one or more GOAL links (100%; target 100%).
+Coverage: 21/21 FRs have one or more GOAL links (100%; target 100%).
 
 ### NFR verification links
 
@@ -384,13 +399,13 @@ Coverage: 20/20 FRs have one or more GOAL links (100%; target 100%).
 | NFR-004 | AC-015, AC-017, AC-026, AC-037, AC-040 and RC-007 |
 | NFR-005 | AC-009, AC-028, AC-033 |
 | NFR-006 | AC-026 |
-| NFR-007 | AC-012, AC-013, AC-014, AC-023, AC-030, AC-035, AC-036, AC-038, AC-040, AC-044 |
+| NFR-007 | AC-012, AC-013, AC-014, AC-023, AC-030, AC-035, AC-036, AC-038, AC-040, AC-044, AC-046, AC-047 |
 | NFR-008 | AC-001, AC-009, AC-020, AC-029 and RC-006 |
 | NFR-009 | AC-015 and RC-006 |
 
 ## MVP and Release Framing
 
-The release contains FR-001 through FR-020. **Do not merge this PRD until CP is fully delivered and its case fixture is approved on the default branch.** The product owner checks code, contract documentation and behavior tests for CP:FR-001 through CP:FR-011, including real revision/permission/history/witness fields and the complete reset command. Verify the ARR dashboard and document/review/request/response endpoints required by FR-003 and FR-005, and the SS source summary `GET /api/v1/cases/{caseId}/sources` (SS:FR-009) required by FR-018 and FR-020, with its tests passing on the default branch. Closed issues alone do not prove delivery.
+The release contains FR-001 through FR-021. **Do not merge this PRD until CP is fully delivered and its case fixture is approved on the default branch.** The product owner checks code, contract documentation and behavior tests for CP:FR-001 through CP:FR-011, including real revision/permission/history/witness fields and the complete reset command. Verify the ARR dashboard and document/review/request/response endpoints required by FR-003 and FR-005, and the SS source summary `GET /api/v1/cases/{caseId}/sources` (SS:FR-009) required by FR-018 and FR-020, with its tests passing on the default branch. Closed issues alone do not prove delivery.
 
 ARR's amendment is merged first; CP's PRD is merged only after its ARR prerequisites are delivered; HG's PRD is merged only after CP delivery. A named person approves each PRD pull request. HG planning then creates dependencies only within the HG plan; it does not recreate ARR or CP work. Draft review can happen now without enabling automatic planning by merging this document early.
 
@@ -417,7 +432,8 @@ Story-split hints, in dependency order (each must stay well under 500 changed li
 19. Rack menu controller: zone entry, focus handling, keys and the open control (FR-018), then the non-3D Data Room list as a second story (FR-020).
 20. Rack and avatar entries in the scene manifest and descriptor, with their assets and provenance, split into rack and avatar if required (FR-016, FR-012).
 21. Guide line adapter and the live-region directions, with the reduced-motion static line (FR-019).
-Each of stories 16 to 19 is a pure function or controller tested without WebGL; only story 20 and 21 touch the canvas adapter.
+22. Follow camera controller: a pure function over avatar position, azimuth, clamps, camera box and an injected clock, with the control and the preset interaction (FR-021).
+Each of stories 16 to 19 and 22 is a pure function or controller tested without WebGL; only stories 20 and 21 touch the canvas adapter.
 
 Production source/asset paths are under `frontend/src/hangar/` and `frontend/src/assets/hangar/`; tests are under `frontend/tests/`. Provenance can live beside assets; release evidence lives under `docs/`. Do not plan `frontend/public/` or a top-level `scripts/` directory, which are outside the current implementer write scope. Every story names its exact files and behavior test; that test must fail against the pre-change default branch. Existing-behavior assertions belong in a separate tests-only story.
 
@@ -436,13 +452,13 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 | RC-005 | Operating-system reduced-motion check (AC-023). | FR-010 |
 | RC-006 | Production WebGL render of all three cases under the exact CSP, local assets and same-origin network requests, with browser/device record; inspect dependency install/build/audit results and the budget check's build invocation. | FR-002, FR-011, FR-013 |
 | RC-007 | Product owner verifies original-asset rights declarations or CC0 grant sources and synthetic content, including the rack and the avatar; unknown or attribution-required rights block HG asset approval/release, not CP fixture freeze. | FR-012 |
-| RC-008 | Data Room walkthrough on the demo baseline: a first-time observer walks to the rack, opens the menu, confirms an aircraft and follows the line to it (AC-043); keyboard and screen-reader pass of the same flow (AC-044); record the observer's feedback on legibility. | FR-016, FR-018, FR-019 |
+| RC-008 | Data Room walkthrough on the demo baseline: a first-time observer walks to the rack, opens the menu, confirms an aircraft and follows the line to it (AC-043); keyboard and screen-reader pass of the same flow (AC-044); record the observer's feedback on legibility and the two-minute follow-camera comfort check (AC-047). | FR-016, FR-018, FR-019, FR-021 |
 
 ## Success Metrics
 
 | Goal | Indicator | Baseline | Target | Measurement window | Evidence |
 |---|---|---|---|---|---|
-| GOAL-001 | Automated HG criteria (37 of 44: all except AC-014, AC-020, AC-021, AC-022, AC-023, AC-043, AC-044); release checks (8). | No hangar behavior or release evidence is accepted yet. | 37 of 37 automated criteria pass; 8 of 8 release checks pass with actual evidence; no scene/server mismatch; rehearsal at most 5 minutes. | Each release-candidate revision and recorded rehearsal. | Test results and review/checklist evidence with browser/device details. |
+| GOAL-001 | Automated HG criteria (39 of 47: all except AC-014, AC-020, AC-021, AC-022, AC-023, AC-043, AC-044, AC-047); release checks (8). | No hangar behavior or release evidence is accepted yet. | 39 of 39 automated criteria pass; 8 of 8 release checks pass with actual evidence; no scene/server mismatch; rehearsal at most 5 minutes. | Each release-candidate revision and recorded rehearsal. | Test results and review/checklist evidence with browser/device details. |
 
 ## Risks and Assumptions
 
@@ -480,6 +496,7 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 | jsdom cannot test real rendering. | High | Medium | Logic tests plus manual WebGL check (RC-006). |
 | Walking and a game-style menu turn the demo into a game or distract from evidence (DD-007). | Medium | Medium | No score, timer or objective; the walk is bounded and optional; every task is available in the non-3D list; AC-043 and RC-008. |
 | Arrow keys are ambiguous between camera and avatar. | Medium | Medium | Two separate labelled focus regions, only the focused one reacts (AC-030, AC-034). |
+| A moving camera causes discomfort or loses the avatar. | Medium | Medium | Easing capped at 400 ms, instant under reduced motion, clamps and camera box, a switch-off control (AC-045 to AC-047). |
 | The menu opening on its own steals focus. | Medium | Medium | Opens once per zone entry, Escape restores focus, an explicit control exists (AC-036). |
 | The source summary contract changes while SS stories are open. | Medium | Low | Supported-version check and per-entry unavailable state (AC-037, AS-007). |
 
@@ -493,6 +510,7 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 | Non-3D equivalent | The semantic list and panel interface that completes every hangar task without WebGL. |
 | Demo baseline | The laptop and browser configuration defined in this PRD for manual checks. |
 | Data Room | The part of Hangar mode with the server rack, the avatar, the rack menu and the guide line. |
+| Follow camera | The third-person orbit whose target is the avatar, on by default in the Data Room. |
 | Rack | The 3D server rack with one unit for each of the five SS source systems. |
 | Avatar | The small generic presenter figure, wearing a yellow safety hard hat, that the user walks across the hangar floor with the arrow keys. |
 | Guide line | The informational line over the floor from the avatar to the selected aircraft's marker. |
