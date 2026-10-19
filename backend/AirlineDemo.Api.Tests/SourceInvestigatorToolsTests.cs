@@ -349,18 +349,31 @@ public sealed class SourceInvestigatorToolsTests
 
     [Theory]
     [InlineData("subjectName", false)]
+    [InlineData("subjectName", true)]
     [InlineData("licenseNumber", false)]
+    [InlineData("licenseNumber", true)]
     [InlineData("SYN-PERSON-NAME-01", false)]
+    [InlineData("SYN-PERSON-NAME-01", true)]
     [InlineData("SYN-LICENSE-NUMBER-01", false)]
+    [InlineData("SYN-LICENSE-NUMBER-01", true)]
     [InlineData("syn-person-name-01", false)]
+    [InlineData("syn-person-name-01", true)]
     [InlineData("syn-license-number-01", false)]
+    [InlineData("syn-license-number-01", true)]
     [InlineData("SYN PERSON NAME 01", true)]
+    [InlineData("SYN PERSON NAME 01", false)]
     [InlineData("SYN.PERSON.NAME.01", true)]
+    [InlineData("SYN.PERSON.NAME.01", false)]
     [InlineData("SYN_PERSON_NAME_01", true)]
+    [InlineData("SYN_PERSON_NAME_01", false)]
+    [InlineData("ＳＹＮ－ＰＥＲＳＯＮ－ＮＡＭＥ－０１", false)]
+    [InlineData("ＳＹＮ－ＰＥＲＳＯＮ－ＮＡＭＥ－０１", true)]
+    [InlineData("Return readiness is pending reserve approval.", false)]
     public async Task MarkedPersonalDataIsRejectedFromReturnedClaims(string markedText, bool isCitation)
     {
         const string caseId = "case-001";
         const string recordId = "rec-doc-arr-0012";
+        const string supportedText = "Return readiness is pending reserve approval.";
         var sources = CreateSources(caseId: caseId);
         var markedRecord = new SourceRecord<RecordsPayload>
         {
@@ -385,14 +398,14 @@ public sealed class SourceInvestigatorToolsTests
         {
             new
             {
-                text = isCitation ? "Return readiness is pending reserve approval." : markedText,
+                text = isCitation ? supportedText : markedText,
                 witnesses = new[]
                 {
                     new
                     {
                         documentId = "return-status",
                         page = 1,
-                        quote = isCitation ? markedText : "Return readiness is pending reserve approval.",
+                        quote = isCitation ? markedText : supportedText,
                     },
                 },
                 sourceWitnesses = new[] { new { sourceId = "records", recordId, recordVersion = 1 } },
@@ -407,10 +420,31 @@ public sealed class SourceInvestigatorToolsTests
             SyntheticContentRegistry.FromCommittedFixtures(), Region, "evidence-v1", model,
             role: "technical-reviewer", sourceSystems: ports);
 
-        var error = await Record.ExceptionAsync(() => investigator.InvestigateAsync([Evidence]));
+        if (!string.Equals(markedText, supportedText, StringComparison.Ordinal))
+        {
+            var error = await Record.ExceptionAsync(() => investigator.InvestigateAsync([Evidence]));
 
-        Assert.IsType<InvestigationOutputException>(error);
-        Assert.Equal("claim contains marked personal data", error!.Message);
+            Assert.IsType<InvestigationOutputException>(error);
+            Assert.Equal("claim contains marked personal data", error!.Message);
+            return;
+        }
+
+        var result = await investigator.InvestigateAsync([Evidence]);
+        var returnedClaim = Assert.Single(result.Claims);
+        Assert.Equal(supportedText, returnedClaim.Text);
+        Assert.Equal(new DocumentWitness("return-status", 1, supportedText), Assert.Single(returnedClaim.Witnesses));
+        Assert.Equal(new SourceRecordWitness("records", recordId, 1), Assert.Single(returnedClaim.SourceWitnesses!));
+        var validation = ClaimValidator.Validate(
+            returnedClaim,
+            ClaimKind.Baseline,
+            new Dictionary<string, BasisDocument>(StringComparer.Ordinal)
+            {
+                ["return-status"] = BasisDocument.Create("return-status", [supportedText]),
+            },
+            supportedText,
+            [new SourceRecordWitness("records", recordId, 1)]);
+        Assert.Equal(ClaimStatus.Supported, validation.Status);
+        Assert.Null(validation.Reason);
     }
 
     [Fact]

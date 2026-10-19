@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.SourceSystems;
 using Microsoft.Extensions.AI;
@@ -207,8 +208,20 @@ public sealed class SourceReadTools(
         }
     }
 
-    private static string NormalizePersonalDataMatch(string value) =>
-        new(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+    private static string NormalizePersonalDataMatch(string value)
+    {
+        var compatibilityNormalized = value.Normalize(NormalizationForm.FormKC);
+        var result = new StringBuilder(compatibilityNormalized.Length);
+        foreach (var rune in compatibilityNormalized.EnumerateRunes())
+        {
+            if (Rune.IsLetterOrDigit(rune))
+            {
+                result.Append(Rune.ToUpperInvariant(rune).ToString());
+            }
+        }
+
+        return result.ToString();
+    }
 
     private static string SerializeRecord<TPayload>(SourceRecord<TPayload> record) where TPayload : class
     {
