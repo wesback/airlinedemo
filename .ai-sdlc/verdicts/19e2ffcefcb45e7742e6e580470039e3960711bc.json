@@ -1,0 +1,241 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 437,
+  "branch": "ai-sdlc/issue-437",
+  "commitSha": "19e2ffcefcb45e7742e6e580470039e3960711bc",
+  "round": 0,
+  "pipelineVersion": "e461d54",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adversarial tests cover several invalid-claim and ambiguity paths, but M-09 does not prove the valid claim still produces a request or that the endpoint selects the current basis.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+          "line": 151,
+          "message": "M-09 is missing the valid-claim control and exact script rejection reason. Assert that the script claim returns reason `script element in missing requirement claim`, then assess the valid default claim with the same setup and assert Request plus exactly one inbox request and receipt.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M09_InvalidClaimsCannotChangeCaseDisposition asserts Review for the script claim, but never asserts the specified reason or assesses the valid default claim under the same complete, unambiguous basis.",
+            "failureScenario": "If AssessmentExecutionService.Assess starts returning Review for every claim, all current M-09 assertions still pass, although the criterion requires the valid default claim to produce Request with exactly one request and receipt. A script claim reviewed for an unrelated reason also passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+          "line": 151,
+          "message": "M-09's endpoint requirement is untested: exercise the assessment endpoint and verify the caller supplies no basis ID or version and the endpoint selects the server's current basis.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test invokes state.Service.Assess directly with a basis argument; it does not call the assessment endpoint or verify how the endpoint selects the current basis.",
+            "failureScenario": "If the endpoint uses a caller-supplied or stale basis instead of the server's current basis, this test still passes because it bypasses the endpoint and supplies the basis directly."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adversarial test exercises the specified script claim through assessment, but omits the required valid-claim control and exact script-review reason assertion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+          "line": 168,
+          "message": "M-09 does not verify its valid-claim control case: assess the default Case B claim with the same basis and assert outcome Request, one inbox request, and one receipt. Also assert the script claim's exact reason, `script element in missing requirement claim`.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M09 assesses the script claim and asserts Review, but does not assess the valid default claim against the same complete, unambiguous EASA basis. It also does not assert the script claim's required reason.",
+            "failureScenario": "If assessment incorrectly routes every missing-requirement claim to Review, including the valid default claim that must produce one request and receipt, this test still passes. If the script claim is reviewed for a different reason, the test also passes without proving the required reason."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added adversarial tests cover several review paths, but the M-09 script case can pass without the required script-element check because its witness is invalid.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+          "line": 138,
+          "message": "M-09 does not prove script-element rejection: its script witness does not match the cited page, so witness validation can independently force Review. Use a witness valid for the basis and assert the script-specific Review reason.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The script claim uses a witness quoting the script, but that witness points to the unchanged llp-history-gap.txt page, which does not contain the script. Claim validation can downgrade it before the assessment reaches the script-element check.",
+            "failureScenario": "If the script-element rejection is removed, the test can still pass because the invalid witness independently produces Review with no request. It therefore does not prove rejection of the exact script claim with a valid witness."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+      "backend/AirlineDemo.Api.Tests/CasePackCaseBTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
