@@ -41,11 +41,18 @@ public sealed class AircraftCasePackManifestTests
     [Fact]
     public void ManifestContractAcceptsAndRejectsTableCases()
     {
+        var documentBoundaries = new[] { 8, 12 };
+        foreach (var count in documentBoundaries)
+        {
+            var boundaryPack = Pack(counts: Enumerable.Repeat(count, 3).ToArray());
+            Assert.Empty(AircraftCasePackManifest.Validate(boundaryPack.Manifest, boundaryPack.Files));
+        }
         var rows = new (string Name, Action<JsonObject> Change, bool Valid, string? Error)[]
         {
             ("integer schema version 1", _ => { }, true, null), ("leap date", j => j["scenarioDate"] = "2024-02-29", true, null),
             ("missing schema version", j => j.Remove("schemaVersion"), false, "schemaVersion"), ("string schema version", j => j["schemaVersion"] = "1", false, "schemaVersion"),
-            ("version 2", j => j["schemaVersion"] = 2, false, "schemaVersion"), ("two aircraft", j => j["cases"]![0]!["aircraftCount"] = 2, false, "aircraftCount"),
+            ("version 2", j => j["schemaVersion"] = 2, false, "schemaVersion"), ("blank pack version", j => j["packVersion"] = " ", false, "packVersion"),
+            ("two aircraft", j => j["cases"]![0]!["aircraftCount"] = 2, false, "aircraftCount"),
             ("no engine", j => j["cases"]![0]!["engineCount"] = 0, false, "engineCount"), ("impossible date", j => j["scenarioDate"] = "2026-02-30", false, "scenarioDate"),
             ("timestamp date", j => j["scenarioDate"] = "2026-02-28T00:00:00Z", false, "scenarioDate"), ("offset date", j => j["scenarioDate"] = "2026-02-28+00:00", false, "scenarioDate"),
             ("two cases", j => j["cases"]!.AsArray().RemoveAt(2), false, "cases"),
@@ -54,6 +61,8 @@ public sealed class AircraftCasePackManifestTests
             ("thirteen documents", j => { var a = j["cases"]![0]!["documents"]!.AsArray(); while (a.Count < 13) a.Add(JsonNode.Parse($$"""{"path":"case-1/extra-{{a.Count}}.txt","synthetic":true,"generatorReference":"generator-v1"}""")); }, false, "documents"),
             ("total below range", j => { foreach (var c in j["cases"]!.AsArray()) while (c!["documents"]!.AsArray().Count > 7) c["documents"]!.AsArray().RemoveAt(7); }, false, "total"),
             ("total above range", j => { foreach (var c in j["cases"]!.AsArray()) { var a = c!["documents"]!.AsArray(); while (a.Count < 13) a.Add(a[a.Count - 1]!.DeepClone()); } }, false, "total"),
+            ("one component", j => j["cases"]![0]!["components"]!.AsArray().RemoveAt(1), false, "components"),
+            ("three components", j => j["cases"]![0]!["components"]!.AsArray().Add(j["cases"]![0]!["components"]![0]!.DeepClone()), false, "components"),
             ("component without mapping", j => j["cases"]![0]!["components"]![0]!["evidenceDocumentPaths"] = new JsonArray(), false, "evidenceDocumentPaths")
         };
         foreach (var row in rows)
