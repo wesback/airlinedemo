@@ -96,8 +96,33 @@ public sealed class CasePackCaseBTests
             Assert.Equal(AssessmentExecutionService.ReviewCapability, reviewItem.CapabilityId);
             Assert.Equal("open", reviewItem.State);
             Assert.Equal(AssessmentExecutionService.ReviewOwner, reviewItem.Owner);
-            Assert.Equal(0, inbox.Requests.Count);
+            AssertNoRequests(inbox);
             Assert.Equal("Review", Assert.Single(caseStore.ListAssessments(scope)).Outcome);
+
+            var injectedInbox = new MockRequestInbox();
+            var injectedEnvelope = new DeliveryEnvelope(
+                $"{CaseId}:{BasisId}:1:assessment",
+                CaseId,
+                "assessment-1",
+                BasisId,
+                1,
+                ScenarioTime,
+                conflict.Component,
+                conflict.SerialNumber,
+                "conflicting engine identity");
+            injectedInbox.RecordPrepared(
+                injectedEnvelope,
+                new DeliveryReceipt(
+                    injectedEnvelope.EventId,
+                    "REQ-INJECTED",
+                    CaseId,
+                    injectedEnvelope.ReportId,
+                    BasisId,
+                    1,
+                    "1",
+                    "Injected request for the ambiguous engine identity."));
+            Assert.Single(injectedInbox.Requests);
+            Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => AssertNoRequests(injectedInbox));
         }
         finally
         {
@@ -107,6 +132,8 @@ public sealed class CasePackCaseBTests
             }
         }
     }
+
+    private static void AssertNoRequests(MockRequestInbox inbox) => Assert.Empty(inbox.Requests);
 
     private static string FixtureRoot([CallerFilePath] string source = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", "AirlineDemo.Api", "Fixtures", "aircraft-case-pack"));
