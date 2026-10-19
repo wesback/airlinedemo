@@ -93,7 +93,7 @@ public sealed class SourcePersonalDataTests
         Assert.Equal(3, records.GetArrayLength());
         var marked = records.EnumerateArray().Single(record => record.GetProperty("recordId").GetString() == MarkedRecordId);
         AssertRecordShape(marked);
-        Assert.Equal("SYN-DOC0012", marked.GetProperty("payload").GetProperty("documentId").GetString());
+        Assert.Equal("DOC-03", marked.GetProperty("payload").GetProperty("documentId").GetString());
         Assert.Equal("1", marked.GetProperty("payload").GetProperty("documentVersion").GetString());
         Assert.True(marked.GetProperty("payload").GetProperty("containsPersonalData").GetBoolean());
 
@@ -166,7 +166,7 @@ public sealed class SourcePersonalDataTests
         Assert.Equal("document_index", record.GetProperty("kind").GetString());
         Assert.False(record.GetProperty("stale").GetBoolean());
         Assert.True(record.GetProperty("synthetic").GetBoolean());
-        Assert.Equal("SYN-DOC0012", payload.GetProperty("documentId").GetString());
+        Assert.Equal("DOC-03", payload.GetProperty("documentId").GetString());
         Assert.Equal("1", payload.GetProperty("documentVersion").GetString());
         Assert.True(payload.GetProperty("containsPersonalData").GetBoolean());
     }
