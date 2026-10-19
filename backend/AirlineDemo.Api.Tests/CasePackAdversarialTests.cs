@@ -135,7 +135,7 @@ public sealed class CasePackAdversarialTests
             };
             basis = basis with { Documents = docs };
             state.Assessments.SetCurrentBasis(CasePackFixture.CaseId, basis);
-            var claim = CasePackFixture.MissingClaim(value: script, quote: script);
+            var claim = CasePackFixture.MissingClaim(value: script, quote: script) with { EvidenceRegime = "FAA-121" };
             Assert.Equal(script, claim.Value);
             Assert.Equal(script, Assert.Single(claim.Witnesses).Quote);
             Assert.True(basis.Coverage.IsComplete);
@@ -143,12 +143,12 @@ public sealed class CasePackAdversarialTests
             var validated = ClaimValidator.Validate(new InvestigationClaim(claim.Value, claim.Witnesses),
                 claim.Kind, basis.Documents, claim.Value);
 
-            var disposition = FindingRouter.Route(basis.Coverage, [validated], identityAmbiguous: false);
+            var record = state.Service.Assess(state.Scope, basis, [claim]);
 
             Assert.Equal(ClaimStatus.Supported, validated.Status);
-            Assert.Equal(FindingOutcome.Review, disposition.Outcome);
-            Assert.False(disposition.AutoAccepted);
-            Assert.Equal(0, disposition.RequestCount);
+            Assert.Equal("Review", record.Outcome);
+            Assert.Equal("evidenceRegime does not match applicability regime", record.Reason);
+            Assert.Null(record.RequestId);
             Assert.Empty(state.Inbox.Requests);
             Assert.Empty(state.Store.ListRequestReceipts(state.Scope));
         }
