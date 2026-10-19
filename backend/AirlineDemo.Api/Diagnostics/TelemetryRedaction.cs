@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,6 +11,11 @@ public static partial class TelemetryRedaction
 {
     public const string ServiceName = "airline-demo-api";
     public const string Redacted = "[redacted]";
+    internal const string SourceSystemMeterName = "airline-demo-api.source-systems";
+
+    private static readonly Meter SourceSystemMeter = new(SourceSystemMeterName);
+    private static readonly Counter<long> SourceSystemEventCounter =
+        SourceSystemMeter.CreateCounter<long>("source.system.events");
 
     // Only enumerated diagnostic fields are emitted; any other key (for example free-text "detail") is dropped.
     private static readonly HashSet<string> AllowedKeys = new(StringComparer.Ordinal)
@@ -71,6 +77,7 @@ public static partial class TelemetryRedaction
 
     private static readonly HashSet<string> DeniedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
+        "source.raw_record_id", "recordid", "record.id", "payload",
         "prompt", "gen_ai.prompt", "gen_ai.content.prompt",
         "document", "document.text", "document.content", "evidence.text",
         "passcode", "cookie", "set-cookie", "authorization", "token", "access_token",
@@ -105,6 +112,11 @@ public static partial class TelemetryRedaction
 
     private static readonly HashSet<string> AllowedOutcomes = new(StringComparer.Ordinal) { "approved", "rejected", "escalated" };
 
+    private static readonly HashSet<string> SourceSpecificAttributeNames = new(StringComparer.Ordinal)
+    {
+        "source.id", "case.id", "event.outcome", "duration",
+    };
+
     private static readonly Regex TraceIdRule = new(@"^trace-[0-9a-f]{4,64}$", RegexOptions.CultureInvariant);
     private static readonly Regex BasisRule = new(@"^basis-v[0-9]{1,4}$", RegexOptions.CultureInvariant);
     private static readonly Regex DeploymentRule = new(@"^[a-z0-9][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
@@ -115,6 +127,12 @@ public static partial class TelemetryRedaction
     private static readonly Regex ErrorTypeRule = new(@"^[a-z][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
 
     public static bool IsAllowedErrorType(string value) => ErrorTypeRule.IsMatch(value);
+
+    internal static bool IsSourceSpecificAttribute(string key) =>
+        key.StartsWith("source.", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("case.id", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("event.outcome", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("duration", StringComparison.OrdinalIgnoreCase);
 
     // Each allowlisted key has a rule that accepts only its enumerated or structured identifier form.
     // Free text, and identifier-shaped content such as canaries, fail the rule and are replaced with Redacted.
@@ -252,6 +270,7 @@ public static partial class TelemetryRedaction
             LogLevel.Error => ("ERROR", 17),
             _ => throw new ArgumentOutOfRangeException(nameof(level)),
         };
+        SourceSystemEventCounter.Add(1);
         Emit(logger, level, merged, severity.Item1, severity.Item2);
     }
 
@@ -277,6 +296,61 @@ public static partial class TelemetryRedaction
     }
 
     public static string ServiceVersion => typeof(TelemetryRedaction).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
+    public static IReadOnlySet<string> ReadApprovedSourceAttributes(string approvalPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(approvalPath);
+        var approved = new HashSet<string>(StringComparer.Ordinal);
+        if (!File.Exists(approvalPath))
+        {
+            return approved;
+        }
+
+        var inSourceAttributes = false;
+        foreach (var rawLine in File.ReadLines(approvalPath))
+        {
+            var line = rawLine.Trim();
+            var isHeading = line.StartsWith('#');
+            if (isHeading)
+            {
+                line = line.TrimStart('#').Trim().TrimEnd('#').Trim();
+            }
+
+            if (line == "source-specific-attributes")
+            {
+                inSourceAttributes = true;
+                continue;
+            }
+
+            if (line == "metric-dimensions")
+            {
+                break;
+            }
+
+            if (isHeading)
+            {
+                inSourceAttributes = false;
+                continue;
+            }
+
+            if (!inSourceAttributes)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("- ", StringComparison.Ordinal) || line.StartsWith("* ", StringComparison.Ordinal))
+            {
+                line = line[2..].Trim();
+            }
+
+            if (SourceSpecificAttributeNames.Contains(line))
+            {
+                approved.Add(line);
+            }
+        }
+
+        return approved;
+    }
 
     public static IReadOnlyDictionary<string, string> ResourceAttributes(string serviceVersion, string environment) =>
         new Dictionary<string, string>(StringComparer.Ordinal)
