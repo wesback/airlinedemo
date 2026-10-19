@@ -413,11 +413,16 @@ public sealed class SourceSystemTelemetryContractTests
             ["case.id"] = CaseId,
             ["event.outcome"] = "unavailable",
             ["duration"] = 42,
+            ["source.raw_record_id"] = "record-1",
         };
-        var approvedAttributeValues = permittedAttributes.ToDictionary(
-            attribute => attribute,
-            attribute => sourceAttributeValues[attribute],
-            StringComparer.Ordinal);
+        var approvedAttributeSet = permittedAttributes.ToHashSet(StringComparer.Ordinal);
+        var approvedAttributeValues = sourceAttributeValues
+            .Where(attribute => approvedAttributeSet.Contains(attribute.Key))
+            .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+        Assert.Equal(
+            expectedPermittedAttributes.OrderBy(attribute => attribute, StringComparer.Ordinal),
+            approvedAttributeValues.Keys.OrderBy(attribute => attribute, StringComparer.Ordinal));
+        Assert.DoesNotContain("source.raw_record_id", approvedAttributeValues.Keys);
         var approvedEvents = new List<CapturedEvent>();
         await using var approvedFactory = CreateFactory(
             Path.Combine(temporaryDirectory.Path, "case-state.json"),
@@ -453,13 +458,28 @@ public sealed class SourceSystemTelemetryContractTests
             new ControlledAdmission(),
             auditFailure: false);
         var defaultLogger = defaultFactory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-default-approval-test");
-        SourceSystemDiagnostics.SourceUnavailable(
-            defaultLogger,
-            defaultFactory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
+        var productionApprovalSet = File.Exists(productionApprovalPath)
+            ? (await File.ReadAllLinesAsync(productionApprovalPath))
+                .SkipWhile(line => line != "source-specific-attributes")
+                .Skip(1)
+                .TakeWhile(line => line != "metric-dimensions")
+                .ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        var defaultAttributeValues = sourceAttributeValues
+            .Where(attribute => productionApprovalSet.Contains(attribute.Key))
+            .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+        Assert.Empty(defaultAttributeValues);
+        using (defaultLogger.BeginScope(defaultAttributeValues))
+        {
+            SourceSystemDiagnostics.SourceUnavailable(
+                defaultLogger,
+                defaultFactory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
+        }
 
         var defaultSourceEvent = Assert.Single(defaultEvents, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
         var defaultEmittedAttributeNames = defaultSourceEvent.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
         Assert.Empty(expectedPermittedAttributes.Intersect(defaultEmittedAttributeNames, StringComparer.Ordinal));
+        Assert.DoesNotContain("source.raw_record_id", defaultEmittedAttributeNames);
     }
 
     private static string FindRepositoryRoot()
