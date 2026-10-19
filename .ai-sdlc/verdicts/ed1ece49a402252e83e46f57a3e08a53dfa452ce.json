@@ -1,0 +1,259 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 230,
+  "branch": "ai-sdlc/issue-230",
+  "commitSha": "ed1ece49a402252e83e46f57a3e08a53dfa452ce",
+  "round": 1,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The page-read counter now verifies the 201-page case extracts zero pages. The stream limit remains bypassable because filter detection does not account for valid escaped PDF names.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 170,
+          "message": "The decoded-stream limit can be bypassed with a PDF name escape: normalize PDF names before checking filters or reject escaped filter names.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "CheckStreamLimits detects a filter only when the raw header contains the literal `/Filter`. PDF names can encode characters with `#xx`, so PdfPig recognizes `/#46ilter` as `/Filter` while this check treats the stream as unfiltered and only counts its compressed length.",
+            "failureScenario": "A presenter submits a PDF under 10 MB with a short Flate stream whose dictionary uses `/#46ilter /FlateDecode` and whose decoded content is very large. The precheck accepts it under the 8 MiB cap, then PdfPig decompresses it in the API process and can exhaust service memory. This leaves the decompression resource-exhaustion risk from the prior round reachable (OWASP A06:2025, Insecure Design)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The revised test observes zero page-text reads for a 201-page PDF. However, PDF name escaping bypasses the new decompression check, so an under-limit compressed document can still exhaust API resources.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 170,
+          "message": "The stream limit check can be bypassed with a PDF-escaped filter name, leaving decompression unbounded during in-process extraction (OWASP A06:2025).",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "CheckStreamLimits detects filters with a literal \"/Filter\" substring. PDF names may encode characters with #xx escapes, which PdfPig decodes when it reads the document.",
+            "failureScenario": "A PDF under the byte limit uses `/F#69lter /FlateDecode` and a short compressed stream that expands beyond the decoded-byte cap. This check treats the stream as unfiltered and counts only its compressed length; PdfPig then decompresses it during page text extraction, potentially exhausting API process resources."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The decoded-stream cap addresses the earlier Flate expansion path, but extracted text is only checked after PdfPig materializes it. A crafted font mapping can still cause excessive API memory use.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 125,
+          "message": "OWASP A06:2025 (Insecure Design): the decoded-stream cap does not bound the text PdfPig materializes. Enforce an extraction bound before the full page text is allocated.",
+          "confidence": 0.78,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The stream check caps decoded stream bytes, but page.Text is materialized before its length is checked at line 126. A font’s ToUnicode mapping can expand each glyph into a longer string than its encoded content.",
+            "failureScenario": "A presenter submits a PDF under the 10 MB input limit whose streams total under 8 MiB, but whose font mapping expands repeated glyphs into a very large amount of text. PdfPig allocates that text in the API process at page.Text before the limit check, potentially exhausting service memory."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 127,
+      "total": 149,
+      "percent": 85.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "covered": 125,
+          "total": 147,
+          "missed": [
+            50,
+            51,
+            52,
+            102,
+            127,
+            128,
+            136,
+            138,
+            158,
+            159,
+            160,
+            166,
+            167,
+            177,
+            178,
+            185,
+            186,
+            190,
+            191,
+            199,
+            200,
+            269
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

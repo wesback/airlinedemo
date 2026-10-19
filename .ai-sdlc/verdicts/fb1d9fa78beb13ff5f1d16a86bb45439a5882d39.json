@@ -1,0 +1,222 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 271,
+  "branch": "ai-sdlc/issue-271",
+  "commitSha": "fb1d9fa78beb13ff5f1d16a86bb45439a5882d39",
+  "round": 1,
+  "pipelineVersion": "a2ace37-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds model-content checks, constrains deployment names to approved aliases, and tests selectedArmId values. However, prohibited content in case annotations still passes the exporter.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/DemoCaseGenerator/EvaluationJsonExporter.cs",
+          "line": 123,
+          "message": "Reject prohibited content in case annotations before export; the current guard does not inspect AnnotatedCitations or AnnotatedMissingRequirements.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Write calls ValidateNoModelContent, which checks dispatch answers and model-call fields, but does not inspect the case annotations on EvaluationCaseResult.",
+            "failureScenario": "If a runner result contains extracted text or a customer-identifying value in AnnotatedCitations.Claim or AnnotatedMissingRequirements, Write succeeds and emits report bytes. Criterion 5 requires typed input containing prohibited values to be rejected with zero output bytes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix rejects model-call content and unsafe deployment names, and the tests now verify allowed and rejected selectedArmId values. The three findings from the previous round are resolved.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix rejects model-call content and restricts deployment names to approved aliases. However, case-input annotations still bypass the new validation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/DemoCaseGenerator/EvaluationJsonExporter.cs",
+          "line": 125,
+          "message": "The prior finding remains for case-input content in runner annotations: reject prohibited values in AnnotatedMissingRequirements and AnnotatedCitations before writing the report.",
+          "confidence": 0.87,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "ValidateNoModelContent checks dispatch answers and model-call fields, but does not inspect EvaluationCaseResult.AnnotatedMissingRequirements or AnnotatedCitations, which the runner copies from the case input.",
+            "failureScenario": "A typed run contains source-document text in an annotated citation's Claim or DocumentId. Write does not reject it and returns report bytes, despite acceptance criterion 5 requiring rejection of typed inputs containing prohibited content."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvaluationJsonExporterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 151,
+      "total": 156,
+      "percent": 96.8,
+      "files": [
+        {
+          "path": "backend/DemoCaseGenerator/EvaluationJsonExporter.cs",
+          "covered": 151,
+          "total": 156,
+          "missed": [
+            43,
+            47,
+            65,
+            151,
+            154
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

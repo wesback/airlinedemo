@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.SourceSystems;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -39,7 +40,15 @@ public sealed class NoInvestigationLimits : IInvestigationLimits
 
 public sealed record DocumentWitness(string DocumentId, int Page, string Quote);
 
-public sealed record InvestigationClaim(string Text, IReadOnlyList<DocumentWitness> Witnesses);
+public sealed record SourceRecordWitness(string SourceId, string RecordId, int RecordVersion);
+
+public sealed record InvestigationClaim(
+    string Text,
+    IReadOnlyList<DocumentWitness> Witnesses,
+    IReadOnlyList<SourceRecordWitness>? SourceWitnesses = null)
+{
+    internal IReadOnlyCollection<SourceRecordWitness>? VerifiedSourceBasis { get; init; }
+}
 
 public sealed record InvestigationResult(IReadOnlyList<InvestigationClaim> Claims, IReadOnlyList<ModelCallTrace> ModelCalls);
 
@@ -57,7 +66,9 @@ public sealed class BoundedInvestigator(
     string evidenceVersion,
     IChatClient modelClient,
     IInvestigationLimits? limits = null,
-    InvestigationTelemetry? telemetry = null)
+    InvestigationTelemetry? telemetry = null,
+    string? role = null,
+    InvestigationSourceSystems? sourceSystems = null)
 {
     public const string UntrustedBegin = "<<<UNTRUSTED_DOCUMENT>>>";
     public const string UntrustedEnd = "<<<END_UNTRUSTED_DOCUMENT>>>";
@@ -77,30 +88,31 @@ public sealed class BoundedInvestigator(
     private readonly InvestigationTelemetry _telemetry = telemetry
         ?? new InvestigationTelemetry(new ConsoleTraceLogger(), "unattributed", RandomNumberGenerator.GetBytes(32), TelemetryRedaction.ServiceVersion, "unknown");
 
-    public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default)
+    public async Task<InvestigationResult> InvestigateAsync(IReadOnlyList<string> documents, CancellationToken cancellationToken = default, InvestigationTraceRecorder? traceRecorder = null)
     {
-        ArgumentNullException.ThrowIfNull(documents);
-        if (documents.Count == 0)
-        {
-            throw new ArgumentException("at least one document is required", nameof(documents));
-        }
+        ValidateDocuments(documents);
 
-        foreach (var text in documents)
-        {
-            if (text is null || text.Contains(UntrustedBegin, StringComparison.Ordinal) || text.Contains(UntrustedEnd, StringComparison.Ordinal))
-            {
-                throw new ArgumentException("document text is missing or contains an untrusted-data delimiter", nameof(documents));
-            }
-        }
-
-        // Every document text that reaches the model, including tool results, is added here before the next call is gated.
+        // Evidence passed to the model is authorized before each call; all model inputs, including tool results, are token-estimated.
         var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
         var evidence = new List<string>(documents);
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits);
+        // The model chooses tool names, so only the declared tools are recorded by name; anything else is one fixed label.
+        var knownTools = new HashSet<string>(StringComparer.Ordinal);
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits,
+            name => traceRecorder?.RecordToolCall(knownTools.Contains(name) ? name : InvestigationTraceRecorder.UnknownTool));
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
         var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
-        var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: [.. tools.Functions]);
+        var functions = tools.Functions.AsEnumerable();
+        SourceReadTools? sourceTools = null;
+        if (sourceSystems is not null)
+        {
+            sourceTools = new SourceReadTools(caseId, role ?? string.Empty, sourceSystems, limits);
+            functions = functions.Concat(sourceTools.Functions);
+        }
+
+        var declaredTools = functions.ToArray();
+        foreach (var function in declaredTools) knownTools.Add(function.Name);
+        var agent = new ChatClientAgent(pipeline, instructions: Instructions, name: "case-investigator", tools: declaredTools);
 
         InvestigationResult? result = null;
         var outcome = "escalated";
@@ -114,7 +126,7 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationLimitExceededException(breach);
             }
 
-            result = new InvestigationResult(VerifyClaims(response.Text), gate.Traces);
+            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder, sourceTools), gate.Traces);
             outcome = "approved";
             return result;
         }
@@ -131,6 +143,24 @@ public sealed class BoundedInvestigator(
         {
             EmitTrace(traceId, gate.ToolsUsed, result, outcome, limits);
             (limits as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>Refuses an investigation before it starts: no documents, a missing text, or a text that carries a delimiter.</summary>
+    internal static void ValidateDocuments(IReadOnlyList<string> documents)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        if (documents.Count == 0)
+        {
+            throw new ArgumentException("at least one document is required", nameof(documents));
+        }
+
+        foreach (var text in documents)
+        {
+            if (text is null || text.Contains(UntrustedBegin, StringComparison.Ordinal) || text.Contains(UntrustedEnd, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("document text is missing or contains an untrusted-data delimiter", nameof(documents));
+            }
         }
     }
 
@@ -160,7 +190,8 @@ public sealed class BoundedInvestigator(
 
     private static string BuildPrompt(IReadOnlyList<string> documents)
     {
-        var prompt = new StringBuilder("Investigate the case documents below and return the claims JSON.\n");
+        var prompt = new StringBuilder(
+            "Investigate the case documents below and return the claims JSON. For every source-backed claim, add sourceWitnesses entries using the exact sourceId, recordId and recordVersion returned by a permitted source tool.\n");
         foreach (var text in documents)
         {
             prompt.Append(UntrustedBegin).Append('\n').Append(text).Append('\n').Append(UntrustedEnd).Append('\n');
@@ -176,8 +207,12 @@ public sealed class BoundedInvestigator(
             .Where(part => part.Length >= 20)
             .Any(part => claimText.Contains(part, StringComparison.Ordinal));
 
-    private IReadOnlyList<InvestigationClaim> VerifyClaims(string modelText)
+    private IReadOnlyList<InvestigationClaim> VerifyClaims(
+        string modelText,
+        InvestigationTraceRecorder? traceRecorder,
+        SourceReadTools? sourceTools)
     {
+        var sourceWitnesses = sourceTools?.ReadWitnesses;
         List<ClaimDto>? dtos;
         try
         {
@@ -207,6 +242,16 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationOutputException("claim echoes the investigator prompt");
             }
 
+            if (sourceTools?.ContainsMarkedPersonalData(dto.Text) == true)
+            {
+                throw new InvestigationOutputException("claim contains marked personal data");
+            }
+
+            if (ClaimValidator.SourceWitnessProblem(dto.SourceWitnesses, sourceWitnesses) is { } sourceProblem)
+            {
+                throw new InvestigationOutputException(sourceProblem);
+            }
+
             var witnesses = new List<DocumentWitness>(dto.Witnesses.Count);
             foreach (var witness in dto.Witnesses)
             {
@@ -215,10 +260,25 @@ public sealed class BoundedInvestigator(
                     throw new InvestigationOutputException("witness is not a document of this case");
                 }
 
+                if (sourceTools?.ContainsMarkedPersonalData(witness.Quote) == true)
+                {
+                    throw new InvestigationOutputException("claim contains marked personal data");
+                }
+
                 var page = source.GetSourcePage(caseId, witness.DocumentId, witness.Page);
                 if (page is null || !page.Contains(witness.Quote, StringComparison.Ordinal))
                 {
+                    if (witness.Page >= 1)
+                    {
+                        traceRecorder?.RecordCitationCheck(witness.DocumentId, witness.Page, InvestigationTraceRecorder.CitationQuoteNotOnPage);
+                    }
+
                     throw new InvestigationOutputException("witness quote is not on the cited page");
+                }
+
+                if (witness.Page >= 1)
+                {
+                    traceRecorder?.RecordCitationCheck(witness.DocumentId, witness.Page, InvestigationTraceRecorder.CitationVerified);
                 }
 
                 witnesses.Add(new DocumentWitness(witness.DocumentId, witness.Page, witness.Quote));
@@ -230,7 +290,10 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationOutputException("claim text is not supported by its witness quote");
             }
 
-            claims.Add(new InvestigationClaim(dto.Text, witnesses));
+            claims.Add(new InvestigationClaim(dto.Text, witnesses, dto.SourceWitnesses)
+            {
+                VerifiedSourceBasis = sourceWitnesses,
+            });
         }
 
         return claims;
@@ -255,7 +318,7 @@ public sealed class BoundedInvestigator(
         }
     }
 
-    private sealed record ClaimDto(string? Text, List<WitnessDto>? Witnesses);
+    private sealed record ClaimDto(string? Text, List<WitnessDto>? Witnesses, List<SourceRecordWitness>? SourceWitnesses);
 
     private sealed record WitnessDto(string? DocumentId, int Page, string? Quote);
 
@@ -267,7 +330,8 @@ public sealed class BoundedInvestigator(
         string dataRegion,
         string evidenceVersion,
         IReadOnlyList<string> evidence,
-        IInvestigationLimits limits) : DelegatingChatClient(inner)
+        IInvestigationLimits limits,
+        Action<string>? onToolCall = null) : DelegatingChatClient(inner)
     {
         private readonly List<ModelCallTrace> _traces = [];
         private readonly List<string> _toolsUsed = [];
@@ -301,6 +365,8 @@ public sealed class BoundedInvestigator(
                     await limits.AfterModelCallAsync(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, cancellationToken);
                     foreach (var call in response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>())
                     {
+                        // Every requested call is recorded in order, including repeats of the same tool.
+                        onToolCall?.Invoke(call.Name);
                         if (!_toolsUsed.Contains(call.Name))
                         {
                             _toolsUsed.Add(call.Name);

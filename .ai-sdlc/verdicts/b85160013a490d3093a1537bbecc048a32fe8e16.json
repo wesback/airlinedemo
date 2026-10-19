@@ -1,0 +1,313 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "b85160013a490d3093a1537bbecc048a32fe8e16",
+  "round": 3,
+  "pipelineVersion": "e867b8e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new execution service propagates append failures through its caller, but no production code invokes it. The named ordered-events test also still constructs its trace by calling the recorder directly, leaving the actual investigation event path unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/InvestigationExecutionService.cs",
+          "line": 10,
+          "message": "AC TRACE-PRODUCER-01 remains unmet: the execution service is not connected to a production investigation path, so actual investigations do not persist their trace.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "InvestigationExecutionService.ExecuteAsync passes a recorder to BoundedInvestigator and appends the trace, but the service has no production call site in the API.",
+            "failureScenario": "When the API runs an investigation through its available production path, it never invokes this service, so tool calls, citation checks, corrections, and the outcome are not appended to the trace store."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 82,
+          "message": "The required AC TRACE-PRODUCER-01 behavior test still does not verify investigation-to-recorder wiring; it can pass while actual executions omit events.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "PersistsActualOrderedToolAndCitationOutcomes directly calls recorder methods; it does not use the provided fake chat client or run BoundedInvestigator. The assertions therefore inspect manually supplied events.",
+            "failureScenario": "If BoundedInvestigator stops forwarding tool calls or citation outcomes to the recorder, this test still passes because it invokes RecordToolCall and RecordCitationCheck itself."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new service addresses recorder exception propagation in its test, but it is not used by a production call path. It also records a trace for pre-execution validation failures, and the named event test still exercises the recorder directly rather than an investigation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 80,
+          "message": "AC TRACE-PRODUCER-01 remains unmet: the new recording service is not connected to a production investigation path, so actual executions still do not persist traces.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new InvestigationExecutionService passes a recorder to InvestigateAsync, but repository call-site search finds no production caller of that service. InvestigateAsync still accepts a null recorder, so calls through the existing investigation path do not append traces.",
+            "failureScenario": "A production investigation runs through the existing path; tool calls and citation checks have no recorder, and no completion or rejection trace is appended."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/InvestigationExecutionService.cs",
+          "line": 30,
+          "message": "The service records traces for requests rejected before investigation starts; restrict rejection recording to failures after execution has begun.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ExecuteAsync creates a recorder before calling InvestigateAsync, then catches every exception and calls recorder.Reject. InvestigateAsync rejects empty documents with ArgumentException before it begins execution.",
+            "failureScenario": "ExecuteAsync receives an empty document list; InvestigateAsync rejects it before execution starts, but the catch block appends an escalated trace, violating AC TRACE-PRODUCER-04."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 88,
+          "message": "The AC TRACE-PRODUCER-01 behavior test still does not verify that an investigation produces the recorded events; it can pass when the investigation-to-recorder wiring is broken.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "PersistsActualOrderedToolAndCitationOutcomes manually invokes RecordToolCall and RecordCitationCheck. It does not run BoundedInvestigator with the fake chat client, so it bypasses the production event callbacks.",
+            "failureScenario": "If BoundedInvestigator stops forwarding tool calls or citation outcomes to the recorder, this test still passes because it records those steps directly."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability in the round-4 changes. The new execution path records categorical outcomes and trace metadata; I found no reachable injection, authorization bypass, or credential exposure.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 140,
+      "total": 150,
+      "percent": 93.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 12,
+          "total": 12,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationExecutionService.cs",
+          "covered": 9,
+          "total": 18,
+          "missed": [
+            29,
+            33,
+            36,
+            37,
+            38,
+            39,
+            41,
+            42,
+            43
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationTraceRecorder.cs",
+          "covered": 40,
+          "total": 40,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 16,
+          "total": 16,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 1,
+          "total": 2,
+          "missed": [
+            155
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261016000000_AddCaseTraces.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 37,
+          "total": 37,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

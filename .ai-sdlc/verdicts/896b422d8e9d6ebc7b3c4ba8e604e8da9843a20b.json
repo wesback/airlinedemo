@@ -1,0 +1,288 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 283,
+  "branch": "ai-sdlc/issue-283",
+  "commitSha": "896b422d8e9d6ebc7b3c4ba8e604e8da9843a20b",
+  "round": 0,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The SQL Server uniqueness index can collapse identifiers ending in U+0000 because it omits their lengths. The 128-code-unit identifier limit is also not enforced by the append path, and its required test is absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 49,
+          "message": "The unique index omits identifier lengths, so SQL Server can treat distinct identifiers ending in U+0000 as equal. Include each identifier’s length in the uniqueness key.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The migration creates a unique index over the three UTF-16 byte columns but omits their lengths. AppendTrace stores those bytes and relies on the index for tuple uniqueness.",
+            "failureScenario": "On SQL Server, append traces with the same case and investigation IDs and RunIds \"run-1\" and \"run-1\\u0000\". The byte values differ, but SQL Server varbinary comparison ignores trailing zero bytes, so the unique index rejects the second distinct identifier."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 261,
+          "message": "Trace identifiers are not limited to 128 UTF-16 code units before persistence, and the required TraceIdentifierLengthIsLimited test is missing. A 129-unit identifier can be stored through SQLite.",
+          "confidence": 0.85,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AppendTrace calls InvestigationTraceRules.Validate, then hashes and stores identifiers without checking their UTF-16 code-unit lengths. EF HasMaxLength metadata does not validate string lengths in the SQLite provider used by the tests.",
+            "failureScenario": "With the migrated in-process SQLite store, append a trace whose RunId has 129 UTF-16 code units. No length check rejects it, so the append succeeds despite the 128-code-unit limit. The required TraceIdentifierLengthIsLimited test is also absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds trace persistence and tests for ordinary round trips, but it does not enforce the 128-code-unit identifier limit. Its SQL Server uniqueness index also lacks lengths, leaving a reachable collision for identifiers that differ by trailing U+0000.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 265,
+          "message": "AC: M-03 requires rejecting identifiers longer than 128 UTF-16 code units, including surrogate code units. No length check or the required TraceIdentifierLengthIsLimited test is present.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AppendTrace calls InvestigationTraceRules.Validate, then hashes and writes the identifier bytes. This change adds no 128-code-unit check; SQLite does not enforce the EF column length metadata or the varbinary length declarations.",
+            "failureScenario": "With the migrated in-process SQLite database required by the criteria, appending a trace whose RunId contains 129 UTF-16 code units passes validation and can be stored, although identifiers longer than 128 code units must be rejected. SqlCaseStateStoreTests.TraceIdentifierLengthIsLimited is also absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 52,
+          "message": "The unique index omits the identifier lengths required by the acceptance criteria, so SQL Server can collapse distinct identifiers ending in U+0000.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The unique index covers only the three UTF-16 byte columns, with no identifier-length columns. SQL Server varbinary comparisons can treat values that differ only by trailing zero bytes as equal. AppendTrace hashes the identifiers exactly, then relies on this index; a collision raises DbUpdateException and is reported as TraceConflictException.",
+            "failureScenario": "On SQL Server, append traces with the same case and investigation IDs and RunIds \"run-1\" and \"run-1\\u0000\". Their hashes differ, but their indexed RunIdUtf16 values compare equal because the latter has trailing zero bytes. The second distinct trace is rejected instead of persisted. TracePersistenceRoundTripsAllFields does not exercise this case."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability in the changed application code. The added database lookups use parameterized EF queries, and the pipeline evidence files are out of scope.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 228,
+      "total": 239,
+      "percent": 95.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 55,
+          "total": 55,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "covered": 54,
+          "total": 58,
+          "missed": [
+            76,
+            77,
+            78,
+            79
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 119,
+          "total": 126,
+          "missed": [
+            265,
+            266,
+            311,
+            312,
+            313,
+            368,
+            369
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

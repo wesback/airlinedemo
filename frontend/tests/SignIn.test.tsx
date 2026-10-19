@@ -153,15 +153,24 @@ describe('sign-in page', () => {
     expect(screen.queryByRole('radio')).toBeNull();
   });
 
-  it('forces sign-out before switching users: no picker or passcode is shown while signed in', async () => {
+  it('provides App the signed-in identity and CSRF token only after sign-in succeeds', async () => {
     stubApi({
       'GET /api/auth/users': () => json(users),
-      'POST /api/auth/sign-in': () => json({ id: 'agent-1', displayName: 'Ada Reviewer', role: 'Reviewer', csrfToken: 'csrf-123' }),
+      'POST /api/auth/sign-in': () => json({
+        id: 'agent-1', displayName: 'Ada Reviewer', role: 'Reviewer',
+        caseScopes: ['case-001'], csrfToken: 'csrf-123',
+      }),
     });
-    render(<SignIn />);
+    const onSessionChange = vi.fn();
+    render(<SignIn onSessionChange={onSessionChange} />);
     await enterPasscodeAndPick('demo-pass', 'Ada');
 
     expect(await screen.findByText('Signed in as Ada Reviewer.')).toBeTruthy();
+    expect(onSessionChange).toHaveBeenCalledTimes(1);
+    expect(onSessionChange).toHaveBeenCalledWith({
+      id: 'agent-1', displayName: 'Ada Reviewer', role: 'Reviewer',
+      caseScopes: ['case-001'], csrfToken: 'csrf-123',
+    });
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByLabelText('Demo passcode')).toBeNull();
   });

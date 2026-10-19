@@ -1,0 +1,270 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 231,
+  "branch": "ai-sdlc/issue-231",
+  "commitSha": "5d58e8f60a2fbca8d70d8200f08e6d352a6e4f09",
+  "round": 2,
+  "pipelineVersion": "5711d2b",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added checks cover rejected package and basis state and verify that a saturated limiter rejects an endpoint request. The tests still do not exercise concurrent investigations through the endpoint or assert that a rejected request leaves investigation-result state empty.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 152,
+          "message": "AC: LIMIT-02 remains unproved for concurrent endpoint investigations: the test blocks direct limiter acquisitions rather than investigations executed through the endpoint.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Concurrent_investigations_are_bounded_and_release_slots acquires the two slots directly through TryAdmitInvestigation and blocks those tasks. It then checks that a package endpoint request is rejected, but it never runs two investigations through the endpoint and holds them at the barrier.",
+            "failureScenario": "If the endpoint releases a slot before its investigation finishes, these direct-slot holders still keep both slots occupied and the endpoint request is rejected; the test passes without proving the required concurrent investigation behavior or slot lifecycle through the endpoint."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 226,
+          "message": "AC: LIMIT-03 still lacks an assertion that a concurrency-limited attempt creates no investigation result.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Limit_failures_are_recorded_without_partial_admission_state checks the concurrency rejection response, event values, package store, and evidence basis store, but does not inspect investigation-result state.",
+            "failureScenario": "If a concurrency-limited request creates an investigation result before returning 429 while leaving package and basis state empty, every assertion in this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round adds endpoint rejection checks and verifies package and basis state, but LIMIT-02's endpoint slot lifetime and LIMIT-03's absence of investigation-result state remain unproved by the named tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 152,
+          "message": "AC: LIMIT-02 remains incompletely tested: use endpoint-backed investigations blocked on the test barrier to verify the endpoint holds slots through execution and releases them after success, cancellation, and exception.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The two barrier-blocked tasks acquire limiter slots directly. The test then sends one request through the endpoint while those slots are held, but does not run admitted investigations through the endpoint.",
+            "failureScenario": "If the endpoint releases its slot before its investigation finishes, these tests still pass: the direct holders prove the limiter works, and the endpoint request is tested only while those holders occupy the slots. LIMIT-02's endpoint concurrency and slot-lifetime behavior remains unproved."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 231,
+          "message": "AC: LIMIT-03 still lacks an assertion that the concurrency-rejected request leaves investigation-result state empty.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The rejection test checks the 429 response, event values, package absence, and basis count, but does not inspect investigation-result state.",
+            "failureScenario": "If a rejected concurrency-limited request creates an investigation result without creating a package or basis entry, the assertions still pass. LIMIT-03's no-result requirement is not proved."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds endpoint rejection checks and verifies package and basis state. The named rejection test still does not inspect investigation-result state, leaving the previously reported gap unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs",
+          "line": 231,
+          "message": "AC: LIMIT-02 and LIMIT-03 still lack an assertion that a concurrency-rejected endpoint request creates no investigation result.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test sends a concurrency-limited request through the endpoint and checks the 429 response, package state, and evidence basis state, but it never checks investigation-result state.",
+            "failureScenario": "If the endpoint creates an investigation result before returning the same 429 response, all current assertions still pass. AC: LIMIT-02 and LIMIT-03 require proving the rejected attempt creates no investigation result."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/WorkloadAdmissionLimitsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 64,
+      "total": 64,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/WorkloadAdmissionLimits.cs",
+          "covered": 58,
+          "total": 58,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "covered": 5,
+          "total": 5,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

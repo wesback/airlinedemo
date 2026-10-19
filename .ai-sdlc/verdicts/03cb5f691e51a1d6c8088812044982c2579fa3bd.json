@@ -1,0 +1,279 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "03cb5f691e51a1d6c8088812044982c2579fa3bd",
+  "round": 2,
+  "pipelineVersion": "e867b8e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The recorder now supports event capture, but no production path supplies it to BoundedInvestigator, and validation corrections are not connected. The failure test exercises the recorder alone rather than the investigation caller.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 61,
+          "message": "AC TRACE-PRODUCER-01 and AC TRACE-PRODUCER-02 remain unmet: the recorder is not wired into a production investigation path, and validation results are never recorded there.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new recorder parameter defaults to null, and no production call site constructs an InvestigationTraceRecorder or passes one to BoundedInvestigator. The new recorder tests call its methods directly; VerifyClaims also never calls RecordValidation.",
+            "failureScenario": "A normal investigation runs with the default null recorder, so tool and citation callbacks do nothing and completion or rejection appends no trace. A downgraded validation likewise produces no correction step."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 94,
+          "message": "AC TRACE-PRODUCER-03 is not demonstrated by the required test: it checks recorder exception propagation, but not that an investigation caller cannot return success after append fails.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "StoreFailureDoesNotReturnSuccessfulInvestigation invokes InvestigationTraceRecorder.Complete directly with a throwing store; it does not run BoundedInvestigator or assert what an investigation caller returns.",
+            "failureScenario": "If BoundedInvestigator swallowed an append exception and returned a successful result, this test would still pass because it only asserts that a direct call to recorder.Complete throws."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The recorder APIs and direct recorder tests were added, but no production path supplies the recorder to BoundedInvestigator. The tests manually call recorder methods, so they do not demonstrate that actual investigation events or validation corrections reach the trace store.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "line": 61,
+          "message": "AC TRACE-PRODUCER-01 remains unmet: no production path supplies a recorder to BoundedInvestigator, so actual investigation events are not persisted.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The recorder parameter defaults to null, and the tool-call and completion paths use null-conditional calls. No production code constructs a recorder or passes one to BoundedInvestigator.",
+            "failureScenario": "An investigation runs with the default constructor arguments; its tool calls and outcome are not appended to either trace store, so the stored trace does not reflect that execution."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+          "line": 33,
+          "message": "The named recorder tests do not verify the investigation-to-recorder wiring required by AC TRACE-PRODUCER-01 and AC TRACE-PRODUCER-02; they can pass while actual executions omit those events.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "PersistsActualOrderedToolAndCitationOutcomes calls RecordToolCall and RecordCitationCheck directly instead of running BoundedInvestigator with the specified fake chat client. RecordsDowngradeWithoutUntrustedContent likewise calls RecordValidation directly.",
+            "failureScenario": "If BoundedInvestigator stops recording tool or citation events, or the validation result is never passed to RecordValidation, these tests still pass because they manually invoke the recorder methods."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable through the changes in this review round.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 134,
+      "total": 135,
+      "percent": 99.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 15,
+          "total": 15,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationTraceRecorder.cs",
+          "covered": 40,
+          "total": 40,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 16,
+          "total": 16,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 1,
+          "total": 2,
+          "missed": [
+            155
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261016000000_AddCaseTraces.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 37,
+          "total": 37,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

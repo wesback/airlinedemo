@@ -1,0 +1,259 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 376,
+  "branch": "ai-sdlc/issue-376",
+  "commitSha": "bc3c8274f48128ffba2f628c0fb95a82a7cadaa4",
+  "round": 0,
+  "pipelineVersion": "c543f99-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Most listed source outcomes are wired to the expected diagnostic event. The production startup fixture-loading path misses the required rejection event.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/SourceFixtureLoader.cs",
+          "line": 70,
+          "message": "Production fixture-load failures do not emit the rejected-fixture diagnostic because the startup call omits the optional logger.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Program.cs calls LoadPinned with only the fixture directory. The optional logger is therefore null, and the catch at line 78 skips FixtureRejected.",
+            "failureScenario": "When a production fixture is missing or invalid during startup, LoadPinned rethrows without emitting the required source.fixture.rejected ERROR/17 event. The new test supplies a logger through LoadPinnedAndPublish, so it does not cover this production call path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The read and mode-change outcomes are covered by the contract test, but fixture rejection is only tested through a seam that explicitly supplies a logger. The existing production call path can fail without emitting the required event.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/SourceFixtureLoader.cs",
+          "line": 77,
+          "message": "Fixture rejection diagnostics are skipped on the existing production call path because it does not supply a logger. Wire the production fixture loader to a logger and cover that path in the contract test.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "LoadPinned accepts a nullable logger with a null default, and its catch block emits FixtureRejected only when a logger is supplied. Existing one-argument production calls remain valid and leave the logger null; the new test passes a logger explicitly.",
+            "failureScenario": "When production loads a rejected fixture through LoadPinned(directory), the exception is rethrown without emitting source.fixture.rejected, so the fixture-load outcome is absent from production diagnostics."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Fixture rejection logging is exercised only through the test helper; the production LoadPinned path defaults to no logger and emits no rejection event.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/SourceFixtureLoader.cs",
+          "line": 69,
+          "message": "Fixture rejection telemetry is not wired into the production load path. Pass the production logger to LoadPinned so validation failures emit the required event (OWASP A09:2025).",
+          "confidence": 0.89,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "LoadPinned catches fixture-load failures but emits the rejection event only when its optional logger argument is non-null. The production call site is not updated in this diff, so it continues to use the null default.",
+            "failureScenario": "A production fixture fails validation during startup. LoadPinned rethrows without emitting source.fixture.rejected, so the required security diagnostic is absent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceSystemTelemetryContractTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 96,
+      "total": 106,
+      "percent": 90.6,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 32,
+          "total": 39,
+          "missed": [
+            137,
+            138,
+            230,
+            231,
+            235,
+            236,
+            253
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceFixtureLoader.cs",
+          "covered": 18,
+          "total": 18,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceModeEndpoints.cs",
+          "covered": 9,
+          "total": 9,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs",
+          "covered": 27,
+          "total": 30,
+          "missed": [
+            83,
+            84,
+            85
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceSystemDiagnostics.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 24,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

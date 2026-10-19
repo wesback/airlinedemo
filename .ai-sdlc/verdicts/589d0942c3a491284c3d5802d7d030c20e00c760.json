@@ -1,0 +1,235 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 226,
+  "branch": "ai-sdlc/issue-226",
+  "commitSha": "589d0942c3a491284c3d5802d7d030c20e00c760",
+  "round": 3,
+  "pipelineVersion": "10776a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest test changes address the prior ingress allowlist and broad egress assertion gaps. The model account’s TLS 1.2 requirement remains unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 112,
+          "message": "M-14 still does not verify that the model account enforces minimum TLS 1.2. The new assertion only rejects a TLS setting in the Terraform block; build-and-gate runs repository tests and does not verify the Azure platform setting.",
+          "confidence": 0.89,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M14 now asserts that the model resource contains no TLS override, but neither that assertion nor the build-and-gate job verifies the Azure model account’s minimum TLS version.",
+            "failureScenario": "If the platform default changes or the account is configured outside this Terraform resource with a minimum below TLS 1.2, the test and named CI job still pass, leaving the M-14 / NFR-001 requirement unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The revised tests address the earlier ingress and egress assertion gaps. The previously raised M-14 test finding remains: the model account's TLS 1.2 requirement is not verified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 106,
+          "message": "M-14 still does not verify the model account's minimum TLS 1.2 requirement. Checking that the resource block contains no TLS setting cannot establish the effective TLS minimum.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M14 checks the model resource only for the absence of text matching `tls`; it does not assert that the effective minimum TLS version is 1.2.",
+            "failureScenario": "If the model account's effective minimum TLS version is below 1.2 while its Terraform block contains no TLS setting, M14 still passes, leaving the NFR-001 requirement unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The ingress assertions now check the configured CIDR and empty-list deny cases, and the model TLS check confirms no Terraform override is present. The M-18 egress test still permits an additional broad Allow rule through an unchecked each.value source.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 170,
+          "message": "M-18 still does not bind every each.value Allow rule to local.egress_rules. A second rule can use a broad destination and pass this check, leaving the egress allowlist bypassable (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.87,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test accepts each.value for every outbound Allow rule, but only checks that the specifically named egress_allow rule uses local.egress_rules.",
+            "failureScenario": "If another NSG Allow rule iterates over a map containing \"Internet\" and sets destination_address_prefix = each.value, this assertion passes while the app subnet can reach unapproved destinations."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 15,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

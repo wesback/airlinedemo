@@ -1,0 +1,247 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 360,
+  "branch": "ai-sdlc/issue-360",
+  "commitSha": "0ff12190d22f34f90f9f9f0e1a8dd6effd4def91",
+  "round": 1,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Both major findings from the previous round remain unresolved: the signed fixture has no synthetic specialist flags, and the IFRS16 test does not cover draft or export output.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 139,
+          "message": "The signed contracts fixture still lacks the synthetic specialist_flag records required by the issue.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Assess reads specialist flags from the current accepted basis's SourcePins. The signed contracts fixture is not updated with specialist_flag records.",
+            "failureScenario": "With the shipped fixture, an assessment has no matching specialist flag and follows ordinary routing, so the fixture cannot exercise the requested specialist review behavior."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SpecialistReviewFlagTests.cs",
+          "line": 117,
+          "message": "The IFRS16 test still does not verify the required assessment-derived draft or export output.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Ifrs16FlagNeverProducesAnAccountingConclusion serializes the assessment record and its persisted CaseAssessment, but does not invoke or assert an assessment-derived draft or export.",
+            "failureScenario": "If an assessment-derived draft or export contains a lease-classification, impairment, or accounting-recognition conclusion, this test still passes because it checks only the assessment record and persisted assessment."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds assertions for persisted assessment output, but the required synthetic fixture flags and draft or export coverage remain absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 139,
+          "message": "The signed contracts fixture still lacks the synthetic specialist_flag records required by the issue.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Assess reads specialist flags from the current accepted basis's SourcePins. The PR diff still does not add synthetic specialist_flag records to the signed contracts fixture.",
+            "failureScenario": "When the shipped contracts fixture is loaded, it supplies no new specialist flags, so an assessment using that fixture cannot exercise the requested specialist routing."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SpecialistReviewFlagTests.cs",
+          "line": 117,
+          "message": "The IFRS16 test still does not verify the draft or export output required by the acceptance criterion.",
+          "confidence": 0.84,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Ifrs16FlagNeverProducesAnAccountingConclusion serializes the assessment record and its persisted CaseAssessment; it does not invoke or assert an assessment-derived draft or export.",
+            "failureScenario": "If an assessment-derived draft or export includes a lease-classification, impairment, or accounting-recognition conclusion, this test still passes because it checks only assessment output."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round's test update checks persisted assessment data, but it does not address either outstanding review finding. I found no security vulnerability in the changed code.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "line": 139,
+          "message": "The signed contracts fixture still lacks synthetic specialist_flag records, so the shipped data cannot trigger the new routing behavior.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Assess reads specialist flags from the current accepted basis's SourcePins, but the PR does not add specialist_flag records to the signed contracts fixture.",
+            "failureScenario": "With the shipped contracts fixture, no matching flag reaches the new routing logic, so assessments follow the ordinary routing path instead of exercising the requested specialist review behavior."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/SpecialistReviewFlagTests.cs",
+          "line": 117,
+          "message": "The IFRS16 test still does not verify the required assessment-derived draft or export output.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Ifrs16FlagNeverProducesAnAccountingConclusion serializes the assessment record and persisted CaseAssessment, but does not invoke or assert any assessment-derived draft or export.",
+            "failureScenario": "If an assessment-derived draft or export includes a lease-classification, impairment, or accounting-recognition conclusion, this test still passes because it checks only the assessment record and persisted assessment."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SpecialistReviewFlagTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

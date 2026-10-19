@@ -17,6 +17,12 @@ public static class Generator
 
     public static int Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "evaluation")
+        {
+            EvaluationCaseGenerator.WriteFixture(args[1], int.Parse(args[2]));
+            return 0;
+        }
+
         if (args.Length != 1)
         {
             Console.Error.WriteLine("usage: DemoCaseGenerator <output-dir>");
@@ -52,6 +58,7 @@ public static class Generator
             + $"  \"caseId\": {JsonSerializer.Serialize(CaseId)},\n"
             + $"  \"seed\": {Seed},\n"
             + $"  \"notice\": {JsonSerializer.Serialize(Notice)},\n"
+            + "  \"scenario\": {\"scenarioNow\": \"2025-01-10\", \"returnDate\": \"2025-10-10\", \"aircraft\": {\"storedId\": \"SYN-AC-001\", \"displayLabel\": \"MOCK-AC-001\"}, \"engine\": {\"storedId\": \"EN-SYN-7781\"}},\n"
             + "  \"documents\": [\n"
             + string.Join(",\n", documentLines) + "\n"
             + "  ]\n}\n";
@@ -83,10 +90,11 @@ public static class Generator
     {
         const string aircraftRelease = "Certificate of release to service (aircraft)";
         const string componentRelease = "Component release certificate";
-        const string aircraftTitle = "Release to service: DEMO-AC-01";
+        const string llpRelease = "Engine life-limited part release certificate";
+        const string aircraftTitle = "Release to service: MOCK-AC-001";
         string[] aircraftLines =
         [
-            "Aircraft: DEMO-AC-01   Registration: SYN-001",
+            "Aircraft: MOCK-AC-001   Stored ID: SYN-AC-001   Registration: SYN-001",
             "Type: Demo narrowbody (synthetic)   Operator: Example Demo Air (synthetic)",
             "Approved station: Synthetic MRO Station S1   Approval: APP-SYN-000",
             "Release date: 2025-03-01   Work order: WO-SYN-1001",
@@ -106,7 +114,7 @@ public static class Generator
                 "Complete engine record with time and cycle history",
                 [
                     "Engine ESN: EN-SYN-7781   Model: DEMO-ENG-A",
-                    "Installed on: DEMO-AC-01 (position 1)",
+                    "Installed on: MOCK-AC-001 (position 1)",
                     "Shop visit: SV-SYN-2201   Date: 2024-11-20",
                     "Time since new: 18200 h   Cycles since new: 9400",
                     "Time since overhaul: 2400 h   Cycles since overhaul: 1300",
@@ -127,17 +135,18 @@ public static class Generator
                     "Release statement: component released to service.",
                 ],
                 Damage.None, true, null, null, "ingest-and-link-component"),
-            new("DOC-04", "DOC-04-release-component-b-missing-history.pdf", componentRelease,
-                "Release: actuator CMP-B-0002", "missing-required-history",
-                "Component release that lacks the required back-to-birth history",
+            new("DOC-04", "DOC-04-release-llp-missing-history.pdf", llpRelease,
+                "Release: engine disk SYN-LLP-0001", "missing-required-history",
+                "Engine LLP release certificate that lacks the required back-to-birth history",
                 [
-                    "Component: Hydraulic actuator   P/N: HA-SYN-200   S/N: CMP-B-0002",
-                    "Fitted to: DEMO-AC-01 (position 2)",
+                    "Part: Engine disk (life-limited part)   P/N: DK-SYN-300   S/N: SYN-LLP-0001",
+                    "Installed in engine: EN-SYN-7781 (model DEMO-ENG-A)",
+                    "Installed on: MOCK-AC-001 (stored as SYN-AC-001)",
                     "Release date: 2025-02-10   Approval: APP-SYN-000",
                     "Time since new: 3980 h   Cycles since new: 2110",
                     "Condition: serviceable",
                     "Back-to-birth history: NOT PROVIDED",
-                    "Release statement: component released to service.",
+                    "Release statement: life-limited part released to service.",
                 ],
                 Damage.None, false, "REQUIRED_HISTORY_MISSING: back-to-birth history absent", null,
                 "reject-and-request-history"),
@@ -146,7 +155,7 @@ public static class Generator
                 "ESN one digit away from DOC-02's engine, with identical hours and cycles",
                 [
                     "Engine ESN: EN-SYN-7718   Model: DEMO-ENG-A",
-                    "Installed on: DEMO-AC-01 (position 1, per work order)",
+                    "Installed on: MOCK-AC-001 (position 1, per work order)",
                     "Shop visit: SV-SYN-2215   Date: 2025-02-02",
                     "Time since new: 18200 h   Cycles since new: 9400",
                     "Note: ESN recorded by hand on the work card; please verify digits.",
@@ -162,16 +171,17 @@ public static class Generator
                 "Copy of DOC-01 cut off at 60 percent, so the end-of-file marker is missing",
                 aircraftLines, Damage.Truncated, false, "TRUNCATED_FILE: end-of-file marker missing", null,
                 "reject-and-request-resubmission"),
-            new("DOC-08", "DOC-08-contradictory-component-b-overhaul.pdf", "Component overhaul record",
-                "Overhaul: actuator CMP-B-0002", "contradictory-later-document",
-                "Later record whose time since new is lower than DOC-04's",
+            new("DOC-08", "DOC-08-contradictory-llp-disk-overhaul.pdf", "Life-limited part overhaul record",
+                "Overhaul: engine disk SYN-LLP-0001", "contradictory-later-document",
+                "Later record for the same disk whose cycles since new are lower than DOC-04's",
                 [
-                    "Component: Hydraulic actuator   P/N: HA-SYN-200   S/N: CMP-B-0002",
+                    "Part: Engine disk (life-limited part)   P/N: DK-SYN-300   S/N: SYN-LLP-0001",
+                    "Installed in engine: EN-SYN-7781 (model DEMO-ENG-A)",
                     "Overhaul date: 2025-03-02   Approval: APP-SYN-000",
-                    "Time since new as at 2025-03-02: 3650 h   Cycles since new: 2190",
+                    "Time since new as at 2025-03-02: 3650 h   Cycles since new: 2050",
                 ],
                 Damage.None, false, null,
-                "CONTRADICTION: TSN 3650 h on 2025-03-02 is lower than TSN 3980 h on 2025-02-10 (DOC-04); TSN cannot decrease",
+                "CONTRADICTION: CSN 2050 on 2025-03-02 is lower than CSN 2110 on 2025-02-10 (DOC-04) for SYN-LLP-0001; cycles since new cannot decrease",
                 "hold-and-flag-for-review; DOC-04 is not overwritten"),
             new("DOC-09", "DOC-09-partner-ack-component-a.pdf", "Partner acknowledgement (mock partner)",
                 "Partner acknowledgement: CMP-A-0001", "partner-linked-response",

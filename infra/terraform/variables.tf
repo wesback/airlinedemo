@@ -47,8 +47,7 @@ variable "egress_allowed_destinations" {
 }
 
 variable "sql_database_name" {
-  type    = string
-  default = "airlinedemo"
+  type = string
 }
 
 variable "sql_server_name" {
@@ -77,6 +76,36 @@ variable "model_account_name" {
 
 variable "model_endpoint_subdomain" {
   type = string
+}
+
+variable "model_deployment_name" {
+  description = "Name of the Azure OpenAI deployment. Required; empty or whitespace is rejected."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.model_deployment_name)) > 0
+    error_message = "model_deployment_name must not be empty or whitespace."
+  }
+}
+
+variable "model_name" {
+  description = "Azure OpenAI model name for the deployment. Required; empty or whitespace is rejected."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.model_name)) > 0
+    error_message = "model_name must not be empty or whitespace."
+  }
+}
+
+variable "model_version" {
+  description = "Azure OpenAI model version for the deployment. Required; empty or whitespace is rejected."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.model_version)) > 0
+    error_message = "model_version must not be empty or whitespace."
+  }
 }
 
 variable "terraform_principal_object_id" {
@@ -147,4 +176,32 @@ variable "terraform_state_backend" {
     condition     = var.terraform_state_backend.use_azuread_auth == true && var.terraform_state_backend.locking_enabled == true && length(var.terraform_state_backend.storage_account_name) > 0
     error_message = "terraform_state_backend requires use_azuread_auth = true, locking_enabled = true and a state storage account name."
   }
+}
+
+variable "acr_name" {
+  type = string
+}
+
+variable "container_apps_environment_name" {
+  type = string
+}
+
+variable "container_app_name" {
+  type = string
+}
+
+variable "image_digest" {
+  description = "Immutable digest of the application image, for example sha256:<64 lowercase hex characters>."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
+    error_message = "image_digest must be a sha256 digest (sha256 followed by 64 lowercase hex characters), not a tag."
+  }
+}
+
+variable "demo_passcode_secret_uri" {
+  description = "Key Vault secret URI of the demo passcode. The Container App references it as a secret; the value is never inlined."
+  type        = string
+  nullable    = false
 }

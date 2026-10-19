@@ -1,0 +1,289 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 226,
+  "branch": "ai-sdlc/issue-226",
+  "commitSha": "91b8e89d46b1c6207ff21c6c7c2c1237d0dca7f4",
+  "round": 2,
+  "pipelineVersion": "10776a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest test assertions address the prior CIDR binding and customer-managed encryption gaps, but M13 and M18 can still pass with additional broad allow rules. M14 also still omits the model account's required TLS assertion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 69,
+          "message": "M-13 does not rule out an additional broad ingress Allow restriction, so the test can pass when the allowlist is bypassed.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M13 checks the configured CIDR binding and the empty-list deny range, but does not assert that no additional Allow restriction exists.",
+            "failureScenario": "If a broad 0.0.0.0/0 Allow restriction is added alongside the checked restrictions, M13 still passes while callers outside presenter_reviewer_cidrs can reach the app."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 106,
+          "message": "M-14 still does not verify that the model account retains minimum TLS 1.2.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M14 checks the model account for no customer-managed key and disabled local auth, but does not assert a minimum TLS version for that resource.",
+            "failureScenario": "If the model account's minimum TLS version is below 1.2 or is not configured, M14 still passes without detecting the unmet M-14 requirement."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 161,
+          "message": "M-18 does not rule out all broader outbound Allow rules, so the test can pass with model egress beyond the approved destinations.",
+          "confidence": 0.89,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M18 rejects Allow rules whose destination is '*' or 0.0.0.0/0, but does not rule out other broad destinations such as the Internet service tag.",
+            "failureScenario": "If an additional outbound Allow rule targets the Internet service tag, M18 still passes while traffic can reach destinations outside egress_allowed_destinations."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-three test changes address parts of the earlier findings, but M-13 still does not bind actions to their ingress restrictions, and M-18 still permits a broad Internet egress rule to escape its checks. M-14 also still lacks coverage for the model account's TLS 1.2 requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 71,
+          "message": "M-13 still does not verify that each ingress restriction has the required action. Assert the configured-CIDR rule is Allow and the empty-list /0 rule is Deny.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M13 independently searches the entire ingress block for Allow, Deny, the configured-CIDR range, and the empty-list /0 range; it does not associate each action with its restriction.",
+            "failureScenario": "If the configured-CIDR restriction is changed to Deny and the empty-list /0 restriction to Allow, all these assertions still pass. With a populated list, approved callers are denied; with an empty list, every caller is allowed."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 164,
+          "message": "M-18 still does not rule out broad egress destinations. Check every Allow rule against the configured destination list, including broad service tags such as Internet.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The new check rejects only destination_address_prefix values of * and 0.0.0.0/0 on Allow rules; it does not reject other broad destinations.",
+            "failureScenario": "If an additional outbound Allow NSG rule uses destination_address_prefix = \"Internet\", that rule permits traffic to unapproved internet destinations while this test passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 109,
+          "message": "M-14 still does not verify the model account's required TLS 1.2 setting. The test comment notes the provider limitation, but the acceptance criterion requires this behavior.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M14 inspects the model resource for a customer-managed key, local auth, and public access, but contains no assertion that the model account enforces minimum TLS 1.2.",
+            "failureScenario": "If the model endpoint does not retain the required TLS 1.2 minimum, M14 still passes because it makes no assertion about that setting."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The ingress tests now bind allow rules to the configured CIDRs and use a deny-all range for an empty list. The model TLS requirement remains unverified, and M18 can miss an outbound rule that allows the Internet service tag.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 112,
+          "message": "M14 still does not verify the model account's required TLS 1.2 minimum. The contract test passes without any assertion of that setting.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "M14 inspects the model account but does not assert a TLS 1.2 minimum; the test comment says the setting cannot be configured through this provider.",
+            "failureScenario": "If the model account's minimum TLS is weakened below 1.2, M14 still passes because it checks only encryption, local authentication, and public access. This leaves the NFR-001 transport requirement unverified (OWASP A02:2025 Cryptographic Failures)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+          "line": 164,
+          "message": "M18 does not reject a broad outbound Allow rule using the Internet service tag, so its egress assertion can pass while unapproved destinations remain reachable.",
+          "confidence": 0.88,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "M18 checks only for wildcard and 0.0.0.0/0 values in destination_address_prefix; it does not reject the Azure NSG service tag Internet.",
+            "failureScenario": "If an outbound Allow rule uses destination_address_prefix = \"Internet\", the contract test passes while the app subnet can send HTTPS traffic to unapproved internet destinations (OWASP A01:2025 Broken Access Control)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/ContainerHostingContractTests.cs",
+      "infra/terraform/tests/identity-telemetry.tftest.hcl",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 15,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

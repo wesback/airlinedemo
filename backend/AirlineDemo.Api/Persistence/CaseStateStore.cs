@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Requests;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -13,6 +15,9 @@ public sealed class RevisionConflictException()
 
 public sealed class ReceiptConflictException()
     : Exception("Receipt was already used for a different commit; no change was made.");
+
+public sealed class TraceConflictException()
+    : Exception("Investigation trace already exists for this case, run and investigation; no change was made.");
 
 public sealed class BasisIntegrityException(string message) : Exception(message);
 
@@ -39,6 +44,18 @@ public sealed record AuditEvent(
     string Detail,
     DateTimeOffset At);
 
+/// <summary>A review work item. <see cref="CreatedAt"/> is assigned by the store, never by the caller.</summary>
+public sealed record WorkItem(
+    string CaseId,
+    string ItemId,
+    string CapabilityId,
+    string State,
+    string Owner,
+    DateTimeOffset CreatedAt);
+
+/// <summary>Caller-supplied work item fields; the creation timestamp is deliberately absent.</summary>
+public sealed record WorkItemDraft(string ItemId, string CapabilityId, string State, string Owner);
+
 public sealed record CaseState(
     string CaseId,
     string Owner,
@@ -46,14 +63,158 @@ public sealed record CaseState(
     IReadOnlyList<BasisVersion> Basis,
     IReadOnlyList<string> ReceiptIds,
     IReadOnlyList<AuditEvent> Audit,
-    IReadOnlyDictionary<string, string> ReceiptFingerprints);
+    IReadOnlyDictionary<string, string> ReceiptFingerprints,
+    IReadOnlyList<WorkItem>? WorkItems = null,
+    IReadOnlyList<InvestigationTrace>? Traces = null,
+    IReadOnlyList<CaseAssessment>? Assessments = null,
+    IReadOnlyList<DeliveryReceipt>? RequestReceipts = null);
+
+public sealed record CaseAssessment(
+    string AssessmentId,
+    string CaseId,
+    string BasisId,
+    int BasisVersion,
+    string Outcome,
+    string Reason,
+    IReadOnlyList<AssessedClaim> Claims,
+    string? RequestId,
+    string? WorkItemId);
+
+internal static class AssessmentPersistenceRules
+{
+    public static void Validate(CaseAssessment assessment)
+    {
+        if (string.IsNullOrWhiteSpace(assessment.AssessmentId) || string.IsNullOrWhiteSpace(assessment.CaseId)
+            || string.IsNullOrEmpty(assessment.BasisId) || assessment.BasisVersion <= 0
+            || string.IsNullOrWhiteSpace(assessment.Outcome) || string.IsNullOrWhiteSpace(assessment.Reason) || assessment.Claims is null)
+            throw new ArgumentException("Assessment identity, basis, result and claims are required.", nameof(assessment));
+
+        foreach (var claim in assessment.Claims)
+            if (claim is null || string.IsNullOrWhiteSpace(claim.Kind) || claim.Value is null || claim.Component is null
+                || claim.SerialNumber is null || claim.Witnesses is null || claim.Witnesses.Any(w => w is null || w.DocumentId is null))
+                throw new ArgumentException("Assessment claims and witnesses are invalid.", nameof(assessment));
+    }
+
+    public static void Validate(DeliveryReceipt receipt)
+    {
+        if (string.IsNullOrWhiteSpace(receipt.EventId) || string.IsNullOrWhiteSpace(receipt.RequestId)
+            || string.IsNullOrWhiteSpace(receipt.CaseId) || string.IsNullOrWhiteSpace(receipt.ReportId)
+            || string.IsNullOrWhiteSpace(receipt.BasisId) || receipt.BasisVersion <= 0 || string.IsNullOrWhiteSpace(receipt.TemplateVersion)
+            || receipt.Body is null)
+            throw new ArgumentException("Request receipt fields are required.", nameof(receipt));
+    }
+}
+
+/// <summary>Required-field rules shared by both case-state stores.</summary>
+internal static class WorkItemRules
+{
+    public static void RequireText(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"Work item {name} is required.", name);
+        }
+    }
+
+    public static void Validate(WorkItemDraft draft)
+    {
+        RequireText(draft.ItemId, nameof(draft.ItemId));
+        RequireText(draft.CapabilityId, nameof(draft.CapabilityId));
+        RequireText(draft.State, nameof(draft.State));
+        RequireText(draft.Owner, nameof(draft.Owner));
+    }
+}
+
+/// <summary>
+/// One ordered, minimized investigation step. Categorical codes only: no document, prompt or response text.
+/// <see cref="CorrectionCode"/> is <c>None</c> when no correction was made; <see cref="PolicyHandover"/> is <c>None</c> when no handover applied.
+/// </summary>
+public sealed record InvestigationTraceStep(
+    int Sequence,
+    string ToolName,
+    string DocumentId,
+    int PageNumber,
+    string CitationCheckOutcome,
+    string CorrectionCode,
+    string PolicyHandover);
+
+/// <summary>
+/// Append-only minimized trace keyed by (CaseId, RunId, InvestigationId). <see cref="ActorToken"/> is opaque and non-identifying.
+/// </summary>
+public sealed record InvestigationTrace(
+    string CaseId,
+    string RunId,
+    string InvestigationId,
+    int BasisVersion,
+    string ModelDeploymentName,
+    string ApiVersion,
+    string Region,
+    string ContentFilterSetting,
+    string Decision,
+    string ActorToken,
+    string Outcome,
+    IReadOnlyList<InvestigationTraceStep> Steps);
+
+internal static class InvestigationTraceRules
+{
+    // Marks a step with no document (a tool call or a correction). Such a step has PageNumber 0.
+    public const string NoValue = "None";
+
+    public static void Validate(InvestigationTrace trace)
+    {
+        Require(trace.CaseId, nameof(trace.CaseId));
+        Require(trace.RunId, nameof(trace.RunId));
+        Require(trace.InvestigationId, nameof(trace.InvestigationId));
+        Require(trace.ModelDeploymentName, nameof(trace.ModelDeploymentName));
+        Require(trace.ApiVersion, nameof(trace.ApiVersion));
+        Require(trace.Region, nameof(trace.Region));
+        Require(trace.ContentFilterSetting, nameof(trace.ContentFilterSetting));
+        Require(trace.Decision, nameof(trace.Decision));
+        Require(trace.ActorToken, nameof(trace.ActorToken));
+        Require(trace.Outcome, nameof(trace.Outcome));
+        if (trace.Steps is null)
+        {
+            throw new ArgumentException("Investigation trace steps are required.", nameof(trace));
+        }
+
+        for (var i = 0; i < trace.Steps.Count; i++)
+        {
+            var step = trace.Steps[i];
+            if (step.Sequence != i + 1)
+            {
+                throw new ArgumentException("Investigation trace steps must be numbered 1..n in append order.", nameof(trace));
+            }
+
+            Require(step.ToolName, "ToolName");
+            Require(step.DocumentId, "DocumentId");
+            Require(step.CitationCheckOutcome, "CitationCheckOutcome");
+            Require(step.CorrectionCode, "CorrectionCode");
+            Require(step.PolicyHandover, "PolicyHandover");
+            if (step.DocumentId == NoValue ? step.PageNumber != 0 : step.PageNumber < 1)
+            {
+                throw new ArgumentException("Investigation trace PageNumber must be positive for a cited document, and 0 when there is none.", nameof(trace));
+            }
+        }
+    }
+
+    private static void Require(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"Investigation trace {name} is required.", name);
+        }
+    }
+}
 
 public sealed record CaseCommit(
     BasisVersion? NewBasis,
     string? ReceiptId,
     string Actor,
     string Action,
-    string Detail);
+    string Detail,
+    DateTimeOffset? At = null,
+    CaseAssessment? Assessment = null,
+    DeliveryReceipt? RequestReceipt = null);
 
 public sealed record CommitResult(CaseState State, bool Replayed);
 
@@ -65,7 +226,7 @@ internal sealed record CaseStoreDocument(int SchemaVersion, List<CaseState> Case
 /// persists atomically: on any failure neither memory nor the file changes.
 /// The audit log is exposed read-only; there is no update or delete operation.
 /// </summary>
-public sealed class CaseStateStore
+public sealed class CaseStateStore : ICaseStateStore
 {
     private const int SchemaVersion = 1;
     private const int LockAttempts = 500;
@@ -173,6 +334,139 @@ public sealed class CaseStateStore
         }
     }
 
+    public IReadOnlyList<CaseAssessment> ListAssessments(CaseScope scope)
+    {
+        lock (_gate) return Current(scope).Assessments ?? Array.Empty<CaseAssessment>();
+    }
+
+    public CaseAssessment? FindAssessment(CaseScope scope, string assessmentId)
+    {
+        lock (_gate) return Current(scope).Assessments?
+            .FirstOrDefault(record => string.Equals(record.AssessmentId, assessmentId, StringComparison.Ordinal));
+    }
+
+    public IReadOnlyList<DeliveryReceipt> ListRequestReceipts(CaseScope scope)
+    {
+        lock (_gate) return Current(scope).RequestReceipts ?? Array.Empty<DeliveryReceipt>();
+    }
+
+    public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
+    {
+        lock (_gate)
+        {
+            return Current(scope).WorkItems ?? Array.Empty<WorkItem>();
+        }
+    }
+
+    /// <summary>Appends a trace. Traces are never updated or deleted; a duplicate (case, run, investigation) fails and keeps the first record.</summary>
+    public void AppendTrace(CaseScope scope, InvestigationTrace trace)
+    {
+        InvestigationTraceRules.Validate(trace);
+        if (trace.CaseId != scope.CaseId)
+        {
+            throw new ArgumentException("Trace case id must match the authorized case.", nameof(trace));
+        }
+
+        lock (_gate)
+        {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
+            var current = Current(scope);
+            var existing = current.Traces ?? Array.Empty<InvestigationTrace>();
+            if (existing.Any(t => t.RunId == trace.RunId && t.InvestigationId == trace.InvestigationId))
+            {
+                throw new TraceConflictException();
+            }
+
+            var updated = Freeze(current with { Traces = [.. existing, SnapshotTrace(trace)] });
+            var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
+            Persist(snapshot);
+            _cases = snapshot;
+        }
+    }
+
+    /// <summary>Returns the trace only when the case, run and investigation ids all match exactly; otherwise null.</summary>
+    public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId)
+    {
+        lock (_gate)
+        {
+            var state = Current(scope);
+            if (caseId != scope.CaseId)
+            {
+                return null;
+            }
+
+            return (state.Traces ?? Array.Empty<InvestigationTrace>())
+                .FirstOrDefault(t => t.RunId == runId && t.InvestigationId == investigationId);
+        }
+    }
+
+    /// <summary>Creates a work item at the current revision; the store assigns the creation timestamp.</summary>
+    public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor)
+    {
+        WorkItemRules.Validate(draft);
+        return ApplyWorkItemChange(scope, expectedRevision, actor, "create-work-item", draft.ItemId, (items, now) =>
+        {
+            if (items.Any(i => string.Equals(i.ItemId, draft.ItemId, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("Work item already exists in this case.");
+            }
+
+            items.Add(new WorkItem(scope.CaseId, draft.ItemId, draft.CapabilityId, draft.State, draft.Owner, now));
+        });
+    }
+
+    public CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor)
+    {
+        WorkItemRules.RequireText(itemId, nameof(itemId));
+        WorkItemRules.RequireText(state, nameof(state));
+        return ApplyWorkItemChange(scope, expectedRevision, actor, "change-work-item-state", itemId + " -> " + state, (items, _) =>
+        {
+            var index = items.FindIndex(i => string.Equals(i.ItemId, itemId, StringComparison.Ordinal));
+            if (index < 0)
+            {
+                throw new KeyNotFoundException("Work item not found for this case.");
+            }
+
+            items[index] = items[index] with { State = state };
+        });
+    }
+
+    /// <summary>Checks scope and revision, applies one work-item change, and appends one audit event at the next revision.</summary>
+    private CommitResult ApplyWorkItemChange(
+        CaseScope scope,
+        long expectedRevision,
+        string actor,
+        string action,
+        string detail,
+        Action<List<WorkItem>, DateTimeOffset> change)
+    {
+        lock (_gate)
+        {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
+            var current = Current(scope);
+            if (expectedRevision != current.Revision)
+            {
+                throw new RevisionConflictException();
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var items = (current.WorkItems ?? Array.Empty<WorkItem>()).ToList();
+            change(items, now);
+
+            var revision = current.Revision + 1;
+            var audit = current.Audit.ToList();
+            audit.Add(new AuditEvent(audit.Count + 1, revision, actor, action, detail, now));
+
+            var updated = Freeze(current with { Revision = revision, Audit = audit, WorkItems = items });
+            var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
+            Persist(snapshot);
+            _cases = snapshot;
+            return new CommitResult(updated, Replayed: false);
+        }
+    }
+
     public static BasisVersion CreateBasisVersion(int version, string content, string previousBasisDigest)
     {
         var contentDigest = Digest(content);
@@ -190,12 +484,30 @@ public sealed class CaseStateStore
     /// </summary>
     public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
     {
+        if (commit.Assessment is { } assessment)
+        {
+            AssessmentPersistenceRules.Validate(assessment);
+            if (!string.Equals(assessment.CaseId, scope.CaseId, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Assessment case id must match the authorized case.", nameof(commit));
+            }
+        }
+
+        if (commit.RequestReceipt is { } requestReceipt)
+        {
+            AssessmentPersistenceRules.Validate(requestReceipt);
+            if (!string.Equals(requestReceipt.CaseId, scope.CaseId, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Request receipt case id must match the authorized case.", nameof(commit));
+            }
+        }
+
         lock (_gate)
         {
             using var fileLock = AcquireFileLock();
             _cases = Load(_path);
             var current = Current(scope);
-            var fingerprint = Fingerprint(commit);
+            var fingerprint = CommitFingerprint(commit);
 
             if (commit.ReceiptId is not null && current.ReceiptFingerprints.TryGetValue(commit.ReceiptId, out var recorded))
             {
@@ -227,7 +539,33 @@ public sealed class CaseStateStore
                     throw new BasisIntegrityException("Basis content or chain digest does not match.");
                 }
 
+                if (commit.Action == "source-basis.gathered")
+                {
+                    ValidateSourceBasisContent(next.Content);
+                }
                 basis.Add(next);
+            }
+
+            var assessments = (current.Assessments ?? Array.Empty<CaseAssessment>()).ToList();
+            if (commit.Assessment is { } newAssessment)
+            {
+                if (assessments.Any(record => string.Equals(record.AssessmentId, newAssessment.AssessmentId, StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException("Assessment id already exists in this case.");
+                }
+
+                assessments.Add(SnapshotAssessment(newAssessment));
+            }
+
+            var requestReceipts = (current.RequestReceipts ?? Array.Empty<DeliveryReceipt>()).ToList();
+            if (commit.RequestReceipt is { } newRequestReceipt)
+            {
+                if (requestReceipts.Any(receipt => string.Equals(receipt.EventId, newRequestReceipt.EventId, StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException("Request receipt event already exists in this case.");
+                }
+
+                requestReceipts.Add(newRequestReceipt);
             }
 
             var receipts = current.ReceiptIds.ToList();
@@ -240,7 +578,7 @@ public sealed class CaseStateStore
 
             var revision = current.Revision + 1;
             var audit = current.Audit.ToList();
-            audit.Add(new AuditEvent(audit.Count + 1, revision, commit.Actor, commit.Action, commit.Detail, DateTimeOffset.UtcNow));
+            audit.Add(new AuditEvent(audit.Count + 1, revision, commit.Actor, commit.Action, commit.Detail, commit.At ?? DateTimeOffset.UtcNow));
 
             var updated = Freeze(current with
             {
@@ -249,6 +587,8 @@ public sealed class CaseStateStore
                 ReceiptIds = receipts,
                 Audit = audit,
                 ReceiptFingerprints = fingerprints,
+                Assessments = assessments,
+                RequestReceipts = requestReceipts,
             });
             var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
             Persist(snapshot);
@@ -343,23 +683,44 @@ public sealed class CaseStateStore
         Basis = Wrap(state.Basis),
         ReceiptIds = Wrap(state.ReceiptIds),
         Audit = Wrap(state.Audit),
+        WorkItems = Wrap(state.WorkItems ?? Array.Empty<WorkItem>()),
+        Traces = Wrap((state.Traces ?? Array.Empty<InvestigationTrace>()).Select(SnapshotTrace)),
+        Assessments = Wrap((state.Assessments ?? Array.Empty<CaseAssessment>()).Select(SnapshotAssessment)),
+        RequestReceipts = Wrap(state.RequestReceipts ?? Array.Empty<DeliveryReceipt>()),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
 
+    /// <summary>Copies a trace's steps into a read-only list so the stored record cannot change through the caller's collection.</summary>
+    private static InvestigationTrace SnapshotTrace(InvestigationTrace trace) =>
+        trace with { Steps = Wrap(trace.Steps) };
+
+    internal static CaseAssessment SnapshotAssessment(CaseAssessment assessment) =>
+        assessment with
+        {
+            Claims = Wrap(assessment.Claims.Select(claim =>
+                claim with { Witnesses = Wrap(claim.Witnesses) })),
+        };
+
     private static ReadOnlyCollection<T> Wrap<T>(IEnumerable<T> items) => new(items.ToList());
 
     /// <summary>Digest of the commit payload, used to tell a true replay from a reused receipt ID.</summary>
-    private static string Fingerprint(CaseCommit commit) => Digest(JsonSerializer.Serialize(new
+    internal static string CommitFingerprint(CaseCommit commit)
     {
-        basisVersion = commit.NewBasis?.Version,
-        content = commit.NewBasis?.Content,
-        contentDigest = commit.NewBasis?.ContentDigest,
-        basisDigest = commit.NewBasis?.BasisDigest,
-        commit.Actor,
-        commit.Action,
-        commit.Detail,
-    }));
+        var digest = Digest(JsonSerializer.Serialize(new
+        {
+            basisVersion = commit.NewBasis?.Version,
+            content = commit.NewBasis?.Content,
+            contentDigest = commit.NewBasis?.ContentDigest,
+            basisDigest = commit.NewBasis?.BasisDigest,
+            commit.Actor,
+            commit.Action,
+            commit.Detail,
+        }));
+        return commit.Assessment is null && commit.RequestReceipt is null
+            ? digest
+            : Digest(digest + JsonSerializer.Serialize(new { commit.Assessment, commit.RequestReceipt }));
+    }
 
     private static void Validate(CaseState state)
     {
@@ -401,8 +762,120 @@ public sealed class CaseStateStore
         {
             throw new InvalidDataException("Receipt fingerprints do not match receipts.");
         }
+
+        var traces = state.Traces ?? Array.Empty<InvestigationTrace>();
+        if (traces.Any(t => t.CaseId != state.CaseId)
+            || traces.Select(t => (t.RunId, t.InvestigationId)).Distinct().Count() != traces.Count)
+        {
+            throw new InvalidDataException("Investigation traces are invalid.");
+        }
+
+        foreach (var trace in traces)
+        {
+            try
+            {
+                InvestigationTraceRules.Validate(trace);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Investigation traces are invalid.", ex);
+            }
+        }
+
+        var assessments = state.Assessments ?? Array.Empty<CaseAssessment>();
+        if (assessments.Select(a => a.AssessmentId).Distinct(StringComparer.Ordinal).Count() != assessments.Count
+            || assessments.Any(a => a.CaseId != state.CaseId))
+        {
+            throw new InvalidDataException("Case assessments are invalid.");
+        }
+
+        foreach (var assessment in assessments)
+        {
+            try
+            {
+                AssessmentPersistenceRules.Validate(assessment);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Case assessments are invalid.", ex);
+            }
+        }
+
+        var items = state.WorkItems ?? Array.Empty<WorkItem>();
+        if (items.Select(i => i.ItemId).Distinct(StringComparer.Ordinal).Count() != items.Count
+            || items.Any(i => i.CaseId != state.CaseId || string.IsNullOrWhiteSpace(i.ItemId)
+                || string.IsNullOrWhiteSpace(i.CapabilityId) || string.IsNullOrWhiteSpace(i.State)
+                || string.IsNullOrWhiteSpace(i.Owner)))
+        {
+            throw new InvalidDataException("Work items are invalid.");
+        }
     }
 
     private static string Digest(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static void ValidateSourceBasisContent(string content)
+    {
+        const string formatName = "source-record-pins-v1";
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(content);
+        }
+        catch (JsonException ex)
+        {
+            throw new BasisIntegrityException($"A gathered source basis pin document is malformed: {ex.Message}");
+        }
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || Text(root, "format") != formatName)
+                throw new BasisIntegrityException("A gathered source basis must use the source-record-pins-v1 format.");
+            if (!root.TryGetProperty("pins", out var pins) || pins.ValueKind != JsonValueKind.Array || pins.GetArrayLength() == 0)
+                throw new BasisIntegrityException("A source basis must contain at least one immutable source pin.");
+            var identities = new HashSet<(string SourceId, string RecordId, int Version)>();
+            foreach (var pin in pins.EnumerateArray())
+            {
+                var sourceId = Text(pin, "sourceId");
+                var recordId = Text(pin, "recordId");
+                var snapshot = Text(pin, "content");
+                var digest = Text(pin, "contentDigest");
+                var version = pin.TryGetProperty("recordVersion", out var value) && value.TryGetInt32(out var number) ? number : 0;
+                if (sourceId is not ("technical" or "maintenance" or "finance" or "records" or "contracts")
+                    || recordId is null || snapshot is null || digest is null || version < 1
+                    || !string.Equals(digest, Digest(snapshot).ToLowerInvariant(), StringComparison.Ordinal)
+                    || !identities.Add((sourceId, recordId, version)))
+                    throw new BasisIntegrityException("A source basis contains an invalid or duplicate source pin.");
+                JsonDocument record;
+                try
+                {
+                    record = JsonDocument.Parse(snapshot);
+                }
+                catch (JsonException ex)
+                {
+                    throw new BasisIntegrityException($"A source pin record envelope is malformed: {ex.Message}");
+                }
+                using (record)
+                {
+                    var envelope = record.RootElement;
+                    if (envelope.ValueKind != JsonValueKind.Object
+                        || Text(envelope, "sourceId") != sourceId || Text(envelope, "recordId") != recordId
+                        || !envelope.TryGetProperty("recordVersion", out var recordVersion)
+                        || !recordVersion.TryGetInt32(out var envelopeVersion) || envelopeVersion != version
+                        || Text(envelope, "asOf") is null || Text(envelope, "caseId") is null || Text(envelope, "kind") is null
+                        || !envelope.TryGetProperty("stale", out var stale) || stale.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                        || !envelope.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object
+                        || !payload.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object
+                        || !envelope.TryGetProperty("synthetic", out var synthetic) || synthetic.ValueKind != JsonValueKind.True)
+                        throw new BasisIntegrityException("A source pin does not contain a complete synthetic source-record envelope.");
+                }
+            }
+        }
+    }
+
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+                ? value.GetString()
+                : null;
 }

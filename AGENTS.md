@@ -1,7 +1,7 @@
 <!-- ai-sdlc-pipeline:start (managed by wesback/engineeringpipelinev3 scripts/onboard-repo.sh) -->
 ## Issues for the AI-SDLC pipeline
 
-This repository is worked by an autonomous pipeline (wesback/engineeringpipelinev3): Copilot implements an issue,
+This repository is worked by an autonomous pipeline: Copilot implements an issue,
 three Codex reviewers check it, and AI-SDLC merges it when every gate passes. An issue is picked up when it has the
 label `ai-eligible`, passes AI-SDLC's Definition-of-Ready gate, and every issue it depends on is closed. When you
 (a person or an assistant) write an issue for it, follow these rules.
@@ -49,6 +49,21 @@ Each rule comes from a story that stopped for a person because it was missing (D
   process. One test may still start the real process to prove the wiring.
 - **Unit tests use only what CI installs.** No unit test runs `npm`, `dotnet publish`, a browser, Docker or a cloud
   service; such a check is `Verified by CI` or `Verified by review`.
+- **A criterion that something does not happen is checked at runtime.** "Resolving the client creates no credential", "no
+  network request is made" is proved by a counting fake, a spy or a fake HTTP handler that the test asserts on (0 calls
+  before the action, the expected count after). A scan of source files for constructors or patterns cannot prove it
+  (any scan has a gap, and reviewers keep finding the next one); the story does not ask for one. What no fake can observe
+  is `Verified by review`.
+- **A property that must hold under concurrent or repeated use states its invariants and the operation that gives them.**
+  Where a criterion says a value stays current, a submission is atomic, a stored object cannot change, or a request is
+  accepted once, the story names each invariant (atomic with the check, immutable after storing, exact identity: ID,
+  version and content) and the existing operation that provides it (a store's expected-revision commit, a lock, a
+  read-only copy). Without that, reviewers raise one weaker layer per round: a recheck, then identity, then mutation.
+  Each invariant gets its own test, and a test for a race uses a fake that changes the state between the read and the write.
+- **A test of a contract lists its cases.** A criterion that a guard, parser, filter or schema test covers "the contract"
+  has a table of the inputs and the expected result of each (every property name, selector form, token set or value
+  the test must accept or reject), and says that other inputs are out of scope. A reviewer's next input variant is then a
+  new story, not a failing round.
 - **Security filters work on names and exact shapes.** A redaction or validation rule lists the property names and the
   exact patterns it acts on (for example `Bearer <token>`, three base64url segments of 8+ characters separated by dots).
   It never judges free text by keywords or wording; what a filter cannot decide structurally goes to a person (an
@@ -57,6 +72,67 @@ Each rule comes from a story that stopped for a person because it was missing (D
   mock provider, a fixture), the story says which.
 - **Small enough.** Well under 500 changed lines including tests; a story that needs more is two stories, the second
   depending on the first.
+- **No wishlist or hedge words, even as ordinary words.** The Definition-of-Ready gate rejects `TBD`, `TODO`, `XXX`, `FIXME`,
+  `???`, "not sure", "decide later", "to be determined", "to be decided", "up to the dev" and the word "placeholder"
+  anywhere outside a fenced code block. Write "template field", "token" or "parameter" instead.
+- **A merge that is itself a decision says so.** When the merge of the pull request is a person's approval or freeze (a frozen
+  fixture, a sign-off, a real-world run), put the line `Merge: person (<why a person decides>)` in the story, with the reason in the brackets: the reason is shown to the person on the pull request and the dashboard. The pipeline then stops the finished pull
+  request for that person and never merges it.
+- **No automated pixel or contrast measurement in a browser.** A criterion never asks for a Chromium test that samples rendered
+  pixels or measures contrast ratios (such suites are slow and fragile).
+  State the requirement as a CSS or markup contract a unit test can read (a token, a rule, an attribute), or as `Verified by review`.
+- **A test input that looks like a link is not written as a link.** The Definition-of-Ready gate fetches every `http://` or
+  `https://` address in the story and refuses it when one does not resolve (for example `https://evil.example` in an
+  injection test). Write the address as parts (the URL formed by `https:` followed by `//evil.example`) or without the scheme,
+  and let the test build the string.
+- **A fact outside the repository is verified by CI or by evidence recorded in the repository, never "by review".** Reviewers read the
+  diff; they cannot query a package registry, a deployed service or another repository (a story stopped three times
+  on "the pinned release is not published"). A criterion that depends on such a fact names the CI job that fails when it is wrong
+  (`npm ci` for a pinned version), or the table the change records it in, and says reviewers check the table for completeness.
+- **A change to a token, selector, style or behaviour lists the existing tests that assert the old one.** Search the repository's
+  tests for the old value and name them in the story with "updated in this story" (a story stopped because five existing
+  tests asserted the look it removed, and a fix round may not edit tests). A criterion that contradicts an
+  existing test says which of the two wins.
+- **Few checks, and each one matters.** A criterion that audits a long list (more than about 15 selectors, properties, files or regular
+  expressions) invites one new finding per review round, and a fixer that cannot satisfy it without breaking an older test
+  (one story audited about 60 properties and took four hours). State the rule once ("no rule uses a colour literal") and let the test
+  enumerate the cases from the code or a fixture; the criterion names that test and the cases that must be rejected, not every selector.
+
+### Before you finish (the implementing and fixing agent)
+
+The reviewers fail a pull request on the same few things, so check them before you stop (D142):
+
+1. **Every acceptance criterion has a test that proves it.** Name the test for each criterion. A test that would still pass if the behaviour were removed proves nothing: check that it fails without the change.
+2. **Assert exact values.** Headers, identifiers, counts, states and error text are compared whole, not with "contains" or "any".
+3. **One negative case per criterion** unless it is purely presentational: invalid input, a denied role, missing data, an out-of-scope id.
+4. **Security criteria: try to get around them.** Ask what a caller can do without the check (another role, an indirect reference, an unlisted path) and test that it fails.
+5. **Stay on the Files line.** If the change needs another file, say so in your final message instead of editing it.
+6. **No wishlist words** (TBD, TODO, "placeholder") in anything you write.
+7. **Run the full test command** and make it pass before you finish.
+
+### Rules by language (D203)
+
+Apply the ones for the files you touch. They come from the stops this pipeline has had; each is a way a pull request failed review or CI.
+
+**C# / .NET**
+- Run the whole test project (`dotnet test`), not only the new tests: a change to a shared service, endpoint or fixture breaks tests elsewhere.
+- A test host that maps an endpoint must register every service the handler takes (an unregistered one is inferred as a request body and the host throws).
+- Signed or checksummed fixtures (a data file with a manifest and a detached signature): update the fixture and the manifest's hash and counts; never write or edit the signature. Say in your final message that the key holder must re-sign.
+- Parsers and validators: list the accepted and rejected inputs in a `[Theory]` table, and include the encoded forms (escapes, comments, mixed case, empty and oversized values). A case that is not in the table will come back as a new review finding.
+- Keep loops linear: no rescan of the whole input per item.
+
+**JavaScript / CSS / HTML**
+- Run the full `npm test`: browser tests measure computed styles and fail on a flat colour where a gradient was.
+- When you replace a legacy design token, search `tests/` for the old token name and update only assertions about the code you changed; say which ones you updated.
+- A source-level guard (a test that scans CSS or JS) needs negative fixtures for each bypass: a selector inside `:not()`/`:is()`, a comment, an alternate spelling.
+- Keep contrast at 4.5:1 for text on the colour it sits on, in both themes.
+
+**Terraform**
+- Update the matching `.tftest.hcl` when you add a resource, grant or output.
+- Never `git add` provider directories (`.terraform/`) or state; stage the files you edited by path.
+
+**Shell and workflows**
+- Quote variables, use `set -euo pipefail`, and do not edit a script another process is running in place.
 
 ### Story template
 
@@ -99,6 +175,17 @@ A feature too large for one story starts as a PRD. The merge of the PRD is the h
 
 Changing an approved PRD later: edit it in a PR (an addendum is fine). A changed PRD file is planned again when
 planning is on, so say in the PR whether the change needs new stories.
+
+### A change that must be large
+
+The pipeline keeps a story under 300 lines (500 once the repository has earned it): reviewers read the whole diff, and the pipeline merges small changes on its own. When a change cannot be split (a rename across the codebase, a framework upgrade, a codemod), a person may add the label `ai-sdlc:large-change` to the issue. The implementer and the fixer may then change up to 1500 lines, the reviewers are told to read it file by file, and the pull request always waits for a person to merge it. Only a person sets the label; do not add it yourself and do not copy it to a story you split.
+
+### Working on a story yourself
+
+Add `ai-sdlc:manual` to the issue before you touch its branch: the dispatcher, the doctor and a running cycle then leave the story alone (a
+running cycle stops at its next step). Remove the label when you hand it back. A story that stops again and again (three stops in a day, or
+two more than two hours apart) is labelled `ai-sdlc:parked` with a comment that lists the options: simplify the story, split it, do it by
+hand (add `ai-sdlc:manual`), or drop it. Nothing retries a parked story; remove `ai-sdlc:parked` and `ai-sdlc:needs-human` to hand it back.
 
 ### After you label it
 

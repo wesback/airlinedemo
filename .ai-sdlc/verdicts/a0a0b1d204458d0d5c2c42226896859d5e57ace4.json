@@ -1,0 +1,288 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 188,
+  "branch": "ai-sdlc/issue-188",
+  "commitSha": "a0a0b1d204458d0d5c2c42226896859d5e57ace4",
+  "round": 3,
+  "pipelineVersion": "1692eaf",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation does not enforce redaction for directly recorded activity events and omits log scopes instead of filtering them. It also lacks the separately required TelemetryPrivacyTests.cs.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 103,
+          "message": "Trace event redaction can be bypassed by recording an event directly. Redact event attributes in the pipeline or otherwise enforce the required behavior for every recorded event.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd only rewrites span tags. Event tags are redacted only when producers call RedactionFilter.AddRedactedEvent; Activity.AddEvent accepts events without that helper.",
+            "failureScenario": "A producer records an ActivityEvent with a prompt or token using Activity.AddEvent. The processor leaves its attributes intact, so the trace exporter can receive sensitive values. OWASP A09:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 55,
+          "message": "The logging setup drops every scope rather than redacting scope properties. This fails the criterion to redact sensitive scope values while preserving unrelated safe metadata.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AddRedaction sets OpenTelemetryLoggerOptions.IncludeScopes to false, and RedactingLogProcessor only processes LogRecord.Attributes.",
+            "failureScenario": "When a log call places safe metadata such as case.id in a scope, the scope is omitted from telemetry instead of having sensitive values redacted while safe values remain available. The scope sentinel assertions can pass because the test disables scope export."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "Acceptance criterion 5 requires both DiagnosticsTests.cs and TelemetryPrivacyTests.cs to pass and detect removed rules or registrations; TelemetryPrivacyTests.cs is missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The change adds DiagnosticsTests.cs but does not add the separately named TelemetryPrivacyTests.cs required by acceptance criterion 5.",
+            "failureScenario": "The repository test command can pass without ever running TelemetryPrivacyTests.cs, so the explicitly required test file is not verified and cannot fail if a listed redaction rule or exporter registration is removed."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diagnostics tests cover several redaction paths and exporter registration, but the explicitly required TelemetryPrivacyTests.cs is absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs",
+          "line": 1,
+          "message": "Acceptance criterion 5 requires both DiagnosticsTests.cs and TelemetryPrivacyTests.cs; the latter is missing.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The change adds DiagnosticsTests.cs, but does not add the acceptance criterion's other required test file, TelemetryPrivacyTests.cs.",
+            "failureScenario": "When the test command runs this change, there is no TelemetryPrivacyTests.cs to pass or fail, so the required privacy regression suite is absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The trace processor does not redact event attributes added through the standard Activity API. Those values can reach the configured trace exporter unchanged.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "line": 108,
+          "message": "Activity events added through Activity.AddEvent bypass redaction and can export sensitive attributes. Redact event tags before export or ensure event producers cannot bypass the redacting path.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "RedactingActivityProcessor.OnEnd redacts span tags but does not inspect activity events. Event redaction happens only when producers call RedactionFilter.AddRedactedEvent.",
+            "failureScenario": "A caller starts an activity from the subscribed source and adds an event with Activity.AddEvent containing a prompt or token. OnEnd leaves the event tags unchanged, so the trace exporter can receive the sensitive value."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 116,
+      "total": 126,
+      "percent": 92.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/DiagnosticsSetup.cs",
+          "covered": 60,
+          "total": 62,
+          "missed": [
+            79,
+            80
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 55,
+          "total": 63,
+          "missed": [
+            37,
+            38,
+            57,
+            58,
+            89,
+            90,
+            112,
+            114
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 11,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

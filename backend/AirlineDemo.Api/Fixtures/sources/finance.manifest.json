@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1",
+  "sourceFixtureVersion": "2026.10.1",
+  "scenarioDate": "2026-10-01",
+  "owningCaseIds": ["case-001", "case-a", "case-b", "case-c"],
+  "sha256": "9858a0828bedbcb9e33e6ced062f2582abfdad452df4dc76b500202d338a8743",
+  "recordCounts": { "technical": 13, "maintenance": 6, "finance": 7, "records": 10, "contracts": 4 }
+}

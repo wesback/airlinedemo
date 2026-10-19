@@ -1,0 +1,475 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 272,
+  "branch": "ai-sdlc/issue-272",
+  "commitSha": "b14ce5128311129276a6517408b2255ab683e2b6",
+  "round": 2,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint now calls the execution service for accepted documents, but it can silently skip tracing when no chat client is registered and can load a different evidence version on retry. The required endpoint tests for accepted evidence, append failure and retry, and investigation start boundaries are still absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 135,
+          "message": "An accepted package can return success without an investigation trace when no IChatClient is registered. This leaves TRACE-PRODUCER-01 unmet and permits success while the required trace is absent.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "SubmitPackage calls RunInvestigationAsync, which returns when GetService<IChatClient>() is null; Program.cs does not register an IChatClient. SubmitPackage then returns the package success response.",
+            "failureScenario": "A package contains an accepted document but the host has no IChatClient registration, as in the current Program.cs setup. The endpoint returns Created or Ok without running the investigation or writing a trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 150,
+          "message": "Investigation input is read from the latest case-and-filename version instead of the accepted version recorded for this package, so a retry can investigate different evidence than the package contains.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The package record retains each accepted document's version, but RunInvestigationAsync builds its basis and read source from EvidenceBasisStore.Latest(caseId/fileName). EvidenceIntake stores versions under that case-and-filename key.",
+            "failureScenario": "Package A accepts file x.pdf at version 1. A later package accepts a different x.pdf at version 2. Retrying package A reads version 2 as its evidence and records an investigation for package A using package B's content."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 86,
+          "message": "The required accepted-package behavior test, EvidenceInvestigationTests.AcceptedEvidenceRunsInvestigationAndPersistsTrace, is missing; the added test covers only the negative case.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The only test in this file submits a package with no accepted documents. It never submits accepted evidence or asserts that the investigator runs and an ordered trace is persisted, as required by TRACE-PRODUCER-01.",
+            "failureScenario": "If SubmitPackage stops invoking InvestigationExecutionService for accepted documents, this test still passes because it exercises only the no-accepted-documents path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 86,
+          "message": "TRACE-PRODUCER-03 remains unverified: EvidenceInvestigationTests.TraceAppendFailureCannotReturnSuccessfulSubmission is missing.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "No test in this change injects a throwing trace store through the evidence endpoint or retries the same accepted package after an append failure.",
+            "failureScenario": "If the endpoint returns a successful package response after trace append fails, or a retry returns success while the trace remains absent, the added no-accepted-documents test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 86,
+          "message": "TRACE-PRODUCER-04 remains unverified: EvidenceInvestigationTests.RecordsStartedOutcomeAndSkipsPreStartRejection is missing.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "No test exercises both accepted evidence that starts an investigation and evidence rejected before start through the endpoint.",
+            "failureScenario": "If the evidence workflow records a trace for pre-start rejection or fails to record the outcome of a started investigation with no activity, the added test still passes because it only checks a package with no accepted documents."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint now connects accepted packages to the execution service when a chat client is registered, but the normal host has no such registration and can return success without a trace. The required endpoint tests for accepted evidence, append failure and retry, and investigation start boundaries are also missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 135,
+          "message": "Accepted packages can return success without an investigation trace when no IChatClient is registered, leaving TRACE-PRODUCER-01 unmet.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "RunInvestigationAsync returns when the service provider has no IChatClient. The repository has no production IChatClient registration, and SubmitPackage then returns a successful package response.",
+            "failureScenario": "In the normal host, a package with accepted documents is submitted. With no registered IChatClient, the endpoint returns success without invoking the investigation service or persisting the required trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 87,
+          "message": "TRACE-PRODUCER-01 lacks its required positive endpoint test using accepted evidence, a fake chat client, and a temporary trace store.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The only endpoint test submits an unaccepted PDF and asserts that no model call or trace occurs. The required AcceptedEvidenceRunsInvestigationAndPersistsTrace test is absent.",
+            "failureScenario": "If accepted package submission stops invoking the execution service, the existing negative-case test still passes and does not detect the missing investigation or trace."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 87,
+          "message": "TRACE-PRODUCER-03 lacks the required endpoint test for append failure and retry behavior.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed endpoint tests contain no TraceAppendFailureCannotReturnSuccessfulSubmission test; the existing test covers only a package with no accepted documents.",
+            "failureScenario": "If the endpoint returns success after trace append fails, or a retry returns success while the trace is still absent, no changed test detects it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 87,
+          "message": "TRACE-PRODUCER-04 lacks the required endpoint test for started outcomes and pre-start rejection.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed endpoint tests contain no RecordsStartedOutcomeAndSkipsPreStartRejection test; the existing test checks only a package rejected during intake.",
+            "failureScenario": "If an investigation that starts without tool activity omits its outcome trace, or a rejection before investigation start writes a trace, no changed test detects it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint path is present, but the application does not register an IChatClient, so accepted packages skip investigation and trace persistence. The required endpoint tests for append failure and investigation start boundaries are also absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "line": 135,
+          "message": "AC TRACE-PRODUCER-01 remains unmet: the production host has no IChatClient registration, so accepted packages return successfully without starting an investigation or persisting a trace.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "SubmitPackage calls RunInvestigationAsync for accepted documents, but Program.cs does not register an IChatClient. GetService therefore returns null and RunInvestigationAsync exits before invoking the execution service.",
+            "failureScenario": "In the configured application, a presenter submits a package with an accepted document. The endpoint skips investigation and trace persistence, then returns a successful package response. The new endpoint test covers only a package with no accepted documents, so it passes in this broken state."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 86,
+          "message": "AC TRACE-PRODUCER-03 remains unverified: EvidenceInvestigationTests.TraceAppendFailureCannotReturnSuccessfulSubmission is missing, so endpoint failure and retry behavior is not tested.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The only test in this file submits a package with no accepted documents. The required TraceAppendFailureCannotReturnSuccessfulSubmission endpoint test is absent.",
+            "failureScenario": "If package submission returns success after trace append fails, or a retry returns success while the trace is absent, the changed endpoint tests would still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+          "line": 86,
+          "message": "AC TRACE-PRODUCER-04 remains unverified: EvidenceInvestigationTests.RecordsStartedOutcomeAndSkipsPreStartRejection is missing.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The only test in this file covers a package with no accepted documents. The required RecordsStartedOutcomeAndSkipsPreStartRejection test is absent.",
+            "failureScenario": "If the evidence workflow records a trace for a request rejected before investigation starts, or omits the outcome for a started investigation with no activity, the changed tests would not detect it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/InvestigationTraceRecorderTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 174,
+      "total": 210,
+      "percent": 82.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceCaseReadSource.cs",
+          "covered": 1,
+          "total": 12,
+          "missed": [
+            9,
+            12,
+            14,
+            17,
+            19,
+            22,
+            23,
+            24,
+            25,
+            27,
+            29
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceEndpoints.cs",
+          "covered": 7,
+          "total": 28,
+          "missed": [
+            137,
+            138,
+            139,
+            140,
+            141,
+            143,
+            144,
+            145,
+            147,
+            148,
+            149,
+            150,
+            151,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            161
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/BoundedInvestigator.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationExecutionService.cs",
+          "covered": 19,
+          "total": 19,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/InvestigationTraceRecorder.cs",
+          "covered": 38,
+          "total": 38,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 16,
+          "total": 16,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 1,
+          "total": 2,
+          "missed": [
+            155
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261016000000_AddCaseTraces.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 37,
+          "total": 37,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 5,
+          "total": 8,
+          "missed": [
+            32,
+            33,
+            34
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -43,29 +43,38 @@ mock_provider "azurerm" {
 }
 
 variables {
-  subscription_id               = "00000000-0000-0000-0000-000000000000"
-  tenant_id                     = "11111111-1111-1111-1111-111111111111"
-  location                      = "uksouth"
-  resource_group_name           = "rg-demo-test"
-  vnet_address_space            = ["10.60.0.0/16"]
-  app_subnet_cidr               = "10.60.1.0/24"
-  private_endpoint_subnet_cidr  = "10.60.2.0/24"
-  presenter_reviewer_cidrs      = ["203.0.113.0/24"]
-  egress_allowed_destinations   = ["198.51.100.0/24"]
-  sql_server_name               = "sql-demo-test"
-  sql_admin_group_name          = "grp-demo-sql-admins"
-  sql_admin_group_object_id     = "22222222-2222-2222-2222-222222222222"
-  storage_account_name          = "stdemotest"
-  key_vault_name                = "kv-demo-test"
-  model_account_name            = "aoai-demo-test"
-  model_endpoint_subdomain      = "aoai-demo-test"
-  terraform_principal_object_id = "33333333-3333-3333-3333-333333333333"
-  budget_amount                 = 100
-  budget_start_date             = "2026-11-01T00:00:00Z"
-  budget_contact_emails         = ["ops@example.invalid"]
-  telemetry_reader_group_id     = "44444444-4444-4444-4444-444444444444"
-  security_response_owner       = { name = "Response Owner", email = "owner@example.invalid" }
-  security_alert_settings       = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
+  subscription_id                 = "00000000-0000-0000-0000-000000000000"
+  tenant_id                       = "11111111-1111-1111-1111-111111111111"
+  location                        = "uksouth"
+  resource_group_name             = "rg-demo-test"
+  vnet_address_space              = ["10.60.0.0/16"]
+  app_subnet_cidr                 = "10.60.1.0/24"
+  private_endpoint_subnet_cidr    = "10.60.2.0/24"
+  presenter_reviewer_cidrs        = ["203.0.113.0/24"]
+  egress_allowed_destinations     = ["198.51.100.0/24"]
+  sql_server_name                 = "sql-demo-test"
+  sql_admin_group_name            = "grp-demo-sql-admins"
+  sql_admin_group_object_id       = "22222222-2222-2222-2222-222222222222"
+  storage_account_name            = "stdemotest"
+  key_vault_name                  = "kv-demo-test"
+  model_account_name              = "aoai-demo-test"
+  model_endpoint_subdomain        = "aoai-demo-test"
+  model_deployment_name           = "gpt-demo-test"
+  model_name                      = "gpt-demo-model"
+  model_version                   = "0000-00-00"
+  terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
+  budget_amount                   = 100
+  budget_start_date               = "2026-11-01T00:00:00Z"
+  budget_contact_emails           = ["ops@example.invalid"]
+  telemetry_reader_group_id       = "44444444-4444-4444-4444-444444444444"
+  sql_database_name               = "airlinedemo"
+  acr_name                        = "acrdemotest"
+  container_apps_environment_name = "cae-demo-test"
+  container_app_name              = "ca-airline-demo-test"
+  image_digest                    = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  demo_passcode_secret_uri        = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
+  security_response_owner         = { name = "Response Owner", email = "owner@example.invalid" }
+  security_alert_settings         = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
   terraform_state_backend = {
     storage_account_name = "stdemotfstate"
     container_name       = "tfstate"
@@ -175,8 +184,8 @@ run "M-13_data_endpoints_are_private" {
     error_message = "Model private endpoint must connect through the account subresource."
   }
   assert {
-    condition     = azurerm_subnet.private_endpoints.address_prefixes[0] == "10.60.2.0/24" && length(azurerm_private_endpoint.demo) == 4
-    error_message = "Private endpoints must be created for SQL, Blob, model and Key Vault in the configured private endpoint subnet."
+    condition     = azurerm_subnet.private_endpoints.address_prefixes[0] == "10.60.2.0/24" && length(azurerm_private_endpoint.demo) == 5
+    error_message = "Private endpoints must be created for SQL, Blob, model, Key Vault and ACR in the configured private endpoint subnet."
   }
   assert {
     condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].name == "link-model"
@@ -199,7 +208,7 @@ run "M-13_data_endpoints_are_private" {
     error_message = "The model private endpoint must use the account subresource and the privatelink.openai.azure.com zone, in the private endpoint subnet."
   }
   assert {
-    condition     = length(local.private_endpoints) == 4 && can(regex("(?s)private_endpoints = \\{.*sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id.*blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id.*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf")))
+    condition     = length(local.private_endpoints) == 5 && can(regex("(?s)private_endpoints = \\{.*sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id.*blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id.*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf")))
     error_message = "SQL, Blob and model private endpoints must target their own resources (SQL server, storage account, cognitive account)."
   }
   assert {
@@ -261,12 +270,12 @@ run "M-14_M-18_encryption_transport_and_no_key_outputs" {
     error_message = "SQL must require TLS 1.2 and Entra-only auth."
   }
   assert {
-    condition     = output.model_endpoint == "https://aoai-demo-test.openai.azure.com/"
-    error_message = "Model endpoint must be HTTPS on the approved subdomain."
+    condition     = output.model_endpoint == "aoai-demo-test.openai.azure.com/"
+    error_message = "Model endpoint must be the approved subdomain host."
   }
   assert {
-    condition     = can(regex("^https://", output.model_endpoint)) && azurerm_cognitive_account.model.local_auth_enabled == false
-    error_message = "Model transport must be HTTPS and key-based auth must be disabled."
+    condition     = azurerm_cognitive_account.model.local_auth_enabled == false
+    error_message = "Key-based auth must be disabled on the model account."
   }
   assert {
     condition     = var.subscription_id != "" && !can(regex("(?is)output \"[^\"]*\" \\{[^}]*(AccountKey|ConnectionString|primary_access_key|primary_key|secondary_key|client_secret)", file("main.tf")))

@@ -1,0 +1,11 @@
+# VCS and dependency/build output, at any depth
+**/.git
+**/node_modules
+**/bin
+**/obj
+**/TestResults
+frontend/dist
+
+# Local secrets and environment files, at any depth
+**/.env
+**/.env.*

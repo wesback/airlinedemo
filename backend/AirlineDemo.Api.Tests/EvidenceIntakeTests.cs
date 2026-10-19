@@ -86,32 +86,50 @@ public class EvidenceIntakeTests
         Assert.Equal(version, store.Latest("valid-text.pdf"));
     }
 
-    [Theory]
-    [InlineData("annotated.pdf")]
-    [InlineData("image.pdf")]
-    [InlineData("embedded-files.pdf")]
-    [InlineData("acroform.pdf")]
-    public void ContentViolatingOneRuleIsRejectedPermanentlyWithNoEvidence(string file)
+    [Fact]
+    public void ContentViolatingOneRuleIsRejectedPermanentlyWithNoEvidence()
     {
-        var store = new EvidenceBasisStore();
+        var fixtures = new[]
+        {
+            (FileName: "annotated.pdf", State: EvidenceProcessingState.RejectedPermanent, ExpectedText: (string?)null),
+            (FileName: "image.pdf", State: EvidenceProcessingState.Complete, ExpectedText: (string?)string.Empty),
+            (FileName: "embedded-files.pdf", State: EvidenceProcessingState.Complete, ExpectedText: (string?)"synthetic embedded file"),
+            (FileName: "acroform.pdf", State: EvidenceProcessingState.Complete, ExpectedText: (string?)"synthetic form"),
+        };
 
-        var result = EvidenceIntake.Process([Doc(file, Fixture(file))], store);
+        foreach (var fixture in fixtures)
+        {
+            var store = new EvidenceBasisStore();
+            var result = EvidenceIntake.Process([Doc(fixture.FileName, Fixture(fixture.FileName))], store);
 
-        Assert.Equal(EvidenceProcessingState.RejectedPermanent, result.State);
-        Assert.Empty(result.Versions);
-        Assert.Null(store.Latest(file));
+            Assert.Equal(fixture.State, result.State);
+            if (fixture.ExpectedText is null)
+            {
+                Assert.Empty(result.Versions);
+                Assert.Null(store.Latest(fixture.FileName));
+                continue;
+            }
+
+            var version = Assert.Single(result.Versions);
+            var actualText = fixture.FileName == "image.pdf" ? version.Text : version.Text.Trim();
+            Assert.Equal(fixture.ExpectedText, actualText);
+            Assert.Equal(version, store.Latest(fixture.FileName));
+        }
     }
 
     [Theory]
     [InlineData("truncated.pdf")]
     [InlineData("corrupt.pdf")]
+    [InlineData("invalid.pdf")]
     public void UnreadablePdfIsRejectedRetryableWithNoEvidence(string file)
     {
         var store = new EvidenceBasisStore();
 
-        var result = EvidenceIntake.Process([Doc(file, Fixture(file))], store);
+        var content = file == "invalid.pdf" ? new byte[] { 0x00, 0x01, 0x02, 0x03 } : Fixture(file);
+        var result = EvidenceIntake.Process([Doc(file, content)], store);
 
         Assert.Equal(EvidenceProcessingState.RejectedRetryable, result.State);
+        Assert.Equal("PdfPig could not open or read the document; retry is possible", result.Reason);
         Assert.Empty(result.Versions);
         Assert.Null(store.Latest(file));
     }

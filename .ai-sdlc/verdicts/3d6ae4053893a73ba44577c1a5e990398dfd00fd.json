@@ -1,0 +1,298 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 315,
+  "branch": "ai-sdlc/issue-315",
+  "commitSha": "3d6ae4053893a73ba44577c1a5e990398dfd00fd",
+  "round": 1,
+  "pipelineVersion": "9c35a1a",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The SQL round-trip test now checks claim and witness fields and is linked to AC-005. The previously reported SQL replay defect remains unfixed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 627,
+          "message": "SQL receipt fingerprint reconstruction still omits assessment and request receipt data, so exact replay of a commit containing either record is rejected.",
+          "confidence": 0.86,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Commit fingerprints assessment and request receipt data, but Load rebuilds receipt fingerprints from decision rows without those payloads.",
+            "failureScenario": "After a SQL commit with a ReceiptId, assessment, and request receipt succeeds, retrying the same commit rebuilds a different fingerprint and throws ReceiptConflictException. The newly added replay assertion exercises this path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added SQL test now checks claim and witness persistence and identifies the round-trip test with AC-005. The previously reported SQL replay defect remains unfixed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 627,
+          "message": "SQL receipt fingerprint reconstruction still omits assessment and request receipt data, so exact replay of a commit containing either record is rejected.",
+          "confidence": 0.86,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Commit includes assessment and request receipt data in its fingerprint, but Load rebuilds stored receipt fingerprints from decision rows without those payloads.",
+            "failureScenario": "After a SQL commit containing a receipt ID, assessment, and request receipt, retrying the same commit rebuilds a different fingerprint and rejects the exact replay as receipt ID reuse."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added SQL round-trip test now checks claim and witness fields, identifies the acceptance criterion, and exercises replay. That replay exposes the previously reported fingerprint defect, which remains unfixed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 627,
+          "message": "SQL receipt fingerprint reconstruction still omits assessment and request receipt data, so exact replay of a commit containing either record is rejected.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "SQL receipt fingerprints are rebuilt from decision rows without the assessment and request receipt included in the original commit.",
+            "failureScenario": "After a SQL commit containing an assessment and request receipt succeeds, retrying that exact commit reloads a fingerprint that omits those records and rejects the replay with ReceiptConflictException."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AssessmentPersistenceTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 258,
+      "total": 299,
+      "percent": 86.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 40,
+          "total": 40,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 92,
+          "total": 111,
+          "missed": [
+            90,
+            95,
+            104,
+            338,
+            339,
+            340,
+            491,
+            492,
+            500,
+            501,
+            549,
+            550,
+            560,
+            561,
+            784,
+            785,
+            794,
+            795,
+            796
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/ICaseStateStore.cs",
+          "covered": 0,
+          "total": 3,
+          "missed": [
+            23,
+            24,
+            25
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261016120000_AddAssessmentHistory.cs",
+          "covered": 40,
+          "total": 44,
+          "missed": [
+            54,
+            55,
+            56,
+            57
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 86,
+          "total": 101,
+          "missed": [
+            106,
+            107,
+            108,
+            109,
+            110,
+            129,
+            130,
+            138,
+            139,
+            201,
+            202,
+            222,
+            223,
+            529,
+            535
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

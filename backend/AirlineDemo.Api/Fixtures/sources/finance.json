@@ -1,0 +1,68 @@
+{
+  "sourceId": "finance",
+  "records": [
+    {
+      "recordId": "fin-lease-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "lease_terms",
+      "synthetic": true,
+      "payload": { "leaseId": "SYN-LEASE-001", "billingPeriod": "monthly", "reserveBasis": "flight_hour_and_cycle", "currency": "USD" }
+    },
+    {
+      "recordId": "fin-reserve-rate-hour-2026-08",
+      "recordVersion": 1,
+      "asOf": "2026-08-01",
+      "caseId": "case-001",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "rateBasis": "per_flight_hour", "rate": "395.00", "currency": "USD", "effectiveFrom": "2026-08-01" }
+    },
+    {
+      "recordId": "fin-reserve-rate-hour-2026-10",
+      "recordVersion": 2,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "rateBasis": "per_flight_hour", "rate": "410.00", "currency": "USD", "effectiveFrom": "2026-10-01" }
+    },
+    {
+      "recordId": "fin-reserve-rate-cycle-2026-10",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "rateBasis": "per_cycle", "rate": "275.00", "currency": "USD", "effectiveFrom": "2026-10-01" }
+    },
+    {
+      "recordId": "fin-a-reserve-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-a",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "recordedAmount": "73865.00", "collectedAmount": "73865.00", "currency": "USD", "period": "2026-09", "dueDate": "2026-10-10", "rateBasis": "per_flight_hour", "rate": "395.00" }
+    },
+    {
+      "recordId": "fin-b-reserve-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-b",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "recordedAmount": "81172.50", "collectedAmount": "60000.00", "currency": "USD", "period": "2026-09", "dueDate": "2026-10-10", "rateBasis": "per_flight_hour", "rate": "395.00" }
+    },
+    {
+      "recordId": "fin-c-reserve-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-c",
+      "kind": "maintenance_reserve",
+      "synthetic": true,
+      "payload": { "recordedAmount": "71000.00", "collectedAmount": "71000.00", "currency": "USD", "period": "2026-09", "dueDate": "2026-10-10", "rateBasis": "per_flight_hour", "rate": "395.00" }
+    }
+  ]
+}

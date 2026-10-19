@@ -32,6 +32,7 @@ locals {
     blob  = "privatelink.blob.core.windows.net"
     model = "privatelink.openai.azure.com"
     kv    = "privatelink.vaultcore.azure.net"
+    acr   = "privatelink.azurecr.io"
   }
 
   private_endpoints = {
@@ -39,6 +40,7 @@ locals {
     blob  = { resource_id = azurerm_storage_account.blob.id, subresource = "blob", zone = "blob" }
     model = { resource_id = azurerm_cognitive_account.model.id, subresource = "account", zone = "model" }
     kv    = { resource_id = azurerm_key_vault.kv.id, subresource = "vault", zone = "kv" }
+    acr   = { resource_id = azurerm_container_registry.acr.id, subresource = "registry", zone = "acr" }
   }
 
   presenter_reviewer_rules = { for i, c in var.presenter_reviewer_cidrs : tostring(i) => c }
@@ -62,6 +64,15 @@ resource "azurerm_subnet" "app" {
   resource_group_name  = azurerm_resource_group.demo.name
   virtual_network_name = azurerm_virtual_network.demo.name
   address_prefixes     = [var.app_subnet_cidr]
+
+  delegation {
+    name = "container-apps-environment"
+
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
 }
 
 resource "azurerm_subnet" "private_endpoints" {
@@ -188,6 +199,19 @@ resource "azurerm_storage_account" "blob" {
   shared_access_key_enabled         = false
   default_to_oauth_authentication   = true
   infrastructure_encryption_enabled = true
+
+  # Evidence versioning and 14-day recovery of deleted blobs and containers (RETENTION-01).
+  blob_properties {
+    versioning_enabled = true
+
+    delete_retention_policy {
+      days = 14
+    }
+
+    container_delete_retention_policy {
+      days = 14
+    }
+  }
 }
 
 resource "azurerm_key_vault" "kv" {
@@ -210,7 +234,7 @@ resource "azurerm_key_vault" "kv" {
 resource "azurerm_cognitive_account" "model" {
   name                          = var.model_account_name
   resource_group_name           = azurerm_resource_group.demo.name
-  location                      = azurerm_resource_group.demo.location
+  location                      = "swedencentral"
   kind                          = "OpenAI"
   sku_name                      = "S0"
   custom_subdomain_name         = var.model_endpoint_subdomain
@@ -219,6 +243,21 @@ resource "azurerm_cognitive_account" "model" {
 
   network_acls {
     default_action = "Deny"
+  }
+}
+
+resource "azurerm_cognitive_deployment" "model" {
+  name                 = var.model_deployment_name
+  cognitive_account_id = azurerm_cognitive_account.model.id
+
+  model {
+    format  = "OpenAI"
+    name    = var.model_name
+    version = var.model_version
+  }
+
+  sku {
+    name = "GlobalStandard"
   }
 }
 
@@ -260,6 +299,14 @@ resource "azurerm_role_assignment" "terraform_contributor" {
   scope                = local.rg_scope
   role_definition_name = "Contributor"
   principal_id         = var.terraform_principal_object_id
+
+  # Fails the plan if this existing Contributor grant would go to a workflow identity.
+  lifecycle {
+    precondition {
+      condition     = lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.build.principal_id) && lower(var.terraform_principal_object_id) != lower(azurerm_user_assigned_identity.release.principal_id)
+      error_message = "terraform_principal_object_id must not be the build or release workflow identity, or the Contributor grant would hand that workflow subscription-wide rights."
+    }
+  }
 }
 
 resource "azurerm_consumption_budget_resource_group" "demo" {
@@ -281,6 +328,6 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
 }
 
 output "model_endpoint" {
-  description = "HTTPS model endpoint, reachable only through the private endpoint."
-  value       = "https://${var.model_endpoint_subdomain}.openai.azure.com/"
+  description = "Model endpoint host and path, reachable only through the private endpoint."
+  value       = "${var.model_endpoint_subdomain}.openai.azure.com/"
 }

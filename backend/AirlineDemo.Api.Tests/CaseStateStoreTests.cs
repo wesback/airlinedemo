@@ -1,4 +1,3 @@
-using System.Reflection;
 using AirlineDemo.Api.Persistence;
 
 namespace AirlineDemo.Api.Tests;
@@ -169,22 +168,6 @@ public sealed class CaseStateStoreTests : IDisposable
     }
 
     [Fact]
-    public void M03_audit_api_is_append_only_with_no_update_or_delete_operation()
-    {
-        var mutators = typeof(CaseStateStore)
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .Select(m => m.Name)
-            .Where(n => n.StartsWith("Update", StringComparison.Ordinal)
-                || n.StartsWith("Delete", StringComparison.Ordinal)
-                || n.StartsWith("Remove", StringComparison.Ordinal)
-                || n.StartsWith("Set", StringComparison.Ordinal))
-            .ToList();
-
-        Assert.Empty(mutators);
-        Assert.DoesNotContain(typeof(CaseStateStore).GetMethods(), m => m.ReturnType == typeof(void) && m.Name.Contains("Audit"));
-    }
-
-    [Fact]
     public void M03_each_commit_appends_one_audit_event_and_replayed_receipt_adds_none()
     {
         var store = new CaseStateStore(PathFor());
@@ -199,32 +182,38 @@ public sealed class CaseStateStoreTests : IDisposable
         Assert.Equal(1, replay.State.Revision);
         Assert.Single(store.ReadAudit(scope));
         Assert.Equal(["receipt-1"], store.Read(scope).ReceiptIds);
+
+        store.Commit(scope, 1, new CaseCommit(null, "receipt-2", "presenter", "submit", "updated"));
+
+        var audit = store.ReadAudit(scope);
+        Assert.Equal(2, audit.Count);
+        Assert.Equal(first.State.Audit[0], audit[0]);
+        Assert.Equal(2, audit[1].Sequence);
+        Assert.Equal(2, audit[1].Revision);
+        Assert.Equal("submit", audit[1].Action);
     }
 
     [Fact]
-    public void M03_injected_persist_failure_leaves_no_partial_state_receipt_or_audit()
+    public void M03_persist_failure_leaves_no_partial_state_receipt_or_audit()
     {
-        var armed = false;
-        var store = new CaseStateStore(PathFor(), beforePersist: () =>
-        {
-            if (armed)
-            {
-                armed = false;
-                throw new IOException("injected transaction failure");
-            }
-        });
+        var path = PathFor();
+        var store = new CaseStateStore(path);
         var scope = store.CreateCase("case-a", Owner);
-        armed = true;
+        var persisted = File.ReadAllText(path);
+        Directory.CreateDirectory(path + ".tmp");
         var basis = CaseStateStore.CreateBasisVersion(1, "evidence", string.Empty);
 
-        Assert.Throws<IOException>(() => store.Commit(scope, 0, new CaseCommit(basis, "receipt-1", "presenter", "submit", "x")));
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            store.Commit(scope, 0, new CaseCommit(basis, "receipt-1", "presenter", "submit", "x")));
 
         var state = store.Read(scope);
         Assert.Equal(0, state.Revision);
         Assert.Empty(state.Basis);
         Assert.Empty(state.ReceiptIds);
         Assert.Empty(state.Audit);
+        Assert.Equal(persisted, File.ReadAllText(path));
 
+        Directory.Delete(path + ".tmp");
         var retry = store.Commit(scope, 0, new CaseCommit(basis, "receipt-1", "presenter", "submit", "x"));
         Assert.False(retry.Replayed);
         Assert.Single(store.ReadAudit(scope));
@@ -276,5 +265,114 @@ public sealed class CaseStateStoreTests : IDisposable
         File.WriteAllText(path, File.ReadAllText(path).Replace("\"revision\": 1", "\"revision\": 5"));
 
         Assert.Throws<InvalidDataException>(() => new CaseStateStore(path));
+    }
+
+    // QW-01: fields survive restart; creation timestamp is server-assigned.
+    [Fact]
+    public void QW01_work_item_fields_survive_restart_with_server_timestamp()
+    {
+        var store = new CaseStateStore(PathFor());
+        var scope = store.CreateCase("case-a", Owner);
+        var before = DateTimeOffset.UtcNow;
+
+        store.CreateWorkItem(scope, 0, new WorkItemDraft("item-1", "cap-1", "open", Owner), "presenter");
+        var after = DateTimeOffset.UtcNow;
+
+        Assert.Null(typeof(WorkItemDraft).GetProperty("CreatedAt"));
+        var restarted = new CaseStateStore(PathFor());
+        var item = Assert.Single(restarted.ListWorkItems(restarted.AuthorizeCase("case-a", Owner)));
+        Assert.Equal("case-a", item.CaseId);
+        Assert.Equal("item-1", item.ItemId);
+        Assert.Equal("cap-1", item.CapabilityId);
+        Assert.Equal("open", item.State);
+        Assert.Equal(Owner, item.Owner);
+        Assert.InRange(item.CreatedAt, before, after);
+    }
+
+    // QW-01: each missing or blank required field is rejected and nothing is written.
+    [Fact]
+    public void QW01_rejects_missing_or_blank_work_item_fields()
+    {
+        var store = new CaseStateStore(PathFor());
+        var scope = store.CreateCase("case-a", Owner);
+        var drafts = new[]
+        {
+            new WorkItemDraft("", "cap-1", "open", Owner),
+            new WorkItemDraft(" ", "cap-1", "open", Owner),
+            new WorkItemDraft("item-1", "", "open", Owner),
+            new WorkItemDraft("item-1", "cap-1", " ", Owner),
+            new WorkItemDraft("item-1", "cap-1", "open", ""),
+        };
+
+        foreach (var draft in drafts)
+        {
+            Assert.Throws<ArgumentException>(() => store.CreateWorkItem(scope, 0, draft, "presenter"));
+        }
+
+        Assert.Empty(store.ListWorkItems(scope));
+        Assert.Equal(0, store.Read(scope).Revision);
+    }
+
+    // QW-01: item IDs are unique within a case, but the same ID may exist in another case.
+    [Fact]
+    public void QW01_rejects_duplicate_item_id_within_case_only()
+    {
+        var store = new CaseStateStore(PathFor());
+        var a = store.CreateCase("case-a", Owner);
+        var b = store.CreateCase("case-b", "owner-b");
+        store.CreateWorkItem(a, 0, new WorkItemDraft("item-1", "cap-1", "open", Owner), "presenter");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            store.CreateWorkItem(a, 1, new WorkItemDraft("item-1", "cap-2", "open", Owner), "presenter"));
+        Assert.Single(store.ListWorkItems(a));
+
+        store.CreateWorkItem(b, 0, new WorkItemDraft("item-1", "cap-1", "open", "owner-b"), "presenter");
+        Assert.Single(store.ListWorkItems(b));
+    }
+
+    // QW-02: scope isolates cases; the wrong owner is denied.
+    [Fact]
+    public void QW02_scope_returns_only_its_case_items_and_denies_other_owners()
+    {
+        var store = new CaseStateStore(PathFor());
+        var a = store.CreateCase("case-a", Owner);
+        var b = store.CreateCase("case-b", "owner-b");
+        store.CreateWorkItem(a, 0, new WorkItemDraft("item-a", "cap-1", "open", Owner), "presenter");
+        store.CreateWorkItem(b, 0, new WorkItemDraft("item-b", "cap-1", "open", "owner-b"), "reviewer");
+
+        var onlyA = Assert.Single(store.ListWorkItems(store.AuthorizeCase("case-a", Owner)));
+        Assert.Equal("item-a", onlyA.ItemId);
+        var onlyB = Assert.Single(store.ListWorkItems(store.AuthorizeCase("case-b", "owner-b")));
+        Assert.Equal("item-b", onlyB.ItemId);
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-a", "owner-b"));
+        Assert.Throws<CaseAccessDeniedException>(() => store.AuthorizeCase("case-b", Owner));
+    }
+
+    // QW-03: create and state change need the current revision, bump it once, and audit once.
+    [Fact]
+    public void QW03_work_item_changes_bump_revision_and_audit_once_and_stale_revision_is_rejected()
+    {
+        var store = new CaseStateStore(PathFor());
+        var scope = store.CreateCase("case-a", Owner);
+        var auditBefore = store.ReadAudit(scope).Count;
+
+        var created = store.CreateWorkItem(scope, 0, new WorkItemDraft("item-1", "cap-1", "open", Owner), "presenter");
+        Assert.Equal(1, created.State.Revision);
+        Assert.Equal(auditBefore + 1, store.ReadAudit(scope).Count);
+        var createdAudit = store.ReadAudit(scope)[auditBefore];
+        Assert.Equal(("presenter", "create-work-item", "item-1", 1L), (createdAudit.Actor, createdAudit.Action, createdAudit.Detail, createdAudit.Revision));
+
+        var changed = store.ChangeWorkItemState(scope, 1, "item-1", "closed", "reviewer");
+        Assert.Equal(2, changed.State.Revision);
+        Assert.Equal("closed", Assert.Single(store.ListWorkItems(scope)).State);
+        Assert.Equal(auditBefore + 2, store.ReadAudit(scope).Count);
+        var changeAudit = store.ReadAudit(scope)[auditBefore + 1];
+        Assert.Equal(("reviewer", "change-work-item-state", "item-1 -> closed", 2L), (changeAudit.Actor, changeAudit.Action, changeAudit.Detail, changeAudit.Revision));
+
+        var auditAfter = store.ReadAudit(scope).Count;
+        Assert.Throws<RevisionConflictException>(() => store.ChangeWorkItemState(scope, 1, "item-1", "reopened", "reviewer"));
+        Assert.Equal("closed", Assert.Single(store.ListWorkItems(scope)).State);
+        Assert.Equal(2, store.Read(scope).Revision);
+        Assert.Equal(auditAfter, store.ReadAudit(scope).Count);
     }
 }

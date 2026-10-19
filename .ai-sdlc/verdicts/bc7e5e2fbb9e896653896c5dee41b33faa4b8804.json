@@ -1,0 +1,393 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 230,
+  "branch": "ai-sdlc/issue-230",
+  "commitSha": "bc7e5e2fbb9e896653896c5dee41b33faa4b8804",
+  "round": 0,
+  "pipelineVersion": "79c540d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change replaces the required child-process parsing route with in-process PdfPig parsing, contrary to the issue’s stated scope. It also lacks the required exact decoded-limit acceptance test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 39,
+          "message": "Accepted PDFs bypass the required child-process route: the parser ignores worker options and opens the document in-process.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The public Parse overload ignores its worker options and calls ParseCore, which opens the PDF with PdfDocument.Open in the API process.",
+            "failureScenario": "When a presenter submits an accepted PDF, Parse opens it in-process and starts no worker. This breaks the acceptance criterion that the existing child-process route remains unchanged and that accepted inputs start the worker once."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 246,
+          "message": "The exact decoded-limit acceptance criterion has no test proving that an 8,388,608-byte decoded stream is accepted and starts the worker exactly once.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed tests include StreamFilterPreflightRejectsBeforeOpeningPdfPig, but no test named StreamFilterPreflightAcceptsExactDecodedLimitAndStartsWorkerOnce or equivalent asserting an exact 8,388,608-byte decoded stream starts the worker once.",
+            "failureScenario": "If the preflight rejects a valid stream at exactly 8,388,608 decoded bytes, or does not start the worker once, the tests in this change still pass. The exact-limit acceptance criterion is unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change replaces the required child-process route with in-process PdfPig parsing, so accepted inputs no longer start the worker. It also omits the required exact-limit acceptance test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 48,
+          "message": "Accepted PDFs bypass the child-process route. Preserve worker startup, supervision, and cleanup for inputs that pass the filter preflight.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The public Parse overloads discard their options and call ParseCore, which opens PdfPig directly through OpenDocument. They no longer start or supervise the child worker.",
+            "failureScenario": "A presenter submits a valid PDF within the filter limits. The parser opens it in the API process and completes without starting the worker, contrary to the acceptance criterion that accepted inputs retain the existing child-process route and start the worker."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs",
+          "line": 305,
+          "message": "The exact decoded-limit acceptance criterion lacks its named test, StreamFilterPreflightAcceptsExactDecodedLimitAndStartsWorkerOnce.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff adds StreamFilterPreflightRejectsBeforeOpeningPdfPig for over-limit and escaped-filter inputs, but no test accepts a Flate stream with exactly 8,388,608 decoded bytes and asserts one worker start.",
+            "failureScenario": "If the preflight incorrectly rejects a stream at the exact limit or fails to start the worker for an accepted stream, the added tests still pass because none exercises that boundary and worker-start behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change bypasses the worker for accepted PDFs, leaving PdfPig parsing without the existing process-level resource limits.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "line": 47,
+          "message": "The parser routes every PDF through in-process extraction, removing the child-process isolation that the acceptance criteria require to remain unchanged.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Both public Parse overloads discard the parser options and call ParseCore directly. ParseCore opens and extracts PDFs in the API process, bypassing the existing child worker and its memory and time limits.",
+            "failureScenario": "A presenter submits an accepted PDF that consumes excessive CPU or memory during PdfPig parsing. Because the worker is never started, its process limits cannot contain the work, putting API availability at risk. OWASP A06:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceIntakeTests.cs",
+      "backend/AirlineDemo.Api.Tests/IsolatedPdfParserTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 512,
+      "total": 620,
+      "percent": 82.6,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evidence/IsolatedPdfParser.cs",
+          "covered": 510,
+          "total": 618,
+          "missed": [
+            58,
+            59,
+            60,
+            61,
+            62,
+            158,
+            159,
+            167,
+            168,
+            169,
+            192,
+            193,
+            194,
+            200,
+            201,
+            206,
+            207,
+            222,
+            223,
+            230,
+            231,
+            235,
+            236,
+            245,
+            266,
+            267,
+            268,
+            269,
+            270,
+            271,
+            286,
+            288,
+            291,
+            293,
+            352,
+            353,
+            420,
+            421,
+            422,
+            423,
+            424,
+            425,
+            427,
+            428,
+            429,
+            430,
+            431,
+            432,
+            443,
+            444,
+            445,
+            446,
+            469,
+            470,
+            471,
+            472,
+            474,
+            475,
+            476,
+            478,
+            479,
+            480,
+            481,
+            535,
+            536,
+            537,
+            538,
+            547,
+            548,
+            549,
+            569,
+            570,
+            571,
+            573,
+            574,
+            575,
+            696,
+            699,
+            700,
+            701,
+            702,
+            703,
+            704,
+            705,
+            706,
+            707,
+            709,
+            710,
+            711,
+            714,
+            716,
+            731,
+            732,
+            733,
+            734,
+            750,
+            751,
+            752,
+            762,
+            763,
+            764,
+            779,
+            780,
+            781,
+            801,
+            802,
+            803,
+            804
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

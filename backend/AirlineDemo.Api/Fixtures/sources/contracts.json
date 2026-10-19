@@ -1,0 +1,118 @@
+{
+  "sourceId": "contracts",
+  "records": [
+    {
+      "recordId": "con-clause-return-notice-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "obligation_clause",
+      "synthetic": true,
+      "payload": { "clauseId": "SYN-CL-RET-07", "obligation": "return_condition_report", "noticeWindowStart": "2026-10-01", "noticeWindowEnd": "2026-10-31", "noticeWindowDays": "30" }
+    },
+    {
+      "recordId": "con-a-clause-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-a",
+      "kind": "obligation_clause",
+      "synthetic": true,
+      "payload": { "clauseId": "SYN-CL-RET-A7", "obligation": "return_condition_report", "noticeWindowStart": "2026-10-15", "noticeWindowEnd": "2026-11-14", "noticeWindowDays": "30" }
+    },
+    {
+      "recordId": "con-b-clause-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-b",
+      "kind": "obligation_clause",
+      "synthetic": true,
+      "payload": { "clauseId": "SYN-CL-RET-B7", "obligation": "return_condition_report", "noticeWindowStart": "2026-09-20", "noticeWindowEnd": "2026-10-20", "noticeWindowDays": "30" }
+    },
+    {
+      "recordId": "con-c-clause-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-c",
+      "kind": "obligation_clause",
+      "synthetic": true,
+      "payload": { "clauseId": "SYN-CL-RET-C7", "obligation": "return_condition_report", "noticeWindowStart": "2026-10-01", "noticeWindowEnd": "2026-10-31", "noticeWindowDays": "30" }
+    },
+    {
+      "recordId": "con-specialist-sanctions-eu-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "specialist_flag",
+      "synthetic": true,
+      "payload": { "relatedRequirementId": "REQ-SANCTIONS-EU", "topic": "sanctions", "result": "specialist_review_required", "regime": "EU" }
+    },
+    {
+      "recordId": "con-specialist-sanctions-us-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "specialist_flag",
+      "synthetic": true,
+      "payload": { "relatedRequirementId": "REQ-SANCTIONS-US", "topic": "sanctions", "result": "specialist_review_required", "regime": "US" }
+    },
+    {
+      "recordId": "con-specialist-sanctions-uk-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "specialist_flag",
+      "synthetic": true,
+      "payload": { "relatedRequirementId": "REQ-SANCTIONS-UK", "topic": "sanctions", "result": "not_assessed", "regime": "UK" }
+    },
+    {
+      "recordId": "con-specialist-cape-town-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "specialist_flag",
+      "synthetic": true,
+      "payload": { "relatedRequirementId": "REQ-CAPE-TOWN", "topic": "cape_town", "result": "specialist_review_required" }
+    },
+    {
+      "recordId": "con-cape-town-interest-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "cape_town_interest",
+      "synthetic": true,
+      "payload": {
+        "internationalInterestRef": "SYN-INT-CT-001",
+        "registrationRef": "SYN-REG-CT-001",
+        "idera": "not_recorded",
+        "stateDeclarationNoted": false
+      }
+    },
+    {
+      "recordId": "con-specialist-ifrs16-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "specialist_flag",
+      "synthetic": true,
+      "payload": { "relatedRequirementId": "REQ-IFRS16", "topic": "ifrs16", "result": "not_assessed" }
+    },
+    {
+      "recordId": "con-specialist-gdpr-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "specialist_flag",
+      "synthetic": true,
+      "payload": { "relatedRequirementId": "REQ-GDPR", "topic": "gdpr", "result": "not_assessed" }
+    },
+    {
+      "recordId": "con-specialist-other-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "specialist_flag",
+      "synthetic": true,
+      "payload": { "relatedRequirementId": "REQ-OTHER", "topic": "other", "result": "specialist_review_required" }
+    }
+  ]
+}

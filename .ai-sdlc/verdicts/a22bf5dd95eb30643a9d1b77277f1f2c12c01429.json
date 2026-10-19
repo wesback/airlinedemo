@@ -1,0 +1,290 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 183,
+  "branch": "ai-sdlc/issue-183",
+  "commitSha": "a22bf5dd95eb30643a9d1b77277f1f2c12c01429",
+  "round": 0,
+  "pipelineVersion": "5711d2b",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The service appears to use the stored basis for validation and guards submission against basis replacement. Two required behaviors remain unproven by the named tests: mutation through CurrentBasis results and routing multiple claims to review.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/AssessmentExecutionServiceTests.cs",
+          "line": 102,
+          "message": "The snapshot-isolation criterion is not fully tested: the test does not try to mutate collections returned by CurrentBasis or verify that such mutation cannot change the stored basis.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The snapshot test edits the caller-owned page list and source dictionary, then reads CurrentBasis. It never attempts to mutate collections returned by CurrentBasis.",
+            "failureScenario": "If CurrentBasis exposed mutable stored collections, the test would still pass its source-mutation assertions. A caller could then change accepted evidence through the returned value, and later assessments could validate against altered content."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/AssessmentExecutionServiceTests.cs",
+          "line": 127,
+          "message": "The AC-03 test omits its required multiple-claims case, so it does not prove that multiple claims create a review item and no request.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The AC-03 scenario array covers ambiguous identity, conflict, incomplete coverage, downgraded witness, stale basis, and stored incomplete coverage, but contains no case with multiple claims.",
+            "failureScenario": "If routing incorrectly allowed multiple claims to produce a request or baseline outcome, every scenario in this test would still pass; the AC-03 multiple-claims behavior would go unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover most stated outcomes, but they do not verify mutation through a CurrentBasis return value or the required multiple-claims routing case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/AssessmentExecutionServiceTests.cs",
+          "line": 116,
+          "message": "The accepted-basis snapshot test does not cover mutation through a value returned by CurrentBasis, as required by the snapshot-isolation criterion.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Stored_basis_is_not_changed_by_later_edits_to_the_supplied_evidence checks edits to the source dictionary and page list, but never attempts to mutate a value returned by CurrentBasis.",
+            "failureScenario": "If CurrentBasis exposes mutable stored collections, a caller could change an accepted page after retrieval and affect later validation or submission; this test would still pass. The acceptance criterion requires proving returned-value mutation cannot change the stored basis."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/AssessmentExecutionServiceTests.cs",
+          "line": 135,
+          "message": "The AC-03 test omits the multiple-claims case, so it does not prove that this required input creates a review item and no request.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Ambiguous_or_unsupported_claim_creates_review_item_not_request iterates scenarios for ambiguous identity, conflict, incomplete coverage, downgraded witness, and stale or incomplete supplied bases; none supplies multiple claims.",
+            "failureScenario": "If routing mistakenly creates a request when given multiple otherwise supported claims, the named test would still pass, despite the criterion requiring multiple claims to produce a review item and no request."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The assessment uses the stored basis snapshot for validation and holds the basis lock across request submission, preventing a basis update from interleaving. I found no concrete, reachable security defect in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AssessmentExecutionServiceTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 159,
+      "total": 172,
+      "percent": 92.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/AssessmentExecutionService.cs",
+          "covered": 110,
+          "total": 121,
+          "missed": [
+            108,
+            109,
+            110,
+            111,
+            117,
+            119,
+            120,
+            121,
+            164,
+            165,
+            172
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Investigation/AssessmentStore.cs",
+          "covered": 49,
+          "total": 51,
+          "missed": [
+            46,
+            47
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

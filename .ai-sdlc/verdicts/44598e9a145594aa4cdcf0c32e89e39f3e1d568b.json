@@ -1,0 +1,240 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 270,
+  "branch": "ai-sdlc/issue-270",
+  "commitSha": "44598e9a145594aa4cdcf0c32e89e39f3e1d568b",
+  "round": 0,
+  "pipelineVersion": "28549a2",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adapters and fixture gate address the listed acceptance criteria. I found no concrete, in-scope defect in the diff.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change includes tests for the main adapter and fixture-gate paths, but arm A's matching result and two of the investigator's three bounds are not behaviorally verified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/FourArmModelAdaptersTests.cs",
+          "line": 30,
+          "message": "The AC-016 test does not verify arm A's deterministic extraction or matching behavior, so that acceptance criterion can regress without a failing test.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC016_UsesIdenticalInputsAndRulesArmMakesNoCalls executes arm A and checks its basis and model call count, but never checks its answer or matching result.",
+            "failureScenario": "If Rules returns an incorrect assessment for every case while preserving the basis and making zero model calls, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/FourArmModelAdaptersTests.cs",
+          "line": 38,
+          "message": "The AC-013 test does not prove enforcement of the model-call and duration limits; add cases that exceed each limit and assert failure.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC013_AgentArmsUseApprovedManifestAndAllowlist asserts the limits' constant values and exercises the tool-call limit, but does not exercise the model-call limit or timeout.",
+            "failureScenario": "If the investigator stops enforcing the eight-model-call or 30-second limit while still enforcing tool calls, the named test passes for both arms."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fixture checks appear to reject altered corpus bytes and unverified page text. The gate test does not prove the acceptance criterion that rejected data results in zero model requests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/EvaluationFixtureModelGateTests.cs",
+          "line": 10,
+          "message": "AC-016 requires proving rejected fixture data causes zero model requests, but this test has no model-request spy or fake and its `calls` counter is unrelated to requests. Add a runtime assertion that the request count remains zero for each rejection.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test increments `calls` itself after `AuthorizePageText` succeeds; no model client or request path observes the gate's rejections.",
+            "failureScenario": "If a future adapter sends a model request before rejecting changed fixture bytes or an unauthorized page, this test still passes because none of its rejection assertions checks a model client's call count."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvaluationFixtureModelGateTests.cs",
+      "backend/AirlineDemo.Api.Tests/FourArmModelAdaptersTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 133,
+      "total": 142,
+      "percent": 93.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/EvaluationFixtureModelGate.cs",
+          "covered": 41,
+          "total": 42,
+          "missed": [
+            30
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/FourArmModelAdapters.cs",
+          "covered": 92,
+          "total": 100,
+          "missed": [
+            43,
+            51,
+            91,
+            92,
+            93,
+            94,
+            97,
+            117
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 23,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

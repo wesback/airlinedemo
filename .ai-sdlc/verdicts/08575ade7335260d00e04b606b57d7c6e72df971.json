@@ -1,0 +1,286 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 283,
+  "branch": "ai-sdlc/issue-283",
+  "commitSha": "08575ade7335260d00e04b606b57d7c6e72df971",
+  "round": 4,
+  "pipelineVersion": "53ae570",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round 5 index enforces tuple uniqueness, but SQL Server's trailing-space comparison rules make it reject distinct exact identifiers. The new UTF-16 validation also continues to exclude identifiers accepted by the file-backed store.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 48,
+          "message": "The unique tuple index collapses identifiers that differ by trailing spaces on SQL Server, so the new database constraint still prevents persisting distinct exact keys.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "AppendTrace hashes identifiers exactly, then inserts a row subject to this unique index. SQL Server string comparisons treat values differing only by trailing spaces as equal, even with a case-sensitive collation.",
+            "failureScenario": "On SQL Server, after appending a trace with RunId \"run-1\", appending one with RunId \"run-1 \" has a different hash but violates this unique index. AppendTrace translates the resulting DbUpdateException to TraceConflictException, so it cannot persist both distinct identifiers as the file-backed store does."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "line": 270,
+          "message": "Rejecting malformed UTF-16 identifiers leaves the prior exact-identifier persistence finding unresolved: these identifiers are accepted by the file-backed store but rejected by SQL.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The file-backed store validates trace identifiers only as nonblank and accepts lone UTF-16 surrogates; the SQL store adds this well-formedness check before writing.",
+            "failureScenario": "Appending a trace with RunId containing a lone high surrogate succeeds through the file-backed store but throws ArgumentException through SqlCaseStateStore, so SQL does not persist every trace allowed by the file-backed contract."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new database uniqueness constraint reintroduces a trailing-space collision on SQL Server. The SQLite test does not exercise that SQL Server behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 42,
+          "message": "The unique tuple index collapses identifiers that differ by trailing spaces on SQL Server, violating exact identifier persistence.",
+          "confidence": 0.92,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new unique index compares CaseId, RunId, and InvestigationId directly. On SQL Server, string key comparisons ignore trailing spaces, so identifiers that TraceKey hashes distinctly can still collide at this index; AppendTrace converts the resulting DbUpdateException to TraceConflictException.",
+            "failureScenario": "After storing a trace with RunId \"run-1\", appending one with RunId \"run-1 \" and the same case and investigation fails on SQL Server, even though the exact identifiers differ."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new database uniqueness constraint reintroduces a trailing-space collision for SQL Server identifiers.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "line": 48,
+          "message": "The new tuple index collapses identifiers that differ by trailing spaces on SQL Server, so distinct exact identifier tuples cannot both be persisted.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new unique index compares the identifier columns directly. SQL Server string comparisons treat values that differ only by trailing spaces as equal, even with the configured case-sensitive collation. AppendTrace finds no matching hash, then the index rejects the insert and the store reports a trace conflict.",
+            "failureScenario": "On SQL Server, append a trace with RunId \"run-1\", then append one with RunId \"run-1 \" and the same case and investigation IDs. The second distinct exact identifier is rejected, despite the hash preserving the distinction."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 215,
+      "total": 229,
+      "percent": 93.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 49,
+          "total": 49,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261015120000_AddInvestigationTraces.cs",
+          "covered": 51,
+          "total": 55,
+          "missed": [
+            72,
+            73,
+            74,
+            75
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 115,
+          "total": 125,
+          "missed": [
+            265,
+            266,
+            314,
+            315,
+            316,
+            371,
+            372,
+            403,
+            404,
+            405
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

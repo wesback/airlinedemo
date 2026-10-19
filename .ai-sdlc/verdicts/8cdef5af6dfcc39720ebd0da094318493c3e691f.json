@@ -1,0 +1,267 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 295,
+  "branch": "ai-sdlc/issue-295",
+  "commitSha": "8cdef5af6dfcc39720ebd0da094318493c3e691f",
+  "round": 0,
+  "pipelineVersion": "d5b1c78",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-haiku-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The command’s production dependency registration is incomplete: SourceModeStore requires TimeProvider, but the production service registrations do not provide it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 25,
+          "message": "Register TimeProvider in production so the mode command can resolve SourceModeStore.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Program registers SourceModeStore, whose constructor requires TimeProvider. The production registrations shown do not register TimeProvider; only the command test factory adds one.",
+            "failureScenario": "In production, a presenter submits an authenticated, CSRF-valid mode command. Dependency injection cannot construct SourceModeStore because TimeProvider is unregistered, so the command fails instead of changing the source mode."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 1,
+        "suggestion": 0
+      },
+      "summary": "The named tests exercise the command, denial, replay, conflict, stale revision, unchanged mode, and reset behaviors. AC-014 leaves the serialized audit detail’s caseId value unchecked.",
+      "findingList": [
+        {
+          "severity": "minor",
+          "file": "backend/AirlineDemo.Api.Tests/SourceModeCommandTests.cs",
+          "line": 110,
+          "message": "AC-014 does not assert the audit detail’s caseId value. Add an exact assertion against the requested case ID.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC-014 checks the audit detail’s field names and several values, but never checks the value of its caseId field.",
+            "failureScenario": "If the serialized audit detail contains an incorrect caseId while the receipt and other audit fields remain correct, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The command path enforces authentication, presenter role, case scope, and CSRF. It accepts an effectively unbounded commandId, however, and persists that value on every accepted change, allowing an authorized presenter to drive excessive case-state growth.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/SourceSystems/SourceModeEndpoints.cs",
+          "line": 30,
+          "message": "A04:2025 Insecure Design — impose a small maximum length on commandId before persisting it in the audit record.",
+          "confidence": 0.83,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The endpoint only rejects a blank commandId, then passes it to SourceModeStore, which serializes it into the audit detail and persists it with the case state.",
+            "failureScenario": "An authenticated presenter submits a mode change with a commandId near the request-body size limit. The large value is retained in the audit record and persisted; repeating valid changes with large IDs can rapidly grow the case-state file and consume memory and disk."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/SourceModeCommandTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 116,
+      "total": 129,
+      "percent": 89.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 3,
+          "total": 3,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceModeEndpoints.cs",
+          "covered": 25,
+          "total": 29,
+          "missed": [
+            36,
+            37,
+            46,
+            47
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/SourceSystems/SourceModeStore.cs",
+          "covered": 86,
+          "total": 95,
+          "missed": [
+            96,
+            97,
+            98,
+            100,
+            101,
+            102,
+            136,
+            137,
+            138
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 16,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

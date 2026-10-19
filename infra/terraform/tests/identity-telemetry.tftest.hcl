@@ -90,38 +90,114 @@ mock_provider "azurerm" {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
     }
   }
+
+  mock_resource "azurerm_key_vault_key" {
+    defaults = {
+      resource_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/keys/release-image-signing"
+    }
+  }
+
+  mock_resource "azurerm_key_vault_certificate" {
+    defaults = {
+      resource_manager_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-image-signing-certificate"
+    }
+  }
+
+  mock_resource "azurerm_container_app_environment" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/managedEnvironments/cae-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_container_app" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test"
+    }
+  }
+
+  mock_resource "azurerm_container_registry" {
+    defaults = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest"
+      login_server = "acrdemotest.azurecr.io"
+    }
+  }
 }
 
 variables {
-  subscription_id               = "00000000-0000-0000-0000-000000000000"
-  tenant_id                     = "11111111-1111-1111-1111-111111111111"
-  location                      = "uksouth"
-  resource_group_name           = "rg-demo-test"
-  vnet_address_space            = ["10.60.0.0/16"]
-  app_subnet_cidr               = "10.60.1.0/24"
-  private_endpoint_subnet_cidr  = "10.60.2.0/24"
-  presenter_reviewer_cidrs      = ["203.0.113.0/24"]
-  egress_allowed_destinations   = ["198.51.100.0/24"]
-  sql_server_name               = "sql-demo-test"
-  sql_admin_group_name          = "grp-demo-sql-admins"
-  sql_admin_group_object_id     = "22222222-2222-2222-2222-222222222222"
-  storage_account_name          = "stdemotest"
-  key_vault_name                = "kv-demo-test"
-  model_account_name            = "aoai-demo-test"
-  model_endpoint_subdomain      = "aoai-demo-test"
-  terraform_principal_object_id = "33333333-3333-3333-3333-333333333333"
-  budget_amount                 = 100
-  budget_start_date             = "2026-11-01T00:00:00Z"
-  budget_contact_emails         = ["ops@example.invalid"]
-  telemetry_reader_group_id     = "44444444-4444-4444-4444-444444444444"
-  security_response_owner       = { name = "Response Owner", email = "owner@example.invalid" }
-  security_alert_settings       = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
+  subscription_id                 = "00000000-0000-0000-0000-000000000000"
+  tenant_id                       = "11111111-1111-1111-1111-111111111111"
+  location                        = "uksouth"
+  resource_group_name             = "rg-demo-test"
+  vnet_address_space              = ["10.60.0.0/16"]
+  app_subnet_cidr                 = "10.60.1.0/24"
+  private_endpoint_subnet_cidr    = "10.60.2.0/24"
+  presenter_reviewer_cidrs        = ["203.0.113.0/24"]
+  egress_allowed_destinations     = ["198.51.100.0/24"]
+  sql_server_name                 = "sql-demo-test"
+  sql_admin_group_name            = "grp-demo-sql-admins"
+  sql_admin_group_object_id       = "22222222-2222-2222-2222-222222222222"
+  storage_account_name            = "stdemotest"
+  key_vault_name                  = "kv-demo-test"
+  model_account_name              = "aoai-demo-test"
+  model_endpoint_subdomain        = "aoai-demo-test"
+  model_deployment_name           = "gpt-demo-test"
+  model_name                      = "gpt-demo-model"
+  model_version                   = "0000-00-00"
+  terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
+  budget_amount                   = 100
+  budget_start_date               = "2026-11-01T00:00:00Z"
+  budget_contact_emails           = ["ops@example.invalid"]
+  telemetry_reader_group_id       = "44444444-4444-4444-4444-444444444444"
+  sql_database_name               = "airlinedemo"
+  acr_name                        = "acrdemotest"
+  container_apps_environment_name = "cae-demo-test"
+  container_app_name              = "ca-airline-demo-test"
+  image_digest                    = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  demo_passcode_secret_uri        = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
+  security_response_owner         = { name = "Response Owner", email = "owner@example.invalid" }
+  security_alert_settings         = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
   terraform_state_backend = {
     storage_account_name = "stdemotfstate"
     container_name       = "tfstate"
     key                  = "demo.tfstate"
     use_azuread_auth     = true
     locking_enabled      = true
+  }
+}
+
+# This run must stay first: override_resource values apply only when a resource is created,
+# and Terraform 1.9 test runs share state, so it needs the freshly created identities.
+run "M-14_app_grants_bind_to_app_principal_not_migration" {
+  command = apply
+
+  override_resource {
+    target = azurerm_user_assigned_identity.app
+    values = {
+      principal_id = "55555555-5555-5555-5555-555555555555"
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app-mock"
+    }
+  }
+
+  override_resource {
+    target = azurerm_user_assigned_identity.migration
+    values = {
+      principal_id = "66666666-6666-6666-6666-666666666666"
+    }
+  }
+
+  assert {
+    condition     = azurerm_user_assigned_identity.app.principal_id != azurerm_user_assigned_identity.migration.principal_id
+    error_message = "App and migration identities must have distinct principals for the grant binding test to be meaningful."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.app_openai_user.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_evidence.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_telemetry.principal_id == azurerm_user_assigned_identity.app.principal_id
+    error_message = "Every app role assignment must be bound to the app workload identity principal."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.migration_sql.principal_id == azurerm_user_assigned_identity.migration.principal_id
+    error_message = "The migration identity grant must be bound to the migration identity principal."
   }
 }
 
@@ -181,6 +257,81 @@ run "M-14_app_identity_grants_are_exact" {
   }
 }
 
+run "source_read_windows_app_grant_is_exact" {
+  command = plan
+
+  assert {
+    condition = output.app_sql_grant_statements == [
+      "IF DATABASE_PRINCIPAL_ID('id-airline-app') IS NULL CREATE USER [id-airline-app] FROM EXTERNAL PROVIDER;",
+      "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.cases TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_documents TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON SCHEMA::dbo TO [id-airline-app];",
+    ]
+    error_message = "App SQL grants must equal the exact ordered grant set, including only SELECT, INSERT and UPDATE on dbo.source_read_windows."
+  }
+
+  assert {
+    condition = alltrue([
+      for p in ["DELETE", "ALTER", "CONTROL"] :
+      !contains(output.app_sql_grant_statements, "GRANT ${p} ON OBJECT::dbo.source_read_windows TO [id-airline-app];")
+      ]) && length([
+      for s in output.app_sql_grant_statements : s
+      if startswith(s, "GRANT") && strcontains(s, "ON SCHEMA::")
+    ]) == 0
+    error_message = "The app identity must receive no DELETE, ALTER, CONTROL or schema-wide grant on source-read data."
+  }
+
+  assert {
+    condition = length([
+      for s in concat(output.app_sql_grant_statements, output.migration_sql_grant_statements) : s
+      if startswith(s, "GRANT ALTER ON SCHEMA::")
+      ]) == 2 && alltrue([
+      for s in concat(output.app_sql_grant_statements, output.migration_sql_grant_statements) :
+      !startswith(s, "GRANT ALTER ON SCHEMA::") || s == "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];" || s == "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];"
+      ]) && output.migration_sql_grant_statements == [
+      "IF DATABASE_PRINCIPAL_ID('id-airline-migration') IS NULL CREATE USER [id-airline-migration] FROM EXTERNAL PROVIDER;",
+      "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];",
+      "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];",
+    ]
+    error_message = "Only the migration identity may receive schema ALTER, and only on dbo and audit."
+  }
+}
+
+run "audit_table_remains_append_only_after_source_read_grant" {
+  command = plan
+
+  assert {
+    condition = [
+      for s in output.app_sql_grant_statements : s
+      if(startswith(s, "GRANT") || startswith(s, "DENY")) && strcontains(s, "OBJECT::audit.case_events")
+      ] == [
+      "GRANT SELECT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];",
+      "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];",
+    ]
+    error_message = "Audit case_events grants must remain exactly SELECT and INSERT, with UPDATE, DELETE, ALTER and CONTROL denied."
+  }
+}
+
 run "M-14_evidence_scope_is_exact_container" {
   command = apply
 
@@ -214,8 +365,8 @@ run "M-14_app_role_scopes_are_exact_literals" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 9 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
-    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE on the three case tables, never the whole schema."
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 12 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
+    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE on the case tables and source-read ledger, never the whole schema."
   }
 }
 
@@ -240,40 +391,6 @@ run "M-14_grants_bind_to_app_identity_as_service_principal" {
   assert {
     condition     = length([for s in output.app_sql_grant_statements : s if strcontains(s, "SCHEMA::audit")]) == 0
     error_message = "No app SQL grant or deny may target the whole audit schema; only audit.case_events."
-  }
-}
-
-run "M-14_app_grants_bind_to_app_principal_not_migration" {
-  command   = apply
-  state_key = "m14-principal-binding"
-
-  override_resource {
-    target = azurerm_user_assigned_identity.app
-    values = {
-      principal_id = "55555555-5555-5555-5555-555555555555"
-    }
-  }
-
-  override_resource {
-    target = azurerm_user_assigned_identity.migration
-    values = {
-      principal_id = "66666666-6666-6666-6666-666666666666"
-    }
-  }
-
-  assert {
-    condition     = azurerm_user_assigned_identity.app.principal_id != azurerm_user_assigned_identity.migration.principal_id
-    error_message = "App and migration identities must have distinct principals for the grant binding test to be meaningful."
-  }
-
-  assert {
-    condition     = azurerm_role_assignment.app_openai_user.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_evidence.principal_id == azurerm_user_assigned_identity.app.principal_id && azurerm_role_assignment.app_telemetry.principal_id == azurerm_user_assigned_identity.app.principal_id
-    error_message = "Every app role assignment must be bound to the app workload identity principal."
-  }
-
-  assert {
-    condition     = azurerm_role_assignment.migration_sql.principal_id == azurerm_user_assigned_identity.migration.principal_id
-    error_message = "The migration identity grant must be bound to the migration identity principal."
   }
 }
 
