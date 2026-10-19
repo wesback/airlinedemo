@@ -39,10 +39,16 @@ public sealed class DecisionDossierService(ICaseStateStore store, TimeProvider t
     {
         var snapshot = store.Read(scope);
         if (!string.Equals(snapshot.CaseId, caseId, StringComparison.Ordinal))
-            return new(DossierResultKind.NotFound);
+            return new(DossierResultKind.Incomplete);
 
         var events = snapshot.Audit.Where(item => item.Sequence == decisionId).ToArray();
-        if (events.Length != 1 || events[0].Action != TechnicalReviewPolicy.DecisionAction)
+        if (events.Length == 0)
+            return snapshot.Audit.Any(item => item.Sequence > decisionId)
+                ? new(DossierResultKind.Incomplete)
+                : new(DossierResultKind.NotFound);
+        if (events.Length > 1)
+            return new(DossierResultKind.Incomplete);
+        if (events[0].Action != TechnicalReviewPolicy.DecisionAction)
             return new(DossierResultKind.NotFound);
 
         DecisionDetail? detail;
