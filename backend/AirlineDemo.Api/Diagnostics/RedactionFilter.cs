@@ -11,6 +11,7 @@ public static partial class RedactionFilter
 
     private static readonly HashSet<string> SensitiveKeys = new(StringComparer.OrdinalIgnoreCase)
     {
+        "source.raw_record_id", "recordid", "record.id", "payload",
         "prompt", "gen_ai.prompt", "gen_ai.content.prompt",
         "document", "document.text", "document.content", "evidence.text",
         "passcode", "cookie", "set-cookie", "authorization", "token", "access_token",
@@ -76,7 +77,8 @@ public static partial class RedactionFilter
     }
 
     public static IReadOnlyList<KeyValuePair<string, object?>> RedactAttributes(
-        IReadOnlyList<KeyValuePair<string, object?>>? attributes)
+        IReadOnlyList<KeyValuePair<string, object?>>? attributes,
+        IReadOnlySet<string>? approvedSourceAttributes = null)
     {
         if (attributes is null)
         {
@@ -86,6 +88,13 @@ public static partial class RedactionFilter
         var result = new List<KeyValuePair<string, object?>>(attributes.Count);
         foreach (var (key, value) in attributes)
         {
+            if (TelemetryRedaction.IsSourceSpecificAttribute(key)
+                && approvedSourceAttributes is not null
+                && !approvedSourceAttributes.Contains(key))
+            {
+                continue;
+            }
+
             // Log properties and scopes with a sensitive name are dropped, not kept as placeholders.
             if (IsSensitiveKey(key))
             {

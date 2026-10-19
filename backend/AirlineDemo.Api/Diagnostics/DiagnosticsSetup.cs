@@ -2,9 +2,11 @@ using System.Diagnostics;
 using Azure.Monitor.OpenTelemetry.Exporter;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
 namespace AirlineDemo.Api.Diagnostics;
@@ -13,6 +15,7 @@ namespace AirlineDemo.Api.Diagnostics;
 public static class DiagnosticsSetup
 {
     public const string ConnectionStringSetting = "APPLICATIONINSIGHTS_CONNECTION_STRING";
+    public const string SourceAttributeApprovalPathSetting = "Telemetry:SourceAttributeApprovalPath";
 
     public static IServiceCollection AddAirlineDiagnostics(this IServiceCollection services, IConfiguration configuration)
     {
@@ -22,9 +25,25 @@ public static class DiagnosticsSetup
             return services;
         }
 
+        var environment = configuration["Telemetry:Environment"]
+            ?? configuration["DOTNET_ENVIRONMENT"]
+            ?? configuration["ASPNETCORE_ENVIRONMENT"]
+            ?? Environments.Production;
+        var resourceAttributes = TelemetryRedaction.ResourceAttributes(
+            TelemetryRedaction.ServiceVersion,
+            environment.ToLowerInvariant())
+            .Select(attribute => new KeyValuePair<string, object>(attribute.Key, attribute.Value));
+        var resource = ResourceBuilder.CreateEmpty()
+            .AddTelemetrySdk()
+            .AddAttributes(resourceAttributes);
+        var approvalPath = configuration[SourceAttributeApprovalPathSetting]
+            ?? Path.Combine(Directory.GetCurrentDirectory(), "docs", "telemetry", "source-system-proposed-additions.md");
+        var approvedSourceAttributes = TelemetryRedaction.ReadApprovedSourceAttributes(approvalPath);
+
         services.AddLogging(logging => logging.AddOpenTelemetry(logs =>
         {
-            logs.AddRedaction();
+            logs.SetResourceBuilder(resource);
+            logs.AddRedaction(approvedSourceAttributes);
             logs.AddAzureMonitorLogExporter(o =>
             {
                 o.ConnectionString = connectionString;
@@ -33,6 +52,7 @@ public static class DiagnosticsSetup
 
         services.AddOpenTelemetry().WithTracing(tracing =>
         {
+            tracing.SetResourceBuilder(resource);
             tracing.AddSource(TelemetryRedaction.ServiceName);
             // Processors run in registration order, so redaction must be added before the exporter.
             tracing.AddRedaction();
@@ -49,9 +69,14 @@ public static class DiagnosticsSetup
     // redacted values. Scopes are read by the processor, folded into the attributes through the same filter, and
     // then removed from the record so exporters cannot read the raw scope values.
     public static OpenTelemetryLoggerOptions AddRedaction(this OpenTelemetryLoggerOptions options)
+        => options.AddRedaction(null);
+
+    public static OpenTelemetryLoggerOptions AddRedaction(
+        this OpenTelemetryLoggerOptions options,
+        IReadOnlySet<string>? approvedSourceAttributes)
     {
         options.IncludeScopes = true;
-        options.AddProcessor(new RedactingLogProcessor());
+        options.AddProcessor(new RedactingLogProcessor(approvedSourceAttributes));
         return options;
     }
 
@@ -61,6 +86,11 @@ public static class DiagnosticsSetup
 
     private sealed class RedactingLogProcessor : BaseProcessor<LogRecord>
     {
+        private readonly IReadOnlySet<string>? approvedSourceAttributes;
+
+        public RedactingLogProcessor(IReadOnlySet<string>? approvedSourceAttributes) =>
+            this.approvedSourceAttributes = approvedSourceAttributes;
+
         // LogRecord keeps scopes in an internal ScopeStorage field; it is cleared after scopes are copied so exporters see no raw scopes.
         private const System.Reflection.BindingFlags AnyInstance =
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
@@ -126,7 +156,7 @@ public static class DiagnosticsSetup
             }
 
             // Body and rendered message are always replaced by the fixed text, so no interpolated or formatted message is exported.
-            data.Attributes = source.Count > 0 ? RedactionFilter.RedactAttributes(source) : null;
+            data.Attributes = source.Count > 0 ? RedactionFilter.RedactAttributes(source, approvedSourceAttributes) : null;
             data.Body = FixedLogBody;
             data.FormattedMessage = FixedLogBody;
         }

@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
@@ -317,7 +319,9 @@ public sealed class SourceSystemTelemetryContractTests
         var insideSpan = Assert.Single(events, item => item.Name == TelemetryRedaction.SourceEvents.ReadLimited);
         var expectedResourceKeys = new[]
         {
+            "deployment.environment",
             "service.name",
+            "service.version",
             "telemetry.sdk.language",
             "telemetry.sdk.name",
             "telemetry.sdk.version",
@@ -352,6 +356,9 @@ public sealed class SourceSystemTelemetryContractTests
                 captured.Resource.Select(attribute => attribute.Key).OrderBy(key => key, StringComparer.Ordinal));
             Assert.All(captured.Resource, attribute => Assert.NotNull(attribute.Value));
             var resource = captured.Resource.ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
+            Assert.Equal(environmentName.ToLowerInvariant(), resource["deployment.environment"]?.ToString());
+            Assert.Equal(TelemetryRedaction.ServiceName, resource["service.name"]?.ToString());
+            Assert.Equal(TelemetryRedaction.ServiceVersion, resource["service.version"]?.ToString());
             Assert.Equal("opentelemetry", resource["telemetry.sdk.name"]);
             Assert.Equal("dotnet", resource["telemetry.sdk.language"]);
             Assert.False(string.IsNullOrWhiteSpace(resource["telemetry.sdk.version"]?.ToString()));
@@ -439,16 +446,19 @@ public sealed class SourceSystemTelemetryContractTests
         Assert.Equal(expectedMetricDimensions, metricDimensions);
         Assert.Empty(permittedAttributes.Intersect(metricDimensions, StringComparer.Ordinal));
 
-        var productionApprovalPath = Path.Combine(
-            FindRepositoryRoot(),
-            "docs",
-            "telemetry",
-            "source-system-proposed-additions.md");
-        Assert.False(File.Exists(productionApprovalPath));
-
-        var defaultFilteredAttributes = TelemetryRedaction.Redact(permittedAttributes.Select(attribute =>
-            new KeyValuePair<string, object?>(attribute, "approval-fixture-value")));
-        Assert.Empty(defaultFilteredAttributes);
+        var observedMetricDimensions = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) => listener.EnableMeasurementEvents(instrument),
+        };
+        CaptureMetricDimensionKeys<byte>(meterListener, observedMetricDimensions);
+        CaptureMetricDimensionKeys<short>(meterListener, observedMetricDimensions);
+        CaptureMetricDimensionKeys<int>(meterListener, observedMetricDimensions);
+        CaptureMetricDimensionKeys<long>(meterListener, observedMetricDimensions);
+        CaptureMetricDimensionKeys<float>(meterListener, observedMetricDimensions);
+        CaptureMetricDimensionKeys<double>(meterListener, observedMetricDimensions);
+        CaptureMetricDimensionKeys<decimal>(meterListener, observedMetricDimensions);
+        meterListener.Start();
 
         var sourceAttributeValues = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -456,29 +466,19 @@ public sealed class SourceSystemTelemetryContractTests
             ["case.id"] = CaseId,
             ["event.outcome"] = "unavailable",
             ["duration"] = 42,
-            ["source.raw_record_id"] = "record-1",
+            ["source.raw_record_id"] = "SYN-SOURCE-RAW-RECORD",
+            ["recordId"] = "SYN-RECORD-ID",
+            ["record.id"] = "SYN-DOTTED-RECORD-ID",
         };
-        var approvedAttributeSet = permittedAttributes.ToHashSet(StringComparer.Ordinal);
-        var approvedAttributeValues = sourceAttributeValues
-            .Where(attribute => approvedAttributeSet.Contains(attribute.Key))
-            .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
-        Assert.Equal(
-            expectedPermittedAttributes.OrderBy(attribute => attribute, StringComparer.Ordinal),
-            approvedAttributeValues.Keys.OrderBy(attribute => attribute, StringComparer.Ordinal));
-        Assert.DoesNotContain("source.raw_record_id", approvedAttributeValues.Keys);
+
         var approvedEvents = new List<CapturedEvent>();
-        await using var approvedFactory = CreateFactory(
-            Path.Combine(temporaryDirectory.Path, "case-state.json"),
-            approvedEvents,
-            new ControlledSource(),
-            new ControlledAdmission(),
-            auditFailure: false);
-        var approvedLogger = approvedFactory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-approval-test");
-        using (approvedLogger.BeginScope(approvedAttributeValues))
+        using (var approvedServices = CreateProductionLoggerServices(new EventCapture(approvedEvents), approvalPath))
         {
-            SourceSystemDiagnostics.SourceUnavailable(
-                approvedLogger,
-                approvedFactory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
+            var approvedLogger = approvedServices.GetRequiredService<ILoggerFactory>().CreateLogger("source-approval-test");
+            using (approvedLogger.BeginScope(sourceAttributeValues))
+            {
+                SourceSystemDiagnostics.SourceUnavailable(approvedLogger, Environments.Development);
+            }
         }
 
         var approvedSourceEvent = Assert.Single(approvedEvents, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
@@ -488,63 +488,66 @@ public sealed class SourceSystemTelemetryContractTests
         Assert.Equal(
             expectedPermittedAttributes.OrderBy(attribute => attribute, StringComparer.Ordinal),
             emittedApprovedAttributes.Keys.OrderBy(attribute => attribute, StringComparer.Ordinal));
-        foreach (var (key, value) in approvedAttributeValues)
+        foreach (var key in expectedPermittedAttributes)
         {
-            Assert.Equal(value, emittedApprovedAttributes[key]);
+            Assert.Equal(sourceAttributeValues[key], emittedApprovedAttributes[key]);
         }
+        AssertNoRecordIdentifiers(approvedSourceEvent);
+        Assert.Empty(expectedPermittedAttributes.Intersect(observedMetricDimensions.Keys, StringComparer.Ordinal));
 
+        File.Delete(approvalPath);
         var defaultEvents = new List<CapturedEvent>();
-        await using var defaultFactory = CreateFactory(
-            Path.Combine(temporaryDirectory.Path, "default-case-state.json"),
-            defaultEvents,
-            new ControlledSource(),
-            new ControlledAdmission(),
-            auditFailure: false);
-        var defaultLogger = defaultFactory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-default-approval-test");
-        var productionApprovalSet = File.Exists(productionApprovalPath)
-            ? (await File.ReadAllLinesAsync(productionApprovalPath))
-                .SkipWhile(line => line != "source-specific-attributes")
-                .Skip(1)
-                .TakeWhile(line => line != "metric-dimensions")
-                .ToHashSet(StringComparer.Ordinal)
-            : new HashSet<string>(StringComparer.Ordinal);
-        var defaultAttributeValues = sourceAttributeValues
-            .Where(attribute => productionApprovalSet.Contains(attribute.Key))
-            .ToDictionary(attribute => attribute.Key, attribute => attribute.Value, StringComparer.Ordinal);
-        Assert.Empty(defaultAttributeValues);
-        using (defaultLogger.BeginScope(defaultAttributeValues))
+        using (var defaultServices = CreateProductionLoggerServices(new EventCapture(defaultEvents), approvalPath))
         {
-            SourceSystemDiagnostics.SourceUnavailable(
-                defaultLogger,
-                defaultFactory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
-        }
-
-        var defaultSourceEvent = Assert.Single(defaultEvents, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
-        var defaultEmittedAttributeNames = defaultSourceEvent.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
-        Assert.Empty(expectedPermittedAttributes.Intersect(defaultEmittedAttributeNames, StringComparer.Ordinal));
-        Assert.DoesNotContain("source.raw_record_id", defaultEmittedAttributeNames);
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "AirlineDemo.sln")))
+            var defaultLogger = defaultServices.GetRequiredService<ILoggerFactory>().CreateLogger("source-default-approval-test");
+            using (defaultLogger.BeginScope(sourceAttributeValues))
             {
-                return directory.FullName;
+                SourceSystemDiagnostics.SourceUnavailable(defaultLogger, Environments.Development);
             }
         }
 
-        throw new DirectoryNotFoundException("Could not locate the repository root from the test output directory.");
+        var defaultSourceEvent = Assert.Single(defaultEvents, item => item.Name == TelemetryRedaction.SourceEvents.SourceUnavailable);
+        var defaultAttributeNames = defaultSourceEvent.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
+        Assert.Empty(expectedPermittedAttributes.Intersect(defaultAttributeNames, StringComparer.Ordinal));
+        AssertNoRecordIdentifiers(defaultSourceEvent);
     }
 
-    private static ServiceProvider CreateProductionLoggerServices(EventCapture processor)
+    private static void CaptureMetricDimensionKeys<T>(
+        MeterListener listener,
+        ConcurrentDictionary<string, byte> observedDimensions)
+        where T : struct
     {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        listener.SetMeasurementEventCallback<T>((_, _, tags, _) =>
+        {
+            foreach (var tag in tags)
+            {
+                observedDimensions.TryAdd(tag.Key, 0);
+            }
+        });
+    }
+
+    private static void AssertNoRecordIdentifiers(CapturedEvent captured)
+    {
+        var names = captured.Attributes.Select(attribute => attribute.Key).ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain("source.raw_record_id", names);
+        Assert.DoesNotContain("recordId", names);
+        Assert.DoesNotContain("record.id", names);
+    }
+
+    private static ServiceProvider CreateProductionLoggerServices(EventCapture processor, string? sourceAttributeApprovalPath = null)
+    {
+        var settings = new Dictionary<string, string?>
         {
             [DiagnosticsSetup.ConnectionStringSetting] =
                 "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=http://127.0.0.1:1/",
-        }).Build();
+            ["Telemetry:Environment"] = Environments.Development,
+        };
+        if (sourceAttributeApprovalPath is not null)
+        {
+            settings[DiagnosticsSetup.SourceAttributeApprovalPathSetting] = sourceAttributeApprovalPath;
+        }
+
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var services = new ServiceCollection();
         services.AddAirlineDiagnostics(configuration);
         services.AddLogging(logging => logging.AddOpenTelemetry(options => options.AddProcessor(processor)));
