@@ -2,11 +2,11 @@
 prd_id: "aircraft-source-systems"
 title: "Synthetic Source-System Stubs and Read-Only Source Port"
 status: "draft"
-version: "0.9.0"
+version: "0.9.1"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-16"
-last_updated: "2026-10-16"
+last_updated: "2026-10-19"
 product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Synthetic Source-System Stubs and Read-Only Source Port
 
-> **aircraft-source-systems** | Status: Draft | Version: 0.9.0 | Last Updated: 2026-10-16
+> **aircraft-source-systems** | Status: Draft | Version: 0.9.1 | Last Updated: 2026-10-19
 
 ## Executive Summary
 
@@ -35,7 +35,7 @@ This PRD defines five synthetic source-system stubs and one read-only server por
 
 The stubs let the demonstration show the intended shape of the product: a coordinator (the application-owned case state machine, ARR:DD-009) gathers facts from several systems, a bounded investigator reads them through case-scoped read-only tools, and humans decide. The port is the seam where a real system adapter would later replace a stub. Every datum read through it carries provenance (system, record, version, as-of date), and the stubs can simulate an unavailable, stale or conflicting source so the presenter can show how the workflow reacts.
 
-Version 0.4.0 withdraws the notice-validity checklist, which is outside the capstone areas. Version 0.3.0 added Cape Town interest evidence records, per-regime sanctions flags, an IFRS 16 flag topic and a personal-data marker, so each regulatory area in the capstone brief has a defined route to its owner. Version 0.2.0 added the controls an auditor or specialist panel will ask about: an exportable decision dossier, regime and responsibility tags on requirements, separate finance record kinds for rent, reserves and deposits, and specialist-review flags that can never read as clearance. They show that the controls work; they do not show regulatory compliance.
+Version 0.9.1 closes the planner's open points: the telemetry approval is a recorded human merge gate (DD-025), role-by-source and anti-forgery negative tests are explicit (AC-038, AC-039), and several criteria now state the invariants they prove. Version 0.4.0 withdraws the notice-validity checklist, which is outside the capstone areas. Version 0.3.0 added Cape Town interest evidence records, per-regime sanctions flags, an IFRS 16 flag topic and a personal-data marker, so each regulatory area in the capstone brief has a defined route to its owner. Version 0.2.0 added the controls an auditor or specialist panel will ask about: an exportable decision dossier, regime and responsibility tags on requirements, separate finance record kinds for rent, reserves and deposits, and specialist-review flags that can never read as clearance. They show that the controls work; they do not show regulatory compliance.
 
 This PRD adds no workflow state, role, agent or external action. ARR stays authoritative for case workflow, authority boundaries and the evidence basis. Acceptance criteria describe future verification and are not evidence of delivery.
 
@@ -85,7 +85,7 @@ All systems, records, actors and decisions are synthetic or simulated.
 | DD-022 | Every `records` entry carries `containsPersonalData` (boolean) and fixtures are rejected without it. Source summaries, dossiers and diagnostics carry identifiers, versions and hashes only, never a field flagged as personal data. Retention, erasure and data-subject request handling are design-only and described in `docs/compliance-request-handling.md`; no request-handling feature is built. |
 | DD-023 | Source authorization is role- and case-scoped: technical-reviewer may read technical, maintenance, and records sources; finance-reviewer may read technical and finance sources; legal-reviewer may read contracts and records sources; presenter and executive may read the source summary only; a decision dossier is readable only by a case-scoped reviewer whose role matches the recorded decision. Unknown roles are denied. Source-mode changes remain presenter-only. |
 | DD-024 | Direct source-record reads are limited to 20 requests per authenticated session and case per minute, with at most 2 in-flight reads per case, no pagination, and at most 100 records in one response. A limit breach returns 429 with error.code source_read_limit; a source response exceeding 100 records returns 422 with error.code source_record_limit and no partial records; a read exceeding the 1-second request deadline returns 504 with error.code source_read_timeout. |
-| DD-025 | After Telemetry Foundations approves the proposed additions and the approval is recorded in `docs/telemetry/source-system-proposed-additions.md`, source-specific structured logs may use source.id, case.id, event.outcome, and duration; these fields are never metric dimensions, and raw record identifiers and payloads remain excluded. |
+| DD-025 | After Telemetry Foundations approves the proposed additions and the approval is recorded in `docs/telemetry/source-system-proposed-additions.md`, source-specific structured logs may use source.id, case.id, event.outcome, and duration; these fields are never metric dimensions, and raw record identifiers and payloads remain excluded. The approval is a human merge gate: it exists only when a pull request that adds `docs/telemetry/source-system-proposed-additions.md` (naming the four attributes, their allowed values, and the approving person) has been merged to the default branch by a person. Until then these attributes stay suppressed and the diagnostic allowlist excludes them; no automated process creates or edits that file. |
 | DD-026 | DD-026: A source coverage flag is true only when the source mode is available and at least one in-scope record from that source is present; otherwise it is false. |
 | DD-027 | DD-027: For Cases A, B, and C, the signed source fixtures are the canonical identifier set; any Aircraft Case Pack artifact for those scenarios uses the same case, document, and component identifiers. |
 | DD-028 | DD-028: For repeated exports of the same recorded decision, serialized bytes are identical after removing the `exportedAt` field; `contentHash` covers every other field except `contentHash` itself. This rule follows AC-024 and DD-016. |
@@ -108,11 +108,11 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 |---|---|---|---|---|---|
 | FR-001 | Define the read-only source port and the `SourceRecord` envelope (DD-002, DD-004, DD-012), with `list` and `get` operations per case and source, a typed `source_unavailable` result, and versioned errors. | Application code or an authenticated client reads a source. | ARR:DD-014, ARR:NFR-008. | AC-001, AC-002, AC-003 | GOAL-001 |
 | FR-002 | Implement the five stubs deterministically from versioned fixtures with manifest, hash, fixed scenario date and refuse-on-mismatch loading, covering the ARR core case and Cases A, B and C. | Application seeds fixtures. | CP:FR-001, CP:FR-002, ARR:DD-018. | AC-004, AC-005 | GOAL-001 |
-| FR-003 | Enforce server-side identity, role and case scope on every source read; never return a record for a different case. | Authenticated user or investigator tool reads a source. | ARR:DD-014, ARR:NFR-001, CP:FR-008. | AC-006, AC-007 | GOAL-001 |
+| FR-003 | Enforce server-side identity, role and case scope on every source read; never return a record for a different case. | Authenticated user or investigator tool reads a source. | ARR:DD-014, ARR:NFR-001, CP:FR-008. | AC-006, AC-007, AC-038 | GOAL-001 |
 | FR-004 | Pin the source records a basis used into the evidence basis, and reassess through the ARR path when a pinned record's version changes. | Coordinator gathers sources; a source record changes version. | ARR:FR-001, ARR:FR-005. | AC-008, AC-009 | GOAL-001 |
 | FR-005 | Give the investigator the read-only tools `list_source_records` and `get_source_record` within its existing budgets and citation validation; a source claim cites a `SourceRecord` witness. | Investigation step runs. | ARR:FR-002, ARR:AC-013. | AC-010, AC-011 | GOAL-001 |
 | FR-006 | Feed the reserve consumer from `technical` and `finance` records and the obligation consumer from `contracts` records, citing the source record on each output line, without changing their rules or states. | Reserve or obligation evaluated. | ARR:FR-006, ARR:FR-007, ARR:AC-014, ARR:AC-015. | AC-012, AC-013 | GOAL-001 |
-| FR-007 | Let a presenter in scope set a source's simulated mode (`available`, `unavailable`, `stale`, `conflicting`) for one case run through an authenticated, anti-forgery-protected, idempotent command that writes one audit record. | Presenter issues the command. | ARR:DD-028, ARR:DD-027, CP:FR-009. | AC-014, AC-015, AC-016 | GOAL-002 |
+| FR-007 | Let a presenter in scope set a source's simulated mode (`available`, `unavailable`, `stale`, `conflicting`) for one case run through an authenticated, anti-forgery-protected, idempotent command that writes one audit record. | Presenter issues the command. | ARR:DD-028, ARR:DD-027, CP:FR-009. | AC-014, AC-015, AC-016, AC-039 | GOAL-002 |
 | FR-008 | Apply source modes to findings as DD-008 states: unavailable or stale blocks or downgrades with a stated reason, document-versus-source disagreement routes to internal review, and none of them creates a mock request or an acceptance. | A finding depends on a non-`available` source. | ARR:FR-003, ARR:FR-004. | AC-017, AC-018 | GOAL-002 |
 | FR-009 | Serve a read-only, versioned source summary for a case: per source its mode, the records in use with provenance, and a coverage flag; no payload text beyond the typed fields. | Authenticated user opens the case. | ARR:FR-008, ARR:FR-013. | AC-019 | GOAL-001 |
 | FR-010 | Emit source-read, mode-change and load outcomes through the existing server diagnostics filter, without record payloads or authentication secrets. | A read, mode change or load completes or fails. | ARR:DD-029, ARR:NFR-002, ARR:NFR-004. | AC-020 | GOAL-001 |
@@ -223,7 +223,7 @@ flowchart LR
 
 ### Security
 
-**NFR-003.** The scope, read-only, anti-forgery and replay rules in the Security Notes hold on every endpoint and tool, verified by negative tests (AC-006, AC-007, AC-010, AC-015, AC-016).
+**NFR-003.** The scope, read-only, anti-forgery and replay rules in the Security Notes hold on every endpoint and tool, verified by negative tests (AC-006, AC-007, AC-010, AC-015, AC-016, AC-038, AC-039).
 
 ### Privacy
 
@@ -235,13 +235,17 @@ flowchart LR
 
 ### Observability
 
-**NFR-006.** Reads, mode changes and loads are visible in diagnostics with source, case, outcome and duration, and without payloads (AC-020).
+**NFR-006.** Reads, mode changes and loads are visible in diagnostics without payloads; the attributes for source, case, outcome and duration are added once the DD-025 approval record is merged (AC-020).
 
 ### Compatibility and Interoperability
 
 **NFR-007.** Contracts are versioned (DD-012); unsupported versions fail explicitly. Cross-source identifiers (`documentId`, `componentId`, `caseId`) match the ARR and CP identifiers exactly.
 
 **NFR-008.** The dossier for a case with up to 50 pinned items is produced in 2 seconds or less at the 95th percentile, and its bytes are identical for repeated exports of the same decision (AC-024).
+
+### Scalability
+
+Out of scope. The demonstrator is a fixed, in-process, four-case fixture set; NFR-001 and NFR-008 bound the only load it serves.
 
 ### Usability and Accessibility
 
@@ -253,7 +257,7 @@ Not applicable to this PRD; there is no interface requirement. Display of the su
 |---|---|---|---|---|
 | CON-001 | Synthetic data and in-process stubs only (ARR:CON-001). | Operational | Fictional demonstrator. | No real system, network call or data. |
 | CON-002 | No new workflow state, role, agent or orchestrator (ARR:DD-010). | Architectural | Keeps one workflow owner. | Source gathering fits inside existing lifecycle states. |
-| CON-003 | No new Azure resource, package or `.github/` change is required. | Delivery | Keeps stories inside the implementer's write scope. | Terraform and CI are untouched. |
+| CON-003 | Stories under this PRD must not add an Azure resource, Terraform, a package dependency, or a change under `.github/` or `.ai-sdlc/`. | Delivery | Imposed by the repository's write-scope rules for pipeline-built stories (`AGENTS.md`, `.ai-sdlc/agent-role.yaml`). | Terraform, CI and governance paths are untouched; a need for any of them becomes a separate, person-merged story. |
 
 ## Process Models
 
@@ -267,11 +271,12 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 |---|---|---|---|
 | AC-001 | Given the port interface, when reflected, then it exposes only read operations, and a test fails if a member named or typed as a write is added. | FR-001 | Automated |
 | AC-002 | Given a valid in-scope request, when a source is read, then every record carries `sourceId`, `recordId`, `recordVersion`, `asOf`, `caseId`, `kind` and `synthetic: true`; a record missing any is rejected by fixture validation. | FR-001 | Automated |
-| AC-003 | Given an unsupported `/api/v{n}/` version, then the response is 400 `unsupported_contract_version` with no case data; given an unauthenticated read, then 401 with no case data. | FR-001 | Automated |
-| AC-004 | Given the fixtures, when loaded, then the ARR core case and Cases A, B and C each have records in all five sources, and the manifest hash, `schemaVersion` and counts validate. | FR-002 | Automated |
-| AC-005 | Given a changed fixture byte, a wrong `schemaVersion` or a wrong count, when loaded, then loading is refused with a reason and no partial data is published; given a pre-existing pack and unrelated case data, an injected failure leaves them unchanged. | FR-002 | Automated |
-| AC-006 | Given a user whose scope excludes a case, when any source endpoint is read, then the response equals that of a nonexistent case and no record is returned. | FR-003 | Automated |
+| AC-003 | Given an unsupported `/api/v{n}/` version, then the response is 400 `unsupported_contract_version` with no case data; given an unauthenticated read, then 401 with no case data; given a source in `unavailable` mode, when its records are read directly, then the response is 503 with `error.code = source_unavailable` and neither a `records` property nor any record data. | FR-001 | Automated |
+| AC-004 | Given the fixtures, when loaded, then the ARR core case and Cases A, B and C each have records in all five sources, and the manifest hash, `schemaVersion` and counts validate; the `caseId`, `documentId` and `componentId` values equal the canonical ARR and CP values (NFR-007, DD-027), compared against the ARR fixtures and the CP pack on the default branch. | FR-002 | Automated |
+| AC-005 | Given a changed fixture byte, a wrong `schemaVersion` or a wrong count, when loaded, then loading is refused with a reason and no partial data is published; given previously stored source data, pins and audit records, an injected validation or publication failure leaves all three byte-for-byte unchanged (NFR-002); loading the same version and hash again is a no-op, and a stored version with different content is refused. | FR-002 | Automated |
+| AC-006 | Given a user whose scope excludes a case, when any source endpoint is read, then the response equals that of a nonexistent case and no record is returned and no source stub is called (a counting fake on the port records zero calls). | FR-003 | Automated |
 | AC-007 | Given a record whose `caseId` differs from the requested case (seeded in a test fixture), when read, then it is never returned, and the attempt is a diagnostics event without payload. | FR-003 | Automated |
+| AC-038 | Given each documented role and source (technical-reviewer: technical, maintenance, records; finance-reviewer: technical, finance; legal-reviewer: contracts, records; presenter and executive: summary only), when every role reads every source, then allowed reads return records and every other combination is denied with the response of a nonexistent resource, no source stub is called and no record is disclosed; an unknown role is denied; a table-driven test enumerates all role-by-source cases (DD-023). | FR-003 | Automated |
 | AC-008 | Given a gathered case, when the basis is built, then it pins each used `(sourceId, recordId, recordVersion)`; a basis built from the same inputs is identical, and a basis without pins is rejected. | FR-004 | Automated |
 | AC-009 | Given a pinned record whose fixture version is bumped, when the case is reassessed, then a new basis is created, the former basis is retained, and the history shows both; an unchanged record creates no new basis. | FR-004 | Automated |
 | AC-010 | Given the investigator, when it lists tools, then `list_source_records` and `get_source_record` are present and no source write tool exists; a call with a different case identifier than the server-bound one is refused. | FR-005 | Automated |
@@ -281,10 +286,11 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | AC-014 | Given a presenter in scope, when the mode command is issued with a valid token and revision, then the source mode changes for the current run, one audit record is written, and the receipt matches the contract. | FR-007 | Automated |
 | AC-015 | Given a technical, finance, legal or executive role, or a presenter outside case scope, when the command is issued, then the response is 403 or 404 respectively, state is unchanged and no audit record is written. | FR-007 | Automated |
 | AC-016 | Given an exact replay, then the original receipt returns with no new audit record; given a reused identifier with a different payload, 409 `command_id_conflict`; given a stale revision, 409 `stale_revision`; given the current mode, 422 `mode_unchanged`; and a run reset restores every source to `available`. | FR-007 | Automated |
+| AC-039 | Given a mode command with a missing or invalid anti-forgery token (and otherwise valid session, role, scope and revision), when issued, then the response is the contract's anti-forgery error, the source mode is unchanged and zero audit records are written; the check runs after authentication, role and case scope and before replay lookup. | FR-007 | Automated |
 | AC-017 | Given a source set to `unavailable` or `stale`, when the dependent finding is assessed, then it is blocked or downgraded with a stated reason, no mock request is created, and no acceptance is recorded; given `available`, the same finding follows its normal path. | FR-008 | Automated |
 | AC-018 | Given a document and a source record that disagree (Case B engine identity), when assessed, then the finding routes to internal review with zero external requests and both items cited. | FR-008 | Automated |
-| AC-019 | Given an in-scope user, when the summary is read, then it lists five sources with mode, record counts and pin flags, contains no payload text, and is consistent with `caseRevision`; an over-limit payload returns 422 `source_payload_limit`. | FR-009 | Automated |
-| AC-020 | Given a read, a mode change or a failed load, when diagnostics are inspected, then each outcome appears with source, case, outcome and duration and contains no payload text, cookie or token. | FR-010 | Automated |
+| AC-019 | Given the summary read by each role, then a technical-reviewer, finance-reviewer or legal-reviewer sees for the five sources the mode, `recordCount`, `pinnedInBasis` and the DD-026 coverage flag (true only when the mode is `available` and at least one in-scope record exists), and a presenter or executive sees the mode and coverage flag only, with `recordCount` and `pinnedInBasis` omitted (DD-023); no payload text appears for any role, the summary is consistent with `caseRevision`, an over-limit payload returns 422 `source_payload_limit`, and an unknown role is denied. | FR-009 | Automated |
+| AC-020 | Given a read, a mode change or a failed load, when diagnostics are inspected, then each outcome appears in diagnostics and contains no payload text, cookie or token; `source.id`, `case.id`, `event.outcome` and `duration` appear only once the DD-025 approval record is on the default branch, and before that no diagnostic event carries them. | FR-010 | Automated |
 | AC-021 | Given a test double implementing `ISourceSystem`, when registered in place of one stub, then all callers work unchanged and no caller references a stub type. | FR-001, FR-006 | Automated |
 | AC-022 | Given the seeded instruction-like text in a task-card record, when the investigator reads it, then no tool call outside policy occurs and the finding is unaffected. | FR-005 | Automated |
 | AC-033 | Given a `sanctions` flag with no `regime` or a regime outside `EU`, `US`, `UK`, or a non-sanctions flag carrying a `regime`, when fixtures load, then loading is refused; given an `EU` flag only, the `US` and `UK` regimes of the same finding show `not_assessed`, not cleared. | FR-015 | Automated |
@@ -309,11 +315,11 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 |---|---|
 | FR-001 | AC-001, AC-002, AC-003, AC-021 |
 | FR-002 | AC-004, AC-005 |
-| FR-003 | AC-006, AC-007 |
+| FR-003 | AC-006, AC-007, AC-038 |
 | FR-004 | AC-008, AC-009 |
 | FR-005 | AC-010, AC-011, AC-022 |
 | FR-006 | AC-012, AC-013, AC-021 |
-| FR-007 | AC-014, AC-015, AC-016, AC-023 |
+| FR-007 | AC-014, AC-015, AC-016, AC-039, AC-023 |
 | FR-008 | AC-017, AC-018, AC-023 |
 | FR-009 | AC-019, AC-023 |
 | FR-010 | AC-020 |
@@ -350,7 +356,7 @@ Suggested story order (each story changes under 500 lines, names its test file, 
 9. Source-mode command, audit record and run-reset restore (FR-007).
 10. Source-mode effects on findings (FR-008).
 11. Case A to C source fixtures (FR-002; after CP).
-12. Source summary endpoint (FR-009) and diagnostics (FR-010).
+12. Source summary endpoint (FR-009) and diagnostics (FR-010); the source, case, outcome and duration attributes wait for the DD-025 approval merge.
 13. Finance record kinds and reserve-draft line separation (FR-014).
 14. Requirement applicability tags and `needs_review` rule (FR-012).
 15. Specialist flags (including per-regime sanctions and `ifrs16`) and `cape_town_interest` records, with fixture validation (FR-015).
@@ -370,8 +376,8 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 
 | Goal | Indicator | Baseline | Target | Evidence |
 |---|---|---|---|---|
-| GOAL-001 | Automated criteria passing (AC-001 to AC-013, AC-019 to AC-022: 18); records without provenance; cross-case records returned | 0 of 18; not built | 18 of 18; 0; 0 | Test results at each release-candidate revision |
-| GOAL-002 | Mode-command criteria (AC-014 to AC-018) passing; audit record per accepted mode change; automatic requests or acceptances caused by a source problem | 0 of 5; none; not built | 5 of 5; 1 per accepted change and none per replay or rejection; 0 | Test results and audit history |
+| GOAL-001 | Automated criteria passing (AC-001 to AC-013, AC-019 to AC-022 and AC-038: 18); records without provenance; cross-case records returned | 0 of 18; not built | 18 of 18; 0; 0 | Test results at each release-candidate revision |
+| GOAL-002 | Mode-command criteria (AC-014 to AC-018 and AC-039: 6) passing; audit record per accepted mode change; automatic requests or acceptances caused by a source problem | 0 of 6; none; not built | 6 of 6; 1 per accepted change and none per replay or rejection; 0 | Test results and audit history |
 | GOAL-003 | Dossier, applicability, finance and specialist-flag criteria passing (AC-024 to AC-037 except the withdrawn AC-028 and AC-029: 12); screens or exports stating compliance, clearance, validity or profit | 0 of 12; not built | 12 of 12; 0 | Test results and manual wording check |
 
 ## Risks and Assumptions
@@ -426,7 +432,7 @@ None requested.
 
 ### Handoff Readiness
 
-Draft only. No implementation story is approved until a named person approves this PRD pull request and the prerequisite delivery gate in MVP and Release Framing is satisfied. A merged PRD is planned into stories by the pipeline (threat model, then stories); say in the pull request whether it needs ARR amendment AS-002 first.
+Draft only. No implementation story is approved until a named person approves this PRD pull request and the prerequisite delivery gate in MVP and Release Framing is satisfied. A merged PRD is planned into stories by the pipeline (threat model, then stories); say in the pull request whether it needs ARR amendment AS-002 first. The telemetry approval record (DD-025) is a separate pull request a person merges; the stories that add the four attributes depend on it.
 
 ## Disclaimer
 

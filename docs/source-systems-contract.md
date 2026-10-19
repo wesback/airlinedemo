@@ -273,7 +273,7 @@ Every error response contains exactly `contractVersion` and `error`; the error c
 
 ## Tests
 
-`backend/AirlineDemo.Api.Tests/SourcePortContractTests.cs` covers AC-001 (`PortExposesCaseScopedReadOperationsOnly`), AC-002 (`RecordRequiresCompleteProvenanceAndSyntheticFlag`) and AC-003 (`UnavailableAndUnknownSourcesHaveDistinctTypedResults`).
+`backend/AirlineDemo.Api.Tests/SourcePortContractTests.cs` covers AC-001 (`PortExposesCaseScopedReadOperationsOnly`) and AC-002 (`RecordRequiresCompleteProvenanceAndSyntheticFlag`). `UnavailableAndUnknownSourcesHaveDistinctTypedResults` covers the port's typed results (FR-001) and is not the AC-003 test: AC-003 is proved at the endpoint, by the unsupported-version, unauthenticated and direct-read 503 `source_unavailable` cases.
 
 ## Limitations
 
