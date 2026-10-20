@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace AirlineDemo.Api.Investigation;
 
 /// <summary>Kinds of investigator claim that policy routes differently.</summary>
@@ -50,10 +52,14 @@ public sealed record ValidatedClaim
 /// in every witness quote, and every witness names a document in the inventory whose current content still matches
 /// its recorded digest, on an existing page, with a quote that appears verbatim there. Source-backed claims also
 /// require every exact source record tuple to appear in the current source basis. Anything else is downgraded.
-/// Claim text is never interpreted.
+/// Claim text is never interpreted as instructions or policy.
 /// </summary>
 public static class ClaimValidator
 {
+    private static readonly Regex MarkupLikeValuePattern = new(
+        @"<\s*/?\s*[A-Za-z!][^>]*>",
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+
     public static ValidatedClaim Validate(
         InvestigationClaim claim,
         ClaimKind kind,
@@ -67,6 +73,11 @@ public static class ClaimValidator
         if (string.IsNullOrWhiteSpace(typedValue))
         {
             return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim has no typed value");
+        }
+
+        if (MarkupLikeValuePattern.IsMatch(typedValue))
+        {
+            return new ValidatedClaim(claim, kind, ClaimStatus.Downgraded, "claim value is markup");
         }
 
         if (claim.Witnesses is null || claim.Witnesses.Count == 0)

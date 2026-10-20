@@ -154,7 +154,8 @@ public sealed class CasePackAdversarialTests
             Assert.False(basis.IdentityAmbiguous);
             var validated = ClaimValidator.Validate(new InvestigationClaim(claim.Value, claim.Witnesses),
                 claim.Kind, basis.Documents, claim.Value);
-            Assert.Equal(ClaimStatus.Supported, validated.Status);
+            Assert.Equal(ClaimStatus.Downgraded, validated.Status);
+            Assert.Equal("claim value is markup", validated.Reason);
 
             var record = state.Service.Assess(state.Scope, basis, [claim]);
 
@@ -175,6 +176,36 @@ public sealed class CasePackAdversarialTests
             Assert.Equal(request.RequestId, validRecord.RequestId);
             var receipt = Assert.Single(state.Store.ListRequestReceipts(state.Scope));
             Assert.Equal(request.RequestId, receipt.RequestId);
+        }
+
+        using (var state = new StateHarness())
+        {
+            const string markup = "<img src=x onerror=alert(1)>";
+            const string markupDocumentId = "case-b/aircraft-summary.txt";
+            var basis = CasePackFixture.Basis(files);
+            var claim = CasePackFixture.MissingClaim(value: markup, documentId: markupDocumentId, quote: markup);
+            var documents = new Dictionary<string, BasisDocument>(basis.Documents, StringComparer.Ordinal)
+            {
+                [markupDocumentId] = BasisDocument.Create(markupDocumentId, [markup]),
+            };
+            basis = basis with { Documents = documents };
+            state.Assessments.SetCurrentBasis(CasePackFixture.CaseId, basis);
+
+            Assert.Equal(markup, claim.Value);
+            Assert.Equal(markup, Assert.Single(claim.Witnesses).Quote);
+            Assert.Equal("EASA", claim.EvidenceRegime);
+            var validated = ClaimValidator.Validate(new InvestigationClaim(claim.Value, claim.Witnesses),
+                claim.Kind, basis.Documents, claim.Value);
+            Assert.Equal(ClaimStatus.Downgraded, validated.Status);
+            Assert.Equal("claim value is markup", validated.Reason);
+
+            var record = state.Service.Assess(state.Scope, basis, [claim]);
+
+            Assert.Equal("Review", record.Outcome);
+            Assert.Equal("downgraded claim: claim value is markup", record.Reason);
+            Assert.Null(record.RequestId);
+            Assert.Empty(state.Inbox.Requests);
+            Assert.Empty(state.Store.ListRequestReceipts(state.Scope));
         }
 
         Assert.Equal(["Claims"], typeof(AssessmentSubmission).GetProperties().Select(property => property.Name));
