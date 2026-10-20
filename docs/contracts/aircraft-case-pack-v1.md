@@ -8,3 +8,7 @@ There are exactly three cases. Each has non-empty `caseId` and `generatorReferen
 
 Sort `cases` by `caseId`; case fields are ordered `caseId`, `synthetic`, `generatorReference`, `aircraftCount`, `engineCount`, `components`, `documents`. Sort components by `componentId` (fields `componentId`, sorted `evidenceDocumentPaths`); sort documents by `path` (fields `path`, `synthetic`, `generatorReference`). Sort files by `path`; each has fields `path`, `sha256`, where the latter is lowercase SHA-256 of the file's exact bytes. String values use the serializer's JSON escaping; each indicated sort is ordinal.
 No file contents are normalized before hashing. Any file, mapping, provenance, review reference, date, or other canonical-field change requires a new `packVersion` and matching recalculated hash. Comparison takes previous/current manifests and file bytes directly, without Git or a child process. The digest detects drift but does not provide authenticity.
+
+## Publication migration note
+
+Pack publication is atomic at the visibility boundary: consumers receive one immutable snapshot containing the pack version, hash, case records, and document references. A failed publication never exposes a partial pack and does not alter a prior published pack or unrelated case data. Immutable evidence blobs written before a failed commit may remain in the evidence store, but no published snapshot references them. Consumers must use the published snapshot, rather than treating individual case or blob writes as proof that a pack is ready.
