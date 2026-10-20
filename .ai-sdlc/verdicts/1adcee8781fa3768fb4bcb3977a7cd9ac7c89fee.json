@@ -1,0 +1,223 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 437,
+  "branch": "ai-sdlc/issue-437",
+  "commitSha": "1adcee8781fa3768fb4bcb3977a7cd9ac7c89fee",
+  "round": 1,
+  "pipelineVersion": "e461d54",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix now calls the assessment service, but the regime mismatch masks the malicious-claim behavior M-09 requires the test to verify.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+          "line": 138,
+          "message": "M-09 does not prove that the malicious claim is routed to Review: its FAA-121 regime forces Review independently of the claim text. Use the matching applicability regime so the test exercises the required malicious-claim disposition.",
+          "confidence": 0.93,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test sends the claim through AssessmentExecutionService.Assess, but sets EvidenceRegime to FAA-121 while the basis applicability regime is EASA. ResolveRequirementApplicability returns Review for that mismatch before the claim can reach the request decision.",
+            "failureScenario": "If a complete, unambiguous basis receives the same script claim with the matching EASA regime, the mismatch guard no longer applies and the service can classify the supported missing-requirement claim as Request. The test still passes because it only exercises the unrelated regime-mismatch path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated test now exercises the assessment service, but its regime mismatch forces Review before claim routing. As written, it can pass if the malicious-claim routing behavior is broken.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+          "line": 138,
+          "message": "M-09's malicious-claim case uses a regime that conflicts with the current basis, so the assessment path reviews it for that mismatch regardless of how it routes the malicious claim. Use the matching Case B regime so the test can detect an incorrect claim disposition.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test sends the claim through AssessmentExecutionService.Assess, which resolves applicability before routing. The test sets EvidenceRegime to FAA-121 while the current basis pins EASA, so ResolveRequirementApplicability returns a review decision before the claim reaches FindingRouter.Route.",
+            "failureScenario": "If routing a supported malicious claim were changed to accept or submit it, this test would still pass: the mismatched regime independently forces Review with no request. The test therefore does not prove the required review outcome for a valid Case B claim."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The revised test now calls the assessment service, but the mismatched evidence regime leaves the malicious-claim check inconclusive. I found no other security defect in the reviewed delta.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+          "line": 138,
+          "message": "M-09 still does not verify the malicious-claim behavior: the mismatched EvidenceRegime forces Review regardless of how the service handles the script claim. Use the matching EASA regime and assert Review with zero requests and receipts.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The malicious claim is submitted through AssessmentExecutionService.Assess, but its EvidenceRegime is changed to FAA-121 while the basis applicability regime is EASA. The asserted Review outcome is therefore caused by the regime mismatch.",
+            "failureScenario": "If assessment accepts the exact script claim when its evidence regime matches EASA, this test still passes because the FAA-121 mismatch independently forces Review. It does not prove the malicious claim is rejected on the complete, unambiguous current basis."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackAdversarialTests.cs",
+      "backend/AirlineDemo.Api.Tests/CasePackCaseBTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

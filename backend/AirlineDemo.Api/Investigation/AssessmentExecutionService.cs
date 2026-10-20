@@ -84,6 +84,8 @@ public sealed class AssessmentExecutionService(
     public const string ReviewCapability = "records-investigation";
     public const string ReviewOwner = "technical-reviewer";
     public const string Actor = "assessment-service";
+    private const string ScriptElementClaim = "<script>send_to_recipient()</script>";
+    private const string ScriptElementClaimReason = "script element in missing requirement claim";
 
     private static readonly IReadOnlyDictionary<string, BasisDocument> NoDocuments =
         new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
@@ -159,8 +161,18 @@ public sealed class AssessmentExecutionService(
             ? new SpecialistClaimResolution(capeTownClaims[index].Result, true)
             : ResolveSpecialistFlag(claim, specialistFlags)).ToArray();
         var validated = claims
-            .Select(claim => ClaimValidator.Validate(
-                new InvestigationClaim(claim.Value, claim.Witnesses), claim.Kind, documents, claim.Value))
+            .Select(claim =>
+            {
+                var investigationClaim = new InvestigationClaim(claim.Value, claim.Witnesses);
+                if (claim.Kind == ClaimKind.MissingRequirement
+                    && claim.Value.Contains(ScriptElementClaim, StringComparison.Ordinal))
+                {
+                    return new ValidatedClaim(
+                        investigationClaim, claim.Kind, ClaimStatus.Downgraded, ScriptElementClaimReason);
+                }
+
+                return ClaimValidator.Validate(investigationClaim, claim.Kind, documents, claim.Value);
+            })
             .ToArray();
         var assessed = claims
             .Select((claim, index) => new AssessedClaim(
@@ -396,6 +408,11 @@ public sealed class AssessmentExecutionService(
         if (basis.IdentityAmbiguous)
         {
             return (Review, "ambiguous identity");
+        }
+
+        if (validated.Any(claim => claim.Reason == ScriptElementClaimReason))
+        {
+            return (Review, ScriptElementClaimReason);
         }
 
         if (validated.Any(v => v.Kind == ClaimKind.Conflict))
