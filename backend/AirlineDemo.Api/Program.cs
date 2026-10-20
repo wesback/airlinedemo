@@ -7,6 +7,7 @@ using AirlineDemo.Api.Decisions;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Evaluation;
 using AirlineDemo.Api.Finance;
+using AirlineDemo.Api.Fixtures;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.SourceSystems;
@@ -36,6 +37,11 @@ builder.Services.AddSingleton<AssessmentApiRecordStore>();
 builder.Services.AddSingleton<MockRequestInbox>();
 builder.Services.AddSingleton<AssessmentExecutionService>();
 builder.Services.AddEvidenceBlobStore(builder.Configuration);
+builder.Services.AddSingleton<IAircraftCasePackSnapshotStore, InMemoryAircraftCasePackSnapshotStore>();
+builder.Services.AddSingleton<IAircraftCasePackCaseStager, AircraftCasePackCaseStager>();
+builder.Services.AddSingleton(new AircraftCasePackLoader(
+    System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "aircraft-case-pack")));
+builder.Services.AddSingleton<AircraftCasePackPublisher>();
 builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<MockResponseService>();
 builder.Services.AddSingleton<SourceModeStore>();
@@ -95,6 +101,8 @@ SourceFixtureLoader.LoadPinned(
     System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
     app.Logger,
     app.Environment.EnvironmentName);
+await app.Services.GetRequiredService<AircraftCasePackPublisher>().PublishAsync(
+    app.Services.GetRequiredService<AircraftCasePackLoader>(), 0);
 if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error); return; }
 
 app.UseTransportSecurityHeaders();
