@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -33,11 +34,36 @@ public sealed class AircraftCasePackManifestTests
     }
     private static JsonObject Json((AircraftCasePackManifest Manifest, Dictionary<string, byte[]> Files) pack) =>
         JsonNode.Parse(JsonSerializer.Serialize(pack.Manifest, WebJson))!.AsObject();
+    private static string FixtureRoot([CallerFilePath] string source = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", "AirlineDemo.Api", "Fixtures", "aircraft-case-pack"));
+
     private static void RefreshHash(JsonObject json, IReadOnlyDictionary<string, byte[]> files)
     {
         var manifest = JsonSerializer.Deserialize<AircraftCasePackManifest>(json.ToJsonString(), WebJson)!;
         json["sha256"] = AircraftCasePackManifest.ComputeSha256(manifest, files);
     }
+
+    [Fact]
+    public void AC001_PackManifestUsesArrFixtureDateAndValidContentHash()
+    {
+        var root = FixtureRoot();
+        var manifestPath = Path.Combine(root, "manifest.json");
+        var rawManifest = File.ReadAllText(manifestPath);
+        var declaredManifest = JsonSerializer.Deserialize<AircraftCasePackManifest>(rawManifest, WebJson)!;
+        var files = declaredManifest.Files.ToDictionary(
+            path => path,
+            path => File.ReadAllBytes(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar))),
+            StringComparer.Ordinal);
+
+        var result = AircraftCasePackManifest.Parse(rawManifest, files);
+
+        Assert.Empty(result.Errors);
+        Assert.NotNull(result.Manifest);
+        Assert.Equal("1.0.1", result.Manifest.PackVersion);
+        Assert.Equal("2026-10-01", result.Manifest.ScenarioDate);
+        Assert.Equal("issue-460", result.Manifest.ProductOwnerReviewReference);
+    }
+
     [Fact]
     public void ManifestContractAcceptsAndRejectsTableCases()
     {
