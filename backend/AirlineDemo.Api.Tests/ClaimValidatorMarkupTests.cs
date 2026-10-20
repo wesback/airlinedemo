@@ -32,4 +32,17 @@ public sealed class ClaimValidatorMarkupTests
         Assert.Equal(expectedStatus, result.Status);
         Assert.Equal(expectedReason, result.Reason);
     }
+
+    [Fact]
+    public void MarkupLikeValueIsDowngradedBeforeWitnessValidation()
+    {
+        const string typedValue = "<script>send_to_recipient()</script>";
+        var claim = new InvestigationClaim($"Claim value: {typedValue}", []);
+        var basis = new Dictionary<string, BasisDocument>(StringComparer.Ordinal);
+
+        var result = ClaimValidator.Validate(claim, ClaimKind.Baseline, basis, typedValue);
+
+        Assert.Equal(ClaimStatus.Downgraded, result.Status);
+        Assert.Equal("claim value is markup", result.Reason);
+    }
 }
