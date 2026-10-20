@@ -56,7 +56,9 @@ public sealed record ValidatedClaim
 /// </summary>
 public static class ClaimValidator
 {
-    private static readonly Regex MarkupLikeValuePattern = new(@"<\s*/?\s*[A-Za-z!][^>]*>", RegexOptions.CultureInvariant);
+    private static readonly Regex MarkupLikeValuePattern = new(
+        @"<\s*/?\s*[A-Za-z!][^>]*>",
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     public static ValidatedClaim Validate(
         InvestigationClaim claim,
