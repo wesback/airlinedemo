@@ -1,12 +1,19 @@
 {
   "schemaVersion": 1,
-  "packVersion": "1.0.1",
+  "packVersion": "1.0.2",
   "scenarioDate": "2026-10-01",
-  "productOwnerReviewReference": "issue-460",
-  "sha256": "a53e88cb3d4cc8601b20443e8a7be69acf2f45d60d0156d9f9f81261a030ddbe",
+  "productOwnerReviewReference": "issue-473",
+  "sha256": "a409be06b477847b7d762f26631be9aad79945794c8f2bc77f9abc5a9ed9bcae",
   "cases": [
     {
       "caseId": "cp-case-a", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1", "aircraftCount": 1, "engineCount": 1,
+      "aircraftRegistration": { "value": "SYN-CP-A-REG", "synthetic": true },
+      "serialNumbers": [
+        { "kind": "aircraft", "value": "SYN-CP-A-AIR-001", "synthetic": true },
+        { "kind": "engine", "value": "SYN-CP-A-ENG-001", "synthetic": true },
+        { "kind": "component", "value": "SYN-CP-A-CMP-001", "synthetic": true, "componentId": "ENG-CP-A-001" },
+        { "kind": "component", "value": "SYN-CP-A-CMP-002", "synthetic": true, "componentId": "LLP-DISK-CP-A-017" }
+      ],
       "components": [
         { "componentId": "ENG-CP-A-001", "evidenceDocumentPaths": ["case-a/aircraft-summary.txt", "case-a/engine-history-index.txt", "case-a/engine-shop-visit.txt", "case-a/engine-serial-record.txt", "case-a/maintenance-log.txt"] },
         { "componentId": "LLP-DISK-CP-A-017", "evidenceDocumentPaths": ["case-a/llp-installation-record.txt", "case-a/llp-history-gap.txt", "case-a/records-index.txt"] }
@@ -24,6 +31,13 @@
     },
     {
       "caseId": "cp-case-b", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1", "aircraftCount": 1, "engineCount": 1,
+      "aircraftRegistration": { "value": "SYN-CP-B-REG", "synthetic": true },
+      "serialNumbers": [
+        { "kind": "aircraft", "value": "SYN-CP-B-AIR-001", "synthetic": true },
+        { "kind": "engine", "value": "SYN-CP-B-ENG-001", "synthetic": true },
+        { "kind": "component", "value": "SYN-CP-B-CMP-001", "synthetic": true, "componentId": "ENG-CP-B-001" },
+        { "kind": "component", "value": "SYN-CP-B-CMP-002", "synthetic": true, "componentId": "FAN-DISK-CP-B-021" }
+      ],
       "components": [
         { "componentId": "ENG-CP-B-001", "evidenceDocumentPaths": ["case-b/aircraft-summary.txt", "case-b/engine-history-index.txt", "case-b/engine-serial-record.txt", "case-b/engine-shop-visit.txt", "case-b/identity-conflict.txt"] },
         { "componentId": "FAN-DISK-CP-B-021", "evidenceDocumentPaths": ["case-b/component-release.txt", "case-b/maintenance-log.txt", "case-b/records-index.txt"] }
@@ -41,6 +55,13 @@
     },
     {
       "caseId": "cp-case-c", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1", "aircraftCount": 1, "engineCount": 1,
+      "aircraftRegistration": { "value": "SYN-CP-C-REG", "synthetic": true },
+      "serialNumbers": [
+        { "kind": "aircraft", "value": "SYN-CP-C-AIR-001", "synthetic": true },
+        { "kind": "engine", "value": "SYN-CP-C-ENG-001", "synthetic": true },
+        { "kind": "component", "value": "SYN-CP-C-CMP-001", "synthetic": true, "componentId": "ENG-CP-C-001" },
+        { "kind": "component", "value": "SYN-CP-C-CMP-002", "synthetic": true, "componentId": "MLG-CP-C-003" }
+      ],
       "components": [
         { "componentId": "ENG-CP-C-001", "evidenceDocumentPaths": ["case-c/aircraft-summary.txt", "case-c/engine-history-index.txt", "case-c/engine-serial-record.txt", "case-c/engine-shop-visit.txt", "case-c/maintenance-log.txt", "case-c/records-index.txt"] },
         { "componentId": "MLG-CP-C-003", "evidenceDocumentPaths": ["case-c/blocked-document.txt", "case-c/work-card.txt"] }
@@ -58,10 +79,13 @@
     }
   ],
   "files": [
+    "case-a.json",
     "case-a/aircraft-summary.txt", "case-a/engine-history-index.txt", "case-a/engine-shop-visit.txt", "case-a/engine-serial-record.txt",
     "case-a/llp-history-gap.txt", "case-a/llp-installation-record.txt", "case-a/maintenance-log.txt", "case-a/records-index.txt",
+    "case-b.json",
     "case-b/aircraft-summary.txt", "case-b/component-release.txt", "case-b/engine-history-index.txt", "case-b/engine-serial-record.txt",
     "case-b/engine-shop-visit.txt", "case-b/identity-conflict.txt", "case-b/maintenance-log.txt", "case-b/records-index.txt",
+    "case-c.json",
     "case-c/aircraft-summary.txt", "case-c/blocked-document.txt", "case-c/engine-history-index.txt", "case-c/engine-serial-record.txt",
     "case-c/engine-shop-visit.txt", "case-c/maintenance-log.txt", "case-c/records-index.txt", "case-c/work-card.txt"
   ]
