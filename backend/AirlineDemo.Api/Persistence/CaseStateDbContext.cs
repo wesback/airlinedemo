@@ -109,6 +109,21 @@ public sealed class CaseRequestReceiptRow
     public string Body { get; set; } = string.Empty;
 }
 
+public sealed class CaseJourneyEventRow
+{
+    public string CaseId { get; set; } = string.Empty;
+    public long Sequence { get; set; }
+    public string EventId { get; set; } = string.Empty;
+    public string RunId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string? BasisId { get; set; }
+    public int? BasisVersion { get; set; }
+    public string ActorRole { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+    public string CapabilityLabel { get; set; } = string.Empty;
+    public string WitnessesJson { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// EF Core model for the provisioned Azure SQL case-state schema. Schema changes are applied only
 /// by the migration identity; the app identity holds data-plane grants only (see identity-and-telemetry.tf).
@@ -124,6 +139,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<InvestigationTraceStepRow> InvestigationTraceSteps => Set<InvestigationTraceStepRow>();
     public DbSet<CaseAssessmentRow> CaseAssessments => Set<CaseAssessmentRow>();
     public DbSet<CaseRequestReceiptRow> CaseRequestReceipts => Set<CaseRequestReceiptRow>();
+    public DbSet<CaseJourneyEventRow> CaseJourneyEvents => Set<CaseJourneyEventRow>();
     public DbSet<SourceReadWindowRow> SourceReadWindows => Set<SourceReadWindowRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -198,6 +214,21 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.BasisId).HasMaxLength(128).IsRequired();
             e.Property(x => x.TemplateVersion).HasMaxLength(64).IsRequired();
             e.Property(x => x.Body).IsRequired();
+        });
+
+        modelBuilder.Entity<CaseJourneyEventRow>(e =>
+        {
+            e.ToTable("case_journey_events", "dbo");
+            e.HasKey(x => new { x.CaseId, x.Sequence });
+            e.Property(x => x.CaseId).HasMaxLength(128);
+            e.Property(x => x.EventId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.RunId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.EventType).HasMaxLength(128).IsRequired();
+            e.Property(x => x.BasisId).HasMaxLength(128);
+            e.Property(x => x.ActorRole).HasMaxLength(128).IsRequired();
+            e.Property(x => x.Summary).IsRequired();
+            e.Property(x => x.CapabilityLabel).HasMaxLength(128).IsRequired();
+            e.Property(x => x.WitnessesJson).IsRequired();
         });
 
         modelBuilder.Entity<CaseRow>(e =>

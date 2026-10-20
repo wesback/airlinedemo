@@ -23,6 +23,11 @@ public interface ICaseStateStore
     IReadOnlyList<CaseAssessment> ListAssessments(CaseScope scope) => throw new NotSupportedException("Assessment history is not supported by this store.");
     CaseAssessment? FindAssessment(CaseScope scope, string assessmentId) => throw new NotSupportedException("Assessment history is not supported by this store.");
     IReadOnlyList<DeliveryReceipt> ListRequestReceipts(CaseScope scope) => throw new NotSupportedException("Request receipts are not supported by this store.");
+
+    /// <summary>
+    /// Atomically appends an optional run-scoped journey event with the revision, audit event, and other
+    /// commit state. The store assigns the event sequence and returns history through <see cref="Read"/>.
+    /// </summary>
     CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit);
 
     IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope);
