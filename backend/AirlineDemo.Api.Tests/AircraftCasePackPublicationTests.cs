@@ -108,7 +108,7 @@ public sealed class AircraftCasePackPublicationTests
             unrelated.Commit(unrelatedScope, 0, new CaseCommit(
                 CaseStateStore.CreateBasisVersion(1, "unrelated basis", ""), null, "presenter", "seed", "unrelated"));
             var unrelatedBefore = unrelated.Read(unrelatedScope);
-            var changed = CreateChangedFixture(fixture, "1.0.1");
+            var changed = CreateChangedFixture(fixture, "1.0.2");
 
             if (failure == "evidence") evidence.FailAfterWriteCall = evidence.Calls + 1;
             else stager.FailCaseId = "cp-case-a";
@@ -118,7 +118,7 @@ public sealed class AircraftCasePackPublicationTests
 
             Assert.Same(prior, cases.Read());
             Assert.Equal(1, cases.Commits);
-            Assert.Equal("1.0.0", cases.Read()!.PackVersion);
+            Assert.Equal("1.0.1", cases.Read()!.PackVersion);
             Assert.Equal(unrelatedBefore, unrelated.Read(unrelatedScope));
             var visibleBlobNames = cases.Read()!.Cases.SelectMany(item => item.DocumentReferences)
                 .Select(item => item.BlobName).ToHashSet(StringComparer.Ordinal);
@@ -128,7 +128,7 @@ public sealed class AircraftCasePackPublicationTests
             evidence.FailAfterWriteCall = null;
             stager.FailCaseId = null;
             var retry = await publisher.PublishAsync(new AircraftCasePackLoader(changed.Root), 1);
-            Assert.Equal("1.0.1", retry.PackVersion);
+            Assert.Equal("1.0.2", retry.PackVersion);
             Assert.Equal(2, cases.Commits);
             Assert.Equal(3, retry.Cases.Count);
             foreach (var path in new[] { unrelatedPath, unrelatedPath + ".lock", unrelatedPath + ".tmp" }) if (File.Exists(path)) File.Delete(path);
@@ -142,7 +142,7 @@ public sealed class AircraftCasePackPublicationTests
         var fixture = LoadFixture(); var evidence = new RecordingEvidenceStore(); var cases = new RecordingCaseStore();
         var publisher = new AircraftCasePackPublisher(evidence, cases, new AircraftCasePackCaseStager());
         var initial = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
-        Assert.Equal("1.0.0", initial.PackVersion);
+        Assert.Equal("1.0.1", initial.PackVersion);
         Assert.Equal(fixture.Manifest.Sha256, initial.Sha256);
         Assert.Equal(3, initial.Cases.Count);
         Assert.Equal(24, initial.Cases.Sum(item => item.DocumentReferences.Count));
@@ -155,12 +155,13 @@ public sealed class AircraftCasePackPublicationTests
         Assert.Equal(writeCount, evidence.Writes.Count);
         Assert.Equal(1, cases.Commits);
 
-        var changed = CreateChangedFixture(fixture, "1.0.0");
+        var changed = CreateChangedFixture(fixture, "1.0.1");
         var exception = await Assert.ThrowsAsync<AircraftCasePackValidationException>(() =>
             publisher.PublishAsync(new AircraftCasePackLoader(changed.Root), 1));
         Assert.Equal(["packVersion: must change when canonical content changes"], exception.Errors);
         Assert.Same(initial, cases.Read());
         Assert.Equal(writeCount, evidence.Writes.Count);
+        Assert.Equal(1, cases.Commits);
         Directory.Delete(changed.Root, recursive: true);
     }
     [Fact]
@@ -170,13 +171,13 @@ public sealed class AircraftCasePackPublicationTests
         var publisher = new AircraftCasePackPublisher(evidence, cases, new AircraftCasePackCaseStager());
         var prior = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
         var priorBlobCount = evidence.Writes.Count;
-        var changed = CreateChangedFixture(fixture, "1.0.1");
+        var changed = CreateChangedFixture(fixture, "1.0.2");
         cases.ChangeRevisionAtNextCommit = true;
 
         await Assert.ThrowsAsync<AircraftCasePackRevisionConflictException>(() =>
             publisher.PublishAsync(new AircraftCasePackLoader(changed.Root), 1));
         Assert.Same(prior, cases.Read());
-        Assert.Equal("1.0.0", cases.Read()!.PackVersion);
+        Assert.Equal("1.0.1", cases.Read()!.PackVersion);
         Assert.Equal(2, cases.Commits);
         var visibleBlobNames = cases.Read()!.Cases.SelectMany(item => item.DocumentReferences)
             .Select(item => item.BlobName).ToHashSet(StringComparer.Ordinal);
@@ -195,7 +196,7 @@ public sealed class AircraftCasePackPublicationTests
         var sameVersion = fixture.Manifest with { Sha256 = AircraftCasePackManifest.ComputeSha256(fixture.Manifest, changedFiles) };
         Assert.Equal(["packVersion: must change when canonical content changes"],
             AircraftCasePackPublisher.CompareVersions(fixture.Manifest, sameVersion, fixture.Files, changedFiles));
-        var newVersion = sameVersion with { PackVersion = "1.0.1", Sha256 = "" };
+        var newVersion = sameVersion with { PackVersion = "1.0.2", Sha256 = "" };
         newVersion = newVersion with { Sha256 = AircraftCasePackManifest.ComputeSha256(newVersion, changedFiles) };
         Assert.Empty(AircraftCasePackPublisher.CompareVersions(fixture.Manifest, newVersion, fixture.Files, changedFiles));
 
