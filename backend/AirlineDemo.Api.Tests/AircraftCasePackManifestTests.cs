@@ -9,13 +9,14 @@ namespace AirlineDemo.Api.Tests;
 public sealed class AircraftCasePackManifestTests
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
-    private static (AircraftCasePackManifest Manifest, Dictionary<string, byte[]> Files) Pack(string version = "1.0.0", string date = "2026-02-28", int caseCount = 3, int[]? counts = null, string text = "fixture")
+    private static (AircraftCasePackManifest Manifest, Dictionary<string, byte[]> Files) Pack(string version = "1.0.0", string date = "2026-10-01", int caseCount = 3, int[]? counts = null, string text = "fixture")
     {
         counts ??= Enumerable.Repeat(9, caseCount).ToArray();
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var caseIds = new[] { "cp-case-a", "cp-case-b", "cp-case-c", "cp-case-d" };
         var cases = Enumerable.Range(0, caseCount).Select(i =>
         {
-            var id = $"case-{i + 1}";
+            var id = caseIds[i];
             var docs = Enumerable.Range(0, counts[i]).Select(j =>
             {
                 var path = $"{id}/doc-{j + 1}.txt";
@@ -75,7 +76,7 @@ public sealed class AircraftCasePackManifestTests
         }
         var rows = new (string Name, Action<JsonObject> Change, bool Valid, string? Error)[]
         {
-            ("integer schema version 1", _ => { }, true, null), ("leap date", j => j["scenarioDate"] = "2024-02-29", true, null),
+            ("integer schema version 1", _ => { }, true, null), ("leap date", j => j["scenarioDate"] = "2024-02-29", false, "scenarioDate"),
             ("missing schema version", j => j.Remove("schemaVersion"), false, "schemaVersion"), ("string schema version", j => j["schemaVersion"] = "1", false, "schemaVersion"),
             ("version 2", j => j["schemaVersion"] = 2, false, "schemaVersion"), ("blank pack version", j => j["packVersion"] = " ", false, "packVersion"),
             ("two aircraft", j => j["cases"]![0]!["aircraftCount"] = 2, false, "aircraftCount"),
@@ -102,6 +103,33 @@ public sealed class AircraftCasePackManifestTests
             Assert.Equal(row.Valid, result.Errors.Count == 0);
             if (row.Error is not null) Assert.Contains(row.Error, string.Join(";", result.Errors));
         }
+    }
+    [Theory]
+    [InlineData("cp-case-a,cp-case-b,cp-case-c", "2026-10-01", null)]
+    [InlineData("cp-case-c,cp-case-a,cp-case-b", "2026-10-01", null)]
+    [InlineData("cp-case-a,cp-case-b", "2026-10-01", "cases")]
+    [InlineData("cp-case-a,cp-case-b,cp-case-b", "2026-10-01", "cases[2].caseId")]
+    [InlineData("cp-case-a,cp-case-b,cp-case-d", "2026-10-01", "cases[2].caseId")]
+    [InlineData("cp-case-a,cp-case-b,cp-case-c", "2026-10-02", "scenarioDate")]
+    [InlineData("cp-case-a,cp-case-b,cp-case-c", "2026-02-30", "scenarioDate")]
+    public void AC001_ManifestRequiresFixedCaseIdsAndScenarioDate(string caseIds, string scenarioDate, string? expectedError)
+    {
+        var pack = Pack();
+        var ids = caseIds.Split(',');
+        var manifest = pack.Manifest with
+        {
+            Cases = ids.Select((id, index) => pack.Manifest.Cases[index] with { CaseId = id }).ToList(),
+            ScenarioDate = scenarioDate,
+            Sha256 = ""
+        };
+        manifest = manifest with { Sha256 = AircraftCasePackManifest.ComputeSha256(manifest, pack.Files) };
+
+        var errors = AircraftCasePackManifest.Validate(manifest, pack.Files);
+
+        if (expectedError is null)
+            Assert.Empty(errors);
+        else
+            Assert.Contains(errors, error => error.StartsWith(expectedError, StringComparison.Ordinal));
     }
     [Fact]
     public void ManifestProvenanceRequiresMarkersAndReferences()
@@ -139,7 +167,7 @@ public sealed class AircraftCasePackManifestTests
     public void ManifestHashAndVersionComparisonUseCanonicalContent()
     {
         var prior = Pack();
-        Assert.Equal("ba766fe55dbc51fc96bee68a79230dd23207d5e3b45ef183df494e1022bf4509", prior.Manifest.Sha256);
+        Assert.Equal("f9dbccda4e68db27e178497ad45a33f4fed9e76aa3bb34af482abc317052fc26", prior.Manifest.Sha256);
         var changedFiles = new Dictionary<string, byte[]>(prior.Files) { [prior.Files.Keys.First()] = Encoding.UTF8.GetBytes("fixturE") };
         var changedWithOldHash = prior.Manifest;
         Assert.NotEmpty(AircraftCasePackManifest.Compare(prior.Manifest, changedWithOldHash, prior.Files, changedFiles));
@@ -153,7 +181,7 @@ public sealed class AircraftCasePackManifestTests
     [Fact]
     public void ManifestHashUsesDeterministicManifestListedContent()
     {
-        const string expectedHash = "ba766fe55dbc51fc96bee68a79230dd23207d5e3b45ef183df494e1022bf4509";
+        const string expectedHash = "f9dbccda4e68db27e178497ad45a33f4fed9e76aa3bb34af482abc317052fc26";
         var pack = Pack();
         var json = Json(pack);
         var reversedJson = new JsonObject();

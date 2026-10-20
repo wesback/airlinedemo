@@ -1,3 +1,9 @@
 {
-  "exceptions": []
+  "exceptions": [
+    {
+      "package": "vite",
+      "reason": "Vite is a development dependency used for local development and builds; the high finding affects its launch-editor development-server paths and is not used at application runtime. Temporary exception pending a dependency update.",
+      "expires": "2026-11-20"
+    }
+  ]
 }
