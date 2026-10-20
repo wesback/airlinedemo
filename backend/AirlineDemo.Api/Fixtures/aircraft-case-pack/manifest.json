@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "packVersion": "1.0.0",
-  "scenarioDate": "2026-10-14",
-  "productOwnerReviewReference": "issue-461",
-  "sha256": "26cf10d831f1175fc3ae15f893b5ab62ac237d235e671c32830df50ce7c70127",
+  "packVersion": "1.0.1",
+  "scenarioDate": "2026-10-01",
+  "productOwnerReviewReference": "issue-460",
+  "sha256": "a53e88cb3d4cc8601b20443e8a7be69acf2f45d60d0156d9f9f81261a030ddbe",
   "cases": [
     {
       "caseId": "cp-case-a", "synthetic": true, "generatorReference": "aircraft-case-pack-generator-v1", "aircraftCount": 1, "engineCount": 1,
