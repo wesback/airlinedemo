@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -33,8 +32,8 @@ public sealed record AircraftCasePackManifest
     {
         var errors = new List<string>();
         if (manifest.SchemaVersion != 1) errors.Add("schemaVersion: must be integer 1"); if (string.IsNullOrWhiteSpace(manifest.PackVersion)) errors.Add("packVersion: must be non-empty");
-        if (!DateOnly.TryParseExact(manifest.ScenarioDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-            errors.Add("scenarioDate: must be a real YYYY-MM-DD date");
+        if (!StringComparer.Ordinal.Equals(manifest.ScenarioDate, "2026-10-01"))
+            errors.Add("scenarioDate: must be 2026-10-01");
         if (!IsHash(manifest.Sha256)) errors.Add("sha256: must be 64 lowercase hexadecimal characters"); if (string.IsNullOrWhiteSpace(manifest.ProductOwnerReviewReference)) errors.Add("productOwnerReviewReference: must be non-empty");
         var cases = manifest.Cases ?? [];
         if (cases.Count != 3) errors.Add("cases: must contain exactly 3 cases");
@@ -51,6 +50,8 @@ public sealed record AircraftCasePackManifest
             var prefix = $"cases[{i}]";
             if (c is null) { errors.Add($"{prefix}: must be an object"); continue; }
             if (string.IsNullOrWhiteSpace(c.CaseId)) errors.Add($"{prefix}.caseId: must be non-empty");
+            else if (c.CaseId is not ("cp-case-a" or "cp-case-b" or "cp-case-c"))
+                errors.Add($"{prefix}.caseId: must be cp-case-a, cp-case-b, or cp-case-c");
             else if (!caseIds.Add(c.CaseId)) errors.Add($"{prefix}.caseId: must be unique");
             if (!c.Synthetic) errors.Add($"{prefix}.synthetic: must be true");
             if (string.IsNullOrWhiteSpace(c.GeneratorReference)) errors.Add($"{prefix}.generatorReference: must be non-empty");

@@ -94,6 +94,50 @@ public sealed class AircraftCasePackPublicationTests
     }
 
     [Fact]
+    public async Task AC002_InvalidFixedManifestIsRejectedBeforeAnyWrite()
+    {
+        var fixture = LoadFixture();
+        var evidence = new RecordingEvidenceStore();
+        var cases = new RecordingCaseStore();
+        var publisher = new AircraftCasePackPublisher(evidence, cases, new AircraftCasePackCaseStager());
+        var prior = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
+        var priorCases = prior.Cases.ToArray();
+        var rows = new (string Name, Action<JsonObject> Change, string Error)[]
+        {
+            ("two cases", json => json["cases"]!.AsArray().RemoveAt(2), "cases"),
+            ("duplicate case ID", json => json["cases"]![2]!["caseId"] = "cp-case-b", "cases[2].caseId"),
+            ("unknown case ID", json => json["cases"]![2]!["caseId"] = "cp-case-d", "cases[2].caseId"),
+            ("different scenario date", json => json["scenarioDate"] = "2026-10-02", "scenarioDate"),
+            ("impossible scenario date", json => json["scenarioDate"] = "2026-02-30", "scenarioDate")
+        };
+
+        foreach (var row in rows)
+        {
+            var json = JsonNode.Parse(fixture.Json)!.AsObject();
+            row.Change(json);
+            RefreshHash(json, fixture.Files);
+            var writesBefore = evidence.Writes.Count;
+            var callsBefore = evidence.Calls;
+            var commitsBefore = cases.Commits;
+
+            var exception = await Assert.ThrowsAsync<AircraftCasePackValidationException>(() =>
+                publisher.PublishAsync(
+                    () => new AircraftCasePackLoader(FixtureRoot()).Load(json.ToJsonString(), fixture.Files),
+                    1));
+
+            Assert.Contains(exception.Errors, error => error.StartsWith(row.Error, StringComparison.Ordinal));
+            Assert.Same(prior, cases.Read());
+            Assert.Equal(prior.PackVersion, cases.Read()!.PackVersion);
+            Assert.Equal(prior.Sha256, cases.Read()!.Sha256);
+            Assert.Equal(prior.Revision, cases.Read()!.Revision);
+            Assert.Equal(priorCases, cases.Read()!.Cases);
+            Assert.Equal(writesBefore, evidence.Writes.Count);
+            Assert.Equal(callsBefore, evidence.Calls);
+            Assert.Equal(commitsBefore, cases.Commits);
+        }
+    }
+
+    [Fact]
     public async Task FailedPublicationDoesNotExposePartialPack()
     {
         foreach (var failure in new[] { "evidence", "staging" })
@@ -239,6 +283,11 @@ public sealed class AircraftCasePackPublicationTests
     }
     private static Dictionary<string, byte[]> CopyFiles(IReadOnlyDictionary<string, byte[]> files) =>
         files.ToDictionary(pair => pair.Key, pair => (byte[])pair.Value.Clone(), StringComparer.Ordinal);
+    private static void RefreshHash(JsonObject json, IReadOnlyDictionary<string, byte[]> files)
+    {
+        var manifest = JsonSerializer.Deserialize<AircraftCasePackManifest>(json.ToJsonString(), WebJson)!;
+        json["sha256"] = AircraftCasePackManifest.ComputeSha256(manifest, files);
+    }
     private static string FixtureRoot([CallerFilePath] string source = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", "AirlineDemo.Api", "Fixtures", "aircraft-case-pack"));
 }
