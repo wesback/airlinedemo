@@ -156,6 +156,8 @@ public sealed class AircraftCasePackPublicationTests
         Assert.Equal(1, cases.Commits);
 
         var changed = CreateChangedFixture(fixture, "1.0.1");
+        Assert.Equal("1.0.1", changed.Manifest.PackVersion);
+        Assert.NotEqual(initial.Sha256, changed.Manifest.Sha256);
         var exception = await Assert.ThrowsAsync<AircraftCasePackValidationException>(() =>
             publisher.PublishAsync(new AircraftCasePackLoader(changed.Root), 1));
         Assert.Equal(["packVersion: must change when canonical content changes"], exception.Errors);
@@ -172,6 +174,8 @@ public sealed class AircraftCasePackPublicationTests
         var prior = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
         var priorBlobCount = evidence.Writes.Count;
         var changed = CreateChangedFixture(fixture, "1.0.2");
+        Assert.Equal("1.0.2", changed.Manifest.PackVersion);
+        Assert.NotEqual(prior.Sha256, changed.Manifest.Sha256);
         cases.ChangeRevisionAtNextCommit = true;
 
         await Assert.ThrowsAsync<AircraftCasePackRevisionConflictException>(() =>
