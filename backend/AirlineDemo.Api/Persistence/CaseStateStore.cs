@@ -19,6 +19,9 @@ public sealed class ReceiptConflictException()
 public sealed class TraceConflictException()
     : Exception("Investigation trace already exists for this case, run and investigation; no change was made.");
 
+public sealed class JourneyEventConflictException()
+    : Exception("Journey event already exists for this case; no change was made.");
+
 public sealed class BasisIntegrityException(string message) : Exception(message);
 
 /// <summary>Server-issued proof that a case id was authorized; only the store can create one.</summary>
@@ -44,6 +47,132 @@ public sealed record AuditEvent(
     string Detail,
     DateTimeOffset At);
 
+public sealed record CaseJourneyWitness(
+    string WitnessId,
+    string DocumentId,
+    int DocumentVersion,
+    int Page,
+    string BasisId,
+    int BasisVersion);
+
+public sealed record CaseJourneyEventDraft(
+    string EventId,
+    string RunId,
+    string CaseId,
+    string EventType,
+    string? BasisId,
+    int? BasisVersion,
+    string ActorRole,
+    string Summary,
+    string CapabilityLabel,
+    IReadOnlyList<CaseJourneyWitness> Witnesses);
+
+public sealed record CaseJourneyEvent(
+    string EventId,
+    string RunId,
+    long Sequence,
+    string CaseId,
+    string EventType,
+    string? BasisId,
+    int? BasisVersion,
+    string ActorRole,
+    string Summary,
+    string CapabilityLabel,
+    IReadOnlyList<CaseJourneyWitness> Witnesses);
+
+internal static class CaseJourneyRules
+{
+    public static void Validate(CaseJourneyEventDraft journeyEvent)
+    {
+        Require(journeyEvent.EventId, nameof(journeyEvent.EventId));
+        Require(journeyEvent.RunId, nameof(journeyEvent.RunId));
+        Require(journeyEvent.CaseId, nameof(journeyEvent.CaseId));
+        Require(journeyEvent.EventType, nameof(journeyEvent.EventType));
+        Require(journeyEvent.ActorRole, nameof(journeyEvent.ActorRole));
+        Require(journeyEvent.Summary, nameof(journeyEvent.Summary));
+        Require(journeyEvent.CapabilityLabel, nameof(journeyEvent.CapabilityLabel));
+        ValidateBasis(journeyEvent.BasisId, journeyEvent.BasisVersion);
+        if (journeyEvent.Witnesses is null)
+        {
+            throw new ArgumentException("Journey event witnesses are required.", nameof(journeyEvent));
+        }
+
+        foreach (var witness in journeyEvent.Witnesses)
+        {
+            if (witness is null)
+            {
+                throw new ArgumentException("Journey event witnesses are invalid.", nameof(journeyEvent));
+            }
+
+            Require(witness.WitnessId, nameof(witness.WitnessId));
+            Require(witness.DocumentId, nameof(witness.DocumentId));
+            Require(witness.BasisId, nameof(witness.BasisId));
+            if (witness.DocumentVersion < 1 || witness.Page < 1 || witness.BasisVersion < 1)
+            {
+                throw new ArgumentException("Journey event witness versions and page must be positive.", nameof(journeyEvent));
+            }
+        }
+    }
+
+    public static void Validate(CaseJourneyEvent journeyEvent)
+    {
+        if (journeyEvent.Sequence < 1)
+        {
+            throw new ArgumentException("Journey event sequence must be positive.", nameof(journeyEvent));
+        }
+
+        Validate(new CaseJourneyEventDraft(
+            journeyEvent.EventId,
+            journeyEvent.RunId,
+            journeyEvent.CaseId,
+            journeyEvent.EventType,
+            journeyEvent.BasisId,
+            journeyEvent.BasisVersion,
+            journeyEvent.ActorRole,
+            journeyEvent.Summary,
+            journeyEvent.CapabilityLabel,
+            journeyEvent.Witnesses));
+    }
+
+    public static CaseJourneyEvent FromDraft(CaseJourneyEventDraft draft, long sequence) =>
+        new(
+            draft.EventId,
+            draft.RunId,
+            sequence,
+            draft.CaseId,
+            draft.EventType,
+            draft.BasisId,
+            draft.BasisVersion,
+            draft.ActorRole,
+            draft.Summary,
+            draft.CapabilityLabel,
+            new ReadOnlyCollection<CaseJourneyWitness>(draft.Witnesses.ToList()));
+
+    public static CaseJourneyEvent Snapshot(CaseJourneyEvent journeyEvent) =>
+        journeyEvent with { Witnesses = new ReadOnlyCollection<CaseJourneyWitness>(journeyEvent.Witnesses.ToList()) };
+
+    private static void ValidateBasis(string? basisId, int? basisVersion)
+    {
+        if (basisId is null && basisVersion is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(basisId) || basisVersion is null or < 1)
+        {
+            throw new ArgumentException("Journey event basis identity must contain a basis id and positive version.");
+        }
+    }
+
+    private static void Require(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"Journey event {name} is required.", name);
+        }
+    }
+}
+
 /// <summary>A review work item. <see cref="CreatedAt"/> is assigned by the store, never by the caller.</summary>
 public sealed record WorkItem(
     string CaseId,
@@ -67,7 +196,8 @@ public sealed record CaseState(
     IReadOnlyList<WorkItem>? WorkItems = null,
     IReadOnlyList<InvestigationTrace>? Traces = null,
     IReadOnlyList<CaseAssessment>? Assessments = null,
-    IReadOnlyList<DeliveryReceipt>? RequestReceipts = null);
+    IReadOnlyList<DeliveryReceipt>? RequestReceipts = null,
+    IReadOnlyList<CaseJourneyEvent>? JourneyEvents = null);
 
 public sealed record CaseAssessment(
     string AssessmentId,
@@ -214,7 +344,8 @@ public sealed record CaseCommit(
     string Detail,
     DateTimeOffset? At = null,
     CaseAssessment? Assessment = null,
-    DeliveryReceipt? RequestReceipt = null);
+    DeliveryReceipt? RequestReceipt = null,
+    CaseJourneyEventDraft? JourneyEvent = null);
 
 public sealed record CommitResult(CaseState State, bool Replayed);
 
@@ -484,6 +615,15 @@ public sealed class CaseStateStore : ICaseStateStore
     /// </summary>
     public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
     {
+        if (commit.JourneyEvent is { } journeyEvent)
+        {
+            CaseJourneyRules.Validate(journeyEvent);
+            if (!string.Equals(journeyEvent.CaseId, scope.CaseId, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Journey event case id must match the authorized case.", nameof(commit));
+            }
+        }
+
         if (commit.Assessment is { } assessment)
         {
             AssessmentPersistenceRules.Validate(assessment);
@@ -568,6 +708,17 @@ public sealed class CaseStateStore : ICaseStateStore
                 requestReceipts.Add(newRequestReceipt);
             }
 
+            var journeyEvents = (current.JourneyEvents ?? Array.Empty<CaseJourneyEvent>()).ToList();
+            if (commit.JourneyEvent is { } newJourneyEvent)
+            {
+                if (journeyEvents.Any(item => string.Equals(item.EventId, newJourneyEvent.EventId, StringComparison.Ordinal)))
+                {
+                    throw new JourneyEventConflictException();
+                }
+
+                journeyEvents.Add(CaseJourneyRules.FromDraft(newJourneyEvent, journeyEvents.Count + 1));
+            }
+
             var receipts = current.ReceiptIds.ToList();
             var fingerprints = new Dictionary<string, string>(current.ReceiptFingerprints, StringComparer.Ordinal);
             if (commit.ReceiptId is not null)
@@ -589,6 +740,7 @@ public sealed class CaseStateStore : ICaseStateStore
                 ReceiptFingerprints = fingerprints,
                 Assessments = assessments,
                 RequestReceipts = requestReceipts,
+                JourneyEvents = journeyEvents,
             });
             var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
             Persist(snapshot);
@@ -687,6 +839,7 @@ public sealed class CaseStateStore : ICaseStateStore
         Traces = Wrap((state.Traces ?? Array.Empty<InvestigationTrace>()).Select(SnapshotTrace)),
         Assessments = Wrap((state.Assessments ?? Array.Empty<CaseAssessment>()).Select(SnapshotAssessment)),
         RequestReceipts = Wrap(state.RequestReceipts ?? Array.Empty<DeliveryReceipt>()),
+        JourneyEvents = Wrap((state.JourneyEvents ?? Array.Empty<CaseJourneyEvent>()).Select(CaseJourneyRules.Snapshot)),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
@@ -717,9 +870,9 @@ public sealed class CaseStateStore : ICaseStateStore
             commit.Action,
             commit.Detail,
         }));
-        return commit.Assessment is null && commit.RequestReceipt is null
+        return commit.Assessment is null && commit.RequestReceipt is null && commit.JourneyEvent is null
             ? digest
-            : Digest(digest + JsonSerializer.Serialize(new { commit.Assessment, commit.RequestReceipt }));
+            : Digest(digest + JsonSerializer.Serialize(new { commit.Assessment, commit.RequestReceipt, commit.JourneyEvent }));
     }
 
     private static void Validate(CaseState state)
@@ -761,6 +914,30 @@ public sealed class CaseStateStore : ICaseStateStore
             || state.ReceiptIds.Any(id => !state.ReceiptFingerprints.ContainsKey(id)))
         {
             throw new InvalidDataException("Receipt fingerprints do not match receipts.");
+        }
+
+        var journeyEvents = state.JourneyEvents ?? Array.Empty<CaseJourneyEvent>();
+        if (journeyEvents.Select(item => item.EventId).Distinct(StringComparer.Ordinal).Count() != journeyEvents.Count)
+        {
+            throw new InvalidDataException("Duplicate journey event in case state file.");
+        }
+
+        for (var i = 0; i < journeyEvents.Count; i++)
+        {
+            var journeyEvent = journeyEvents[i];
+            if (journeyEvent.Sequence != i + 1 || journeyEvent.CaseId != state.CaseId)
+            {
+                throw new InvalidDataException("Journey event history is invalid.");
+            }
+
+            try
+            {
+                CaseJourneyRules.Validate(journeyEvent);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Journey event history is invalid.", ex);
+            }
         }
 
         var traces = state.Traces ?? Array.Empty<InvestigationTrace>();

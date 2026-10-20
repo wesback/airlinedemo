@@ -122,6 +122,15 @@ public sealed class SqlCaseStateStore : ICaseStateStore
     /// </summary>
     public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
     {
+        if (commit.JourneyEvent is { } journeyEvent)
+        {
+            CaseJourneyRules.Validate(journeyEvent);
+            if (!Same(journeyEvent.CaseId, scope.CaseId))
+            {
+                throw new ArgumentException("Journey event case id must match the authorized case.", nameof(commit));
+            }
+        }
+
         if (commit.Assessment is { } assessment)
         {
             AssessmentPersistenceRules.Validate(assessment);
@@ -233,6 +242,30 @@ public sealed class SqlCaseStateStore : ICaseStateStore
                 BasisVersion = newRequestReceipt.BasisVersion,
                 TemplateVersion = newRequestReceipt.TemplateVersion,
                 Body = newRequestReceipt.Body,
+            });
+        }
+
+        if (commit.JourneyEvent is { } newJourneyEvent)
+        {
+            if (current.JourneyEvents!.Any(item => Same(item.EventId, newJourneyEvent.EventId)))
+            {
+                throw new JourneyEventConflictException();
+            }
+
+            var persistedEvent = CaseJourneyRules.FromDraft(newJourneyEvent, current.JourneyEvents.Count + 1);
+            db.CaseJourneyEvents.Add(new CaseJourneyEventRow
+            {
+                CaseId = row.CaseId,
+                Sequence = persistedEvent.Sequence,
+                EventId = persistedEvent.EventId,
+                RunId = persistedEvent.RunId,
+                EventType = persistedEvent.EventType,
+                BasisId = persistedEvent.BasisId,
+                BasisVersion = persistedEvent.BasisVersion,
+                ActorRole = persistedEvent.ActorRole,
+                Summary = persistedEvent.Summary,
+                CapabilityLabel = persistedEvent.CapabilityLabel,
+                WitnessesJson = JsonSerializer.Serialize(persistedEvent.Witnesses),
             });
         }
 
@@ -613,6 +646,44 @@ public sealed class SqlCaseStateStore : ICaseStateStore
                 r.BasisVersion, r.TemplateVersion, r.Body))
             .ToList();
 
+        var journeyEvents = db.CaseJourneyEvents
+            .Where(e => e.CaseId == caseId)
+            .OrderBy(e => e.Sequence)
+            .AsEnumerable()
+            .Where(e => Same(e.CaseId, caseId))
+            .Select(e => CaseJourneyRules.Snapshot(new CaseJourneyEvent(
+                e.EventId,
+                e.RunId,
+                e.Sequence,
+                e.CaseId,
+                e.EventType,
+                e.BasisId,
+                e.BasisVersion,
+                e.ActorRole,
+                e.Summary,
+                e.CapabilityLabel,
+                JsonSerializer.Deserialize<IReadOnlyList<CaseJourneyWitness>>(e.WitnessesJson)
+                    ?? throw new InvalidDataException("Journey event witnesses are unreadable."))))
+            .ToList();
+
+        if (journeyEvents.Select(item => item.EventId).Distinct(StringComparer.Ordinal).Count() != journeyEvents.Count
+            || journeyEvents.Where((item, index) => item.Sequence != index + 1 || !Same(item.CaseId, caseId)).Any())
+        {
+            throw new InvalidDataException("Journey event history is invalid.");
+        }
+
+        foreach (var journeyEvent in journeyEvents)
+        {
+            try
+            {
+                CaseJourneyRules.Validate(journeyEvent);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("Journey event history is invalid.", ex);
+            }
+        }
+
         var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var decision in decisions)
         {
@@ -629,7 +700,8 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             new ReadOnlyDictionary<string, string>(fingerprints),
             items.AsReadOnly(),
             Assessments: assessments.AsReadOnly(),
-            RequestReceipts: requestReceipts.AsReadOnly());
+            RequestReceipts: requestReceipts.AsReadOnly(),
+            JourneyEvents: journeyEvents.AsReadOnly());
     }
 
     private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.Ordinal);
