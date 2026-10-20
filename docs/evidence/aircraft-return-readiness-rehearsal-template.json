@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aircraft return-readiness rehearsal evidence",
+  "x-templateVersion": "1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["repositoryRevision", "fixtureConfigurationVersion", "deploymentId", "traceReference", "decision", "accessibilityResult", "applicationBuild", "browser", "assistiveTechnology", "runTimestampUtc", "outcomeDurationSeconds", "liveSegmentDurationSeconds", "fallbackOutcome", "fallbackFixtureId", "fallbackApplicationVersion", "journeyStates"],
+  "properties": {
+    "repositoryRevision": { "type": "string", "minLength": 1 },
+    "fixtureConfigurationVersion": { "type": "string", "minLength": 1 },
+    "deploymentId": { "type": "string", "minLength": 1 },
+    "traceReference": { "type": "string", "minLength": 1 },
+    "decision": { "type": "string", "minLength": 1 },
+    "accessibilityResult": { "type": "string", "minLength": 1 },
+    "applicationBuild": { "type": "string", "minLength": 1 },
+    "browser": { "type": "string", "minLength": 1 },
+    "assistiveTechnology": { "type": "string", "minLength": 1 },
+    "runTimestampUtc": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z(?![\\s\\S])" },
+    "outcomeDurationSeconds": { "type": "number", "minimum": 0 },
+    "liveSegmentDurationSeconds": { "type": "number", "minimum": 0 },
+    "fallbackOutcome": { "enum": ["used", "not-used"] },
+    "fallbackFixtureId": { "type": ["string", "null"], "minLength": 1 },
+    "fallbackApplicationVersion": { "type": ["string", "null"], "minLength": 1 },
+    "journeyStates": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  },
+  "allOf": [{ "if": { "properties": { "fallbackOutcome": { "const": "used" } } },
+    "then": { "properties": { "fallbackFixtureId": { "type": "string", "minLength": 1 }, "fallbackApplicationVersion": { "type": "string", "minLength": 1 } } },
+    "else": { "properties": { "fallbackFixtureId": { "type": "null" }, "fallbackApplicationVersion": { "type": "null" } } } }]
+}

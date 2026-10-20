@@ -15,8 +15,14 @@ public static class Generator
     public const int Seed = 1801;
     public const string Notice = "Synthetic fictional data only. No document is a real record.";
 
-    public static int Main(string[] args)
+    public static async Task<int> Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "capture-timing")
+            return await RehearsalCommands.RunAsync(RehearsalCommands.CaptureTiming);
+
+        if (args.Length == 1 && args[0] == "capture-trace")
+            return await RehearsalCommands.RunAsync(RehearsalCommands.CaptureTraceAsync);
+
         if (args.Length == 3 && args[0] == "evaluation")
         {
             EvaluationCaseGenerator.WriteFixture(args[1], int.Parse(args[2]));
@@ -25,7 +31,7 @@ public static class Generator
 
         if (args.Length != 1)
         {
-            Console.Error.WriteLine("usage: DemoCaseGenerator <output-dir>");
+            Console.Error.WriteLine("usage: DemoCaseGenerator <output-dir> | evaluation <output-dir> <version> | capture-timing | capture-trace");
             return 2;
         }
 

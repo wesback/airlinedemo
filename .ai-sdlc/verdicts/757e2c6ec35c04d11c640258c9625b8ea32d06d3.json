@@ -1,0 +1,189 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 471,
+  "branch": "ai-sdlc/issue-471",
+  "commitSha": "757e2c6ec35c04d11c640258c9625b8ea32d06d3",
+  "round": 0,
+  "pipelineVersion": "747290d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The validator enforces the exact case ID set and scenario date, and the added tests cover the listed validation and publication rejection cases. No concrete defect found within the acceptance criteria.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The validator enforces the exact case ID set and scenario date. The named tests cover both acceptance criteria, including rejection before evidence writes or snapshot commits; no concrete defect found.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed validator enforces the fixed case IDs and exact scenario date before publication, and the added publication test checks that rejected manifests cause no evidence writes or snapshot commits. I found no concrete security vulnerability in the in-scope change.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": true,
+    "failed": [],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 0,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/AircraftCasePackManifestTests.cs",
+      "backend/AirlineDemo.Api.Tests/AircraftCasePackPublicationTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 4,
+      "total": 4,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Fixtures/AircraftCasePackManifest.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
