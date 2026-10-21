@@ -791,8 +791,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         var before = store.CaptureState();
 
         using var accepted = await SendResetAsync(client, "cp-case-c", presenter,
-            new { contractVersion = 1, commandId = "reset-014", expectedRevision = 0L, variant = "blocked",
-                actor = "caller-actor", reasonCode = "caller_reason", at = "2000-01-01T00:00:00Z" });
+            new { contractVersion = 1, commandId = "reset-014", expectedRevision = 0L, variant = "blocked" });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         using var receiptJson = await ReadJsonAsync(accepted);
         Assert.Equal(["auditEventId", "caseId", "commandId", "contractVersion", "newRevision", "newRunId", "priorRevision"],
@@ -970,9 +969,8 @@ public sealed class CasePackEndpointsTests : IDisposable
         var acceptedLimiterPresenter = CreateSession(acceptedLimiterHost, "presenter", "cp-case-c");
         using var auditFailure = await SendResetAsync(acceptedLimiterClient, "cp-case-c", acceptedLimiterPresenter,
             new { contractVersion = 1, commandId = "m14-audit", expectedRevision = 0L, variant = "blocked" });
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, auditFailure.StatusCode);
-        using var auditJson = await ReadJsonAsync(auditFailure);
         Assert.Equal(HttpStatusCode.InternalServerError, auditFailure.StatusCode);
+        using var auditJson = await ReadJsonAsync(auditFailure);
         Assert.Equal("internal_error", auditJson.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
@@ -1017,6 +1015,8 @@ public sealed class CasePackEndpointsTests : IDisposable
             new() { ["contractVersion"] = 1, ["commandId"] = "variant-null", ["expectedRevision"] = acceptedIds.Length, ["variant"] = null },
             new() { ["contractVersion"] = 1, ["commandId"] = "variant-number", ["expectedRevision"] = acceptedIds.Length, ["variant"] = 1 },
             new() { ["contractVersion"] = 1, ["commandId"] = "extra-actor", ["expectedRevision"] = acceptedIds.Length, ["variant"] = "blocked", ["actor"] = "other" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "extra-time", ["expectedRevision"] = acceptedIds.Length, ["variant"] = "blocked", ["time"] = "2026-10-21T10:00:00Z" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "extra-reason", ["expectedRevision"] = acceptedIds.Length, ["variant"] = "blocked", ["reason"] = "requested" },
         })
         {
             var session = CreateSession(host, "presenter", "cp-case-c");
@@ -1036,6 +1036,8 @@ public sealed class CasePackEndpointsTests : IDisposable
         using var stale = await SendResetAsync(client, "cp-case-c", staleSession,
             new { contractVersion = 1, commandId = "stale-command", expectedRevision = 99L, variant = "blocked" });
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var staleJson = await ReadJsonAsync(stale);
+        Assert.Equal("stale_revision", staleJson.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]
@@ -1047,6 +1049,13 @@ public sealed class CasePackEndpointsTests : IDisposable
         using var host = CreateHost(store, windowStore, clock);
         SeedCases(store);
         using var client = host.CreateClient();
+
+        var unauthenticated = new HttpRequestMessage(HttpMethod.Post,
+            "/api/v1/cases/cp-case-c/reset-blocked-variant")
+        { Content = JsonContent.Create(new { contractVersion = 1, commandId = "quota-unauthenticated", expectedRevision = 0L, variant = "blocked" }) };
+        using var unauthenticatedResponse = await client.SendAsync(unauthenticated, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticatedResponse.StatusCode);
+        Assert.Equal(0, windowStore.TotalCount(CasePackRequestLimiter.ResetEndpoint));
 
         var body = new { contractVersion = 1, commandId = "quota-accepted", expectedRevision = 0L, variant = "blocked" };
         var presenter = CreateSession(host, "presenter", "cp-case-c");
