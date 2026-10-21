@@ -45,6 +45,7 @@ builder.Services.AddSingleton(new AircraftCasePackLoader(
     System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "aircraft-case-pack")));
 builder.Services.AddSingleton<AircraftCasePackPublisher>();
 builder.Services.AddSingleton<DemoRunReset>();
+builder.Services.AddSingleton<CasePackBlockedVariantReset>();
 builder.Services.AddSingleton<MockResponseService>();
 builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<SourceSummaryService>();

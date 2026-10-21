@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace AirlineDemo.Api.Tests;
@@ -40,6 +41,8 @@ public sealed class CasePackRequestLimiterTests
     private sealed record ResetAdmission(string Outcome, int AgeSeconds, string User, string Endpoint, bool Expected);
 
     private sealed record ResetScenario(string Name, ResetAdmission[] Attempts);
+
+    private sealed record HttpResetAttempt(string Outcome, int AgeSeconds, string User, string Role, object Body, HttpStatusCode ExpectedStatus);
 
     [Theory]
     [InlineData("case-list", 28, 0, "user-a", "case-list", "user-a", true)]
@@ -152,7 +155,7 @@ public sealed class CasePackRequestLimiterTests
     public async Task AC030_ResetAttemptsCountEveryAuthenticatedOutcome()
     {
         var reset = CasePackRequestLimiter.ResetEndpoint;
-        var scenarios = new[]
+        var directScenarios = new[]
         {
             new ResetScenario("two attempts", [
                 new("accepted", 0, "user-a", reset, true),
@@ -200,7 +203,7 @@ public sealed class CasePackRequestLimiterTests
             ]),
         };
 
-        foreach (var scenario in scenarios)
+        foreach (var scenario in directScenarios)
         {
             var time = new AdjustableTime();
             var limiter = new CasePackRequestLimiter(new InMemoryCasePackRequestWindowStore(), time);
@@ -210,6 +213,82 @@ public sealed class CasePackRequestLimiterTests
                 Assert.Equal(attempt.Expected,
                     await limiter.TryRecordAttemptAsync(attempt.User, attempt.Endpoint));
             }
+        }
+
+        var endpointScenarios = new[]
+        {
+            new[]
+            {
+                new HttpResetAttempt("accepted", 0, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+                new HttpResetAttempt("denied-role", 0, "presenter", "technical-reviewer", new { commandId = "reset-2", expectedRevision = 1L, variant = "blocked" }, HttpStatusCode.Forbidden),
+            },
+            new[]
+            {
+                new HttpResetAttempt("accepted", 0, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+                new HttpResetAttempt("replayed", 0, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+                new HttpResetAttempt("invalid", 0, "presenter", "presenter", new { commandId = "", expectedRevision = 1L, variant = "blocked" }, HttpStatusCode.BadRequest),
+            },
+            new[]
+            {
+                new HttpResetAttempt("accepted", 59, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+                new HttpResetAttempt("replayed", 59, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+                new HttpResetAttempt("invalid", 59, "presenter", "presenter", new { commandId = "", expectedRevision = 1L, variant = "blocked" }, HttpStatusCode.BadRequest),
+                new HttpResetAttempt("denied-role", 59, "presenter", "technical-reviewer", new { commandId = "reset-2", expectedRevision = 1L, variant = "blocked" }, HttpStatusCode.TooManyRequests),
+            },
+            new[]
+            {
+                new HttpResetAttempt("accepted", 60, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+                new HttpResetAttempt("replayed", 0, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+            },
+        };
+
+        foreach (var attempts in endpointScenarios)
+        {
+            var time = new AdjustableTime();
+            var windowStore = new InMemoryCasePackRequestWindowStore();
+            var statePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"case-pack-reset-limiter-{Guid.NewGuid():N}.json");
+            var caseStore = new CaseStateStore(statePath);
+            caseStore.CreateCase("cp-case-c", "presenter");
+            using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<TimeProvider>();
+                    services.AddSingleton<TimeProvider>(time);
+                    services.RemoveAll<ICasePackRequestWindowStore>();
+                    services.AddSingleton<ICasePackRequestWindowStore>(windowStore);
+                    services.RemoveAll<ICaseStateStore>();
+                    services.AddSingleton<ICaseStateStore>(caseStore);
+                }));
+            using var client = factory.CreateClient();
+            var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+
+            foreach (var attempt in attempts)
+            {
+                time.Current = Now.AddSeconds(-attempt.AgeSeconds);
+                var role = attempt.Role;
+                var session = sessions.Create(new DemoUser(attempt.User, attempt.User, role,
+                    ["cp-case-a", "cp-case-b", "cp-case-c"]));
+                using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant")
+                {
+                    Content = JsonContent.Create(attempt.Body, options: null,
+                        mediaType: null),
+                };
+                request.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+                request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, session.CsrfToken);
+
+                using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+                Assert.Equal(attempt.ExpectedStatus, response.StatusCode);
+
+                if (attempt.ExpectedStatus is HttpStatusCode.BadRequest or HttpStatusCode.TooManyRequests)
+                {
+                    using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+                    var expectedCode = attempt.ExpectedStatus == HttpStatusCode.BadRequest ? "validation_error" : "rate_limit_exceeded";
+                    Assert.Equal(1, json.RootElement.GetProperty("contractVersion").GetInt32());
+                    Assert.Equal(expectedCode, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+                }
+            }
+
+            System.IO.File.Delete(statePath);
         }
     }
 
