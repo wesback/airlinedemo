@@ -7,6 +7,7 @@ using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Projection;
 using AirlineDemo.Api.Requests;
 using AirlineDemo.Api.Reviews;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -30,6 +31,26 @@ public sealed class CasePackEndpointsTests : IDisposable
     }
     private sealed record CaseStateSnapshot(
         string CaseId, long Revision, string[] RunIds, string[] JourneyRunIds, AuditEvent[] Audit);
+    private sealed record ArrSelector(string CaseId, string RunId, string BasisId);
+    private sealed class CountingArrHistorySource : IArrCaseHistorySource
+    {
+        public List<ArrSelector> Selectors { get; } = [];
+        public string CaseId { get; set; } = "cp-case-a";
+        public string RunId { get; set; } = "current-run";
+        public string BasisId { get; set; } = "basis-v1";
+        public IReadOnlyList<CaseJourneyEvent> Events { get; set; } = [];
+        public int ReadCalls { get; private set; }
+        public bool OlderHistoryAvailable { get; set; } = true;
+        public ArrCaseHistorySelection? Read(string caseId, string runId, string basisId)
+        {
+            ReadCalls++;
+            Selectors.Add(new ArrSelector(caseId, runId, basisId));
+            if (!StringComparer.Ordinal.Equals(caseId, CaseId)
+                || !StringComparer.Ordinal.Equals(runId, RunId)
+                || !StringComparer.Ordinal.Equals(basisId, BasisId)) return null;
+            return new ArrCaseHistorySelection(caseId, runId, basisId, Events, OlderHistoryAvailable);
+        }
+    }
     private sealed class CountingCaseStateStore(CaseStateStore inner) : ICaseStateStore
     {
         public CaseStateStore Inner { get; } = inner;
@@ -81,7 +102,8 @@ public sealed class CasePackEndpointsTests : IDisposable
     private WebApplicationFactory<Program> CreateHost(
         CountingCaseStateStore store,
         ICasePackRequestWindowStore? windowStore = null,
-        TimeProvider? time = null) =>
+        TimeProvider? time = null,
+        IArrCaseHistorySource? history = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
@@ -104,6 +126,11 @@ public sealed class CasePackEndpointsTests : IDisposable
                 {
                     services.RemoveAll<ICasePackRequestWindowStore>();
                     services.AddSingleton(windowStore);
+                }
+                if (history is not null)
+                {
+                    services.RemoveAll<IArrCaseHistorySource>();
+                    services.AddSingleton(history);
                 }
             });
         });
@@ -268,6 +295,193 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(0, store.WriteCalls);
         Assert.Equal(baseline, store.CaptureState());
     }
+    private static void SeedSceneHistory(CaseStateStore store, string caseId, string runId = "current-run", int count = 1, int summaryLength = 0, string? eventPrefix = null)
+    {
+        var scope = store.AuthorizeCase(caseId, "case-pack-test-owner");
+        var state = store.Read(scope);
+        var basis = state.Basis.MaxBy(item => item.Version);
+        if (basis is null)
+        {
+            var created = CaseStateStore.CreateBasisVersion(1, "current basis", string.Empty);
+            store.Commit(scope, state.Revision, new CaseCommit(created, null, "presenter", "basis", "current basis"));
+            state = store.Read(scope);
+        }
+        for (var index = 1; index <= count; index++)
+        {
+            state = store.Read(scope);
+            var summary = summaryLength == 0 ? $"Current run event {index}" : new string('x', summaryLength);
+            var prefix = eventPrefix ?? string.Empty;
+            var witness = caseId switch
+            {
+                "cp-case-a" => new CaseJourneyWitness($"{prefix}witness-{index}", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                "cp-case-b" => new CaseJourneyWitness($"{prefix}witness-{index}", "case-b/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                "cp-case-c" => new CaseJourneyWitness($"{prefix}witness-{index}", "case-c/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                _ => null,
+            };
+            store.Commit(scope, state.Revision, new CaseCommit(null, null, "presenter", "journey", "scene history",
+                JourneyEvent: new CaseJourneyEventDraft($"{prefix}event-{index}", runId, caseId, "evidence-reviewed", "basis-v1", 1,
+                    "presenter", summary, "AI agent", witness is null ? [] : [witness])));
+        }
+    }
+
+    [Fact]
+    public async Task AC027_SceneUsesAuthorizedHistoryAndExactWitnessTuples()
+    {
+        var store = CreateStore();
+        SeedCases(store);
+        SeedSceneHistory(store.Inner, "cp-case-a", "current-run", 25);
+        var historyEvents = store.Inner.Read(store.Inner.AuthorizeCase("cp-case-a", "case-pack-test-owner"))
+            .JourneyEvents!;
+        var reader = new CountingArrHistorySource
+        {
+            CaseId = "cp-case-a", RunId = "current-run", BasisId = "basis-v1",
+            Events = historyEvents.Where(item => item.RunId == "current-run" && item.BasisId == "basis-v1").ToArray(),
+        };
+        using var host = CreateHost(store, history: reader);
+        var packages = host.Services.GetRequiredService<EvidencePackageStore>();
+        packages.Submit("accepted-a", "cp-case-a", () => new EvidencePackageOutcome("complete",
+            [new EvidenceDocumentResult("aircraft-summary.txt", "accepted", "accepted", 1, null)]));
+        using var client = host.CreateClient();
+        var session = CreateSession(host, "presenter", "cp-case-a");
+
+        using var sceneResponse = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.OK, sceneResponse.StatusCode);
+        var bytes = await sceneResponse.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        Assert.True(bytes.Length <= 65_536);
+        using var json = JsonDocument.Parse(bytes);
+        var root = json.RootElement;
+        Assert.Equal("cp-case-a", root.GetProperty("case").GetProperty("caseId").GetString());
+        Assert.Equal("current-run", root.GetProperty("case").GetProperty("currentRunId").GetString());
+        Assert.Equal(20, root.GetProperty("history").GetArrayLength());
+        Assert.Equal(
+            Enumerable.Range(6, 20).Select(index => $"event-{index}").ToArray(),
+            root.GetProperty("history").EnumerateArray().Select(item => item.GetProperty("eventId").GetString()).ToArray());
+        Assert.True(root.GetProperty("olderHistoryAvailable").GetBoolean());
+        Assert.Equal(20, root.GetProperty("evidence").GetArrayLength());
+        Assert.Equal(
+            Enumerable.Range(6, 20).Select(index => $"witness-{index}").OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            root.GetProperty("evidence").EnumerateArray().Select(item => item.GetProperty("witnessId").GetString()).ToArray());
+        Assert.All(root.GetProperty("evidence").EnumerateArray(), witness =>
+        {
+            Assert.Equal("case-a/aircraft-summary.txt", witness.GetProperty("documentId").GetString());
+            Assert.Equal("basis-v1", witness.GetProperty("basisId").GetString());
+            Assert.Equal(1, witness.GetProperty("documentVersion").GetInt32());
+            Assert.Equal(1, witness.GetProperty("basisVersion").GetInt32());
+            Assert.Equal(1, witness.GetProperty("page").GetInt32());
+        });
+        Assert.Equal([new ArrSelector("cp-case-a", "current-run", "basis-v1")], reader.Selectors);
+
+        reader.CaseId = "cp-case-b";
+        using var crossCase = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.NotFound, crossCase.StatusCode);
+        using var crossJson = await ReadJsonAsync(crossCase);
+        Assert.False(crossJson.RootElement.TryGetProperty("case", out _));
+        Assert.False(crossJson.RootElement.TryGetProperty("evidence", out _));
+        Assert.Equal(
+            [new ArrSelector("cp-case-a", "current-run", "basis-v1"),
+             new ArrSelector("cp-case-a", "current-run", "basis-v1")], reader.Selectors);
+
+        reader.CaseId = "cp-case-a";
+        reader.BasisId = "basis-v2";
+        using var crossBasis = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.NotFound, crossBasis.StatusCode);
+        using var crossBasisJson = await ReadJsonAsync(crossBasis);
+        Assert.False(crossBasisJson.RootElement.TryGetProperty("case", out _));
+        Assert.False(crossBasisJson.RootElement.TryGetProperty("evidence", out _));
+        Assert.Equal(
+            [new ArrSelector("cp-case-a", "current-run", "basis-v1"),
+             new ArrSelector("cp-case-a", "current-run", "basis-v1"),
+             new ArrSelector("cp-case-a", "current-run", "basis-v1")], reader.Selectors);
+    }
+
+    [Fact]
+    public async Task AC020_SceneMeetsLatencyAndPayloadBudgets()
+    {
+        var store = CreateStore();
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        using var host = CreateHost(store, new InMemoryCasePackRequestWindowStore(), clock);
+        SeedCases(store);
+        SeedSceneHistory(store.Inner, "cp-case-a", "current-run", 25);
+        using var client = host.CreateClient();
+        var session = CreateSession(host, "presenter", "cp-case-a");
+        using (var warmup = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session))
+        {
+            Assert.Equal(HttpStatusCode.OK, warmup.StatusCode);
+            Assert.True((await warmup.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken)).Length <= 65_536);
+        }
+        clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
+
+        var samples = new double[100];
+        for (var index = 0; index < 100; index++)
+        {
+            if (index > 0 && index % 30 == 0) clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
+            var started = Stopwatch.GetTimestamp();
+            using var response = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session);
+            var body = await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+            samples[index] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(body.Length <= 65_536, $"Scene payload was {body.Length} UTF-8 bytes.");
+        }
+        Array.Sort(samples);
+        Assert.True(samples[94] <= 1000, $"Scene p95 was {samples[94]:F3} ms.");
+
+        SeedSceneHistory(store.Inner, "cp-case-a", "oversized-run", 1, 70_000, "oversized-");
+        store.ResetWriteCount();
+        var baseline = store.CaptureState();
+        using var oversized = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, oversized.StatusCode);
+        using var oversizedJson = await ReadJsonAsync(oversized);
+        Assert.Equal("scene_payload_limit", oversizedJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.False(oversizedJson.RootElement.TryGetProperty("case", out _));
+        Assert.False(oversizedJson.RootElement.TryGetProperty("evidence", out _));
+        Assert.Equal(0, store.WriteCalls);
+        Assert.Equal(baseline, store.CaptureState());
+    }
+
+    [Fact]
+    public async Task AC029_SceneEnforcesPerUserReadLimit()
+    {
+        var store = CreateStore();
+        var windowStore = new InMemoryCasePackRequestWindowStore();
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        var history = new CountingArrHistorySource();
+        using var host = CreateHost(store, windowStore, clock, history);
+        SeedCases(store);
+        SeedSceneHistory(store.Inner, "cp-case-a", "current-run", 25);
+        var readerEvents = store.Inner.Read(store.Inner.AuthorizeCase("cp-case-a", "case-pack-test-owner")).JourneyEvents!;
+        history.Events = readerEvents.Where(item => item.RunId == "current-run" && item.BasisId == "basis-v1").ToArray();
+        using var client = host.CreateClient();
+        var sessions = host.Services.GetRequiredService<DemoSessionStore>();
+        var userOne = sessions.Create(new DemoUser("scene-user-one", "Scene User One", "presenter", ["cp-case-a"]));
+        var userTwo = sessions.Create(new DemoUser("scene-user-two", "Scene User Two", "presenter", ["cp-case-a"]));
+        var one = new Session($"{DemoAuthEndpoints.CookieName}={userOne.Id}", userOne);
+        var two = new Session($"{DemoAuthEndpoints.CookieName}={userTwo.Id}", userTwo);
+
+        for (var attempt = 1; attempt <= 30; attempt++)
+        {
+            using var response = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", one);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            _ = await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        }
+        using var limited = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", one);
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        using var limitedJson = await ReadJsonAsync(limited);
+        Assert.Equal("rate_limit_exceeded", limitedJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.False(limitedJson.RootElement.TryGetProperty("case", out _));
+
+        using var second = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", two);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        _ = await second.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        using var caseList = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", one);
+        Assert.Equal(HttpStatusCode.OK, caseList.StatusCode);
+        _ = await caseList.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+
+        clock.Current = clock.Current.AddSeconds(60);
+        using var expired = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", one);
+        Assert.Equal(HttpStatusCode.OK, expired.StatusCode);
+        Assert.Equal(0, store.WriteCalls);
+    }
+
     [Fact]
     public async Task AC020_CaseListP95MeetsOneSecondBudget()
     {
