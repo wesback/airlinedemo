@@ -124,6 +124,20 @@ public sealed class CaseJourneyEventRow
     public string WitnessesJson { get; set; } = string.Empty;
 }
 
+public sealed class CasePackResetReceiptRow
+{
+    public byte[] CommandIdHash { get; set; } = [];
+    public string CommandId { get; set; } = string.Empty;
+    public string CaseId { get; set; } = string.Empty;
+    public string Actor { get; set; } = string.Empty;
+    public long ExpectedRevision { get; set; }
+    public string Variant { get; set; } = string.Empty;
+    public long PriorRevision { get; set; }
+    public long NewRevision { get; set; }
+    public string NewRunId { get; set; } = string.Empty;
+    public string AuditEventId { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// EF Core model for the provisioned Azure SQL case-state schema. Schema changes are applied only
 /// by the migration identity; the app identity holds data-plane grants only (see identity-and-telemetry.tf).
@@ -140,6 +154,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CaseAssessmentRow> CaseAssessments => Set<CaseAssessmentRow>();
     public DbSet<CaseRequestReceiptRow> CaseRequestReceipts => Set<CaseRequestReceiptRow>();
     public DbSet<CaseJourneyEventRow> CaseJourneyEvents => Set<CaseJourneyEventRow>();
+    public DbSet<CasePackResetReceiptRow> CasePackResetReceipts => Set<CasePackResetReceiptRow>();
     public DbSet<SourceReadWindowRow> SourceReadWindows => Set<SourceReadWindowRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -229,6 +244,19 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.Summary).IsRequired();
             e.Property(x => x.CapabilityLabel).HasMaxLength(128).IsRequired();
             e.Property(x => x.WitnessesJson).IsRequired();
+        });
+
+        modelBuilder.Entity<CasePackResetReceiptRow>(e =>
+        {
+            e.ToTable("case_pack_reset_receipts", "dbo");
+            e.HasKey(x => x.CommandIdHash);
+            e.Property(x => x.CommandIdHash).HasMaxLength(32).IsFixedLength();
+            e.Property(x => x.CommandId).HasMaxLength(64).IsRequired();
+            e.Property(x => x.CaseId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.Actor).HasMaxLength(256).IsRequired();
+            e.Property(x => x.Variant).HasMaxLength(32).IsRequired();
+            e.Property(x => x.NewRunId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.AuditEventId).HasMaxLength(256).IsRequired();
         });
 
         modelBuilder.Entity<CaseRow>(e =>
