@@ -5,6 +5,8 @@ using AirlineDemo.Api.Dashboard;
 using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Projection;
+using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Reviews;
 namespace AirlineDemo.Api.Auth;
 
@@ -53,8 +55,86 @@ public static class CasePackEndpoints
             .Produces(StatusCodes.Status503ServiceUnavailable);
         app.MapPost("/api/v{version:int}/cases", () => Results.StatusCode(StatusCodes.Status405MethodNotAllowed))
             .ExcludeFromDescription();
+
+        app.MapGet("/api/v{version:int}/cases/{caseId}/scene", GetScene)
+            .WithName("GetCasePackScene")
+            .WithSummary("Read an authorized case-pack scene")
+            .WithDescription("Returns the published, role-visible scene for one authorized case.");
+        app.MapGet("/api/v{version:int}/cases/{*caseId}", GetScene);
+        app.MapMethods("/api/v{version:int}/cases/{caseId}/scene",
+                new[] { "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" },
+                (int version) => version == ContractVersion
+                    ? Error(StatusCodes.Status405MethodNotAllowed, "method_not_allowed", "method_not_allowed")
+                    : Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"))
+            .ExcludeFromDescription();
         return app;
     }
+
+    private static async Task<IResult> GetScene(
+        int version,
+        string caseId,
+        HttpContext http,
+        DemoSessionStore sessions,
+        CasePackRequestLimiter limiter,
+        IAircraftCasePackSnapshotStore snapshots,
+        ICaseStateStore caseStates,
+        EvidencePackageStore packages,
+        IArrCaseHistorySource history,
+        CancellationToken cancellationToken)
+    {
+        if (caseId.EndsWith("/scene", StringComparison.Ordinal))
+            caseId = caseId[..^"/scene".Length];
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null)
+            return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "unauthenticated");
+        if (version != ContractVersion)
+            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+
+        try
+        {
+            if (!await limiter.TryRecordAttemptAsync(session.User.Id, CasePackRequestLimiter.SceneEndpoint, cancellationToken))
+                return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded");
+
+            if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
+                return SceneNotFound();
+
+            var snapshot = snapshots.Read();
+            var published = snapshot?.Cases.SingleOrDefault(item =>
+                StringComparer.Ordinal.Equals(item.CaseId, caseId));
+            if (snapshot is null || published is null)
+                return SceneNotFound();
+
+            var owner = caseStates.OwnerOf(caseId);
+            if (owner is null)
+                return SceneNotFound();
+
+            CaseScope scope;
+            try { scope = caseStates.AuthorizeCase(caseId, owner); }
+            catch (CaseAccessDeniedException) { return SceneNotFound(); }
+
+            var result = CasePackSceneProjection.BuildResult(
+                caseStates, scope, snapshot, session.User.Role, packages, history);
+            if (!result.Succeeded)
+            {
+                if (result.IsPayloadLimit)
+                    return Error(StatusCodes.Status422UnprocessableEntity,
+                        CasePackSceneProjection.PayloadLimitCode, CasePackSceneProjection.PayloadLimitCode);
+                if (result.ErrorCode == "invalid_scene") return SceneNotFound();
+                return Error(StatusCodes.Status500InternalServerError,
+                    "internal_error", "The request could not be completed.");
+            }
+
+            return Results.Ok(result.Scene);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed.");
+        }
+    }
+
+    private static IResult SceneNotFound() =>
+        Error(StatusCodes.Status404NotFound, "not_found", "Not found.");
     private static async Task<IResult> GetCases(
         int version,
         HttpContext http,
