@@ -32,7 +32,8 @@ public interface ICaseStateStore
 
     /// <summary>Atomically starts a Case C blocked-variant run and stores its receipt and audit event.</summary>
     CasePackResetCommitResult CommitBlockedVariantReset(
-        CaseScope scope, long expectedRevision, string actor, string commandId, string variant) =>
+        CaseScope scope, long expectedRevision, string actor, string commandId, string variant,
+        DateTimeOffset? auditAt = null) =>
         throw new NotSupportedException("Case-pack blocked-variant reset is not supported by this store.");
 
     IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope);

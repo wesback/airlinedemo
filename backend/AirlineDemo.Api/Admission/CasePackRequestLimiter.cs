@@ -153,6 +153,12 @@ public sealed class InMemoryCasePackRequestWindowStore : ICasePackRequestWindowS
         }
     }
 
+    internal int TotalCount(string endpoint)
+    {
+        lock (_gate)
+            return _attempts.Count(attempt => attempt.Endpoint == endpoint);
+    }
+
     internal int ActiveCount(string userId, string endpoint, DateTimeOffset now)
     {
         var userHash = Convert.ToHexString(Hash(userId));

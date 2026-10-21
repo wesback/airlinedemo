@@ -376,7 +376,8 @@ internal static class CasePackResetCommitter
     private const string ReasonCode = "presenter_reset_blocked_variant";
 
     public static CasePackResetCommitResult Commit(
-        ICaseStateStore store, CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
+        ICaseStateStore store, CaseScope scope, long expectedRevision, string actor, string commandId, string variant,
+        DateTimeOffset? auditAt = null)
     {
         var current = store.Read(scope);
         var existing = FindReceipt(current, commandId);
@@ -392,7 +393,7 @@ internal static class CasePackResetCommitter
         var newRevision = expectedRevision + 1;
         var newRunId = "run-" + Guid.NewGuid().ToString("N");
         var auditEventId = $"{scope.CaseId}:audit:{Guid.NewGuid():N}";
-        var now = DateTimeOffset.UtcNow;
+        var now = auditAt ?? DateTimeOffset.UtcNow;
         var receipt = new CasePackResetReceipt(1, commandId, scope.CaseId, expectedRevision, newRevision, newRunId, auditEventId);
         var commandReceipt = new CasePackResetCommandReceipt(receipt, actor, expectedRevision, variant);
         var journeyEvent = new CaseJourneyEventDraft(
@@ -562,8 +563,9 @@ public sealed class CaseStateStore : ICaseStateStore
     }
 
     public CasePackResetCommitResult CommitBlockedVariantReset(
-        CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
-        => CasePackResetCommitter.Commit(this, scope, expectedRevision, actor, commandId, variant);
+        CaseScope scope, long expectedRevision, string actor, string commandId, string variant,
+        DateTimeOffset? auditAt = null)
+        => CasePackResetCommitter.Commit(this, scope, expectedRevision, actor, commandId, variant, auditAt);
 
     public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
     {

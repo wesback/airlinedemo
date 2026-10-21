@@ -1,0 +1,253 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 444,
+  "branch": "ai-sdlc/issue-444",
+  "commitSha": "b3f7bfe3909b667f554fefbfca2ac92a1f0a5c38",
+  "round": 0,
+  "pipelineVersion": "18314a8",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint code appears to follow the specified authorization order and charges the limiter after session authentication. The added tests do not prove the full ordering or the reset endpoint's quota behavior, as required by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 810,
+          "message": "M-03's required authorization-order test is incomplete: it is not table-driven and does not assert that each rejected stage causes zero calls to later checks. Add cases and counting fakes that prove the specified ordering.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder tests role rejection, out-of-scope rejection, and invalid anti-forgery separately. It does not count calls to later checks or exercise the Case C/variant, replay, and revision ordering.",
+            "failureScenario": "If anti-forgery validation is moved before scope checking, or variant validation is moved after replay lookup, the named test can still pass because it never asserts those call-order invariants."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 753,
+          "message": "The acceptance criterion requires the authenticated reset quota to be wired and charged after session authentication, but the tests added here do not verify that endpoint behavior. Add endpoint-level tests for quota exhaustion and unauthenticated requests.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC014_ResetEndpointRequiresPresenterAndCommits sends one accepted request; AC015 tests role, scope, and anti-forgery rejections. Neither exercises the endpoint quota or unauthenticated requests against the limiter.",
+            "failureScenario": "If the reset endpoint stops charging the authenticated user's quota, or charges it before confirming a session, these endpoint tests still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint tests cover the main successful reset, authorization rejections, replay, and stale revision paths, but they do not prove several explicit acceptance-criteria details, including reset audit provenance and the full authorization order.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 750,
+          "message": "AC-014 does not test that the server derives the actor, time, and reason code. Assert those exact values in the stored audit/reset state.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC014_ResetEndpointRequiresPresenterAndCommits checks receipt keys, revisions, write count, and that store state changed, but does not inspect the recorded actor, time, or reason.",
+            "failureScenario": "If the reset records the wrong actor or reason, or uses caller-controlled time, this test can still pass with the same receipt and revision."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 868,
+          "message": "M-03's test does not verify the required check order or zero calls to later checks at each rejected stage. Add assertions for scope, anti-forgery, variant, replay, and revision ordering, including their call counts.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder checks ReadCalls only after role rejection. For scope and anti-forgery rejection it checks state equality, and it does not exercise variant, replay, or revision checks.",
+            "failureScenario": "If replay lookup is moved before anti-forgery validation, an invalid-token request can still leave state unchanged, so this test passes without detecting the required ordering violation."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 806,
+          "message": "AC-015 requires both missing and invalid anti-forgery tokens to return 400 without mutation; only the invalid-token case is tested.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC015_ResetRejectsRolesScopeAndAntiForgeryWithoutMutation sends an invalid anti-forgery token, but does not send a request with the token missing.",
+            "failureScenario": "If the endpoint accepts a request with no anti-forgery header while rejecting an invalid token, the named test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 819,
+          "message": "AC-016/AC-023 also require Case A and Case B to return 422 and command-ID reuse by another actor to return 409 without mutation; those cases are not tested.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC016_And_AC023_ResetReplayRevisionAndConflictResponsesAreExact exercises Case C and an unsupported variant, but does not submit resets for Case A or Case B, or reuse a command ID from another actor.",
+            "failureScenario": "If Case A or Case B is accepted, or another actor can reuse the command ID without a conflict, this test can pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint follows the visible role, scope, and anti-forgery order. The M-03 test does not prove that order at every rejected stage as the acceptance criterion requires.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 857,
+          "message": "M-03 requires a table-driven test proving each rejected stage makes zero calls to later checks. This test asserts that only for the role rejection; add assertions for the scope and anti-forgery cases.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The M-03 test sends requests rejected at the role, scope, and anti-forgery stages, but checks later-call counts only for the role rejection. It does not use the required table-driven stage checks.",
+            "failureScenario": "If the endpoint starts reading case state before rejecting an out-of-scope presenter, or performs later checks before rejecting an invalid anti-forgery token, the scope and anti-forgery portions of this test can still pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
