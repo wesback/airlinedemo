@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
@@ -160,6 +161,16 @@ public sealed class CasePackEndpointsTests : IDisposable
     }
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+    private static async Task<HttpResponseMessage> SendResetAsync(
+        HttpClient client, string caseId, Session session, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/cases/{caseId}/reset-blocked-variant");
+        request.Headers.Add("Cookie", session.Cookie);
+        request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, session.Value.CsrfToken);
+        request.Content = JsonContent.Create(body);
+        return await client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
 
     private static string[] Keys(JsonElement value) =>
         value.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
@@ -736,6 +747,141 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(0, store.WriteCalls);
         store.ThrowOnRead = false;
         Assert.Equal(baseline, store.CaptureState());
+    }
+
+    [Fact]
+    public async Task AC014_ResetEndpointRequiresPresenterAndCommits()
+    {
+        var store = CreateStore();
+        using var host = CreateHost(store);
+        SeedCases(store);
+        using var client = host.CreateClient();
+        var presenter = CreateSession(host, "presenter", "cp-case-c");
+        var before = store.CaptureState();
+
+        using var accepted = await SendResetAsync(client, "cp-case-c", presenter,
+            new { contractVersion = 1, commandId = "reset-014", expectedRevision = 0L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        using var receiptJson = await ReadJsonAsync(accepted);
+        Assert.Equal(["auditEventId", "caseId", "commandId", "contractVersion", "newRevision", "newRunId", "priorRevision"],
+            Keys(receiptJson.RootElement));
+        Assert.Equal(0, receiptJson.RootElement.GetProperty("priorRevision").GetInt64());
+        Assert.Equal(1, receiptJson.RootElement.GetProperty("newRevision").GetInt64());
+        Assert.Equal(1, store.WriteCalls);
+        Assert.NotEqual(before, store.CaptureState());
+    }
+
+    [Fact]
+    public async Task AC015_ResetRejectsRolesScopeAndAntiForgeryWithoutMutation()
+    {
+        var store = CreateStore();
+        using var host = CreateHost(store);
+        SeedCases(store);
+        using var client = host.CreateClient();
+        foreach (var role in new[] { "technical-reviewer", "finance-reviewer", "legal-reviewer", "executive" })
+        {
+            var before = store.CaptureState();
+            var session = CreateSession(host, role, "cp-case-c");
+            using var response = await SendResetAsync(client, "cp-case-c", session,
+                new { contractVersion = 1, commandId = $"role-{role}", expectedRevision = 0L, variant = "blocked" });
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            Assert.Equal(before, store.CaptureState());
+        }
+
+        var presenter = CreateSession(host, "presenter", "cp-case-c");
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            "/api/v1/cases/cp-case-c/reset-blocked-variant");
+        request.Headers.Add("Cookie", presenter.Cookie);
+        request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, "invalid-token");
+        request.Content = JsonContent.Create(new { contractVersion = 1, commandId = "bad-csrf", expectedRevision = 0L, variant = "blocked" });
+        var beforeCsrf = store.CaptureState();
+        using var csrf = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
+        Assert.Equal(beforeCsrf, store.CaptureState());
+
+        var outOfScope = CreateSession(host, "presenter", "cp-case-a");
+        var beforeScope = store.CaptureState();
+        using var scopeResponse = await SendResetAsync(client, "cp-case-c", outOfScope,
+            new { contractVersion = 1, commandId = "bad-scope", expectedRevision = 0L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.NotFound, scopeResponse.StatusCode);
+        Assert.Equal(beforeScope, store.CaptureState());
+    }
+
+    [Fact]
+    public async Task AC016_And_AC023_ResetReplayRevisionAndConflictResponsesAreExact()
+    {
+        var store = CreateStore();
+        using var host = CreateHost(store);
+        SeedCases(store);
+        using var client = host.CreateClient();
+        var presenter = CreateSession(host, "presenter", "cp-case-c");
+        var body = new { contractVersion = 1, commandId = "reset-replay", expectedRevision = 0L, variant = "blocked" };
+
+        using var accepted = await SendResetAsync(client, "cp-case-c", presenter, body);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        using var replayJson = await ReadJsonAsync(accepted);
+        using var replay = await SendResetAsync(client, "cp-case-c", presenter, body);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        using var replayedJson = await ReadJsonAsync(replay);
+        Assert.Equal(replayJson.RootElement.GetRawText(), replayedJson.RootElement.GetRawText());
+
+        var cScope = store.Inner.AuthorizeCase("cp-case-c", "case-pack-test-owner");
+        Assert.Equal(1, store.Inner.Read(cScope).Revision);
+        store.Inner.Commit(cScope, store.Inner.Read(cScope).Revision,
+            new CaseCommit(null, null, "presenter", "advance", "test advancement"));
+        store.ResetWriteCount();
+        using var stale = await SendResetAsync(client, "cp-case-c", presenter,
+            new { contractVersion = 1, commandId = "reset-stale", expectedRevision = 0L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal("stale_revision", (await ReadJsonAsync(stale)).RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(0, store.WriteCalls);
+
+        var beforeUnsupported = store.CaptureState();
+        using var unsupported = await SendResetAsync(client, "cp-case-c", presenter,
+            new { contractVersion = 1, commandId = "reset-replay", expectedRevision = 0L, variant = "other" });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, unsupported.StatusCode);
+        Assert.Equal(beforeUnsupported, store.CaptureState());
+
+        var beforeConflict = store.CaptureState();
+        using var conflict = await SendResetAsync(client, "cp-case-c", presenter,
+            new { contractVersion = 1, commandId = "reset-replay", expectedRevision = 99L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        using var conflictJson = await ReadJsonAsync(conflict);
+        Assert.Equal("command_id_conflict", conflictJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(beforeConflict, store.CaptureState());
+    }
+
+    [Fact]
+    public async Task M03_ResetAuthorizationChecksRunInRequiredOrder()
+    {
+        var store = CreateStore();
+        using var host = CreateHost(store);
+        SeedCases(store);
+        using var client = host.CreateClient();
+        var cBody = new { contractVersion = 1, commandId = "m03", expectedRevision = 0L, variant = "blocked" };
+
+        var technical = CreateSession(host, "technical-reviewer", "cp-case-c");
+        var beforeRole = store.CaptureState();
+        using var roleRejected = await SendResetAsync(client, "cp-case-c", technical, cBody);
+        Assert.Equal(HttpStatusCode.Forbidden, roleRejected.StatusCode);
+        Assert.Equal(beforeRole, store.CaptureState());
+        Assert.Equal(0, store.ReadCalls);
+
+        var outOfScope = CreateSession(host, "presenter", "cp-case-a");
+        var beforeScope = store.CaptureState();
+        using var scopeRejected = await SendResetAsync(client, "cp-case-c", outOfScope, cBody);
+        Assert.Equal(HttpStatusCode.NotFound, scopeRejected.StatusCode);
+        Assert.Equal(beforeScope, store.CaptureState());
+
+        var presenter = CreateSession(host, "presenter", "cp-case-c");
+        var invalidRequest = new HttpRequestMessage(HttpMethod.Post,
+            "/api/v1/cases/cp-case-c/reset-blocked-variant") { Content = JsonContent.Create(cBody) };
+        invalidRequest.Headers.Add("Cookie", presenter.Cookie);
+        invalidRequest.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, "bad");
+        var beforeAntiForgery = store.CaptureState();
+        using var antiForgeryRejected = await client.SendAsync(invalidRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, antiForgeryRejected.StatusCode);
+        Assert.Equal(beforeAntiForgery, store.CaptureState());
     }
 
     [Fact]

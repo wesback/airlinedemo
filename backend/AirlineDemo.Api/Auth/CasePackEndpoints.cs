@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Dashboard;
 using AirlineDemo.Api.Finance;
@@ -8,6 +10,7 @@ using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Projection;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Reviews;
+using AirlineDemo.Api.Runs;
 namespace AirlineDemo.Api.Auth;
 
 /// <summary>The versioned envelope returned by the case-pack list endpoint.</summary>
@@ -37,6 +40,12 @@ public sealed record CasePackCaseSummary(
     string? ActivityId,
     string CapabilityLabel,
     bool Synthetic);
+public sealed record CasePackResetBlockedVariantRequest(
+    int? ContractVersion,
+    string? CommandId,
+    long? ExpectedRevision,
+    string? Variant);
+
 public static class CasePackEndpoints
 {
     private const int ContractVersion = 1;
@@ -61,6 +70,8 @@ public static class CasePackEndpoints
             .WithSummary("Read an authorized case-pack scene")
             .WithDescription("Returns the published, role-visible scene for one authorized case.");
         app.MapGet("/api/v{version:int}/cases/{*caseId}", GetScene);
+        app.MapPost("/api/v{version:int}/cases/{caseId}/reset-blocked-variant",
+                ResetBlockedVariant);
         app.MapMethods("/api/v{version:int}/cases/{caseId}/scene",
                 new[] { "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" },
                 (int version) => version == ContractVersion
@@ -68,6 +79,88 @@ public static class CasePackEndpoints
                     : Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"))
             .ExcludeFromDescription();
         return app;
+    }
+
+    private static async Task<IResult> ResetBlockedVariant(
+        int version,
+        string caseId,
+        HttpContext http,
+        DemoSessionStore sessions,
+        CasePackRequestLimiter limiter,
+        ICaseStateStore caseStates,
+        TimeProvider time,
+        CancellationToken cancellationToken)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null)
+            return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in.");
+
+        try
+        {
+            if (!await limiter.TryRecordAttemptAsync(session.User.Id,
+                    CasePackRequestLimiter.ResetEndpoint, cancellationToken))
+                return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Error(StatusCodes.Status503ServiceUnavailable, "rate_limit_unavailable", "rate_limit_unavailable");
+        }
+
+        if (version != ContractVersion)
+            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+        if (!string.Equals(session.User.Role, "presenter", StringComparison.Ordinal))
+            return Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden");
+
+        if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal)
+            || caseStates.OwnerOf(caseId) is not { } owner)
+            return SceneNotFound();
+
+        CaseScope scope;
+        try { scope = caseStates.AuthorizeCase(caseId, owner); }
+        catch (CaseAccessDeniedException) { return SceneNotFound(); }
+
+        if (!DemoAuthEndpoints.HasValidAntiForgery(http, session))
+            return Error(StatusCodes.Status400BadRequest, "anti_forgery_failed", "Anti-forgery validation failed.");
+
+        CasePackResetBlockedVariantRequest? body;
+        try
+        {
+            body = await http.Request.ReadFromJsonAsync<CasePackResetBlockedVariantRequest>(cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return Error(StatusCodes.Status400BadRequest, "invalid_request", "Request body must be a valid reset command.");
+        }
+
+        if (body is null || body.ContractVersion is null || body.CommandId is null
+            || body.ExpectedRevision is null || body.Variant is null)
+            return Error(StatusCodes.Status400BadRequest, "invalid_request", "contractVersion, commandId, expectedRevision and variant are required.");
+        if (body.ContractVersion != ContractVersion)
+            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+        if (!Regex.IsMatch(body.CommandId, "^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking))
+            return Error(StatusCodes.Status400BadRequest, "invalid_request", "commandId must be 1-64 ASCII letters, digits, hyphens, or underscores.");
+        if (body.ExpectedRevision < 0)
+            return Error(StatusCodes.Status400BadRequest, "invalid_request", "expectedRevision must be nonnegative.");
+
+        if (!string.Equals(caseId, "cp-case-c", StringComparison.Ordinal)
+            || !string.Equals(body.Variant, "blocked", StringComparison.Ordinal))
+            return Error(StatusCodes.Status422UnprocessableEntity, "unsupported_target", "Only the Case C blocked variant can be reset.");
+
+        try
+        {
+            var reset = new CasePackBlockedVariantReset(caseStates);
+            var result = reset.Reset(scope, session.User.Id, body.CommandId,
+                body.ExpectedRevision.Value, body.Variant);
+            return Results.Ok(result.Receipt);
+        }
+        catch (CasePackBlockedVariantResetException exception)
+        {
+            return Error(exception.StatusCode, exception.Code, exception.Message);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return Error(StatusCodes.Status503ServiceUnavailable, "audit_write_failed", "The reset could not be recorded.");
+        }
     }
 
     private static async Task<IResult> GetScene(
