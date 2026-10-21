@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Investigation;
@@ -20,6 +22,11 @@ public sealed class CasePackEndpointsTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"case-pack-list-{Guid.NewGuid():N}");
 
     private sealed record Session(string Cookie, DemoSession Value);
+    private sealed class AdjustableTime : TimeProvider
+    {
+        public DateTimeOffset Current { get; set; }
+        public override DateTimeOffset GetUtcNow() => Current;
+    }
     private sealed record CaseStateSnapshot(
         string CaseId, long Revision, string[] RunIds, string[] JourneyRunIds, AuditEvent[] Audit);
     private sealed class CountingCaseStateStore(CaseStateStore inner) : ICaseStateStore
@@ -70,7 +77,10 @@ public sealed class CasePackEndpointsTests : IDisposable
         }
         public void ResetWriteCount() => WriteCalls = 0;
     }
-    private WebApplicationFactory<Program> CreateHost(CountingCaseStateStore store) =>
+    private WebApplicationFactory<Program> CreateHost(
+        CountingCaseStateStore store,
+        ICasePackRequestWindowStore? windowStore = null,
+        TimeProvider? time = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
@@ -84,6 +94,16 @@ public sealed class CasePackEndpointsTests : IDisposable
                 services.RemoveAll<ICaseStateStore>();
                 services.AddSingleton(store);
                 services.AddSingleton<ICaseStateStore>(store);
+                if (time is not null)
+                {
+                    services.RemoveAll<TimeProvider>();
+                    services.AddSingleton(time);
+                }
+                if (windowStore is not null)
+                {
+                    services.RemoveAll<ICasePackRequestWindowStore>();
+                    services.AddSingleton(windowStore);
+                }
             });
         });
 
@@ -247,6 +267,115 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(0, store.WriteCalls);
         Assert.Equal(baseline, store.CaptureState());
     }
+    [Fact]
+    public async Task AC020_CaseListP95MeetsOneSecondBudget()
+    {
+        var store = CreateStore();
+        var clock = new AdjustableTime
+        {
+            Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero),
+        };
+        using var host = CreateHost(store, new InMemoryCasePackRequestWindowStore(), clock);
+        SeedCases(store);
+        using var client = host.CreateClient();
+        var session = CreateSession(host, "presenter", CaseIds);
+
+        using (var warmup = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", session))
+        {
+            Assert.Equal(HttpStatusCode.OK, warmup.StatusCode);
+            _ = await warmup.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        }
+        clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
+
+        var samples = new double[100];
+        for (var index = 0; index < samples.Length; index++)
+        {
+            if (index > 0 && index % 30 == 0)
+                clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
+            var started = Stopwatch.GetTimestamp();
+            using var response = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", session);
+            _ = await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+            samples[index] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        Array.Sort(samples);
+        Assert.True(samples[94] <= 1000, $"Case-list p95 was {samples[94]:F3} ms.");
+        Assert.Equal(0, store.WriteCalls);
+    }
+
+    [Fact]
+    public async Task AC029_CaseListEnforcesPerUserReadLimit()
+    {
+        var store = CreateStore();
+        var windowStore = new InMemoryCasePackRequestWindowStore();
+        var clock = new AdjustableTime
+        {
+            Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero),
+        };
+        using var host = CreateHost(store, windowStore, clock);
+        SeedCases(store);
+        using var client = host.CreateClient();
+        var sessions = host.Services.GetRequiredService<DemoSessionStore>();
+        var userOne = sessions.Create(new DemoUser("user-one", "User One", "presenter", CaseIds));
+        var userTwo = sessions.Create(new DemoUser("user-two", "User Two", "presenter", CaseIds));
+        var userOneSession = new Session($"{DemoAuthEndpoints.CookieName}={userOne.Id}", userOne);
+        var userTwoSession = new Session($"{DemoAuthEndpoints.CookieName}={userTwo.Id}", userTwo);
+        var baseline = store.CaptureState();
+
+        for (var attempt = 1; attempt <= 29; attempt++)
+        {
+            using var response = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", userOneSession);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            _ = await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (var thirtieth = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", userOneSession))
+        {
+            Assert.Equal(HttpStatusCode.OK, thirtieth.StatusCode);
+            _ = await thirtieth.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        }
+
+        using (var thirtyFirst = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", userOneSession))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, thirtyFirst.StatusCode);
+            using var json = await ReadJsonAsync(thirtyFirst);
+            Assert.Equal(new[] { "contractVersion", "error" }, Keys(json.RootElement));
+            Assert.Equal(1, json.RootElement.GetProperty("contractVersion").GetInt32());
+            Assert.False(json.RootElement.TryGetProperty("cases", out _));
+            var error = json.RootElement.GetProperty("error");
+            Assert.Equal(new[] { "code", "message" }, Keys(error));
+            Assert.Equal("rate_limit_exceeded", error.GetProperty("code").GetString());
+            Assert.Equal("rate_limit_exceeded", error.GetProperty("message").GetString());
+        }
+        Assert.Equal(0, store.WriteCalls);
+        Assert.Equal(baseline, store.CaptureState());
+
+        using (var secondUser = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", userTwoSession))
+        {
+            Assert.Equal(HttpStatusCode.OK, secondUser.StatusCode);
+            _ = await secondUser.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        }
+
+        clock.Current = clock.Current.AddSeconds(59);
+        using (var agedRequest = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", userOneSession))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, agedRequest.StatusCode);
+            using var json = await ReadJsonAsync(agedRequest);
+            Assert.Equal("rate_limit_exceeded", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+            Assert.False(json.RootElement.TryGetProperty("cases", out _));
+        }
+
+        clock.Current = clock.Current.AddSeconds(1);
+        using (var expiredWindow = await SendAsync(client, HttpMethod.Get, "/api/v1/cases", userOneSession))
+        {
+            Assert.Equal(HttpStatusCode.OK, expiredWindow.StatusCode);
+            _ = await expiredWindow.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(0, store.WriteCalls);
+        Assert.Equal(baseline, store.CaptureState());
+    }
+
     [Fact]
     public async Task AC025_CaseListRejectsUnsupportedVersion()
     {
