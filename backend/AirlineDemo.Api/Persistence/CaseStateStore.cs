@@ -22,6 +22,9 @@ public sealed class TraceConflictException()
 public sealed class JourneyEventConflictException()
     : Exception("Journey event already exists for this case; no change was made.");
 
+public sealed class CasePackResetCommandConflictException()
+    : Exception("Reset command id was already used for a different command; no change was made.");
+
 public sealed class BasisIntegrityException(string message) : Exception(message);
 
 /// <summary>Server-issued proof that a case id was authorized; only the store can create one.</summary>
@@ -79,6 +82,23 @@ public sealed record CaseJourneyEvent(
     string Summary,
     string CapabilityLabel,
     IReadOnlyList<CaseJourneyWitness> Witnesses);
+
+public sealed record CasePackResetReceipt(
+    int ContractVersion,
+    string CommandId,
+    string CaseId,
+    long PriorRevision,
+    long NewRevision,
+    string NewRunId,
+    string AuditEventId);
+
+public sealed record CasePackResetCommandReceipt(
+    CasePackResetReceipt Receipt,
+    string Actor,
+    long ExpectedRevision,
+    string Variant);
+
+public sealed record CasePackResetCommitResult(CaseState State, CasePackResetReceipt Receipt, bool Replayed);
 
 internal static class CaseJourneyRules
 {
@@ -197,7 +217,8 @@ public sealed record CaseState(
     IReadOnlyList<InvestigationTrace>? Traces = null,
     IReadOnlyList<CaseAssessment>? Assessments = null,
     IReadOnlyList<DeliveryReceipt>? RequestReceipts = null,
-    IReadOnlyList<CaseJourneyEvent>? JourneyEvents = null);
+    IReadOnlyList<CaseJourneyEvent>? JourneyEvents = null,
+    IReadOnlyList<CasePackResetCommandReceipt>? BlockedVariantResetReceipts = null);
 
 public sealed record CaseAssessment(
     string AssessmentId,
@@ -345,9 +366,68 @@ public sealed record CaseCommit(
     DateTimeOffset? At = null,
     CaseAssessment? Assessment = null,
     DeliveryReceipt? RequestReceipt = null,
-    CaseJourneyEventDraft? JourneyEvent = null);
+    CaseJourneyEventDraft? JourneyEvent = null,
+    CasePackResetCommandReceipt? BlockedVariantResetReceipt = null);
 
 public sealed record CommitResult(CaseState State, bool Replayed);
+
+internal static class CasePackResetCommitter
+{
+    private const string ReasonCode = "presenter_reset_blocked_variant";
+
+    public static CasePackResetCommitResult Commit(
+        ICaseStateStore store, CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
+    {
+        var current = store.Read(scope);
+        var existing = FindReceipt(current, commandId);
+        if (existing is not null)
+        {
+            if (SameCommand(existing, scope, actor, expectedRevision, variant))
+                return new CasePackResetCommitResult(current, existing.Receipt, Replayed: true);
+            throw new CasePackResetCommandConflictException();
+        }
+        CaseStateStore.ValidateBlockedVariantReset(scope, actor, commandId, variant);
+        if (expectedRevision == long.MaxValue)
+            throw new RevisionConflictException();
+        var newRevision = expectedRevision + 1;
+        var newRunId = "run-" + Guid.NewGuid().ToString("N");
+        var auditEventId = $"{scope.CaseId}:audit:{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var receipt = new CasePackResetReceipt(1, commandId, scope.CaseId, expectedRevision, newRevision, newRunId, auditEventId);
+        var commandReceipt = new CasePackResetCommandReceipt(receipt, actor, expectedRevision, variant);
+        var journeyEvent = new CaseJourneyEventDraft(
+            auditEventId, newRunId, scope.CaseId, ReasonCode, null, null,
+            "presenter", "Blocked variant reset", "Case pack reset", []);
+        var detail = $"caseId={scope.CaseId};priorRevision={expectedRevision};newRevision={newRevision};reasonCode={ReasonCode};commandId={commandId};auditEventId={auditEventId}";
+        try
+        {
+            var committed = store.Commit(scope, expectedRevision, new CaseCommit(
+                null, commandId, actor, ReasonCode, detail, now,
+                JourneyEvent: journeyEvent, BlockedVariantResetReceipt: commandReceipt));
+            var stored = FindReceipt(committed.State, commandId)
+                ?? throw new InvalidDataException("Committed reset receipt is missing from case state.");
+            return new CasePackResetCommitResult(committed.State, stored.Receipt, committed.Replayed);
+        }
+        catch (ReceiptConflictException)
+        {
+            current = store.Read(scope);
+            existing = FindReceipt(current, commandId);
+            if (existing is null || !SameCommand(existing, scope, actor, expectedRevision, variant))
+                throw new CasePackResetCommandConflictException();
+            return new CasePackResetCommitResult(current, existing.Receipt, Replayed: true);
+        }
+    }
+    private static CasePackResetCommandReceipt? FindReceipt(CaseState state, string commandId) =>
+        (state.BlockedVariantResetReceipts ?? Array.Empty<CasePackResetCommandReceipt>())
+            .FirstOrDefault(item => string.Equals(item.Receipt.CommandId, commandId, StringComparison.Ordinal));
+
+    private static bool SameCommand(
+        CasePackResetCommandReceipt stored, CaseScope scope, string actor, long expectedRevision, string variant) =>
+        string.Equals(stored.Receipt.CaseId, scope.CaseId, StringComparison.Ordinal)
+        && string.Equals(stored.Actor, actor, StringComparison.Ordinal)
+        && stored.ExpectedRevision == expectedRevision
+        && string.Equals(stored.Variant, variant, StringComparison.Ordinal);
+}
 
 internal sealed record CaseStoreDocument(int SchemaVersion, List<CaseState> Cases);
 
@@ -480,6 +560,10 @@ public sealed class CaseStateStore : ICaseStateStore
     {
         lock (_gate) return Current(scope).RequestReceipts ?? Array.Empty<DeliveryReceipt>();
     }
+
+    public CasePackResetCommitResult CommitBlockedVariantReset(
+        CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
+        => CasePackResetCommitter.Commit(this, scope, expectedRevision, actor, commandId, variant);
 
     public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
     {
@@ -642,6 +726,8 @@ public sealed class CaseStateStore : ICaseStateStore
             }
         }
 
+        ValidateBlockedVariantResetCommit(scope, expectedRevision, commit);
+
         lock (_gate)
         {
             using var fileLock = AcquireFileLock();
@@ -719,6 +805,12 @@ public sealed class CaseStateStore : ICaseStateStore
                 journeyEvents.Add(CaseJourneyRules.FromDraft(newJourneyEvent, journeyEvents.Count + 1));
             }
 
+            var resetReceipts = (current.BlockedVariantResetReceipts ?? Array.Empty<CasePackResetCommandReceipt>()).ToList();
+            if (commit.BlockedVariantResetReceipt is { } newResetReceipt)
+            {
+                resetReceipts.Add(newResetReceipt);
+            }
+
             var receipts = current.ReceiptIds.ToList();
             var fingerprints = new Dictionary<string, string>(current.ReceiptFingerprints, StringComparer.Ordinal);
             if (commit.ReceiptId is not null)
@@ -741,6 +833,7 @@ public sealed class CaseStateStore : ICaseStateStore
                 Assessments = assessments,
                 RequestReceipts = requestReceipts,
                 JourneyEvents = journeyEvents,
+                BlockedVariantResetReceipts = resetReceipts,
             });
             var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = updated };
             Persist(snapshot);
@@ -840,6 +933,7 @@ public sealed class CaseStateStore : ICaseStateStore
         Assessments = Wrap((state.Assessments ?? Array.Empty<CaseAssessment>()).Select(SnapshotAssessment)),
         RequestReceipts = Wrap(state.RequestReceipts ?? Array.Empty<DeliveryReceipt>()),
         JourneyEvents = Wrap((state.JourneyEvents ?? Array.Empty<CaseJourneyEvent>()).Select(CaseJourneyRules.Snapshot)),
+        BlockedVariantResetReceipts = Wrap(state.BlockedVariantResetReceipts ?? Array.Empty<CasePackResetCommandReceipt>()),
         ReceiptFingerprints = new ReadOnlyDictionary<string, string>(
             new Dictionary<string, string>(state.ReceiptFingerprints, StringComparer.Ordinal)),
     };
@@ -857,6 +951,47 @@ public sealed class CaseStateStore : ICaseStateStore
 
     private static ReadOnlyCollection<T> Wrap<T>(IEnumerable<T> items) => new(items.ToList());
 
+    internal static void ValidateBlockedVariantReset(CaseScope scope, string actor, string commandId, string variant)
+    {
+        if (!string.Equals(scope.CaseId, "cp-case-c", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Only the Case C blocked variant can be reset.", nameof(scope));
+        }
+
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            throw new ArgumentException("Reset actor is required.", nameof(actor));
+        }
+
+        if (commandId is null || commandId.Length is < 1 or > 64
+            || commandId.Any(character => !(character is >= 'A' and <= 'Z'
+                or >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_')))
+        {
+            throw new ArgumentException("Reset command id must contain 1 to 64 ASCII letters, digits, hyphens or underscores.", nameof(commandId));
+        }
+        if (!string.Equals(variant, "blocked", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Only the blocked variant can be reset.", nameof(variant));
+        }
+    }
+
+    internal static void ValidateBlockedVariantResetCommit(CaseScope scope, long expectedRevision, CaseCommit commit)
+    {
+        if (commit.BlockedVariantResetReceipt is not { } record) return;
+        var receipt = record.Receipt;
+        ValidateBlockedVariantReset(scope, record.Actor, receipt.CommandId, record.Variant);
+        var journeyEvent = commit.JourneyEvent;
+        if (receipt.CaseId != scope.CaseId || record.ExpectedRevision != expectedRevision
+            || receipt.PriorRevision != expectedRevision || expectedRevision == long.MaxValue
+            || receipt.NewRevision != expectedRevision + 1 || receipt.ContractVersion != 1
+            || commit.ReceiptId != receipt.CommandId || commit.Actor != record.Actor
+            || commit.Action != "presenter_reset_blocked_variant" || journeyEvent is null
+            || journeyEvent.EventId != receipt.AuditEventId || journeyEvent.RunId != receipt.NewRunId
+            || journeyEvent.CaseId != receipt.CaseId || journeyEvent.EventType != commit.Action
+            || journeyEvent.ActorRole != "presenter")
+            throw new ArgumentException("Blocked-variant reset receipt does not match its commit.", nameof(commit));
+    }
+
     /// <summary>Digest of the commit payload, used to tell a true replay from a reused receipt ID.</summary>
     internal static string CommitFingerprint(CaseCommit commit)
     {
@@ -871,8 +1006,15 @@ public sealed class CaseStateStore : ICaseStateStore
             commit.Detail,
         }));
         return commit.Assessment is null && commit.RequestReceipt is null && commit.JourneyEvent is null
+            && commit.BlockedVariantResetReceipt is null
             ? digest
-            : Digest(digest + JsonSerializer.Serialize(new { commit.Assessment, commit.RequestReceipt, commit.JourneyEvent }));
+            : Digest(digest + JsonSerializer.Serialize(new
+            {
+                commit.Assessment,
+                commit.RequestReceipt,
+                commit.JourneyEvent,
+                commit.BlockedVariantResetReceipt,
+            }));
     }
 
     private static void Validate(CaseState state)

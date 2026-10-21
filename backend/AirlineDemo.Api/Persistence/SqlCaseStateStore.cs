@@ -149,6 +149,8 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             }
         }
 
+        CaseStateStore.ValidateBlockedVariantResetCommit(scope, expectedRevision, commit);
+
         using var db = NewContext();
         using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
 
@@ -269,6 +271,24 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             });
         }
 
+        if (commit.BlockedVariantResetReceipt is { } newResetReceipt)
+        {
+            var reset = newResetReceipt.Receipt;
+            db.CasePackResetReceipts.Add(new CasePackResetReceiptRow
+            {
+                CommandIdHash = SHA256.HashData(Encoding.UTF8.GetBytes(reset.CommandId)),
+                CommandId = reset.CommandId,
+                CaseId = reset.CaseId,
+                Actor = newResetReceipt.Actor,
+                ExpectedRevision = newResetReceipt.ExpectedRevision,
+                Variant = newResetReceipt.Variant,
+                PriorRevision = reset.PriorRevision,
+                NewRevision = reset.NewRevision,
+                NewRunId = reset.NewRunId,
+                AuditEventId = reset.AuditEventId,
+            });
+        }
+
         if (commit.ReceiptId is { } newReceiptId)
         {
             db.CaseDecisions.Add(new CaseDecisionRow
@@ -294,6 +314,10 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         tx.Commit();
         return new CommitResult(Load(db, row.CaseId), Replayed: false);
     }
+
+    public CasePackResetCommitResult CommitBlockedVariantReset(
+        CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
+        => CasePackResetCommitter.Commit(this, scope, expectedRevision, actor, commandId, variant);
 
     public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
     {
@@ -666,6 +690,24 @@ public sealed class SqlCaseStateStore : ICaseStateStore
                     ?? throw new InvalidDataException("Journey event witnesses are unreadable."))))
             .ToList();
 
+        var resetReceipts = db.CasePackResetReceipts
+            .AsEnumerable()
+            .Where(receipt => Same(receipt.CaseId, caseId))
+            .OrderBy(receipt => receipt.PriorRevision)
+            .Select(receipt => new CasePackResetCommandReceipt(
+                new CasePackResetReceipt(
+                    1,
+                    receipt.CommandId,
+                    receipt.CaseId,
+                    receipt.PriorRevision,
+                    receipt.NewRevision,
+                    receipt.NewRunId,
+                    receipt.AuditEventId),
+                    receipt.Actor,
+                    receipt.ExpectedRevision,
+                    receipt.Variant))
+            .ToList();
+
         if (journeyEvents.Select(item => item.EventId).Distinct(StringComparer.Ordinal).Count() != journeyEvents.Count
             || journeyEvents.Where((item, index) => item.Sequence != index + 1 || !Same(item.CaseId, caseId)).Any())
         {
@@ -701,7 +743,8 @@ public sealed class SqlCaseStateStore : ICaseStateStore
             items.AsReadOnly(),
             Assessments: assessments.AsReadOnly(),
             RequestReceipts: requestReceipts.AsReadOnly(),
-            JourneyEvents: journeyEvents.AsReadOnly());
+            JourneyEvents: journeyEvents.AsReadOnly(),
+            BlockedVariantResetReceipts: resetReceipts.AsReadOnly());
     }
 
     private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.Ordinal);

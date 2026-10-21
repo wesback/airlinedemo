@@ -1,0 +1,238 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 443,
+  "branch": "ai-sdlc/issue-443",
+  "commitSha": "a9b065f5542653bbb1b9e03a86e4ff1806aa852e",
+  "round": 1,
+  "pipelineVersion": "747290d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior AC-023 finding is fixed: the store now checks for an existing command ID before validating the variant, so a reused ID with a different variant returns a command conflict. I found no new defect in this round’s delta or critical/security issue in the change.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix checks for an existing command receipt before validating the variant, so reusing a command ID with a different variant returns the required conflict. The updated AC-023 test covers that case, and I found no new defect in the changes since the prior review.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix checks for an existing command receipt before validating the retry payload, so reusing a command ID with a different variant now returns the required conflict. I found no concrete security vulnerability in the reviewed changes.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": true,
+    "failed": [],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 0,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackBlockedVariantResetTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 205,
+      "total": 220,
+      "percent": 93.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 20,
+          "total": 20,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 100,
+          "total": 109,
+          "missed": [
+            391,
+            416,
+            957,
+            958,
+            962,
+            963,
+            969,
+            970,
+            992
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/ICaseStateStore.cs",
+          "covered": 0,
+          "total": 1,
+          "missed": [
+            36
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261020120000_CasePackResetReceipts.cs",
+          "covered": 26,
+          "total": 27,
+          "missed": [
+            37
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 38,
+          "total": 38,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/CasePackBlockedVariantReset.cs",
+          "covered": 21,
+          "total": 25,
+          "missed": [
+            21,
+            30,
+            31,
+            32
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -22,7 +22,7 @@ public sealed class SqlCaseStateStoreTests
     private static readonly string[] InterfaceMethods =
     [
         "AuthorizeCase", "OwnerOf", "CreateCase", "Read", "GetBasisVersion", "ReadAudit",
-        "ListAssessments", "FindAssessment", "ListRequestReceipts", "Commit",
+        "ListAssessments", "FindAssessment", "ListRequestReceipts", "Commit", "CommitBlockedVariantReset",
         "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState", "AppendTrace", "FindTrace",
     ];
 
@@ -60,8 +60,9 @@ public sealed class SqlCaseStateStoreTests
         AssertMapped(db, typeof(CaseDocumentRow), "dbo", "case_documents");
         AssertMapped(db, typeof(CaseDecisionRow), "dbo", "case_decisions");
         AssertMapped(db, typeof(CaseEventRow), "audit", "case_events");
+        AssertMapped(db, typeof(CasePackResetReceiptRow), "dbo", "case_pack_reset_receipts");
 
-        foreach (var table in new[] { "cases", "case_documents", "case_decisions", "case_events" })
+        foreach (var table in new[] { "cases", "case_documents", "case_decisions", "case_events", "case_pack_reset_receipts" })
         {
             using var check = connection.CreateCommand();
             check.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $name";
@@ -82,6 +83,33 @@ public sealed class SqlCaseStateStoreTests
         var auditIndex = operations.FindIndex(o => o is EnsureSchemaOperation e && e.Name == "audit");
         var eventsIndex = operations.FindIndex(o => o is CreateTableOperation c && c.Name == "case_events");
         Assert.True(auditIndex >= 0 && auditIndex < eventsIndex, "audit schema must be created before audit.case_events");
+    }
+
+    [Fact]
+    public void AC014_CasePackResetReceiptAndRunPersistAtomicallyInSql()
+    {
+        using var connection = OpenMigratedSqlite(out var options);
+        var store = new SqlCaseStateStore(options);
+        var scope = store.CreateCase("cp-case-c", "presenter");
+        store.Commit(scope, 0, new CaseCommit(
+            null, null, "presenter", "seed", "prior event",
+            JourneyEvent: new CaseJourneyEventDraft(
+                "prior-event", "prior-run", scope.CaseId, "run.started", null, null,
+                "presenter", "Prior run", "Case pack", [])));
+
+        var committed = store.CommitBlockedVariantReset(scope, 1, "presenter", "sql-reset-1", "blocked");
+        var reloaded = new SqlCaseStateStore(options);
+        var reloadedScope = reloaded.AuthorizeCase("cp-case-c", "presenter");
+        var persisted = reloaded.Read(reloadedScope);
+        Assert.Equal(committed.Receipt, Assert.Single(persisted.BlockedVariantResetReceipts!).Receipt);
+        Assert.Equal(committed.State.Audit.Select(item => (item.Sequence, item.Revision, item.Actor, item.Action, item.Detail, item.At)),
+            persisted.Audit.Select(item => (item.Sequence, item.Revision, item.Actor, item.Action, item.Detail, item.At)));
+        Assert.Equal(new[] { "prior-run", committed.Receipt.NewRunId }, persisted.JourneyEvents!.Select(item => item.RunId));
+        var replay = reloaded.CommitBlockedVariantReset(reloadedScope, 1, "presenter", "sql-reset-1", "blocked");
+        Assert.Equal((true, committed.Receipt, 2L), (replay.Replayed, replay.Receipt, replay.State.Revision));
+        Assert.Equal(2, CountAuditEvents(options));
+        Assert.Throws<CasePackResetCommandConflictException>(() =>
+            reloaded.CommitBlockedVariantReset(reloadedScope, 1, "different-actor", "sql-reset-1", "blocked"));
     }
 
     [Fact]
