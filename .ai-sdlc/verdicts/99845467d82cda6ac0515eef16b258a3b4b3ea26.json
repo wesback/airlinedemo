@@ -1,0 +1,314 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 458,
+  "branch": "ai-sdlc/issue-458",
+  "commitSha": "99845467d82cda6ac0515eef16b258a3b4b3ea26",
+  "round": 2,
+  "pipelineVersion": "18314a8",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added runtime requests and audit-count checks address parts of the earlier findings. Operation coverage remains incomplete for several required paths, and the trace assertion does not capture the canary-bearing request.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 65,
+          "message": "AC-022 still lacks operation-path coverage for pack loads and accepted, replayed, and rate-limited resets. Exercise those operations and assert their captured diagnostics so removing an emission makes the test fail.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC022_OperationAndOutcomeTableEmitsOnlyApprovedFields invokes the case-list, scene, and invalid-reset endpoints, but does not exercise a pack load or accepted, replayed, and rate-limited reset paths. The complete outcome table calls CasePackDiagnostics helpers directly.",
+            "failureScenario": "If the pack publisher or an accepted, replayed, or rate-limited reset stops emitting diagnostics, the test still passes because those operation paths are not exercised."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 159,
+          "message": "The canary test still does not inspect trace output from the operation that receives the canaries. Register the listener before sending the request and assert that its captured tags contain none of the specified property names or values.",
+          "confidence": 0.93,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test sends the canary-bearing reset request before registering its ActivityListener. It then registers the listener and calls CasePackDiagnostics.Reset without canary inputs.",
+            "failureScenario": "If the canary-bearing reset emits a trace tag containing a canary property name or value, this test does not capture that activity and can still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new tests add runtime coverage for case-list, scene, invalid reset, and the telemetry 404, and check audit counts for direct store replay and rejection. The previously raised gaps remain for several operation emissions, trace canaries, and reset audit behavior through the application path.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 75,
+          "message": "AC-022 still lacks operation-path coverage for pack loads and accepted, replayed, and rate-limited resets. Exercise those operations and assert their captured event types, outcomes, and exact fields so a missing emission fails.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test invokes the diagnostics helpers directly for the full event and outcome table, then sends runtime requests only for a case-list read, a scene read, and an invalid reset. It does not exercise pack loading, accepted or replayed resets, or reset rate limiting through their operation paths.",
+            "failureScenario": "If pack loading or an accepted, replayed, or rate-limited reset stops emitting diagnostics, the direct helper calls still pass and the runtime assertions do not cover that operation."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 153,
+          "message": "The canary test still does not inspect trace output from an operation carrying the injected canaries. Register the trace listener before sending the request and assert that captured logger and trace output contain none of the specified property names or values.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The canary request is sent at line 150, before the ActivityListener is registered; the listener then observes only a direct Reset call with fixed identifiers at line 161. The test separately checks TelemetryRedaction.Redact, rather than inspecting a trace emitted while the canaries are present.",
+            "failureScenario": "If a diagnostic trace emitted during the canary request includes a canary property or value, the listener is not yet registered and the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 212,
+          "message": "NFR-006 still does not verify audit behavior for replayed and rejected reset requests through the application path. Exercise those outcomes through the in-process host and assert the audit count is unchanged.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The replay and rejected reset cases call ICaseStateStore.CommitBlockedVariantReset directly; they do not send requests through the reset endpoint in the in-process host.",
+            "failureScenario": "If the reset endpoint adds a business audit entry for a replayed or rejected request, the direct store assertions still pass because they bypass the endpoint."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes add runtime coverage for case-list and scene reads and verify audit counts for replayed and rejected store operations. The named diagnostics test still misses several required operation paths, and the canary request is not observed by the trace sink.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 94,
+          "message": "AC-022 still lacks operation-level coverage for pack loads and successful, replayed, and rate-limited resets. The helper-level table cannot detect missing emissions from those paths.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added host requests exercise case-list and scene reads plus an invalid reset. The complete event/outcome table at lines 32–73 calls diagnostic helpers directly, rather than exercising pack loading and accepted, replayed, or rate-limited reset paths.",
+            "failureScenario": "If pack loading or a successful reset stops emitting diagnostics, the helper table still emits those events directly and passes; the host assertions do not cover those operation paths."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 153,
+          "message": "The canary test still does not inspect trace output from the request carrying the canaries. Register the trace listener before sending that request so the specified canary names and values are checked in its captured activity.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test sends canary fields in a reset request at lines 139–150, but adds the ActivityListener only afterward. The activity tags it inspects come from a separate Reset call with fixed identifiers at line 161.",
+            "failureScenario": "If the request's diagnostic activity includes one of the canary property names or values, this test does not capture that activity and can still pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 115,
+      "total": 120,
+      "percent": 95.8,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 33,
+          "total": 35,
+          "missed": [
+            252,
+            315
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/CasePackDiagnostics.cs",
+          "covered": 30,
+          "total": 30,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/RedactionFilter.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/AircraftCasePackPublisher.cs",
+          "covered": 47,
+          "total": 50,
+          "missed": [
+            199,
+            200,
+            201
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
