@@ -40,7 +40,13 @@ public sealed class CasePackRequestLimiterTests
     private sealed class RacingStore : ICasePackRequestWindowStore
     {
         private readonly List<(string User, string Endpoint, DateTimeOffset At)> _attempts = [];
+        private readonly bool _raceAtLimit;
         private bool _raced;
+
+        public RacingStore(bool raceAtLimit = false)
+        {
+            _raceAtLimit = raceAtLimit;
+        }
 
         public int Count => _attempts.Count;
 
@@ -54,7 +60,7 @@ public sealed class CasePackRequestLimiterTests
             var limit = CasePackRequestLimiter.MaxRequestsForEndpoint(endpoint);
             var activeCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (!_raced && activeCount == limit - 1)
+            if (!_raced && activeCount == limit - (_raceAtLimit ? 0 : 1))
             {
                 _attempts.Add((userId, endpoint, attemptedAt));
                 _raced = true;
@@ -62,7 +68,7 @@ public sealed class CasePackRequestLimiterTests
 
             var currentCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (activeCount >= limit || currentCount >= limit)
+            if (currentCount >= limit)
                 return Task.FromResult(false);
 
             _attempts.Add((userId, endpoint, attemptedAt));
@@ -224,6 +230,21 @@ public sealed class CasePackRequestLimiterTests
                 new("accepted", 0, "user-a", CasePackRequestLimiter.CaseListEndpoint, true),
                 new("accepted", 0, "user-a", CasePackRequestLimiter.SceneEndpoint, true),
             ]),
+            new ResetScenario("endpoint quotas remain independent at their limits", [
+                new("accepted", 0, "user-a", reset, true),
+                new("denied-role", 0, "user-a", reset, true),
+                new("invalid", 0, "user-a", reset, true),
+                .. Enumerable.Repeat(
+                    new ResetAdmission("accepted", 0, "user-a", CasePackRequestLimiter.CaseListEndpoint, true),
+                    CasePackRequestLimiter.MaxRequests),
+                .. Enumerable.Repeat(
+                    new ResetAdmission("accepted", 0, "user-a", CasePackRequestLimiter.SceneEndpoint, true),
+                    CasePackRequestLimiter.MaxRequests),
+                new("replayed", 0, "user-a", reset, false),
+                new("case-list limit", 0, "user-a", CasePackRequestLimiter.CaseListEndpoint, false),
+                new("scene limit", 0, "user-a", CasePackRequestLimiter.SceneEndpoint, false),
+                new("other user", 0, "user-b", reset, true),
+            ]),
         };
 
         foreach (var scenario in scenarios)
@@ -263,13 +284,13 @@ public sealed class CasePackRequestLimiterTests
         Assert.Equal(CasePackRequestLimiter.MaxResetAttempts,
             store.ActiveCount("user-a", CasePackRequestLimiter.ResetEndpoint, Now));
 
-        var racingStore = new RacingStore();
+        var racingStore = new RacingStore(raceAtLimit: true);
         var racingLimiter = new CasePackRequestLimiter(racingStore, time);
-        for (var attempt = 0; attempt < CasePackRequestLimiter.MaxResetAttempts - 1; attempt++)
+        for (var attempt = 0; attempt < CasePackRequestLimiter.MaxResetAttempts; attempt++)
             Assert.True(await racingLimiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
 
         Assert.False(await racingLimiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
-        Assert.Equal(CasePackRequestLimiter.MaxResetAttempts, racingStore.Count);
+        Assert.Equal(CasePackRequestLimiter.MaxResetAttempts + 1, racingStore.Count);
     }
 
     [Theory]
