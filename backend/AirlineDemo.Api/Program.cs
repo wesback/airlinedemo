@@ -30,6 +30,7 @@ builder.Services.AddAirlineDiagnostics(builder.Configuration);
 builder.Services.AddSingleton<DemoSessionStore>();
 builder.Services.AddSingleton<PasscodeThrottle>();
 builder.Services.AddCaseStateStore(builder.Configuration);
+builder.Services.AddCasePackRequestLimiter(builder.Configuration);
 builder.Services.AddSourceReadBudget(builder.Configuration);
 builder.Services.AddSingleton<InvestigationExecutionService>();
 builder.Services.AddSingleton<AssessmentStore>();
@@ -111,6 +112,23 @@ app.UseTransportSecurityHeaders();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();
 app.MapCaseEndpoints();
+app.MapGet("/api/v{version:int}/cases", (
+    int version,
+    HttpContext http,
+    DemoSessionStore sessions,
+    CasePackRequestLimiter limiter,
+    IAircraftCasePackSnapshotStore snapshots,
+    CancellationToken cancellationToken) =>
+    Program.ReadCasePackCasesAsync(version, http, sessions, limiter, snapshots, cancellationToken));
+app.MapGet("/api/v{version:int}/cases/{caseId}/scene", (
+    int version,
+    string caseId,
+    HttpContext http,
+    DemoSessionStore sessions,
+    CasePackRequestLimiter limiter,
+    IAircraftCasePackSnapshotStore snapshots,
+    CancellationToken cancellationToken) =>
+    Program.ReadCasePackSceneAsync(version, caseId, http, sessions, limiter, snapshots, cancellationToken));
 app.MapDashboardEndpoints();
 app.MapReadinessSummaryEndpoints();
 app.MapTechnicalReviewEndpoints();
@@ -130,6 +148,82 @@ app.Run();
 
 public partial class Program
 {
+    internal static async Task<IResult> ReadCasePackCasesAsync(
+        int version,
+        HttpContext http,
+        DemoSessionStore sessions,
+        CasePackRequestLimiter limiter,
+        IAircraftCasePackSnapshotStore snapshots,
+        CancellationToken cancellationToken)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null) return CasePackReadError(StatusCodes.Status401Unauthorized, "unauthenticated");
+        if (version != 1) return CasePackReadError(StatusCodes.Status400BadRequest, "unsupported_contract_version");
+        if (!await limiter.TryRecordAttemptAsync(session.User.Id, CasePackRequestLimiter.CaseListEndpoint, cancellationToken))
+            return CasePackReadError(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded");
+
+        var snapshot = snapshots.Read();
+        if (snapshot is null) return CasePackReadError(StatusCodes.Status503ServiceUnavailable, "case_pack_unavailable");
+        var visibleCases = snapshot.Cases
+            .Where(item => session.User.CaseScopes.Contains(item.CaseId, StringComparer.Ordinal))
+            .Select(item => new
+            {
+                caseId = item.CaseId,
+                synthetic = item.Synthetic,
+                aircraftCount = item.AircraftCount,
+                engineCount = item.EngineCount,
+            });
+        return Results.Ok(new { contractVersion = 1, packVersion = snapshot.PackVersion, cases = visibleCases });
+    }
+
+    internal static async Task<IResult> ReadCasePackSceneAsync(
+        int version,
+        string caseId,
+        HttpContext http,
+        DemoSessionStore sessions,
+        CasePackRequestLimiter limiter,
+        IAircraftCasePackSnapshotStore snapshots,
+        CancellationToken cancellationToken)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null) return CasePackReadError(StatusCodes.Status401Unauthorized, "unauthenticated");
+        if (version != 1) return CasePackReadError(StatusCodes.Status400BadRequest, "unsupported_contract_version");
+        if (!await limiter.TryRecordAttemptAsync(session.User.Id, CasePackRequestLimiter.SceneEndpoint, cancellationToken))
+            return CasePackReadError(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded");
+
+        var snapshot = snapshots.Read();
+        var sceneCase = snapshot?.Cases.SingleOrDefault(item =>
+            string.Equals(item.CaseId, caseId, StringComparison.Ordinal));
+        if (sceneCase is null || !session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
+            return Results.NotFound();
+
+        return Results.Ok(new
+        {
+            contractVersion = 1,
+            packVersion = snapshot!.PackVersion,
+            @case = new
+            {
+                caseId = sceneCase.CaseId,
+                synthetic = sceneCase.Synthetic,
+                aircraftCount = sceneCase.AircraftCount,
+                engineCount = sceneCase.EngineCount,
+                components = sceneCase.Components.Select(component => new
+                {
+                    componentId = component.ComponentId,
+                    evidenceDocumentPaths = component.EvidenceDocumentPaths,
+                }),
+                documents = sceneCase.Documents.Select(document => new
+                {
+                    path = document.Path,
+                    synthetic = document.Synthetic,
+                }),
+            },
+        });
+    }
+
+    private static IResult CasePackReadError(int statusCode, string code) =>
+        Results.Json(new { contractVersion = 1, error = new { code, message = code } }, statusCode: statusCode);
+
     internal static void RegisterProductionEvaluationExecutors(IServiceCollection services)
     {
         foreach (var arm in Enum.GetValues<EvaluationArm>())
