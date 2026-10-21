@@ -15,15 +15,17 @@ public sealed class CasePackBlockedVariantReset(ICaseStateStore store)
         CaseScope scope, string actor, string commandId, long expectedRevision, string variant)
     {
         if (scope is null
-            || !string.Equals(scope.CaseId, "cp-case-c", StringComparison.Ordinal)
-            || !string.Equals(variant, "blocked", StringComparison.Ordinal))
+            || !string.Equals(scope.CaseId, "cp-case-c", StringComparison.Ordinal))
             throw new CasePackBlockedVariantResetException("unsupported_target", 422, "Only the Case C blocked variant can be reset.");
         if (expectedRevision < 0)
             throw new CasePackBlockedVariantResetException("validation_error", 400, "Reset command fields are invalid.");
         try
         {
-            CaseStateStore.ValidateBlockedVariantReset(scope, actor, commandId, variant);
             return store.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant);
+        }
+        catch (ArgumentException exception) when (exception.ParamName == "variant")
+        {
+            throw new CasePackBlockedVariantResetException("unsupported_target", 422, "Only the Case C blocked variant can be reset.");
         }
         catch (ArgumentException)
         {

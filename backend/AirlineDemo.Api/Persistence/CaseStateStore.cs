@@ -378,7 +378,6 @@ internal static class CasePackResetCommitter
     public static CasePackResetCommitResult Commit(
         ICaseStateStore store, CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
     {
-        CaseStateStore.ValidateBlockedVariantReset(scope, actor, commandId, variant);
         var current = store.Read(scope);
         var existing = FindReceipt(current, commandId);
         if (existing is not null)
@@ -387,6 +386,7 @@ internal static class CasePackResetCommitter
                 return new CasePackResetCommitResult(current, existing.Receipt, Replayed: true);
             throw new CasePackResetCommandConflictException();
         }
+        CaseStateStore.ValidateBlockedVariantReset(scope, actor, commandId, variant);
         if (expectedRevision == long.MaxValue)
             throw new RevisionConflictException();
         var newRevision = expectedRevision + 1;

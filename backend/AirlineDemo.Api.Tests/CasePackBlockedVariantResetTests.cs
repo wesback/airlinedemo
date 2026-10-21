@@ -65,6 +65,9 @@ public sealed class CasePackBlockedVariantResetTests : IDisposable
         var stale = Assert.Throws<CasePackBlockedVariantResetException>(() =>
             reset.Reset(caseC, Actor, "replay-2", 0, "blocked"));
         Assert.Equal((409, "stale_revision"), (stale.StatusCode, stale.Code));
+        var invalidVariant = Assert.Throws<CasePackBlockedVariantResetException>(() =>
+            reset.Reset(caseC, Actor, "invalid-variant", 1, "unblocked"));
+        Assert.Equal((422, "unsupported_target"), (invalidVariant.StatusCode, invalidVariant.Code));
         var beforeA = store.Read(caseA);
         var beforeB = store.Read(caseB);
         foreach (var scope in new[] { caseA, caseB })
@@ -92,6 +95,9 @@ public sealed class CasePackBlockedVariantResetTests : IDisposable
         var payloadConflict = Assert.Throws<CasePackBlockedVariantResetException>(() =>
             reset.Reset(scope, Actor, "command-1", 1, "blocked"));
         Assert.Equal((409, "command_id_conflict"), (payloadConflict.StatusCode, payloadConflict.Code));
+        var variantConflict = Assert.Throws<CasePackBlockedVariantResetException>(() =>
+            reset.Reset(scope, Actor, "command-1", 0, "unblocked"));
+        Assert.Equal((409, "command_id_conflict"), (variantConflict.StatusCode, variantConflict.Code));
         AssertUnchanged(beforeConflict, store.Read(scope));
         var raceStore = new CaseStateStore(Path.Combine(_directory, "race.json"));
         var raceScope = raceStore.CreateCase("cp-case-c", Actor);
