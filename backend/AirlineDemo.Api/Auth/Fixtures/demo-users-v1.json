@@ -24,6 +24,12 @@
       "displayName": "Legal reviewer",
       "role": "legal-reviewer",
       "caseScopes": [ "case-001", "cp-case-a", "cp-case-b", "cp-case-c" ]
+    },
+    {
+      "id": "exec-1",
+      "displayName": "Executive observer",
+      "role": "executive",
+      "caseScopes": [ "cp-case-a", "cp-case-b", "cp-case-c" ]
     }
   ]
 }

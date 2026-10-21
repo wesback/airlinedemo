@@ -18,6 +18,7 @@ public sealed class DemoFixtureTests
         new("reviewer", "Technical reviewer", "technical-reviewer", ["case-001", "cp-case-a", "cp-case-b", "cp-case-c"]),
         new("fin-1", "Finance reviewer", "finance-reviewer", ["case-001", "cp-case-a", "cp-case-b", "cp-case-c"]),
         new("legal-1", "Legal reviewer", "legal-reviewer", ["case-001", "cp-case-a", "cp-case-b", "cp-case-c"]),
+        new("exec-1", "Executive observer", "executive", ["cp-case-a", "cp-case-b", "cp-case-c"]),
     ];
 
     private static WebApplicationFactory<Program> CreateFactory() =>
