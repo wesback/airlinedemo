@@ -71,10 +71,19 @@ public sealed class CasePackEndpointsTests : IDisposable
         public BasisVersion GetBasisVersion(CaseScope scope, int version) => Inner.GetBasisVersion(scope, version);
         public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => Inner.ReadAudit(scope);
         public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit)
-        { WriteCalls++; return Inner.Commit(scope, expectedRevision, commit); }
+        {
+            var result = Inner.Commit(scope, expectedRevision, commit);
+            WriteCalls++;
+            return result;
+        }
+        public void ResetReadCount() => ReadCalls = 0;
         public CasePackResetCommitResult CommitBlockedVariantReset(
             CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
-        { WriteCalls++; return Inner.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant); }
+        {
+            var result = Inner.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant);
+            if (!result.Replayed) WriteCalls++;
+            return result;
+        }
         public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope) => Inner.ListWorkItems(scope);
         public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor)
         { WriteCalls++; return Inner.CreateWorkItem(scope, expectedRevision, draft, actor); }
@@ -148,8 +157,9 @@ public sealed class CasePackEndpointsTests : IDisposable
     }
     private static Session CreateSession(WebApplicationFactory<Program> host, string role, params string[] scopes)
     {
+        var userId = "case-pack-reader-" + Guid.NewGuid().ToString("N");
         var value = host.Services.GetRequiredService<DemoSessionStore>()
-            .Create(new DemoUser("case-pack-reader", "Case Pack Reader", role, scopes));
+            .Create(new DemoUser(userId, "Case Pack Reader", role, scopes));
         return new Session($"{DemoAuthEndpoints.CookieName}={value.Id}", value);
     }
     private static async Task<HttpResponseMessage> SendAsync(
@@ -769,13 +779,22 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(1, receiptJson.RootElement.GetProperty("newRevision").GetInt64());
         Assert.Equal(1, store.WriteCalls);
         Assert.NotEqual(before, store.CaptureState());
+        var scope = store.Inner.AuthorizeCase("cp-case-c", "case-pack-test-owner");
+        var state = store.Inner.Read(scope);
+        var audit = Assert.Single(state.Audit);
+        Assert.Equal(presenter.Value.User.Id, audit.Actor);
+        Assert.Equal("presenter_reset_blocked_variant", audit.Action);
+        Assert.Contains("reasonCode=presenter_reset_blocked_variant", audit.Detail, StringComparison.Ordinal);
+        Assert.NotEqual(default, audit.At);
     }
 
     [Fact]
     public async Task AC015_ResetRejectsRolesScopeAndAntiForgeryWithoutMutation()
     {
         var store = CreateStore();
-        using var host = CreateHost(store);
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        var windowStore = new InMemoryCasePackRequestWindowStore();
+        using var host = CreateHost(store, windowStore, clock);
         SeedCases(store);
         using var client = host.CreateClient();
         foreach (var role in new[] { "technical-reviewer", "finance-reviewer", "legal-reviewer", "executive" })
@@ -789,6 +808,16 @@ public sealed class CasePackEndpointsTests : IDisposable
         }
 
         var presenter = CreateSession(host, "presenter", "cp-case-c");
+
+        var unauthenticated = new HttpRequestMessage(HttpMethod.Post,
+            "/api/v1/cases/cp-case-c/reset-blocked-variant") { Content = JsonContent.Create(new { contractVersion = 1, commandId = "unauthenticated-reset", expectedRevision = 0L, variant = "blocked" }) };
+        unauthenticated.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, "not-required-when-unauthenticated");
+        var beforeUnauthenticated = store.CaptureState();
+        using var unauthenticatedResponse = await client.SendAsync(unauthenticated, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticatedResponse.StatusCode);
+        Assert.Equal(beforeUnauthenticated, store.CaptureState());
+        Assert.Equal(0, store.WriteCalls);
+
         var request = new HttpRequestMessage(HttpMethod.Post,
             "/api/v1/cases/cp-case-c/reset-blocked-variant");
         request.Headers.Add("Cookie", presenter.Cookie);
@@ -799,19 +828,44 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
         Assert.Equal(beforeCsrf, store.CaptureState());
 
+        var missingRequest = new HttpRequestMessage(HttpMethod.Post,
+            "/api/v1/cases/cp-case-c/reset-blocked-variant") { Content = JsonContent.Create(new { contractVersion = 1, commandId = "missing-csrf", expectedRevision = 0L, variant = "blocked" }) };
+        missingRequest.Headers.Add("Cookie", presenter.Cookie);
+        var beforeMissingCsrf = store.CaptureState();
+        using var missingCsrf = await client.SendAsync(missingRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCsrf.StatusCode);
+        Assert.Equal(beforeMissingCsrf, store.CaptureState());
+
         var outOfScope = CreateSession(host, "presenter", "cp-case-a");
         var beforeScope = store.CaptureState();
         using var scopeResponse = await SendResetAsync(client, "cp-case-c", outOfScope,
             new { contractVersion = 1, commandId = "bad-scope", expectedRevision = 0L, variant = "blocked" });
         Assert.Equal(HttpStatusCode.NotFound, scopeResponse.StatusCode);
         Assert.Equal(beforeScope, store.CaptureState());
+
+        var quotaPresenter = CreateSession(host, "presenter", "cp-case-c");
+        for (var attempt = 0; attempt < CasePackRequestLimiter.MaxResetRequests; attempt++)
+        {
+            using var accepted = await SendResetAsync(client, "cp-case-c", quotaPresenter,
+                new { contractVersion = 1, commandId = $"quota-{attempt}", expectedRevision = (long)attempt, variant = "blocked" });
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        }
+        store.ResetWriteCount();
+        var beforeQuota = store.CaptureState();
+        using var exhausted = await SendResetAsync(client, "cp-case-c", quotaPresenter,
+            new { contractVersion = 1, commandId = "quota-exhausted", expectedRevision = 3L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, exhausted.StatusCode);
+        Assert.Equal(beforeQuota, store.CaptureState());
+        Assert.Equal(0, store.WriteCalls);
     }
 
     [Fact]
     public async Task AC016_And_AC023_ResetReplayRevisionAndConflictResponsesAreExact()
     {
         var store = CreateStore();
-        using var host = CreateHost(store);
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        var windowStore = new InMemoryCasePackRequestWindowStore();
+        using var host = CreateHost(store, windowStore, clock);
         SeedCases(store);
         using var client = host.CreateClient();
         var presenter = CreateSession(host, "presenter", "cp-case-c");
@@ -836,6 +890,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal("stale_revision", (await ReadJsonAsync(stale)).RootElement.GetProperty("error").GetProperty("code").GetString());
         Assert.Equal(0, store.WriteCalls);
 
+        clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
         var beforeUnsupported = store.CaptureState();
         using var unsupported = await SendResetAsync(client, "cp-case-c", presenter,
             new { contractVersion = 1, commandId = "reset-replay", expectedRevision = 0L, variant = "other" });
@@ -849,6 +904,24 @@ public sealed class CasePackEndpointsTests : IDisposable
         using var conflictJson = await ReadJsonAsync(conflict);
         Assert.Equal("command_id_conflict", conflictJson.RootElement.GetProperty("error").GetProperty("code").GetString());
         Assert.Equal(beforeConflict, store.CaptureState());
+
+        clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
+        foreach (var unsupportedCase in new[] { "cp-case-a", "cp-case-b" })
+        {
+            var unsupportedBefore = store.CaptureState();
+            var unsupportedSession = CreateSession(host, "presenter", unsupportedCase);
+            using var response = await SendResetAsync(client, unsupportedCase, unsupportedSession,
+                new { contractVersion = 1, commandId = $"unsupported-{unsupportedCase}", expectedRevision = 0L, variant = "blocked" });
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            Assert.Equal(unsupportedBefore, store.CaptureState());
+        }
+
+        clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
+        var differentActor = CreateSession(host, "presenter", "cp-case-c");
+        var replayWithOtherActor = await SendResetAsync(client, "cp-case-c", differentActor, body);
+        Assert.Equal(HttpStatusCode.Conflict, replayWithOtherActor.StatusCode);
+        using var actorConflictJson = await ReadJsonAsync(replayWithOtherActor);
+        Assert.Equal("command_id_conflict", actorConflictJson.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]
@@ -866,12 +939,14 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(HttpStatusCode.Forbidden, roleRejected.StatusCode);
         Assert.Equal(beforeRole, store.CaptureState());
         Assert.Equal(0, store.ReadCalls);
+        Assert.Equal(0, store.WriteCalls);
 
         var outOfScope = CreateSession(host, "presenter", "cp-case-a");
         var beforeScope = store.CaptureState();
         using var scopeRejected = await SendResetAsync(client, "cp-case-c", outOfScope, cBody);
         Assert.Equal(HttpStatusCode.NotFound, scopeRejected.StatusCode);
         Assert.Equal(beforeScope, store.CaptureState());
+        Assert.Equal(0, store.ReadCalls);
 
         var presenter = CreateSession(host, "presenter", "cp-case-c");
         var invalidRequest = new HttpRequestMessage(HttpMethod.Post,
@@ -882,6 +957,8 @@ public sealed class CasePackEndpointsTests : IDisposable
         using var antiForgeryRejected = await client.SendAsync(invalidRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, antiForgeryRejected.StatusCode);
         Assert.Equal(beforeAntiForgery, store.CaptureState());
+        Assert.Equal(0, store.ReadCalls);
+        Assert.Equal(0, store.WriteCalls);
     }
 
     [Fact]
