@@ -4,6 +4,9 @@ using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -11,6 +14,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using System.Net;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace AirlineDemo.Api.Tests;
@@ -37,6 +43,26 @@ public sealed class CasePackRequestLimiterTests
                 services.AddSingleton<ICasePackRequestWindowStore>(store);
             }));
 
+    private static WebApplicationFactory<Program> ResetOutcomeFactory(
+        InMemoryCasePackRequestWindowStore store,
+        AdjustableTime time,
+        string caseStatePath) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["CaseState:Path"] = caseStatePath,
+                }));
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(time);
+                services.RemoveAll<ICasePackRequestWindowStore>();
+                services.AddSingleton<ICasePackRequestWindowStore>(store);
+            });
+        });
+
     private sealed class RacingStore : ICasePackRequestWindowStore
     {
         private readonly List<(string User, string Endpoint, DateTimeOffset At)> _attempts = [];
@@ -53,7 +79,8 @@ public sealed class CasePackRequestLimiterTests
             var cutoff = attemptedAt - CasePackRequestLimiter.RollingWindow;
             var activeCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (!_raced && activeCount == CasePackRequestLimiter.MaxRequests - 1)
+            var maximum = CasePackRequestLimiter.MaximumFor(endpoint);
+            if (!_raced && activeCount == maximum - 1)
             {
                 _attempts.Add((userId, endpoint, attemptedAt));
                 _raced = true;
@@ -61,8 +88,8 @@ public sealed class CasePackRequestLimiterTests
 
             var currentCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (activeCount >= CasePackRequestLimiter.MaxRequests
-                || currentCount >= CasePackRequestLimiter.MaxRequests)
+            if (activeCount >= maximum
+                || currentCount >= maximum)
                 return Task.FromResult(false);
 
             _attempts.Add((userId, endpoint, attemptedAt));
@@ -103,6 +130,164 @@ public sealed class CasePackRequestLimiterTests
         }
 
         Assert.Equal(expected, await limiter.TryRecordAttemptAsync(requestUser, requestEndpoint));
+    }
+
+    [Theory]
+    [InlineData(2, 59, "accepted", 200, 2, "/api/runs/run-a/reset")]
+    [InlineData(2, 30, "accepted", 200, 2, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "accepted", 200, 3, "/api/runs/run-a/reset")]
+    [InlineData(4, 59, "accepted", 429, 3, "/api/runs/run-a/reset")]
+    [InlineData(4, 59, "accepted", 429, 3, "/API/RUNS/run-a/ReSeT")]
+    [InlineData(3, 60, "accepted", 200, 1, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "denied-role", 403, 3, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "invalid", 400, 3, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "replayed", 409, 3, "/api/runs/run-a/reset")]
+    public async Task AC030_ResetAttemptsCountEveryAuthenticatedOutcome(
+        int totalAttempts,
+        int oldestAgeSeconds,
+        string outcome,
+        int expectedStatus,
+        int expectedActiveResetAttempts,
+        string resetPath)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "case-pack-reset-http-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var caseStatePath = Path.Combine(directory, "state.json");
+        try
+        {
+            var seedStore = new CaseStateStore(caseStatePath);
+            var runA = seedStore.CreateCase("run-a", "user-a");
+            seedStore.Commit(runA, 0, new CaseCommit(null, null, "user-a", "open", "opened"));
+            var runB = seedStore.CreateCase("run-b", "user-a");
+            seedStore.Commit(runB, 0, new CaseCommit(null, null, "user-a", "open", "opened"));
+
+            var time = new AdjustableTime();
+            var store = new InMemoryCasePackRequestWindowStore();
+            var attemptTime = Now.AddSeconds(-oldestAgeSeconds);
+            var seededAttempts = Math.Min(totalAttempts - 1, CasePackRequestLimiter.MaxResetRequests);
+            for (var attempt = 0; attempt < seededAttempts; attempt++)
+            {
+                Assert.True(await store.TryRecordAttemptAsync(
+                    "user-a", CasePackRequestLimiter.ResetEndpoint, attemptTime, CancellationToken.None));
+            }
+
+            using var factory = ResetOutcomeFactory(store, time, caseStatePath);
+            using var client = factory.CreateClient();
+            var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+            var role = outcome == "denied-role" ? "Reader" : "presenter";
+            var session = sessions.Create(new DemoUser("user-a", "Reader", role, ["run-a", "run-b"]));
+            client.DefaultRequestHeaders.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+            client.DefaultRequestHeaders.Add(DemoAuthEndpoints.CsrfHeaderName, session.CsrfToken);
+
+            object body = outcome switch
+            {
+                "invalid" => new { newRunId = "run-new", fixtureId = "fixture", applicationVersion = (string?)null },
+                "replayed" => new { newRunId = "run-b", fixtureId = "fixture", applicationVersion = "1.0.0" },
+                _ => new { newRunId = "run-new", fixtureId = "fixture", applicationVersion = "1.0.0" },
+            };
+            using var response = await client.PostAsJsonAsync(
+                resetPath, body, TestContext.Current.CancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+            Assert.Equal((HttpStatusCode)expectedStatus, response.StatusCode);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                using var json = JsonDocument.Parse(responseBody);
+                var root = json.RootElement;
+                Assert.Equal(2, root.EnumerateObject().Count());
+                Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
+                var error = root.GetProperty("error");
+                Assert.Equal(2, error.EnumerateObject().Count());
+                Assert.Equal("rate_limit_exceeded", error.GetProperty("code").GetString());
+                Assert.Equal("rate_limit_exceeded", error.GetProperty("message").GetString());
+            }
+
+            var limiter = new CasePackRequestLimiter(store, time);
+            Assert.True(await limiter.TryRecordAttemptAsync(
+                "user-b", CasePackRequestLimiter.ResetEndpoint));
+            Assert.True(await limiter.TryRecordAttemptAsync(
+                "user-a", CasePackRequestLimiter.CaseListEndpoint));
+            Assert.True(await limiter.TryRecordAttemptAsync(
+                "user-a", CasePackRequestLimiter.SceneEndpoint));
+
+            Assert.Equal(expectedActiveResetAttempts,
+                store.ActiveCount("user-a", CasePackRequestLimiter.ResetEndpoint, Now));
+            Assert.Equal(1,
+                store.ActiveCount("user-b", CasePackRequestLimiter.ResetEndpoint, Now));
+            Assert.Equal(1,
+                store.ActiveCount("user-a", CasePackRequestLimiter.CaseListEndpoint, Now));
+            Assert.Equal(1,
+                store.ActiveCount("user-a", CasePackRequestLimiter.SceneEndpoint, Now));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AC030_HostLimiterAdmitsThreeResetAttemptsThenDeniesTheFourth()
+    {
+        var time = new AdjustableTime();
+        var store = new InMemoryCasePackRequestWindowStore();
+        using var factory = ReadFactory(store, time);
+        using var scope = factory.Services.CreateScope();
+        var limiter = scope.ServiceProvider.GetRequiredService<CasePackRequestLimiter>();
+
+        for (var attempt = 1; attempt <= CasePackRequestLimiter.MaxResetRequests; attempt++)
+            Assert.True(await limiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
+
+        Assert.False(await limiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
+        Assert.True(await limiter.TryRecordAttemptAsync("user-b", CasePackRequestLimiter.ResetEndpoint));
+        Assert.Equal(CasePackRequestLimiter.MaxResetRequests,
+            store.ActiveCount("user-a", CasePackRequestLimiter.ResetEndpoint, Now));
+    }
+
+    [Fact]
+    public async Task AC030_ConcurrentResetAdmissionIsAtomic()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "case-pack-reset-limit-" + Guid.NewGuid().ToString("N") + ".sqlite");
+        try
+        {
+            await using var connection = new SqliteConnection($"Data Source={path}");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlite(connection).Options;
+            await using (var db = new CaseStateDbContext(options))
+                await db.Database.MigrateAsync();
+
+            var store = new SqlCasePackRequestWindowStore(options);
+            for (var attempt = 0; attempt < CasePackRequestLimiter.MaxResetRequests - 1; attempt++)
+                Assert.True(await store.TryRecordAttemptAsync(
+                    "user-a", CasePackRequestLimiter.ResetEndpoint, Now, CancellationToken.None));
+
+            var ready = 0;
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            async Task<bool> ConcurrentAttempt()
+            {
+                if (Interlocked.Increment(ref ready) == 2) start.TrySetResult();
+                await start.Task;
+                return await store.TryRecordAttemptAsync(
+                    "user-a", CasePackRequestLimiter.ResetEndpoint, Now, CancellationToken.None);
+            }
+
+            var results = await Task.WhenAll(ConcurrentAttempt(), ConcurrentAttempt());
+            Assert.Equal(1, results.Count(result => result));
+            Assert.Equal(1, results.Count(result => !result));
+
+            await using (var db = new CaseStateDbContext(options))
+            {
+                var cutoff = Now.UtcDateTime.Ticks - CasePackRequestLimiter.RollingWindow.Ticks;
+                var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("user-a"));
+                var active = await db.CasePackRequestWindows.CountAsync(row =>
+                    row.UserHash == hash && row.Endpoint == CasePackRequestLimiter.ResetEndpoint
+                    && row.RequestedAtTicks > cutoff);
+                Assert.Equal(CasePackRequestLimiter.MaxResetRequests, active);
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 
     [Fact]
