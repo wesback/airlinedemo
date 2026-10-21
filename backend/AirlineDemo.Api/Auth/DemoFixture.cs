@@ -13,6 +13,12 @@ public static class DemoFixture
     public const string ResourceName = "AirlineDemo.Api.Auth.Fixtures.demo-users-v1.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly HashSet<string> CasePackScopeIds = new(StringComparer.Ordinal)
+    {
+        "cp-case-a",
+        "cp-case-b",
+        "cp-case-c",
+    };
     private static IReadOnlyList<DemoUser>? _users;
 
     public static IReadOnlyList<DemoUser> Users =>
@@ -57,7 +63,13 @@ public static class DemoFixture
                 throw Invalid($"user '{id}' has no caseScopes.");
             var scopes = new List<string>(entry.CaseScopes.Count);
             foreach (var scope in entry.CaseScopes)
-                scopes.Add(Required(scope, $"caseScopes entry for user '{id}'"));
+            {
+                var requiredScope = Required(scope, $"caseScopes entry for user '{id}'");
+                if (requiredScope.StartsWith("cp-case-", StringComparison.Ordinal) &&
+                    !CasePackScopeIds.Contains(requiredScope))
+                    throw Invalid($"invalid case-pack scope '{requiredScope}' for user '{id}'.");
+                scopes.Add(requiredScope);
+            }
             users.Add(new DemoUser(id, displayName, role, scopes.AsReadOnly()));
         }
 
