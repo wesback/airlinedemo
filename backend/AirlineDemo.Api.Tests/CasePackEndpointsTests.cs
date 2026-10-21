@@ -1,7 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Finance;
+using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Requests;
+using AirlineDemo.Api.Reviews;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
@@ -118,6 +122,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         var store = CreateStore();
         using var host = CreateHost(store);
         SeedCases(store);
+        SeedCurrentArrProjection(store.Inner, "cp-case-a");
         using var client = host.CreateClient();
         var snapshot = host.Services.GetRequiredService<IAircraftCasePackSnapshotStore>().Read();
         Assert.NotNull(snapshot);
@@ -127,6 +132,10 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, allResponse.StatusCode);
         using var allJson = await ReadJsonAsync(allResponse);
         AssertSummaryEnvelope(allJson.RootElement, snapshot.PackVersion, CaseIds);
+        var allCases = allJson.RootElement.GetProperty("cases");
+        AssertStatus(allCases, "cp-case-a", "assessment-ready", "open", "delivered", "approve", "signed-off", "accept");
+        AssertStatus(allCases, "cp-case-b", null, null, null, null, null, null);
+        AssertStatus(allCases, "cp-case-c", null, null, null, null, null, null);
 
         using var oneResponse = await SendAsync(client, HttpMethod.Get, "/api/v1/cases",
             CreateSession(host, "presenter", "cp-case-a"));
@@ -136,6 +145,58 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.DoesNotContain("cp-case-b", oneJson.RootElement.GetRawText(), StringComparison.Ordinal);
         Assert.DoesNotContain("cp-case-c", oneJson.RootElement.GetRawText(), StringComparison.Ordinal);
     }
+
+    private static void SeedCurrentArrProjection(CaseStateStore store, string caseId)
+    {
+        var scope = store.AuthorizeCase(caseId, "case-pack-test-owner");
+        var at = new DateTimeOffset(2026, 10, 21, 0, 0, 0, TimeSpan.Zero);
+        var basis = CaseStateStore.CreateBasisVersion(1, "current basis", string.Empty);
+        var receipt = new DeliveryReceipt(
+            "request-event-a", "request-a", caseId, "report-a", "basis-v1", 1, "1", "synthetic request");
+        var assessment = new CaseAssessment(
+            "assessment-a", caseId, "basis-v1", 1, "assessment-ready", "current assessment",
+            Array.Empty<AssessedClaim>(), receipt.RequestId, null);
+        store.Commit(scope, 0, new CaseCommit(
+            basis, receipt.EventId, "assessment-service", "assessment-delivered", "delivered",
+            At: at, Assessment: assessment, RequestReceipt: receipt));
+        store.CreateWorkItem(
+            scope, 1,
+            new WorkItemDraft("review-a", AssessmentExecutionService.ReviewCapability, "open", "technical-reviewer"),
+            "assessment-service");
+        store.Commit(scope, 2, new CaseCommit(
+            null, null, "finance-reviewer", FinanceEndpoints.ReserveDecisionAction,
+            """{"decision":"approve"}""", At: at));
+        store.Commit(scope, 3, new CaseCommit(
+            null, null, "legal-reviewer", FinanceEndpoints.LegalDecisionAction,
+            """{"decision":"signed-off"}""", At: at));
+
+        var review = TechnicalReviewPolicy.Decide(
+            store, [caseId], "technical-reviewer", "technical-reviewer", caseId,
+            new TechnicalReviewCommand(4, 1, "accept", "Current basis approved."), "trace-a");
+        Assert.Equal(TechnicalReviewOutcome.Recorded, review.Outcome);
+    }
+
+    private static void AssertStatus(
+        JsonElement cases,
+        string caseId,
+        string? assessment,
+        string? review,
+        string? request,
+        string? finance,
+        string? legal,
+        string? acceptance)
+    {
+        var summary = Assert.Single(cases.EnumerateArray(), item =>
+            item.GetProperty("caseId").GetString() == caseId);
+        var status = summary.GetProperty("status");
+        Assert.Equal(assessment, status.GetProperty("assessment").GetString());
+        Assert.Equal(review, status.GetProperty("review").GetString());
+        Assert.Equal(request, status.GetProperty("request").GetString());
+        Assert.Equal(finance, status.GetProperty("finance").GetString());
+        Assert.Equal(legal, status.GetProperty("legal").GetString());
+        Assert.Equal(acceptance, status.GetProperty("acceptance").GetString());
+    }
+
     [Fact]
     public async Task AC008_CaseListIsReadOnlyAndFailsClosed()
     {
