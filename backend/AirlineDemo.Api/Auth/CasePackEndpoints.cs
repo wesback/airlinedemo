@@ -12,6 +12,8 @@ using AirlineDemo.Api.Projection;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Reviews;
 using AirlineDemo.Api.Runs;
+using AirlineDemo.Api.Diagnostics;
+using System.Diagnostics;
 namespace AirlineDemo.Api.Auth;
 
 /// <summary>The versioned envelope returned by the case-pack list endpoint.</summary>
@@ -94,17 +96,20 @@ public static class CasePackEndpoints
         CasePackRequestLimiter limiter,
         ICaseStateStore caseStates,
         TimeProvider time,
+        ILoggerFactory loggers,
         CancellationToken cancellationToken)
     {
+        var logger = loggers.CreateLogger("AirlineDemo.Api.CasePackDiagnostics");
+        var started = Stopwatch.GetTimestamp();
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null)
-            return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in.");
+            { CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in."); }
 
         try
         {
             if (!await limiter.TryRecordAttemptAsync(session.User.Id,
                     CasePackRequestLimiter.ResetEndpoint, cancellationToken))
-                return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded");
+                { CasePackDiagnostics.Reset(logger, "rate_limited", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded"); }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -112,9 +117,9 @@ public static class CasePackEndpoints
         }
 
         if (version != ContractVersion)
-            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"); }
         if (!string.Equals(session.User.Role, "presenter", StringComparison.Ordinal))
-            return Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden");
+            { CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden"); }
 
         if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal)
             || caseStates.OwnerOf(caseId) is not { } owner)
@@ -173,25 +178,28 @@ public static class CasePackEndpoints
             return ValidationError();
         }
 
-        static IResult ValidationError() => Error(StatusCodes.Status400BadRequest, "validation_error", "Reset command fields are invalid.");
+        IResult ValidationError(string? commandId = null) { CasePackDiagnostics.Reset(logger, "validation_failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, commandId); return Error(StatusCodes.Status400BadRequest, "validation_error", "Reset command fields are invalid."); }
 
         if (!Regex.IsMatch(body.CommandId!, "^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)
             || body.ExpectedRevision < 0)
-            return ValidationError();
+            return ValidationError(body.CommandId);
 
         if (!string.Equals(caseId, "cp-case-c", StringComparison.Ordinal)
             || !string.Equals(body.Variant, "blocked", StringComparison.Ordinal))
-            return Error(StatusCodes.Status422UnprocessableEntity, "unsupported_target", "Only the Case C blocked variant can be reset.");
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId); return Error(StatusCodes.Status422UnprocessableEntity, "unsupported_target", "Only the Case C blocked variant can be reset."); }
 
         try
         {
             var reset = new CasePackBlockedVariantReset(caseStates, time);
             var result = reset.Reset(scope, session.User.Id, body.CommandId!,
                 body.ExpectedRevision.Value, body.Variant!);
+            CasePackDiagnostics.Reset(logger, result.Replayed ? "replayed" : "success", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId);
             return Results.Ok(result.Receipt);
         }
         catch (CasePackBlockedVariantResetException exception)
         {
+            var outcome = exception.Code switch { "validation_error" => "validation_failed", "command_id_conflict" or "stale_revision" => "conflict", "unsupported_target" => "invalid", _ => "failed" };
+            CasePackDiagnostics.Reset(logger, outcome, CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId);
             return Error(exception.StatusCode, exception.Code, exception.Message);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -211,29 +219,32 @@ public static class CasePackEndpoints
         ICaseStateStore caseStates,
         EvidencePackageStore packages,
         IArrCaseHistorySource history,
+        ILoggerFactory loggers,
         CancellationToken cancellationToken)
     {
+        var logger = loggers.CreateLogger("AirlineDemo.Api.CasePackDiagnostics");
+        var started = Stopwatch.GetTimestamp();
         if (caseId.EndsWith("/scene", StringComparison.Ordinal))
             caseId = caseId[..^"/scene".Length];
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null)
-            return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "unauthenticated");
+            { CasePackDiagnostics.SceneProjection(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "unauthenticated"); }
         if (version != ContractVersion)
-            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+            { CasePackDiagnostics.SceneProjection(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"); }
 
         try
         {
             if (!await limiter.TryRecordAttemptAsync(session.User.Id, CasePackRequestLimiter.SceneEndpoint, cancellationToken))
-                return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded");
+                { CasePackDiagnostics.SceneProjection(logger, "rate_limited", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded"); }
 
             if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
-                return SceneNotFound();
+                { CasePackDiagnostics.SceneProjection(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return SceneNotFound(); }
 
             var snapshot = snapshots.Read();
             var published = snapshot?.Cases.SingleOrDefault(item =>
                 StringComparer.Ordinal.Equals(item.CaseId, caseId));
             if (snapshot is null || published is null)
-                return SceneNotFound();
+                { CasePackDiagnostics.SceneProjection(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return SceneNotFound(); }
 
             var owner = caseStates.OwnerOf(caseId);
             if (owner is null)
@@ -255,10 +266,12 @@ public static class CasePackEndpoints
                     "internal_error", "The request could not be completed.");
             }
 
+            CasePackDiagnostics.SceneProjection(logger, "success", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
             return Results.Ok(result.Scene);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            CasePackDiagnostics.SceneProjection(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
             return Error(StatusCodes.Status500InternalServerError,
                 "internal_error", "The request could not be completed.");
         }
@@ -274,25 +287,27 @@ public static class CasePackEndpoints
         IAircraftCasePackSnapshotStore snapshots,
         ICaseStateStore caseStates,
         TimeProvider time,
-        ILogger<DemoSessionStore> logger,
+        ILoggerFactory loggers,
         CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
+        var logger = loggers.CreateLogger("AirlineDemo.Api.CasePackDiagnostics");
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
-        if (session is null) return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "unauthenticated");
+        if (session is null) { CasePackDiagnostics.CaseList(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started)); return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "unauthenticated"); }
         if (version != ContractVersion)
-            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+            { CasePackDiagnostics.CaseList(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started)); return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"); }
         if (!CanReadSummaries(session.User.Role))
-            return Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden");
+            { CasePackDiagnostics.CaseList(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started)); return Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden"); }
 
         try
         {
             if (!await limiter.TryRecordAttemptAsync(
                     session.User.Id, CasePackRequestLimiter.CaseListEndpoint, cancellationToken))
-                return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded");
+                { CasePackDiagnostics.CaseList(logger, "rate_limited", CasePackDiagnostics.ElapsedMilliseconds(started)); return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded"); }
 
             var snapshot = snapshots.Read();
             if (snapshot is null)
-                return Error(StatusCodes.Status503ServiceUnavailable, "case_pack_unavailable", "case_pack_unavailable");
+                { CasePackDiagnostics.CaseList(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started)); return Error(StatusCodes.Status503ServiceUnavailable, "case_pack_unavailable", "case_pack_unavailable"); }
 
             var summaries = new List<CasePackCaseSummary>();
             foreach (var item in snapshot.Cases)
@@ -308,11 +323,12 @@ public static class CasePackEndpoints
 
                 summaries.Add(Project(item.CaseId, metadata.Name, metadata.Category, state, session.User.Role, time.GetUtcNow()));
             }
+            CasePackDiagnostics.CaseList(logger, "success", CasePackDiagnostics.ElapsedMilliseconds(started));
             return Results.Ok(new CasePackListResponse(ContractVersion, snapshot.PackVersion, summaries));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogError(exception, "Case-pack list read failed.");
+            CasePackDiagnostics.CaseList(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started));
             return Error(StatusCodes.Status500InternalServerError, "internal_error", "The request could not be completed.");
         }
     }

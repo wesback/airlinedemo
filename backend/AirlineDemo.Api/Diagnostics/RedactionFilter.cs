@@ -11,9 +11,10 @@ public static partial class RedactionFilter
 
     private static readonly HashSet<string> SensitiveKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "source.raw_record_id", "recordid", "record.id", "payload",
-        "prompt", "gen_ai.prompt", "gen_ai.content.prompt",
-        "document", "document.text", "document.content", "evidence.text",
+        "source.raw_record_id", "recordid", "record.id", "payload", "response", "connectionstring", "credential", "auditdetail",
+        "prompt", "gen_ai.prompt", "gen_ai.content.prompt", "response",
+        "document", "document.text", "document.content", "documenttext", "evidence.text",
+        "connectionstring", "credential", "auditdetail",
         "passcode", "cookie", "set-cookie", "authorization", "token", "access_token",
         "refresh_token", "password", "secret",
         "email", "user.email", "user.name", "phone", "address", "enduser.id", "user.id",
