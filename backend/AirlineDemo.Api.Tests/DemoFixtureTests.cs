@@ -96,6 +96,17 @@ public sealed class DemoFixtureTests
             }
             Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("csrfToken").GetString()));
         }
+
+        using var executiveClient = factory.CreateClient();
+        using var executiveSignIn = await executiveClient.PostAsJsonAsync(
+            "/api/auth/sign-in", new { userId = "exec-1", passcode = Passcode }, ct);
+        Assert.Equal(HttpStatusCode.OK, executiveSignIn.StatusCode);
+        using var executiveJson = JsonDocument.Parse(await executiveSignIn.Content.ReadAsStringAsync(ct));
+        Assert.Equal("exec-1", executiveJson.RootElement.GetProperty("id").GetString());
+        Assert.Equal("executive", executiveJson.RootElement.GetProperty("role").GetString());
+        Assert.Equal(
+            new[] { "cp-case-a", "cp-case-b", "cp-case-c" },
+            executiveJson.RootElement.GetProperty("caseScopes").EnumerateArray().Select(scope => scope.GetString()).ToArray());
     }
 
     [Theory]
