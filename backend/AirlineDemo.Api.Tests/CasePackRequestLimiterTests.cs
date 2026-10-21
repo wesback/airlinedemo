@@ -4,6 +4,9 @@ using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -38,6 +41,52 @@ public sealed class CasePackRequestLimiterTests
                 services.RemoveAll<ICasePackRequestWindowStore>();
                 services.AddSingleton<ICasePackRequestWindowStore>(store);
             }));
+
+    private static WebApplicationFactory<Program> ResetOutcomeFactory(
+        InMemoryCasePackRequestWindowStore store,
+        AdjustableTime time) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(time);
+                services.RemoveAll<ICasePackRequestWindowStore>();
+                services.AddSingleton<ICasePackRequestWindowStore>(store);
+            });
+            builder.Configure(app =>
+            {
+                app.UseRouting();
+                app.UseEndpoints(endpoints => endpoints.MapPost("/__reset-test/{outcome}",
+                    async (string outcome, HttpContext http, DemoSessionStore sessions, CasePackRequestLimiter limiter, CancellationToken cancellationToken) =>
+                    {
+                        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+                        if (session is null)
+                            return Results.Json(new { error = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+
+                        var admitted = await limiter.TryRecordAttemptAsync(
+                            session.User.Id, CasePackRequestLimiter.ResetEndpoint, cancellationToken);
+                        if (!admitted)
+                            return Results.Json(new
+                            {
+                                contractVersion = 1,
+                                error = new { code = "rate_limit_exceeded", message = "rate_limit_exceeded" },
+                            }, statusCode: StatusCodes.Status429TooManyRequests);
+
+                        if (outcome == "denied-role")
+                            return session.User.Role == "Reader"
+                                ? Results.StatusCode(StatusCodes.Status403Forbidden)
+                                : Results.StatusCode(StatusCodes.Status500InternalServerError);
+                        return Results.StatusCode(outcome switch
+                        {
+                            "accepted" => StatusCodes.Status200OK,
+                            "invalid" => StatusCodes.Status400BadRequest,
+                            "replayed" => StatusCodes.Status409Conflict,
+                            _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unsupported reset outcome."),
+                        });
+                    }));
+            });
+        });
 
     private sealed class RacingStore : ICasePackRequestWindowStore
     {
@@ -109,35 +158,56 @@ public sealed class CasePackRequestLimiterTests
     }
 
     [Theory]
-    [InlineData(2, 59, "accepted", true)]
-    [InlineData(2, 30, "accepted", true)]
-    [InlineData(3, 59, "accepted", false)]
-    [InlineData(4, 59, "accepted", false)]
-    [InlineData(3, 60, "accepted", true)]
-    [InlineData(3, 59, "denied-role", false)]
-    [InlineData(3, 59, "invalid", false)]
-    [InlineData(3, 59, "replayed", false)]
+    [InlineData(2, 59, "accepted", 200, 2)]
+    [InlineData(2, 30, "accepted", 200, 2)]
+    [InlineData(3, 59, "accepted", 200, 3)]
+    [InlineData(4, 59, "accepted", 429, 3)]
+    [InlineData(3, 60, "accepted", 200, 1)]
+    [InlineData(3, 59, "denied-role", 403, 3)]
+    [InlineData(3, 59, "invalid", 400, 3)]
+    [InlineData(3, 59, "replayed", 409, 3)]
     public async Task AC030_ResetAttemptsCountEveryAuthenticatedOutcome(
-        int activeAttempts,
+        int totalAttempts,
         int oldestAgeSeconds,
         string outcome,
-        bool expected)
+        int expectedStatus,
+        int expectedActiveResetAttempts)
     {
         var time = new AdjustableTime();
         var store = new InMemoryCasePackRequestWindowStore();
-        var limiter = new CasePackRequestLimiter(store, time);
         var attemptTime = Now.AddSeconds(-oldestAgeSeconds);
+        var seededAttempts = Math.Min(totalAttempts - 1, CasePackRequestLimiter.MaxResetRequests);
 
-        for (var attempt = 0; attempt < activeAttempts && attempt < CasePackRequestLimiter.MaxResetRequests; attempt++)
+        for (var attempt = 0; attempt < seededAttempts; attempt++)
         {
             Assert.True(await store.TryRecordAttemptAsync(
-                "user-a", CasePackRequestLimiter.ResetEndpoint, attemptTime, CancellationToken.None),
-                $"seeding reset outcome {outcome}");
+                "user-a", CasePackRequestLimiter.ResetEndpoint, attemptTime, CancellationToken.None));
         }
 
-        Assert.Equal(expected, await limiter.TryRecordAttemptAsync(
-            "user-a", CasePackRequestLimiter.ResetEndpoint));
+        using var factory = ResetOutcomeFactory(store, time);
+        using var client = factory.CreateClient();
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var role = outcome == "denied-role" ? "Reader" : "presenter";
+        var session = sessions.Create(new DemoUser("user-a", "Reader", role, ["cp-case-a"]));
+        client.DefaultRequestHeaders.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
 
+        using var response = await client.PostAsync($"/__reset-test/{outcome}", null, TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal((HttpStatusCode)expectedStatus, response.StatusCode);
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            using var json = JsonDocument.Parse(body);
+            var root = json.RootElement;
+            Assert.Equal(2, root.EnumerateObject().Count());
+            Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
+            var error = root.GetProperty("error");
+            Assert.Equal(2, error.EnumerateObject().Count());
+            Assert.Equal("rate_limit_exceeded", error.GetProperty("code").GetString());
+            Assert.Equal("rate_limit_exceeded", error.GetProperty("message").GetString());
+        }
+
+        var limiter = new CasePackRequestLimiter(store, time);
         Assert.True(await limiter.TryRecordAttemptAsync(
             "user-b", CasePackRequestLimiter.ResetEndpoint));
         Assert.True(await limiter.TryRecordAttemptAsync(
@@ -145,11 +215,14 @@ public sealed class CasePackRequestLimiterTests
         Assert.True(await limiter.TryRecordAttemptAsync(
             "user-a", CasePackRequestLimiter.SceneEndpoint));
 
-        var expectedActiveResetAttempts = oldestAgeSeconds == 60
-            ? 1
-            : CasePackRequestLimiter.MaxResetRequests;
         Assert.Equal(expectedActiveResetAttempts,
             store.ActiveCount("user-a", CasePackRequestLimiter.ResetEndpoint, Now));
+        Assert.Equal(1,
+            store.ActiveCount("user-b", CasePackRequestLimiter.ResetEndpoint, Now));
+        Assert.Equal(1,
+            store.ActiveCount("user-a", CasePackRequestLimiter.CaseListEndpoint, Now));
+        Assert.Equal(1,
+            store.ActiveCount("user-a", CasePackRequestLimiter.SceneEndpoint, Now));
     }
 
     [Fact]
