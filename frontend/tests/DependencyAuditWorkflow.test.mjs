@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-function runSeverityGate(severity) {
+function runSeverityGate(severity, dotnetLines = '') {
   const workflow = readFileSync('../.github/workflows/build.yml', 'utf8');
   const gateStart = workflow.indexOf('      - name: Severity gate\n');
   const scriptStart = workflow.indexOf("          node <<'EOF'\n", gateStart);
@@ -23,7 +23,7 @@ function runSeverityGate(severity) {
       metadata: {},
       vulnerabilities: { vite: { severity } },
     }));
-    writeFileSync(join(root, 'artifacts/audit/dotnet-vulnerable.txt'), '');
+    writeFileSync(join(root, 'artifacts/audit/dotnet-vulnerable.txt'), dotnetLines);
     return spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8' });
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -42,6 +42,16 @@ describe('dependency audit workflow', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr.trim()).toBe(`::error::npm vite has a ${severity} finding with no valid exception`);
+  });
+
+  it.each([
+    ['High', 'high'],
+    ['Critical', 'critical'],
+  ])('blocks an unexcepted .NET %s finding at runtime', (severity, expectedSeverity) => {
+    const result = runSeverityGate('low', `> Example.Package 1.0.0 1.0.0 ${severity} advisory`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr.trim()).toBe(`::error::dotnet Example.Package has a ${expectedSeverity} finding with no valid exception`);
   });
 
   it('retains the strict npm and .NET high/critical severity gate', () => {
