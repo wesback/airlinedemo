@@ -1,0 +1,233 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 446,
+  "branch": "ai-sdlc/issue-446",
+  "commitSha": "f53bd3ebfd899df785104f0ed7eb0e38348ccf13",
+  "round": 1,
+  "pipelineVersion": "59fe952",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous major test finding remains unfixed: only the first older event’s witness is checked.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseHistoryEndpointTests.cs",
+          "line": 97,
+          "message": "The named test still does not verify the exact witness on every returned event. Add assertions for the second older event’s witness so the test fails if it is missing or altered.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HistorySelectsExactAuthorizedCaseRunAndBasis checks both older event IDs, but reads and asserts witness fields only for olderEvents[0].",
+            "failureScenario": "If the response omits or changes the witness for event-older-2, this test still passes, although AC-027 / AC-028 / M-02 / M-07 requires every exact evidence witness for the selected tuple."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The test still checks both older event IDs but verifies witness fields only for the first event. The prior major testing finding remains unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseHistoryEndpointTests.cs",
+          "line": 97,
+          "message": "The test still does not verify the exact witness on every returned event, leaving the prior round’s finding unresolved.",
+          "confidence": 0.87,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "HistorySelectsExactAuthorizedCaseRunAndBasis checks both older event IDs, but checks witness fields only on olderEvents[0].",
+            "failureScenario": "If the response omitted or altered the witness on event-older-2, this test would still pass, although AC-027 / AC-028 / M-02 / M-07 requires every exact evidence witness."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previously reported major test finding remains unfixed. I found no other reportable round-two change.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CaseHistoryEndpointTests.cs",
+          "line": 106,
+          "message": "The previously reported test gap remains: assert the exact witness fields for every returned older event so the test fails if any event's witness is missing or altered.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HistorySelectsExactAuthorizedCaseRunAndBasis asserts both older event IDs, but reads witness fields only from olderEvents[0].",
+            "failureScenario": "If event-older-2 has a missing or altered witness, this test still passes, despite the criterion requiring every exact evidence witness for the selected tuple."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CaseHistoryEndpointTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 51,
+      "total": 54,
+      "percent": 94.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/CaseHistoryEndpoints.cs",
+          "covered": 50,
+          "total": 53,
+          "missed": [
+            74,
+            75,
+            76
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
