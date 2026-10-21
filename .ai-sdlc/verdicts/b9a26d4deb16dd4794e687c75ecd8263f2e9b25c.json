@@ -1,0 +1,281 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 495,
+  "branch": "ai-sdlc/issue-495",
+  "commitSha": "b9a26d4deb16dd4794e687c75ecd8263f2e9b25c",
+  "round": 0,
+  "pipelineVersion": "d0f2752",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Historical witnesses can disappear from returned events when the latest package has a newer accepted document version. This violates the requirement to preserve returned-event witnesses and their original tuples.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Projection/CasePackSceneProjection.cs",
+          "line": 172,
+          "message": "Historical witnesses are dropped when the latest package contains a newer document version. Preserve valid historical witnesses and their exact document/basis tuple as required by AC-027 and AC-028.",
+          "confidence": 0.89,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "BuildState checks each historical witness against PackageStatus for its document version; PackageStatus marks it unusable when the latest package contains a different version. The witness is then omitted at lines 184–190.",
+            "failureScenario": "A returned current-run event has a valid witness for document version 1 and basis version 1, while the latest package has accepted document version 2. The projection treats the historical reference as unprocessed and drops the witness, so the event no longer preserves its witness."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The projection rejects valid historical witnesses when document and basis versions differ. The AC-028 test also omits the required blocked, failed, and partial reference cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Projection/CasePackSceneProjection.cs",
+          "line": 175,
+          "message": "Historical witness validation incorrectly requires the document version to equal the basis version. Validate the exact historical tuple without assuming those independent versions match.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Historical witnesses are accepted only when documentVersionMatchesHistory is true, which requires BasisVersion to equal DocumentVersion.",
+            "failureScenario": "A valid historical witness has basis version 1 and document version 2. BuildState rejects it and returns no scene, even though the witness's original document and basis versions should be retained."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackSceneProjectionTests.cs",
+          "line": 169,
+          "message": "AC-028 has no test for blocked, failed, or partial references producing no witness. Add a status case to the named test and assert the reference is unusable and no witness is emitted.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC028_EvidenceWitnessesBindExactCaseRunDocumentBasisAndPageTuples tests valid tuples and mutations to case, document, versions, basis, run, and page, but does not set up blocked, failed, or partial package status.",
+            "failureScenario": "If a blocked, failed, or partial document's witness is emitted, the AC028 test still passes; the acceptance criterion requires those references to be unusable and have no witness."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The historical witness check rejects valid document and basis version tuples when their version numbers differ, preventing the scene from returning authorized history.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Projection/CasePackSceneProjection.cs",
+          "line": 185,
+          "message": "Historical witnesses are incorrectly required to have matching document and basis version numbers. Validate the historical tuple against its recorded document and basis instead of assuming those independent versions are equal.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Historical witnesses are checked by `documentVersionMatchesHistory` before their reference and witness are added to the scene.",
+            "failureScenario": "A valid historical witness for document version 2 under basis version 1 fails the equality check. `BuildState` then returns null, so the scene omits valid history instead of preserving the witness's original document and basis tuple."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackSceneProjectionTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 65,
+      "total": 102,
+      "percent": 63.7,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Projection/ArrCaseHistorySource.cs",
+          "covered": 2,
+          "total": 25,
+          "missed": [
+            16,
+            19,
+            20,
+            21,
+            22,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            39,
+            40,
+            41,
+            43
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Projection/CasePackSceneProjection.cs",
+          "covered": 63,
+          "total": 77,
+          "missed": [
+            32,
+            33,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            83,
+            86,
+            88,
+            152,
+            164
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
