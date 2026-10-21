@@ -11,6 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace AirlineDemo.Api.Tests;
@@ -53,7 +55,8 @@ public sealed class CasePackRequestLimiterTests
             var cutoff = attemptedAt - CasePackRequestLimiter.RollingWindow;
             var activeCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (!_raced && activeCount == CasePackRequestLimiter.MaxRequests - 1)
+            var maximum = CasePackRequestLimiter.MaximumFor(endpoint);
+            if (!_raced && activeCount == maximum - 1)
             {
                 _attempts.Add((userId, endpoint, attemptedAt));
                 _raced = true;
@@ -61,8 +64,8 @@ public sealed class CasePackRequestLimiterTests
 
             var currentCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (activeCount >= CasePackRequestLimiter.MaxRequests
-                || currentCount >= CasePackRequestLimiter.MaxRequests)
+            if (activeCount >= maximum
+                || currentCount >= maximum)
                 return Task.FromResult(false);
 
             _attempts.Add((userId, endpoint, attemptedAt));
@@ -103,6 +106,97 @@ public sealed class CasePackRequestLimiterTests
         }
 
         Assert.Equal(expected, await limiter.TryRecordAttemptAsync(requestUser, requestEndpoint));
+    }
+
+    [Theory]
+    [InlineData(2, 59, "accepted", true)]
+    [InlineData(2, 30, "accepted", true)]
+    [InlineData(3, 59, "accepted", false)]
+    [InlineData(4, 59, "accepted", false)]
+    [InlineData(3, 60, "accepted", true)]
+    [InlineData(3, 59, "denied-role", false)]
+    [InlineData(3, 59, "invalid", false)]
+    [InlineData(3, 59, "replayed", false)]
+    public async Task AC030_ResetAttemptsCountEveryAuthenticatedOutcome(
+        int activeAttempts,
+        int oldestAgeSeconds,
+        string outcome,
+        bool expected)
+    {
+        var time = new AdjustableTime();
+        var store = new InMemoryCasePackRequestWindowStore();
+        var limiter = new CasePackRequestLimiter(store, time);
+        var attemptTime = Now.AddSeconds(-oldestAgeSeconds);
+
+        for (var attempt = 0; attempt < activeAttempts && attempt < CasePackRequestLimiter.MaxResetRequests; attempt++)
+        {
+            Assert.True(await store.TryRecordAttemptAsync(
+                "user-a", CasePackRequestLimiter.ResetEndpoint, attemptTime, CancellationToken.None),
+                $"seeding reset outcome {outcome}");
+        }
+
+        Assert.Equal(expected, await limiter.TryRecordAttemptAsync(
+            "user-a", CasePackRequestLimiter.ResetEndpoint));
+
+        Assert.True(await limiter.TryRecordAttemptAsync(
+            "user-b", CasePackRequestLimiter.ResetEndpoint));
+        Assert.True(await limiter.TryRecordAttemptAsync(
+            "user-a", CasePackRequestLimiter.CaseListEndpoint));
+        Assert.True(await limiter.TryRecordAttemptAsync(
+            "user-a", CasePackRequestLimiter.SceneEndpoint));
+
+        var expectedActiveResetAttempts = oldestAgeSeconds == 60
+            ? 1
+            : CasePackRequestLimiter.MaxResetRequests;
+        Assert.Equal(expectedActiveResetAttempts,
+            store.ActiveCount("user-a", CasePackRequestLimiter.ResetEndpoint, Now));
+    }
+
+    [Fact]
+    public async Task AC030_ConcurrentResetAdmissionIsAtomic()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "case-pack-reset-limit-" + Guid.NewGuid().ToString("N") + ".sqlite");
+        try
+        {
+            await using var connection = new SqliteConnection($"Data Source={path}");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlite(connection).Options;
+            await using (var db = new CaseStateDbContext(options))
+                await db.Database.MigrateAsync();
+
+            var store = new SqlCasePackRequestWindowStore(options);
+            for (var attempt = 0; attempt < CasePackRequestLimiter.MaxResetRequests - 1; attempt++)
+                Assert.True(await store.TryRecordAttemptAsync(
+                    "user-a", CasePackRequestLimiter.ResetEndpoint, Now, CancellationToken.None));
+
+            var ready = 0;
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            async Task<bool> ConcurrentAttempt()
+            {
+                if (Interlocked.Increment(ref ready) == 2) start.TrySetResult();
+                await start.Task;
+                return await store.TryRecordAttemptAsync(
+                    "user-a", CasePackRequestLimiter.ResetEndpoint, Now, CancellationToken.None);
+            }
+
+            var results = await Task.WhenAll(ConcurrentAttempt(), ConcurrentAttempt());
+            Assert.Equal(1, results.Count(result => result));
+            Assert.Equal(1, results.Count(result => !result));
+
+            await using (var db = new CaseStateDbContext(options))
+            {
+                var cutoff = Now.UtcDateTime.Ticks - CasePackRequestLimiter.RollingWindow.Ticks;
+                var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("user-a"));
+                var active = await db.CasePackRequestWindows.CountAsync(row =>
+                    row.UserHash == hash && row.Endpoint == CasePackRequestLimiter.ResetEndpoint
+                    && row.RequestedAtTicks > cutoff);
+                Assert.Equal(CasePackRequestLimiter.MaxResetRequests, active);
+            }
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 
     [Fact]
