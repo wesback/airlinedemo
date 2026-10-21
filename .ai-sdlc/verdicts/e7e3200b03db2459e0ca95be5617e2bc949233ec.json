@@ -1,0 +1,293 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 444,
+  "branch": "ai-sdlc/issue-444",
+  "commitSha": "e7e3200b03db2459e0ca95be5617e2bc949233ec",
+  "round": 1,
+  "pipelineVersion": "18314a8",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds the named request-path test and the other-actor conflict assertions. The M-03 paired precedence proof and AC-015 quota accounting for invalid authenticated requests remain incomplete.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 950,
+          "message": "M-03's paired precedence cases are still missing. Add the specified role and scope inputs with invalid later-stage values, then assert the expected earlier-stage response and required zero store calls.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder sends valid anti-forgery tokens in both the role and scope cases. The role case also uses an in-scope Case C path, and the scope case uses a Case C path.",
+            "failureScenario": "If anti-forgery validation runs before role or scope authorization, these cases still return 403 or 404 and pass. They do not prove the required precedence for the table inputs pairing a rejected role or scope with an invalid token and, for the role case, a Case A path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 870,
+          "message": "AC-015 still lacks an assertion that invalid authenticated requests consume quota. Assert the request-window store's exact attempt count for an invalid request.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC015_ResetRejectsRolesScopeAndAntiForgeryWithoutMutation checks zero limiter attempts for an unauthenticated request and one attempt for denied roles, but makes no limiter-count assertion after invalid anti-forgery requests or the out-of-scope request.",
+            "failureScenario": "If invalid authenticated requests stop consuming quota, the test still passes because it checks only their response and unchanged case state."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests fix the missing M14 path coverage, unauthenticated quota assertion, and other-actor conflict checks. M-03 still lacks its specified paired precedence cases, and quota consumption for authenticated invalid requests remains unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 1060,
+          "message": "M-03's required paired precedence cases remain missing. Add the role case with out-of-scope access, invalid anti-forgery, Case A path, and variant `other`, and the scope case with invalid anti-forgery and variant `other`, then assert the specified response and zero named store calls.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The M-03 table checks role rejection only with an in-scope Case C and checks scope rejection only with a valid anti-forgery token. It does not include the acceptance table's paired later-stage failures.",
+            "failureScenario": "If scope checking runs before role checking, a technical reviewer with Case C out of scope could receive 404 instead of 403; if anti-forgery checking runs before scope checking, an out-of-scope presenter with an invalid token could receive 400 instead of 404. The current cases pass without detecting either precedence regression."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 851,
+          "message": "AC-015 still does not verify quota accounting for authenticated invalid requests. Assert the request-window store records the expected attempts for an invalid request, such as the invalid anti-forgery or malformed-body case.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The AC-015 test sends invalid anti-forgery and out-of-scope requests, and M14 sends malformed and invalid command requests, but none asserts the request-window store's attempt count for those authenticated invalid requests.",
+            "failureScenario": "If the endpoint skips quota recording for authenticated invalid requests, all current status and state assertions still pass, despite AC-015 requiring invalid requests to consume quota."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix addresses the other prior-round findings. M-03’s ordering test still omits the paired inputs needed to prove role and scope take precedence over later checks.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 1060,
+          "message": "M-03’s role and scope cases still do not prove precedence for the table’s paired invalid inputs. Add the specified Case A and invalid-token values to those cases and assert the expected earlier-stage status and zero case-store calls.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The role and scope cases test an invalid variant, but use a Case C path and valid anti-forgery token. They omit the acceptance table’s paired inputs: role rejection with an invalid token and Case A path, and scope rejection with an invalid token.",
+            "failureScenario": "If the endpoint checks the Case A target before rejecting a technical reviewer, or checks anti-forgery before rejecting an out-of-scope presenter, the specified requests return the wrong status while these tests still pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackBlockedVariantResetTests.cs",
+      "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 69,
+      "total": 71,
+      "percent": 97.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/CasePackRequestLimiter.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 58,
+          "total": 60,
+          "missed": [
+            120,
+            139
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/CasePackBlockedVariantReset.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
