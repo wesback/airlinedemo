@@ -1,0 +1,217 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 457,
+  "branch": "ai-sdlc/issue-457",
+  "commitSha": "8770eb4a1ffbb309db36a82aae143da14411c7f6",
+  "round": 2,
+  "pipelineVersion": "d1f69f2",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior M-13 race-test finding remains: the fake enforces the limit after injecting the competing attempt, so the test can pass even if production admission allows a fourth attempt.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 65,
+          "message": "M-13's race test still verifies RacingStore's quota check rather than production admission. Exercise the production store with a race that changes the stored count between read and commit, and assert the fourth attempt is not recorded.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC030_ConcurrentResetAdmissionIsAtomic exercises the race through RacingStore. After injecting the competing attempt, RacingStore itself checks currentCount against the limit and returns false.",
+            "failureScenario": "If the production store admitted the tested request after the competing attempt filled the quota, this test would still pass because RacingStore rejects it at line 65. The race case therefore still does not verify the production store's atomic admission."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-3 change adjusts the fake's race setup and count assertion, but the fake still supplies the limit check that the test is meant to verify.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 293,
+          "message": "M-13's race test still verifies RacingStore's admission check rather than the production store's atomic admission. Exercise the production store behavior under a changed-count race and assert that the fourth attempt is not recorded.",
+          "confidence": 0.86,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC030_ConcurrentResetAdmissionIsAtomic uses RacingStore for the changed-count scenario. RacingStore inserts the competing attempt, recounts, and itself rejects the tested request when the limit is reached.",
+            "failureScenario": "If the production store stopped enforcing the limit atomically and admitted a fourth reset attempt after a competing write, this test would still pass because it exercises RacingStore's independent rejection instead of that production store behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior M-13 test finding remains: the revised race case still does not verify the specified fourth-attempt race.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 302,
+          "message": "M-13's race test still does not prove a fourth reset attempt cannot be admitted when the stored count changes between read and commit. The fake inserts the third attempt and rejects the tested request itself; exercise the fourth-attempt race and assert the stored count remains three.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The race scenario seeds two attempts, then RacingStore inserts a competing third attempt and checks the quota itself before returning false.",
+            "failureScenario": "The test denies the request that would be the third attempt if admitted; it never tests a fourth request after three attempts are stored. Because RacingStore performs the recount and rejection, this assertion can pass without proving the implementation prevents a fourth admission under the specified race."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
