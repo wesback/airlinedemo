@@ -4,6 +4,16 @@
   "generatorReference": "aircraft-case-pack-generator-v1",
   "aircraftCount": 1,
   "engineCount": 1,
+  "aircraftRegistration": {
+    "value": "SYN-CP-B-REG",
+    "synthetic": true
+  },
+  "serialNumbers": [
+    { "kind": "aircraft", "value": "SYN-CP-B-AIR-001", "synthetic": true },
+    { "kind": "engine", "value": "SYN-CP-B-ENG-001", "synthetic": true },
+    { "kind": "component", "value": "SYN-CP-B-CMP-001", "synthetic": true, "componentId": "ENG-CP-B-001" },
+    { "kind": "component", "value": "SYN-CP-B-CMP-002", "synthetic": true, "componentId": "FAN-DISK-CP-B-021" }
+  ],
   "components": [
     {
       "componentId": "ENG-CP-B-001",

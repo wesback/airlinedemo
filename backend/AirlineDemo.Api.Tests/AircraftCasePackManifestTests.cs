@@ -9,7 +9,7 @@ namespace AirlineDemo.Api.Tests;
 public sealed class AircraftCasePackManifestTests
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
-    private static (AircraftCasePackManifest Manifest, Dictionary<string, byte[]> Files) Pack(string version = "1.0.0", string date = "2026-10-01", int caseCount = 3, int[]? counts = null, string text = "fixture")
+    private static (AircraftCasePackManifest Manifest, Dictionary<string, byte[]> Files) Pack(string version = "1.0.2", string date = "2026-10-01", int caseCount = 3, int[]? counts = null, string text = "fixture")
     {
         counts ??= Enumerable.Repeat(9, caseCount).ToArray();
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
@@ -23,9 +23,27 @@ public sealed class AircraftCasePackManifestTests
                 files.Add(path, Encoding.UTF8.GetBytes(text));
                 return new AircraftCasePackDocument(path, true, "generator-v1");
             }).ToList();
-            return new AircraftCasePackCase(id, true, "generator-v1", 1, 1,
-                [new($"{id}-component-1", [docs[0].Path]), new($"{id}-component-2", [docs[1].Path])], docs);
+            var components = new List<AircraftCasePackComponent>
+            {
+                new($"{id}-component-1", [docs[0].Path]),
+                new($"{id}-component-2", [docs[1].Path])
+            };
+            var labelPrefix = $"SYN-CP-{char.ToUpperInvariant(id[^1])}";
+            var serialNumbers = new AircraftCasePackSerialNumber[]
+            {
+                new("aircraft", $"{labelPrefix}-AIR-001", true),
+                new("engine", $"{labelPrefix}-ENG-001", true),
+                new("component", $"{labelPrefix}-CMP-001", true, components[0].ComponentId),
+                new("component", $"{labelPrefix}-CMP-002", true, components[1].ComponentId)
+            };
+            return new AircraftCasePackCase(id, true, "generator-v1", 1, 1, components, docs,
+                new($"{labelPrefix}-REG", true), serialNumbers);
         }).ToList();
+        foreach (var caseRecord in cases)
+        {
+            var casePath = $"case-{caseRecord.CaseId[^1]}.json";
+            files.Add(casePath, JsonSerializer.SerializeToUtf8Bytes(caseRecord, WebJson));
+        }
         var manifest = new AircraftCasePackManifest
         {
             SchemaVersion = 1, PackVersion = version, ScenarioDate = date, ProductOwnerReviewReference = "review-123",
@@ -60,9 +78,81 @@ public sealed class AircraftCasePackManifestTests
 
         Assert.Empty(result.Errors);
         Assert.NotNull(result.Manifest);
-        Assert.Equal("1.0.1", result.Manifest.PackVersion);
+        Assert.Equal("1.0.2", result.Manifest.PackVersion);
         Assert.Equal("2026-10-01", result.Manifest.ScenarioDate);
-        Assert.Equal("issue-460", result.Manifest.ProductOwnerReviewReference);
+        Assert.Equal("issue-473", result.Manifest.ProductOwnerReviewReference);
+    }
+
+    [Fact]
+    public void AC003_FictionalIdentityContractAcceptsAndRejectsTableCases()
+    {
+        var root = FixtureRoot();
+        var manifestJson = File.ReadAllText(Path.Combine(root, "manifest.json"));
+        var fixtureManifest = JsonSerializer.Deserialize<AircraftCasePackManifest>(manifestJson, WebJson)!;
+        var fixtureFiles = fixtureManifest.Files.ToDictionary(path => path,
+            path => File.ReadAllBytes(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar))),
+            StringComparer.Ordinal);
+        var fixtureResult = AircraftCasePackManifest.Parse(manifestJson, fixtureFiles);
+        Assert.NotNull(fixtureResult.Manifest);
+        foreach (var caseRecord in fixtureResult.Manifest.Cases)
+        {
+            var letter = caseRecord.CaseId[^1];
+            var fixtureCase = JsonSerializer.Deserialize<AircraftCasePackCase>(
+                File.ReadAllText(Path.Combine(root, $"case-{letter}.json")), WebJson)!;
+            Assert.Equal(JsonSerializer.Serialize(caseRecord, WebJson), JsonSerializer.Serialize(fixtureCase, WebJson));
+        }
+
+        var rows = new (string Name, Action<JsonObject> Change, string Error)[]
+        {
+            ("valid fictional identities", _ => { }, "SYN-CP-"),
+            ("missing registration", j => j["cases"]![0]!.AsObject().Remove("aircraftRegistration"), "aircraftRegistration"),
+            ("false registration marker", j => j["cases"]![0]!["aircraftRegistration"]!["synthetic"] = false, "aircraftRegistration"),
+            ("missing registration marker", j => j["cases"]![0]!["aircraftRegistration"]!.AsObject().Remove("synthetic"), "aircraftRegistration"),
+            ("registration without synthetic prefix", j => j["cases"]![0]!["aircraftRegistration"]!["value"] = "N12345", "aircraftRegistration"),
+            ("other prefixed registration", j => j["cases"]![0]!["aircraftRegistration"]!["value"] = "SYN-CP-B-REG", "aircraftRegistration"),
+            ("false serial marker", j => j["cases"]![0]!["serialNumbers"]![0]!["synthetic"] = false, "serialNumbers"),
+            ("missing serial marker", j => j["cases"]![0]!["serialNumbers"]![0]!.AsObject().Remove("synthetic"), "serialNumbers"),
+            ("missing serial kind", j => j["cases"]![0]!["serialNumbers"]![1]!.AsObject().Remove("kind"), "serialNumbers"),
+            ("duplicate serial kind", j => j["cases"]![0]!["serialNumbers"]![1]!["kind"] = "aircraft", "serialNumbers"),
+            ("duplicate serial value", j => j["cases"]![0]!["serialNumbers"]![1]!["value"] = j["cases"]![0]!["serialNumbers"]![0]!["value"]!.GetValue<string>(), "serialNumbers"),
+            ("component ID outside case", j => j["cases"]![0]!["serialNumbers"]![2]!["componentId"] = "ENG-CP-B-001", "serialNumbers"),
+            ("serial count other than four", j => j["cases"]![0]!["serialNumbers"]!.AsArray().RemoveAt(3), "serialNumbers")
+        };
+        foreach (var row in rows)
+        {
+            var pack = Pack();
+            var json = Json(pack);
+            row.Change(json);
+            RefreshHash(json, pack.Files);
+            var result = AircraftCasePackManifest.Parse(json.ToJsonString(), pack.Files);
+            if (row.Name == "valid fictional identities")
+                Assert.NotNull(result.Manifest);
+            else
+            {
+                Assert.Null(result.Manifest);
+                Assert.Contains(row.Error, string.Join(";", result.Errors));
+            }
+        }
+    }
+
+    [Fact]
+    public void AC018_IdentityChangesRequireNewPackVersionAndHash()
+    {
+        var oldVersion = Pack("1.0.1");
+        Assert.Contains(AircraftCasePackManifest.Validate(oldVersion.Manifest, oldVersion.Files),
+            error => error == "packVersion: fictional identity labels require version 1.0.2 or later");
+
+        var updated = Pack("1.0.2");
+        Assert.Empty(AircraftCasePackManifest.Validate(updated.Manifest, updated.Files));
+        Assert.Equal("1.0.2", updated.Manifest.PackVersion);
+        Assert.Equal(AircraftCasePackManifest.ComputeSha256(updated.Manifest, updated.Files), updated.Manifest.Sha256);
+
+        var changedIdentity = Json(updated);
+        changedIdentity["cases"]![0]!["serialNumbers"]![0]!["value"] = "SYN-CP-A-AIR-002";
+        RefreshHash(changedIdentity, updated.Files);
+        var changedResult = AircraftCasePackManifest.Parse(changedIdentity.ToJsonString(), updated.Files);
+        Assert.Null(changedResult.Manifest);
+        Assert.Contains(changedResult.Errors, error => error.Contains("fictional identity", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -118,7 +208,8 @@ public sealed class AircraftCasePackManifestTests
         var ids = caseIds.Split(',');
         var manifest = pack.Manifest with
         {
-            Cases = ids.Select((id, index) => pack.Manifest.Cases[index] with { CaseId = id }).ToList(),
+            Cases = ids.Select((id, index) => pack.Manifest.Cases.SingleOrDefault(item => item.CaseId == id)
+                ?? pack.Manifest.Cases[index] with { CaseId = id }).ToList(),
             ScenarioDate = scenarioDate,
             Sha256 = ""
         };
@@ -167,21 +258,21 @@ public sealed class AircraftCasePackManifestTests
     public void ManifestHashAndVersionComparisonUseCanonicalContent()
     {
         var prior = Pack();
-        Assert.Equal("f9dbccda4e68db27e178497ad45a33f4fed9e76aa3bb34af482abc317052fc26", prior.Manifest.Sha256);
+        Assert.Equal("c6e80f7334ae910ebfe43149f4b60982f8bcb5950b7b99f17cec3139694ff698", prior.Manifest.Sha256);
         var changedFiles = new Dictionary<string, byte[]>(prior.Files) { [prior.Files.Keys.First()] = Encoding.UTF8.GetBytes("fixturE") };
         var changedWithOldHash = prior.Manifest;
         Assert.NotEmpty(AircraftCasePackManifest.Compare(prior.Manifest, changedWithOldHash, prior.Files, changedFiles));
         var changedSameVersion = changedWithOldHash with { Sha256 = AircraftCasePackManifest.ComputeSha256(changedWithOldHash, changedFiles) };
         Assert.Contains(AircraftCasePackManifest.Compare(prior.Manifest, changedSameVersion, prior.Files, changedFiles),
             e => e.Contains("packVersion", StringComparison.Ordinal));
-        var changedVersion = changedSameVersion with { PackVersion = "1.0.1", Sha256 = "" };
+        var changedVersion = changedSameVersion with { PackVersion = "1.0.3", Sha256 = "" };
         changedVersion = changedVersion with { Sha256 = AircraftCasePackManifest.ComputeSha256(changedVersion, changedFiles) };
         Assert.Empty(AircraftCasePackManifest.Compare(prior.Manifest, changedVersion, prior.Files, changedFiles));
     }
     [Fact]
     public void ManifestHashUsesDeterministicManifestListedContent()
     {
-        const string expectedHash = "f9dbccda4e68db27e178497ad45a33f4fed9e76aa3bb34af482abc317052fc26";
+        const string expectedHash = "c6e80f7334ae910ebfe43149f4b60982f8bcb5950b7b99f17cec3139694ff698";
         var pack = Pack();
         var json = Json(pack);
         var reversedJson = new JsonObject();
