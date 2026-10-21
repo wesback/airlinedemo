@@ -295,7 +295,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(0, store.WriteCalls);
         Assert.Equal(baseline, store.CaptureState());
     }
-    private static void SeedSceneHistory(CaseStateStore store, string caseId, string runId = "current-run", int count = 1, int summaryLength = 0)
+    private static void SeedSceneHistory(CaseStateStore store, string caseId, string runId = "current-run", int count = 1, int summaryLength = 0, string? eventPrefix = null)
     {
         var scope = store.AuthorizeCase(caseId, "case-pack-test-owner");
         var state = store.Read(scope);
@@ -310,15 +310,16 @@ public sealed class CasePackEndpointsTests : IDisposable
         {
             state = store.Read(scope);
             var summary = summaryLength == 0 ? $"Current run event {index}" : new string('x', summaryLength);
+            var prefix = eventPrefix ?? string.Empty;
             var witness = caseId switch
             {
-                "cp-case-a" => new CaseJourneyWitness($"witness-{index}", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1),
-                "cp-case-b" => new CaseJourneyWitness($"witness-{index}", "case-b/aircraft-summary.txt", 1, 1, "basis-v1", 1),
-                "cp-case-c" => new CaseJourneyWitness($"witness-{index}", "case-c/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                "cp-case-a" => new CaseJourneyWitness($"{prefix}witness-{index}", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                "cp-case-b" => new CaseJourneyWitness($"{prefix}witness-{index}", "case-b/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                "cp-case-c" => new CaseJourneyWitness($"{prefix}witness-{index}", "case-c/aircraft-summary.txt", 1, 1, "basis-v1", 1),
                 _ => null,
             };
             store.Commit(scope, state.Revision, new CaseCommit(null, null, "presenter", "journey", "scene history",
-                JourneyEvent: new CaseJourneyEventDraft($"event-{index}", runId, caseId, "evidence-reviewed", "basis-v1", 1,
+                JourneyEvent: new CaseJourneyEventDraft($"{prefix}event-{index}", runId, caseId, "evidence-reviewed", "basis-v1", 1,
                     "presenter", summary, "AI agent", witness is null ? [] : [witness])));
         }
     }
@@ -337,6 +338,9 @@ public sealed class CasePackEndpointsTests : IDisposable
             Events = historyEvents.Where(item => item.RunId == "current-run" && item.BasisId == "basis-v1").ToArray(),
         };
         using var host = CreateHost(store, history: reader);
+        var packages = host.Services.GetRequiredService<EvidencePackageStore>();
+        packages.Submit("accepted-a", "cp-case-a", () => new EvidencePackageOutcome("complete",
+            [new EvidenceDocumentResult("aircraft-summary.txt", "accepted", "accepted", 1, null)]));
         using var client = host.CreateClient();
         var session = CreateSession(host, "presenter", "cp-case-a");
 
@@ -349,7 +353,14 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal("cp-case-a", root.GetProperty("case").GetProperty("caseId").GetString());
         Assert.Equal("current-run", root.GetProperty("case").GetProperty("currentRunId").GetString());
         Assert.Equal(20, root.GetProperty("history").GetArrayLength());
+        Assert.Equal(
+            Enumerable.Range(6, 20).Select(index => $"event-{index}").ToArray(),
+            root.GetProperty("history").EnumerateArray().Select(item => item.GetProperty("eventId").GetString()).ToArray());
         Assert.True(root.GetProperty("olderHistoryAvailable").GetBoolean());
+        Assert.Equal(20, root.GetProperty("evidence").GetArrayLength());
+        Assert.Equal(
+            Enumerable.Range(6, 20).Select(index => $"witness-{index}").OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            root.GetProperty("evidence").EnumerateArray().Select(item => item.GetProperty("witnessId").GetString()).ToArray());
         Assert.All(root.GetProperty("evidence").EnumerateArray(), witness =>
         {
             Assert.Equal("case-a/aircraft-summary.txt", witness.GetProperty("documentId").GetString());
@@ -368,6 +379,18 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.False(crossJson.RootElement.TryGetProperty("evidence", out _));
         Assert.Equal(
             [new ArrSelector("cp-case-a", "current-run", "basis-v1"),
+             new ArrSelector("cp-case-a", "current-run", "basis-v1")], reader.Selectors);
+
+        reader.CaseId = "cp-case-a";
+        reader.BasisId = "basis-v2";
+        using var crossBasis = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.NotFound, crossBasis.StatusCode);
+        using var crossBasisJson = await ReadJsonAsync(crossBasis);
+        Assert.False(crossBasisJson.RootElement.TryGetProperty("case", out _));
+        Assert.False(crossBasisJson.RootElement.TryGetProperty("evidence", out _));
+        Assert.Equal(
+            [new ArrSelector("cp-case-a", "current-run", "basis-v1"),
+             new ArrSelector("cp-case-a", "current-run", "basis-v1"),
              new ArrSelector("cp-case-a", "current-run", "basis-v1")], reader.Selectors);
     }
 
@@ -402,8 +425,9 @@ public sealed class CasePackEndpointsTests : IDisposable
         Array.Sort(samples);
         Assert.True(samples[94] <= 1000, $"Scene p95 was {samples[94]:F3} ms.");
 
+        SeedSceneHistory(store.Inner, "cp-case-a", "oversized-run", 1, 70_000, "oversized-");
+        store.ResetWriteCount();
         var baseline = store.CaptureState();
-        SeedSceneHistory(store.Inner, "cp-case-a", "oversized-run", 1, 70_000);
         using var oversized = await SendAsync(client, HttpMethod.Get, "/api/v1/cases/cp-case-a/scene", session);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, oversized.StatusCode);
         using var oversizedJson = await ReadJsonAsync(oversized);
@@ -411,6 +435,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.False(oversizedJson.RootElement.TryGetProperty("case", out _));
         Assert.False(oversizedJson.RootElement.TryGetProperty("evidence", out _));
         Assert.Equal(0, store.WriteCalls);
+        Assert.Equal(baseline, store.CaptureState());
     }
 
     [Fact]
