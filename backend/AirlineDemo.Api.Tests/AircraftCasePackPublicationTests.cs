@@ -12,10 +12,7 @@ public sealed class AircraftCasePackPublicationTests
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
-    private sealed record ApplicationVisibleState(
-        AircraftCasePackSnapshot? Pack,
-        CaseState? UnrelatedCase,
-        IReadOnlyList<AuditEvent> Audit);
+    private sealed record ApplicationVisibleState(AircraftCasePackSnapshot? Pack);
 
     private sealed class RecordingEvidenceStore : IEvidenceBlobStore
     {
@@ -43,10 +40,7 @@ public sealed class AircraftCasePackPublicationTests
         private ApplicationVisibleState _visibleState;
         private long _revision;
 
-        public RecordingCaseStore(CaseState? unrelatedCase = null, IReadOnlyList<AuditEvent>? audit = null)
-        {
-            _visibleState = new ApplicationVisibleState(null, unrelatedCase, audit ?? Array.Empty<AuditEvent>());
-        }
+        public RecordingCaseStore() => _visibleState = new ApplicationVisibleState(null);
 
         public int Commits { get; private set; }
         public int Reads { get; private set; }
@@ -320,14 +314,15 @@ public sealed class AircraftCasePackPublicationTests
             var unrelatedScope = unrelatedStore.CreateCase("unrelated-case", "presenter");
             unrelatedStore.Commit(unrelatedScope, 0, new CaseCommit(
                 CaseStateStore.CreateBasisVersion(1, "unrelated basis", ""), null, "presenter", "seed", "unrelated"));
-            var publication = new RecordingCaseStore(
-                unrelatedStore.Read(unrelatedScope), unrelatedStore.ReadAudit(unrelatedScope));
+            var publication = new RecordingCaseStore();
             var publisher = new AircraftCasePackPublisher(evidence, publication, caseStager, referenceStager);
 
             try
             {
                 var prior = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
                 var priorBlobCount = evidence.Writes.Count;
+                var unrelatedBeforeAttempt = unrelatedStore.Read(unrelatedScope);
+                var auditBeforeAttempt = unrelatedStore.ReadAudit(unrelatedScope);
                 var beforeAttempt = publication.ReadApplicationState();
                 switch (failure)
                 {
@@ -368,6 +363,11 @@ public sealed class AircraftCasePackPublicationTests
                         Assert.Same(prior.Cases[i].DocumentReferences[j], visible.Cases[i].DocumentReferences[j]);
                 }
                 AssertSameApplicationState(expectedState, afterAttempt);
+                AssertSameCaseState(
+                    unrelatedBeforeAttempt,
+                    unrelatedStore.Read(unrelatedScope),
+                    auditBeforeAttempt,
+                    unrelatedStore.ReadAudit(unrelatedScope));
                 Assert.NotEmpty(evidence.Writes.Skip(priorBlobCount));
                 var visibleBlobNames = visible.Cases.SelectMany(item => item.DocumentReferences)
                     .Select(item => item.BlobName).ToHashSet(StringComparer.Ordinal);
@@ -389,19 +389,27 @@ public sealed class AircraftCasePackPublicationTests
 
     private static void AssertSameApplicationState(ApplicationVisibleState expected, ApplicationVisibleState actual)
     {
-        Assert.NotNull(expected.UnrelatedCase);
-        Assert.NotNull(actual.UnrelatedCase);
-        Assert.Same(expected.UnrelatedCase, actual.UnrelatedCase);
-        Assert.Equal(expected.UnrelatedCase!.CaseId, actual.UnrelatedCase!.CaseId);
-        Assert.Equal(expected.UnrelatedCase.Owner, actual.UnrelatedCase.Owner);
-        Assert.Equal(expected.UnrelatedCase.Revision, actual.UnrelatedCase.Revision);
-        Assert.Equal(expected.UnrelatedCase.Basis, actual.UnrelatedCase.Basis);
-        Assert.Equal(expected.UnrelatedCase.ReceiptIds, actual.UnrelatedCase.ReceiptIds);
-        Assert.Equal(expected.UnrelatedCase.ReceiptFingerprints, actual.UnrelatedCase.ReceiptFingerprints);
-        Assert.Equal(expected.Audit, actual.Audit);
-        Assert.Equal(expected.Audit.Count, actual.Audit.Count);
-        for (var i = 0; i < expected.Audit.Count; i++)
-            Assert.Same(expected.Audit[i], actual.Audit[i]);
+        Assert.Same(expected.Pack, actual.Pack);
+    }
+
+    private static void AssertSameCaseState(
+        CaseState expected,
+        CaseState actual,
+        IReadOnlyList<AuditEvent> expectedAudit,
+        IReadOnlyList<AuditEvent> actualAudit)
+    {
+        Assert.Same(expected, actual);
+        Assert.Equal(expected.CaseId, actual.CaseId);
+        Assert.Equal(expected.Owner, actual.Owner);
+        Assert.Equal(expected.Revision, actual.Revision);
+        Assert.Equal(expected.Basis, actual.Basis);
+        Assert.Equal(expected.ReceiptIds, actual.ReceiptIds);
+        Assert.Equal(expected.ReceiptFingerprints, actual.ReceiptFingerprints);
+        Assert.Same(expectedAudit, actualAudit);
+        Assert.Equal(expectedAudit, actualAudit);
+        Assert.Equal(expectedAudit.Count, actualAudit.Count);
+        for (var i = 0; i < expectedAudit.Count; i++)
+            Assert.Same(expectedAudit[i], actualAudit[i]);
     }
 
     [Fact]
