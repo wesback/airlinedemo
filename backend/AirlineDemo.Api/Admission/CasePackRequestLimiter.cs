@@ -3,6 +3,10 @@ using System.Security.Cryptography;
 using System.Text;
 using AirlineDemo.Api.Persistence;
 using Microsoft.EntityFrameworkCore;
+using AirlineDemo.Api.Auth;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -182,6 +186,79 @@ public static class CasePackRequestLimiterRegistration
         }
 
         services.AddSingleton<CasePackRequestLimiter>();
+        services.AddSingleton<IStartupFilter, CasePackResetRequestRateLimitStartupFilter>();
         return services;
+    }
+}
+
+public sealed class CasePackResetRequestRateLimitStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.UseMiddleware<CasePackResetRequestRateLimitMiddleware>();
+        next(app);
+    };
+}
+
+public sealed class CasePackResetRequestRateLimitMiddleware(RequestDelegate next)
+{
+    public async Task InvokeAsync(
+        HttpContext http,
+        DemoSessionStore sessions,
+        CasePackRequestLimiter limiter)
+    {
+        if (!IsResetRequest(http.Request))
+        {
+            await next(http);
+            return;
+        }
+
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null)
+        {
+            await next(http);
+            return;
+        }
+
+        if (!await limiter.TryRecordAttemptAsync(session.User.Id, CasePackRequestLimiter.ResetEndpoint, http.RequestAborted))
+        {
+            http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await http.Response.WriteAsJsonAsync(new
+            {
+                contractVersion = 1,
+                error = new { code = "rate_limit_exceeded", message = "rate_limit_exceeded" },
+            }, http.RequestAborted);
+            return;
+        }
+
+        if (!string.Equals(session.User.Role, "presenter", StringComparison.Ordinal)
+            && TryGetResetRunId(http.Request, out var runId)
+            && session.User.CaseScopes.Contains(runId))
+        {
+            http.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await http.Response.WriteAsJsonAsync(new { error = "forbidden" }, http.RequestAborted);
+            return;
+        }
+
+        await next(http);
+    }
+
+    private static bool IsResetRequest(HttpRequest request)
+    {
+        return TryGetResetRunId(request, out _) && HttpMethods.IsPost(request.Method);
+    }
+
+    private static bool TryGetResetRunId(HttpRequest request, out string runId)
+    {
+        var segments = request.Path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments is { Length: 4 } && segments[0] == "api"
+            && segments[1] == "runs" && segments[3] == "reset")
+        {
+            runId = segments[2];
+            return true;
+        }
+
+        runId = string.Empty;
+        return false;
     }
 }
