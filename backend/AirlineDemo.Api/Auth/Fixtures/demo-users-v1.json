@@ -5,25 +5,25 @@
       "id": "presenter",
       "displayName": "Demo presenter",
       "role": "presenter",
-      "caseScopes": [ "case-001", "case-002" ]
+      "caseScopes": [ "case-001", "case-002", "cp-case-a", "cp-case-b", "cp-case-c" ]
     },
     {
       "id": "reviewer",
       "displayName": "Technical reviewer",
       "role": "technical-reviewer",
-      "caseScopes": [ "case-001" ]
+      "caseScopes": [ "case-001", "cp-case-a", "cp-case-b", "cp-case-c" ]
     },
     {
       "id": "fin-1",
       "displayName": "Finance reviewer",
       "role": "finance-reviewer",
-      "caseScopes": [ "case-001" ]
+      "caseScopes": [ "case-001", "cp-case-a", "cp-case-b", "cp-case-c" ]
     },
     {
       "id": "legal-1",
       "displayName": "Legal reviewer",
       "role": "legal-reviewer",
-      "caseScopes": [ "case-001" ]
+      "caseScopes": [ "case-001", "cp-case-a", "cp-case-b", "cp-case-c" ]
     }
   ]
 }

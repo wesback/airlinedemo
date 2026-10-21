@@ -14,10 +14,10 @@ public sealed class DemoFixtureTests
 
     private static readonly DemoUser[] ExpectedUsers =
     [
-        new("presenter", "Demo presenter", "presenter", ["case-001", "case-002"]),
-        new("reviewer", "Technical reviewer", "technical-reviewer", ["case-001"]),
-        new("fin-1", "Finance reviewer", "finance-reviewer", ["case-001"]),
-        new("legal-1", "Legal reviewer", "legal-reviewer", ["case-001"]),
+        new("presenter", "Demo presenter", "presenter", ["case-001", "case-002", "cp-case-a", "cp-case-b", "cp-case-c"]),
+        new("reviewer", "Technical reviewer", "technical-reviewer", ["case-001", "cp-case-a", "cp-case-b", "cp-case-c"]),
+        new("fin-1", "Finance reviewer", "finance-reviewer", ["case-001", "cp-case-a", "cp-case-b", "cp-case-c"]),
+        new("legal-1", "Legal reviewer", "legal-reviewer", ["case-001", "cp-case-a", "cp-case-b", "cp-case-c"]),
     ];
 
     private static WebApplicationFactory<Program> CreateFactory() =>
@@ -26,6 +26,32 @@ public sealed class DemoFixtureTests
                 config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = Passcode })));
 
     private static MemoryStream Utf8(string json) => new(Encoding.UTF8.GetBytes(json));
+
+    private static IReadOnlyList<DemoUser> LoadSingleScope(string scope)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            schemaVersion = DemoFixture.SupportedSchemaVersion,
+            users = new[] { new { id = "a", displayName = "A", role = "r", caseScopes = new[] { scope } } },
+        });
+        using var stream = Utf8(json);
+        return DemoFixture.Load(stream);
+    }
+
+    [Fact]
+    public void AC012_SeededUsersReceiveExactCasePackScopes()
+    {
+        using var stream = typeof(DemoFixture).Assembly.GetManifestResourceStream(DemoFixture.ResourceName)
+            ?? throw new InvalidOperationException($"Missing embedded fixture '{DemoFixture.ResourceName}'.");
+        var users = DemoFixture.Load(stream);
+
+        Assert.Equal(ExpectedUsers.Select(user => user.Id), users.Select(user => user.Id));
+        foreach (var expected in ExpectedUsers)
+        {
+            var actual = Assert.Single(users, user => user.Id == expected.Id);
+            Assert.Equal(expected.CaseScopes, actual.CaseScopes);
+        }
+    }
 
     [Fact]
     public async Task VersionOneFixtureSuppliesPickerAndSessionUsers()
@@ -61,6 +87,34 @@ public sealed class DemoFixtureTests
             Assert.Equal(expected.CaseScopes, root.GetProperty("caseScopes").EnumerateArray().Select(e => e.GetString()!).ToArray());
             Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("csrfToken").GetString()));
         }
+    }
+
+    [Theory]
+    [InlineData("case-001", true)]
+    [InlineData("case-002", true)]
+    [InlineData("cp-case-a", true)]
+    [InlineData("cp-case-b", true)]
+    [InlineData("cp-case-c", true)]
+    [InlineData("cp-case-d", false)]
+    [InlineData("cp-case-x", false)]
+    [InlineData("cp-case-a/../case", false)]
+    public void AC012_CasePackScopeValidationPreservesCoreIdsAndRejectsUnknownPackIds(string scope, bool accepted)
+    {
+        if (accepted)
+        {
+            var user = Assert.Single(LoadSingleScope(scope));
+            Assert.Equal(new[] { scope }, user.CaseScopes);
+        }
+        else
+        {
+            Assert.Throws<InvalidDataException>(() => LoadSingleScope(scope));
+        }
+    }
+
+    [Fact]
+    public void AC012_UnknownPackScopeFailsFixtureLoad()
+    {
+        Assert.Throws<InvalidDataException>(() => LoadSingleScope("cp-case-d"));
     }
 
     [Fact]
