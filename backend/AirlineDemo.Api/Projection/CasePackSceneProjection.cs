@@ -26,23 +26,66 @@ public sealed record SceneEnvelope(int ContractVersion, string PackVersion, stri
     IReadOnlyList<string> AllowedActions, bool CanResetBlockedVariant, IReadOnlyList<SceneObject> Objects,
     IReadOnlyList<JourneyEvent> History, bool OlderHistoryAvailable, IReadOnlyList<EvidenceReference> DocumentRefs,
     IReadOnlyList<EvidenceWitness> Evidence);
+
+public sealed record SceneBuildResult(SceneEnvelope? Scene, bool PayloadLimit, string? ErrorCode, int SerializedByteLength)
+{
+    public bool IsPayloadLimit => PayloadLimit;
+    public SceneEnvelope? Value => Scene;
+    public bool Succeeded => Scene is not null && !PayloadLimit;
+}
+
 public static class CasePackSceneProjection
 {
     public const int ContractVersion = 1;
     public const string ScenarioDate = "2026-10-01";
+    public const int MaxPayloadBytes = 65_536;
+    public const string PayloadLimitCode = "scene_payload_limit";
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     public static SceneEnvelope? Build(ICaseStateStore store, CaseScope scope, AircraftCasePackSnapshot pack,
-        string? role = null, EvidencePackageStore? packages = null)
+        string? role = null, EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null)
     {
         ArgumentNullException.ThrowIfNull(store); ArgumentNullException.ThrowIfNull(scope); ArgumentNullException.ThrowIfNull(pack);
         var state = store.Read(scope); // exactly one snapshot
-        return state.CaseId == scope.CaseId ? Build(pack, state, role, packages) : null;
+        return state.CaseId == scope.CaseId ? Build(pack, state, role, packages, history) : null;
     }
     public static SceneEnvelope? Build(AircraftCasePackSnapshot pack, CaseState state, string? role = null,
-        EvidencePackageStore? packages = null) => BuildState(pack, state, role, packages);
+        EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null) => BuildLimited(pack, state, role, packages, history);
+
+    public static SceneBuildResult BuildResult(ICaseStateStore store, CaseScope scope, AircraftCasePackSnapshot pack,
+        string? role = null, EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null)
+    {
+        ArgumentNullException.ThrowIfNull(store); ArgumentNullException.ThrowIfNull(scope); ArgumentNullException.ThrowIfNull(pack);
+        var state = store.Read(scope);
+        return state.CaseId == scope.CaseId
+            ? BuildResult(pack, state, role, packages, history)
+            : new SceneBuildResult(null, false, "invalid_scene", 0);
+    }
+    private static SceneEnvelope? BuildLimited(AircraftCasePackSnapshot pack, CaseState state, string? role = null,
+        EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null)
+    {
+        var scene = BuildState(pack, state, role, packages, history);
+        if (scene is null) return null;
+        return JsonSerializer.SerializeToUtf8Bytes(scene, WebJson).Length <= MaxPayloadBytes ? scene : null;
+    }
+    public static SceneBuildResult BuildResult(AircraftCasePackSnapshot pack, CaseState state, string? role = null,
+        EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null)
+    {
+        var scene = BuildState(pack, state, role, packages, history);
+        if (scene is null) return new SceneBuildResult(null, false, "invalid_scene", 0);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(scene, WebJson);
+        return bytes.Length > MaxPayloadBytes
+            ? new SceneBuildResult(null, true, PayloadLimitCode, bytes.Length)
+            : new SceneBuildResult(scene, false, null, bytes.Length);
+    }
+    public static SceneEnvelope? TryBuildResult(ICaseStateStore store, CaseScope scope, AircraftCasePackSnapshot pack,
+        out SceneBuildResult result, string? role = null, EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null)
+    { result = BuildResult(store, scope, pack, role, packages, history); return result.Scene; }
+    public static SceneBuildResult BuildPayloadResult(ICaseStateStore store, CaseScope scope, AircraftCasePackSnapshot pack,
+        string? role = null, EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null) =>
+        BuildResult(store, scope, pack, role, packages, history);
     public static SceneEnvelope? Build(CaseState state, AircraftCasePackSnapshot pack, string? role = null,
-        EvidencePackageStore? packages = null) => BuildState(pack, state, role, packages);
+        EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null) => BuildLimited(pack, state, role, packages, history);
     public static SceneEnvelope? Project(ICaseStateStore store, CaseScope scope, AircraftCasePackSnapshot pack,
         string? role = null, EvidencePackageStore? packages = null) => Build(store, scope, pack, role, packages);
     public static SceneEnvelope? Build(CaseScope scope, ICaseStateStore store, AircraftCasePackSnapshot pack,
@@ -59,7 +102,7 @@ public static class CasePackSceneProjection
         string? role = null, EvidencePackageStore? packages = null) => BuildState(pack, state, role, packages);
 
     public static SceneEnvelope? BuildState(AircraftCasePackSnapshot pack, CaseState state,
-        string? role = null, EvidencePackageStore? packages = null)
+        string? role = null, EvidencePackageStore? packages = null, IArrCaseHistorySource? history = null)
     {
         var published = pack?.Cases.SingleOrDefault(item => item.CaseId == state?.CaseId);
         if (pack is null || state is null || state.Revision < 0 || published is null || published.AircraftCount != 1 ||
@@ -99,28 +142,55 @@ public static class CasePackSceneProjection
         var currentRun = allEvents.LastOrDefault()?.RunId ?? state.Traces?.LastOrDefault(item => item.CaseId == state.CaseId)?.RunId
             ?? state.BlockedVariantResetReceipts?.LastOrDefault(item => item.Receipt.CaseId == state.CaseId)?.Receipt.NewRunId ?? "";
         var currentEvents = currentRun.Length == 0 ? [] : allEvents.Where(item => item.RunId == currentRun).ToArray();
-        var window = currentEvents.TakeLast(20).ToArray();
-        var history = new List<JourneyEvent>(window.Length);
+        var currentBasisId = currentEvents.LastOrDefault(item => item.BasisId is not null)?.BasisId ?? "basis-v" + basis.Version;
+        var currentBasisVersion = currentEvents.LastOrDefault(item => item.BasisVersion.HasValue)?.BasisVersion ?? basis.Version;
+        ArrCaseHistorySelection? arrSelection = null;
+        if (history is not null && currentRun.Length != 0)
+        {
+            arrSelection = history.Read(state.CaseId, currentRun, currentBasisId);
+            if (arrSelection is null || arrSelection.CaseId != state.CaseId || arrSelection.RunId != currentRun || arrSelection.BasisId != currentBasisId)
+                return null;
+            if (arrSelection.Events.Any(item => item.CaseId != state.CaseId || item.RunId != currentRun || item.BasisId != currentBasisId)) return null;
+        }
+        var windowEvents = (arrSelection?.Events.Where(item =>
+            item.CaseId == state.CaseId && item.RunId == currentRun && item.BasisId == currentBasisId)
+            ?? currentEvents.Where(item => item.BasisId == currentBasisId || item.BasisId is null))
+            .OrderBy(item => item.Sequence).ToArray();
+        var window = windowEvents.TakeLast(20).ToArray();
+        var projectedHistory = new List<JourneyEvent>(window.Length);
         foreach (var source in window)
         {
+            if (source.CaseId != state.CaseId || source.RunId != currentRun)
+                return null;
             var ids = new List<string>();
             foreach (var sourceWitness in source.Witnesses ?? [])
             {
                 if (sourceWitness is null || sourceWitness.Page < 1 || string.IsNullOrWhiteSpace(sourceWitness.DocumentId) ||
-                    !ResolveDocument(published, sourceWitness.DocumentId, out var document)) return null;
+                    sourceWitness.DocumentVersion < 1 || sourceWitness.BasisVersion < 1 ||
+                    string.IsNullOrWhiteSpace(sourceWitness.BasisId) ||
+                    !ResolveDocument(published, sourceWitness.DocumentId, out var document) || !ExactDocumentPage(pack, document, sourceWitness.Page)) return null;
                 var status = PackageStatus(packages, state.CaseId, document.Path, sourceWitness.DocumentVersion);
-                if (!status.Usable || sourceWitness.BasisVersion < 1 || sourceWitness.DocumentVersion < 1)
-                    return null;
-                var reference = AddRef(refs, state.CaseId, sourceWitness.DocumentId,
+                var expectedBasisId = "basis-v" + sourceWitness.BasisVersion;
+                if (!StringComparer.Ordinal.Equals(sourceWitness.BasisId, expectedBasisId)
+                    || !state.Basis.Any(item => item.Version == sourceWitness.BasisVersion)) return null;
+                var documentVersionMatchesCurrent = sourceWitness.BasisVersion == currentBasisVersion &&
+                    sourceWitness.DocumentVersion == document.Evidence.Version;
+                var documentVersionMatchesHistory = sourceWitness.BasisVersion != currentBasisVersion &&
+                    sourceWitness.BasisVersion >= 1 && sourceWitness.BasisVersion == sourceWitness.DocumentVersion;
+                if (!documentVersionMatchesCurrent && !documentVersionMatchesHistory) return null;
+                var reference = AddRef(refs, state.CaseId, document.Evidence.Path,
                     sourceWitness.DocumentVersion, sourceWitness.BasisId, sourceWitness.BasisVersion,
                     document.Path, status);
-                var witness = new EvidenceWitness(sourceWitness.WitnessId, reference.EvidenceRefId,
-                    sourceWitness.DocumentId, sourceWitness.DocumentVersion, sourceWitness.Page,
-                    sourceWitness.BasisId, sourceWitness.BasisVersion, document.Path);
-                if (!witnesses.TryAdd(sourceWitness.WitnessId, witness)) return null;
-                ids.Add(sourceWitness.WitnessId);
+                if (status.Usable)
+                {
+                    var witness = new EvidenceWitness(sourceWitness.WitnessId, reference.EvidenceRefId,
+                        document.Evidence.Path, sourceWitness.DocumentVersion, sourceWitness.Page,
+                        sourceWitness.BasisId, sourceWitness.BasisVersion, document.Path);
+                    if (!witnesses.TryAdd(sourceWitness.WitnessId, witness)) return null;
+                    ids.Add(sourceWitness.WitnessId);
+                }
             }
-            history.Add(new JourneyEvent(source.EventId, source.RunId, source.Sequence, source.EventType,
+            projectedHistory.Add(new JourneyEvent(source.EventId, source.RunId, source.Sequence, source.EventType,
                 source.BasisId, source.BasisVersion, source.ActorRole, source.Summary,
                 CapabilityLabels.Normalize(source.CapabilityLabel), ids));
         }
@@ -154,7 +224,7 @@ public static class CasePackSceneProjection
         var summary = new CaseSummary(state.CaseId, name, category, state.Revision, currentRun, states,
             owner, next, activityId, label, true);
         var scene = new SceneEnvelope(ContractVersion, pack.PackVersion, ScenarioDate, summary, allowed, canReset,
-            objects, history, allEvents.Any(item => item.RunId != currentRun) || currentEvents.Length > window.Length,
+            objects, projectedHistory, allEvents.Any(item => item.RunId != currentRun) || currentEvents.Length > window.Length || arrSelection?.OlderHistoryAvailable == true,
             refs.Values.OrderBy(item => item.EvidenceRefId, StringComparer.Ordinal).ToArray(),
             witnesses.Values.OrderBy(item => item.WitnessId, StringComparer.Ordinal).ToArray());
         return Validate(scene) ? scene : null;
@@ -328,8 +398,17 @@ public static class CasePackSceneProjection
     private static bool ResolveDocument(PublishedAircraftCasePackCase published, string documentId,
         out PublishedAircraftCasePackDocument document)
     {
-        document = published.Documents.FirstOrDefault(item => item.Evidence.Path == documentId || item.Evidence.BlobName == documentId || item.Path == documentId)!;
+        document = published.Documents.FirstOrDefault(item =>
+            StringComparer.Ordinal.Equals(item.Evidence.Path, documentId))!;
         return document is not null && !string.IsNullOrWhiteSpace(document.Evidence.Path);
+    }
+    private static bool ExactDocumentPage(AircraftCasePackSnapshot pack,
+        PublishedAircraftCasePackDocument document, int page)
+    {
+        if (!pack.Files.TryGetValue(document.Path, out var bytes)) return false;
+        var text = Encoding.UTF8.GetString(bytes);
+        var pages = text.Split(Evidence.EvidenceIntake.PageSeparator);
+        return page <= pages.Length;
     }
     private static bool TrySerial(AircraftCasePackSnapshot pack, string caseId, string kind, string? componentId, out string serial)
     {

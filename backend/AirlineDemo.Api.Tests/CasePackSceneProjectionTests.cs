@@ -130,6 +130,116 @@ public sealed class CasePackSceneProjectionTests
         Assert.False(CasePackSceneProjection.Validate(unresolvedWitness.ToJsonString()));
     }
 
+    [Fact]
+    public void AC027_CurrentRunWindowPreservesOlderHistoryAndWitnesses()
+    {
+        var events = new List<CaseJourneyEvent>();
+        for (var index = 1; index <= 100; index++)
+            events.Add(new CaseJourneyEvent("old-" + index, "old-run-" + index, index, CaseId,
+                "evidence-reviewed", "basis-v1", 1, "presenter", "Older run", "AI agent",
+                [new CaseJourneyWitness("old-witness-" + index, "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1)]));
+        for (var index = 1; index <= 25; index++)
+            events.Add(new CaseJourneyEvent("current-" + index, "current-run", 100 + index, CaseId,
+                "evidence-reviewed", "basis-v1", 1, "presenter", "Current run event", "AI agent",
+                [new CaseJourneyWitness("current-witness-" + index, "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1)]));
+        var state = State(CaseId, 25) with { JourneyEvents = events };
+        var reader = new FakeArrHistoryReader(CaseId, "current-run", "basis-v1", events.TakeLast(25).ToArray(), 100);
+        var result = CasePackSceneProjection.BuildResult(Pack(), state, "presenter", history: reader);
+
+        Assert.True(result.Succeeded);
+        var scene = result.Scene;
+        Assert.NotNull(scene);
+        Assert.Equal([.. Enumerable.Range(106, 20).Select(index => (long)index)],
+            scene.History.Select(item => item.Sequence).ToArray());
+        Assert.Equal(20, scene.History.Count);
+        Assert.True(scene.OlderHistoryAvailable);
+        Assert.Equal(20, scene.Evidence.Count);
+        Assert.All(scene.Evidence, witness => Assert.Equal("case-a/aircraft-summary.txt", witness.DocumentId));
+        Assert.Equal(125, state.JourneyEvents!.Count);
+        Assert.Equal(100, reader.RetainedOlderRuns);
+        Assert.True(reader.Selectors.SequenceEqual([new ArrSelector(CaseId, "current-run", "basis-v1")],
+            EqualityComparer<ArrSelector>.Default));
+
+        var oversized = State(CaseId, 26) with { JourneyEvents = [new CaseJourneyEvent("oversized", "current-run", 126, CaseId,
+            "evidence-reviewed", "basis-v1", 1, "presenter", new string('x', 70_000), "AI agent", [])] };
+        var limit = CasePackSceneProjection.BuildResult(Pack(), oversized, "presenter");
+        Assert.True(limit.PayloadLimit);
+        Assert.Null(limit.Scene);
+        Assert.Equal(CasePackSceneProjection.PayloadLimitCode, limit.ErrorCode);
+    }
+
+    [Fact]
+    public void AC028_EvidenceWitnessesBindExactCaseRunDocumentBasisAndPageTuples()
+    {
+        var pack = Pack();
+        var validBasis = State(CaseId, 30) with
+        {
+            Basis = [new BasisVersion(1, "old", "old-digest", "old-basis", DateTimeOffset.UtcNow),
+                new BasisVersion(2, "current", "current-digest", "current-basis", DateTimeOffset.UtcNow)],
+            JourneyEvents = [new CaseJourneyEvent("current-event", "current-run", 1, CaseId,
+                "evidence-reviewed", "basis-v2", 2, "presenter", "Current evidence", "AI agent",
+                [new CaseJourneyWitness("historical-witness", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1)])]
+        };
+        var valid = CasePackSceneProjection.Build(pack, validBasis, "presenter");
+        Assert.NotNull(valid);
+        var witness = Assert.Single(valid.Evidence);
+        Assert.Equal((1, 1), (witness.DocumentVersion, witness.BasisVersion));
+        Assert.Contains(valid.DocumentRefs, item => item.BasisId == "basis-v2" && item.UsableAsEvidence);
+        Assert.Contains(valid.DocumentRefs, item => item.BasisId == "basis-v1" && item.DocumentVersion == 1 && item.UsableAsEvidence);
+
+        foreach (var mutation in new[] { "case", "document", "document-version", "basis-id", "basis-version", "run", "page" })
+        {
+            var badWitness = mutation switch
+            {
+                "case" => new CaseJourneyWitness("bad", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                "document" => new CaseJourneyWitness("bad", "case-b/foreign.txt", 1, 1, "basis-v1", 1),
+                "document-version" => new CaseJourneyWitness("bad", "case-a/aircraft-summary.txt", 999, 1, "basis-v1", 1),
+                "basis-id" => new CaseJourneyWitness("bad", "case-a/aircraft-summary.txt", 1, 1, "wrong-basis", 1),
+                "basis-version" => new CaseJourneyWitness("bad", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 999),
+                "run" => new CaseJourneyWitness("bad", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1),
+                "page" => new CaseJourneyWitness("bad", "case-a/aircraft-summary.txt", 1, 999, "basis-v1", 1),
+                _ => throw new InvalidOperationException()
+            };
+            var badEvent = mutation switch
+            {
+                "case" => new CaseJourneyEvent("bad-event", "current-run", 2, "cp-case-b", "evidence-reviewed", "basis-v1", 1, "presenter", "bad", "AI agent", [badWitness]),
+                "run" => new CaseJourneyEvent("bad-event", "wrong-run", 2, CaseId, "evidence-reviewed", "basis-v1", 1, "presenter", "bad", "AI agent", [badWitness]),
+                _ => new CaseJourneyEvent("bad-event", "current-run", 2, CaseId, "evidence-reviewed", "basis-v1", 1, "presenter", "bad", "AI agent", [badWitness])
+            };
+            if (mutation == "run")
+            {
+                var validEvent = new CaseJourneyEvent("valid-event", "current-run", 3, CaseId, "evidence-reviewed", "basis-v1", 1, "presenter", "valid", "AI agent", []);
+                var badState = State(CaseId, 31) with { JourneyEvents = [badEvent, validEvent] };
+                var scene = CasePackSceneProjection.Build(pack, badState, "presenter");
+                Assert.NotNull(scene);
+                Assert.DoesNotContain(scene.History, item => item.RunId == "wrong-run");
+                Assert.DoesNotContain(scene.Evidence, item => item.WitnessId == "bad");
+            }
+            else
+            {
+                var badState = State(CaseId, 31) with { JourneyEvents = [badEvent] };
+                Assert.Null(CasePackSceneProjection.Build(pack, badState, "presenter"));
+            }
+        }
+    }
+
+    private sealed record ArrSelector(string CaseId, string RunId, string BasisId);
+    private sealed class FakeArrHistoryReader : IArrCaseHistorySource
+    {
+        private readonly string _caseId; private readonly string _runId; private readonly string _basisId;
+        private readonly CaseJourneyEvent[] _events;
+        public int RetainedOlderRuns { get; }
+        public List<ArrSelector> Selectors { get; } = [];
+        public FakeArrHistoryReader(string caseId, string runId, string basisId, CaseJourneyEvent[] events, int retainedOlderRuns)
+        { _caseId = caseId; _runId = runId; _basisId = basisId; _events = events; RetainedOlderRuns = retainedOlderRuns; }
+        public ArrCaseHistorySelection? Read(string caseId, string runId, string basisId)
+        {
+            Selectors.Add(new ArrSelector(caseId, runId, basisId));
+            if (caseId != _caseId || runId != _runId || basisId != _basisId) return null;
+            return new ArrCaseHistorySelection(caseId, runId, basisId, _events, true);
+        }
+    }
+
     private static AircraftCasePackSnapshot Pack()
     {
         var root = CasePackFixture.Root();
