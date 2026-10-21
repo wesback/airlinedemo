@@ -1,0 +1,210 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 457,
+  "branch": "ai-sdlc/issue-457",
+  "commitSha": "d1483641ac3e018731be47813d1d56ce820032c0",
+  "round": 0,
+  "pipelineVersion": "d1f69f2",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The limiter applies the reset quota per user and endpoint within the rolling window. The added tests cover the stated boundary, independent quotas, and concurrent admission cases.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The rolling-window scenarios cover the reset quota, expiry boundary, outcomes, and independent quotas. The atomicity test covers a competing admission at the third-attempt boundary, but not the criterion's fourth-attempt race case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 268,
+          "message": "M-13's race test does not verify that a changing store count cannot admit a fourth attempt. Seed the fake at the limit, then make the fake change the count between the admission read and commit for the fourth request.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC030_ConcurrentResetAdmissionIsAtomic seeds the RacingStore with MaxResetAttempts - 1 attempts, then makes one more request. RacingStore injects a competing attempt when activeCount equals limit - 1.",
+            "failureScenario": "With two attempts already stored, the fake inserts a third before the tested request commits, so the tested request is the third attempt and is denied. The test never has three attempts stored before testing a fourth request, so it would not catch a race that admits a fourth reset attempt."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset limit and concurrent admission tests cover the main quota behavior. The independence test does not distinguish separate endpoint windows from cross-endpoint counting.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 220,
+          "message": "AC-030's endpoint-independence behavior is not proven: the test does not exercise either endpoint quota near its limit alongside reset attempts, so cross-endpoint counting can pass.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC-030 requires the test to prove that reset, case-list, and scene quotas are independent. The separate-user-and-endpoints scenario records only one request for each read endpoint after three reset attempts.",
+            "failureScenario": "If the store incorrectly counted attempts across endpoints but applied the requested endpoint's limit, those single case-list and scene requests would still be admitted. The test would pass even though enough case-list attempts could cause a later reset to be denied."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 9,
+      "total": 9,
+      "percent": 100,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/CasePackRequestLimiter.cs",
+          "covered": 9,
+          "total": 9,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
