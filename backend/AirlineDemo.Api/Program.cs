@@ -39,6 +39,7 @@ builder.Services.AddSingleton<AssessmentExecutionService>();
 builder.Services.AddEvidenceBlobStore(builder.Configuration);
 builder.Services.AddSingleton<IAircraftCasePackSnapshotStore, InMemoryAircraftCasePackSnapshotStore>();
 builder.Services.AddSingleton<IAircraftCasePackCaseStager, AircraftCasePackCaseStager>();
+builder.Services.AddSingleton<IAircraftCasePackDocumentReferenceStager, AircraftCasePackDocumentReferenceStager>();
 builder.Services.AddSingleton(new AircraftCasePackLoader(
     System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "aircraft-case-pack")));
 builder.Services.AddSingleton<AircraftCasePackPublisher>();

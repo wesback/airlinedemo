@@ -68,9 +68,46 @@ public sealed class InMemoryAircraftCasePackSnapshotStore : IAircraftCasePackSna
         }
     }
 }
+
+public interface IAircraftCasePackDocumentReferenceStager
+{
+    IReadOnlyDictionary<string, AircraftCasePackDocumentReference> Stage(
+        AircraftCasePackCase record,
+        IReadOnlyDictionary<string, EvidenceBlobVersion> documentBlobs);
+}
+
+public sealed class AircraftCasePackDocumentReferenceStager : IAircraftCasePackDocumentReferenceStager
+{
+    public IReadOnlyDictionary<string, AircraftCasePackDocumentReference> Stage(
+        AircraftCasePackCase record,
+        IReadOnlyDictionary<string, EvidenceBlobVersion> documentBlobs)
+    {
+        var references = record.Documents!.ToDictionary(
+            document => document.Path,
+            document =>
+            {
+                var blob = documentBlobs[document.Path];
+                return new AircraftCasePackDocumentReference(document.Path, blob.Name, blob.Sha256, blob.Version);
+            },
+            StringComparer.Ordinal);
+        return new ReadOnlyDictionary<string, AircraftCasePackDocumentReference>(references);
+    }
+}
+
 public interface IAircraftCasePackCaseStager
 {
     PublishedAircraftCasePackCase Stage(AircraftCasePackCase record, IReadOnlyDictionary<string, EvidenceBlobVersion> documentBlobs);
+
+    PublishedAircraftCasePackCase Stage(
+        AircraftCasePackCase record,
+        IReadOnlyDictionary<string, AircraftCasePackDocumentReference> documentReferences)
+    {
+        var blobs = documentReferences.ToDictionary(
+            pair => pair.Key,
+            pair => new EvidenceBlobVersion(pair.Value.BlobName, pair.Value.Sha256, pair.Value.Version),
+            StringComparer.Ordinal);
+        return Stage(record, blobs);
+    }
 }
 
 public sealed class AircraftCasePackCaseStager : IAircraftCasePackCaseStager
@@ -79,11 +116,15 @@ public sealed class AircraftCasePackCaseStager : IAircraftCasePackCaseStager
         AircraftCasePackCase record,
         IReadOnlyDictionary<string, EvidenceBlobVersion> documentBlobs)
     {
-        var references = record.Documents!.Select(document =>
-        {
-            var blob = documentBlobs[document.Path];
-            return new AircraftCasePackDocumentReference(document.Path, blob.Name, blob.Sha256, blob.Version);
-        }).ToArray();
+        var references = new AircraftCasePackDocumentReferenceStager().Stage(record, documentBlobs);
+        return Stage(record, references);
+    }
+
+    public PublishedAircraftCasePackCase Stage(
+        AircraftCasePackCase record,
+        IReadOnlyDictionary<string, AircraftCasePackDocumentReference> documentReferences)
+    {
+        var references = record.Documents!.Select(document => documentReferences[document.Path]).ToArray();
         var documents = record.Documents.Select((document, index) =>
             new PublishedAircraftCasePackDocument(document.Path, document.Synthetic, document.GeneratorReference, references[index])).ToArray();
         var components = record.Components!.Select(component => new PublishedAircraftCasePackComponent(
@@ -97,7 +138,8 @@ public sealed class AircraftCasePackRevisionConflictException()
 public sealed class AircraftCasePackPublisher(
     IEvidenceBlobStore evidenceStore,
     IAircraftCasePackSnapshotStore snapshotStore,
-    IAircraftCasePackCaseStager caseStager)
+    IAircraftCasePackCaseStager caseStager,
+    IAircraftCasePackDocumentReferenceStager? documentReferenceStager = null)
 {
     private static readonly HashSet<string> EvaluationCaseIds = CreateEvaluationCaseIds();
 
@@ -133,7 +175,8 @@ public sealed class AircraftCasePackPublisher(
                 var documentId = "case-pack-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
                 blobs.Add(document.Path, await evidenceStore.StoreAsync(documentId, pack.ReadFile(document.Path), cancellationToken));
             }
-            cases.Add(caseStager.Stage(record, blobs));
+            var references = (documentReferenceStager ?? new AircraftCasePackDocumentReferenceStager()).Stage(record, blobs);
+            cases.Add(caseStager.Stage(record, references));
         }
 
         var snapshot = new AircraftCasePackSnapshot(expectedRevision + 1, manifest, pack.Files, cases);

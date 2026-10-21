@@ -41,6 +41,7 @@ public sealed class AircraftCasePackLoader(string fixtureDirectory)
     {
         var manifestJson = File.ReadAllText(Path.Combine(fixtureDirectory, "manifest.json"));
         var contents = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var missingFiles = new List<string>();
         try
         {
             using var json = JsonDocument.Parse(manifestJson);
@@ -54,7 +55,12 @@ public sealed class AircraftCasePackLoader(string fixtureDirectory)
                     var relativePath = item.GetString()!;
                     if (!IsRelativePath(relativePath)) continue;
                     var path = Path.GetFullPath(Path.Combine(fixtureDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-                    if (!path.StartsWith(root, StringComparison.Ordinal) || !File.Exists(path)) continue;
+                    if (!path.StartsWith(root, StringComparison.Ordinal)) continue;
+                    if (!File.Exists(path))
+                    {
+                        missingFiles.Add(relativePath);
+                        continue;
+                    }
                     if (!contents.ContainsKey(relativePath)) contents.Add(relativePath, File.ReadAllBytes(path));
                 }
             }
@@ -64,7 +70,14 @@ public sealed class AircraftCasePackLoader(string fixtureDirectory)
             return Load(manifestJson, contents);
         }
 
-        return Load(manifestJson, contents);
+        var result = AircraftCasePackManifest.Parse(manifestJson, contents);
+        var errors = result.Errors.Concat(missingFiles.Select(path => $"{path}: fixture file does not exist")).ToArray();
+        if (errors.Length > 0)
+        {
+            throw new AircraftCasePackValidationException(errors);
+        }
+
+        return new LoadedAircraftCasePack(result.Manifest!, contents);
     }
     public LoadedAircraftCasePack Load(string manifestJson, IReadOnlyDictionary<string, byte[]> fileContents)
     {

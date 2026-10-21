@@ -38,14 +38,43 @@ public sealed class AircraftCasePackPublicationTests
         private AircraftCasePackSnapshot? _snapshot;
         private long _revision;
         public int Commits { get; private set; }
+        public int Reads { get; private set; }
         public bool ChangeRevisionAtNextCommit { get; set; }
-        public AircraftCasePackSnapshot? Read() => _snapshot;
+        public bool PublishInterveningSnapshotOnRace { get; set; }
+        public AircraftCasePackSnapshot? InterveningSnapshot { get; private set; }
+        public long Revision => _revision;
+        public AircraftCasePackSnapshot? VisibleSnapshot => _snapshot;
+        public AircraftCasePackSnapshot? Read() { Reads++; return _snapshot; }
         public bool TryCommit(long expectedRevision, AircraftCasePackSnapshot snapshot)
         {
             Commits++;
-            if (ChangeRevisionAtNextCommit) { ChangeRevisionAtNextCommit = false; _revision++; }
+            if (ChangeRevisionAtNextCommit)
+            {
+                ChangeRevisionAtNextCommit = false;
+                _revision++;
+                if (PublishInterveningSnapshotOnRace && _snapshot is not null)
+                    _snapshot = new AircraftCasePackSnapshot(_revision, _snapshot.Manifest, _snapshot.Files, _snapshot.Cases);
+                InterveningSnapshot = _snapshot;
+            }
             if (_revision != expectedRevision) return false;
             _snapshot = snapshot; _revision = snapshot.Revision; return true;
+        }
+    }
+    private sealed class RecordingCaseStager : IAircraftCasePackCaseStager
+    {
+        private readonly AircraftCasePackCaseStager _inner = new();
+        public int Calls { get; private set; }
+        public PublishedAircraftCasePackCase Stage(AircraftCasePackCase record, IReadOnlyDictionary<string, EvidenceBlobVersion> documentBlobs)
+        {
+            Calls++;
+            return _inner.Stage(record, documentBlobs);
+        }
+        public PublishedAircraftCasePackCase Stage(
+            AircraftCasePackCase record,
+            IReadOnlyDictionary<string, AircraftCasePackDocumentReference> documentReferences)
+        {
+            Calls++;
+            return _inner.Stage(record, documentReferences);
         }
     }
     private sealed class FailingCaseStager : IAircraftCasePackCaseStager
@@ -55,6 +84,20 @@ public sealed class AircraftCasePackPublicationTests
         public PublishedAircraftCasePackCase Stage(AircraftCasePackCase record, IReadOnlyDictionary<string, EvidenceBlobVersion> documentBlobs)
         {
             if (record.CaseId == FailCaseId) throw new InvalidOperationException("injected case staging failure");
+            return _inner.Stage(record, documentBlobs);
+        }
+    }
+    private sealed class FailingDocumentReferenceStager : IAircraftCasePackDocumentReferenceStager
+    {
+        private readonly AircraftCasePackDocumentReferenceStager _inner = new();
+        public int Calls { get; private set; }
+        public bool Fail { get; set; }
+        public IReadOnlyDictionary<string, AircraftCasePackDocumentReference> Stage(
+            AircraftCasePackCase record,
+            IReadOnlyDictionary<string, EvidenceBlobVersion> documentBlobs)
+        {
+            Calls++;
+            if (Fail) throw new InvalidOperationException("injected document-reference staging failure");
             return _inner.Stage(record, documentBlobs);
         }
     }
@@ -90,6 +133,68 @@ public sealed class AircraftCasePackPublicationTests
             Assert.Equal(0, evidence.Calls);
             Assert.Equal(0, cases.Commits);
             Assert.Null(cases.Read());
+        }
+    }
+
+    [Fact]
+    public async Task AC001_ValidatesBeforeAnyStoreWrites()
+    {
+        var fixture = LoadFixture();
+        var rows = new (string Name, Action<JsonObject> Change, string Expected, string? MissingFile)[]
+        {
+            ("schema version 2", json => json["schemaVersion"] = 2, "schemaVersion", null),
+            ("two cases", json => json["cases"]!.AsArray().RemoveAt(2), "cases", null),
+            ("four cases", json => json["cases"]!.AsArray().Add(json["cases"]![0]!.DeepClone()), "cases", null),
+            ("seven case documents", json => json["cases"]![0]!["documents"]!.AsArray().RemoveAt(7), "cases[0].documents", null),
+            ("thirteen case documents", json =>
+            {
+                for (var i = 0; i < 5; i++) json["cases"]![0]!["documents"]!.AsArray().Add(json["cases"]![0]!["documents"]![0]!.DeepClone());
+            }, "cases[0].documents", null),
+            ("23 total documents", json => json["cases"]![0]!["documents"]!.AsArray().RemoveAt(0), "cases.documents", null),
+            ("37 total documents", json =>
+            {
+                for (var i = 0; i < 13; i++) json["cases"]![0]!["documents"]!.AsArray().Add(json["cases"]![0]!["documents"]![0]!.DeepClone());
+            }, "cases.documents", null),
+            ("stale digest", json => json["sha256"] = new string('0', 64), "sha256", null),
+            ("false case marker", json => json["cases"]![0]!["synthetic"] = false, "cases[0].synthetic", null),
+            ("false document marker", json => json["cases"]![0]!["documents"]![0]!["synthetic"] = false, "cases[0].documents[0].synthetic", null),
+            ("empty case generator", json => json["cases"]![0]!["generatorReference"] = "", "cases[0].generatorReference", null),
+            ("blank case generator", json => json["cases"]![0]!["generatorReference"] = "   ", "cases[0].generatorReference", null),
+            ("empty document generator", json => json["cases"]![0]!["documents"]![0]!["generatorReference"] = "", "cases[0].documents[0].generatorReference", null),
+            ("blank document generator", json => json["cases"]![0]!["documents"]![0]!["generatorReference"] = "   ", "cases[0].documents[0].generatorReference", null),
+            ("empty review reference", json => json["productOwnerReviewReference"] = "", "productOwnerReviewReference", null),
+            ("blank review reference", json => json["productOwnerReviewReference"] = "   ", "productOwnerReviewReference", null),
+            ("missing listed fixture", json => { }, "case-a/aircraft-summary.txt", "case-a/aircraft-summary.txt")
+        };
+
+        foreach (var row in rows)
+        {
+            var json = JsonNode.Parse(fixture.Json)!.AsObject();
+            row.Change(json);
+            var root = CreateFixtureDirectory(fixture, json.ToJsonString(), row.MissingFile);
+            try
+            {
+                var evidence = new RecordingEvidenceStore();
+                var publication = new RecordingCaseStore();
+                var caseStager = new RecordingCaseStager();
+                var referenceStager = new FailingDocumentReferenceStager();
+                var publisher = new AircraftCasePackPublisher(evidence, publication, caseStager, referenceStager);
+
+                var exception = await Assert.ThrowsAsync<AircraftCasePackValidationException>(() =>
+                    publisher.PublishAsync(new AircraftCasePackLoader(root), 0));
+
+                Assert.Contains(exception.Errors, error => error.StartsWith(row.Expected + ":", StringComparison.Ordinal));
+                Assert.Equal(0, evidence.Calls);
+                Assert.Equal(0, caseStager.Calls);
+                Assert.Equal(0, referenceStager.Calls);
+                Assert.Equal(0, publication.Reads);
+                Assert.Equal(0, publication.Commits);
+                Assert.Null(publication.VisibleSnapshot);
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
         }
     }
 
@@ -181,6 +286,84 @@ public sealed class AircraftCasePackPublicationTests
     }
 
     [Fact]
+    public async Task M05_AC002_FailuresPreserveVisibleSnapshotAndHideOrphans()
+    {
+        foreach (var failure in new[] { "blob", "case", "document-reference", "revision" })
+        {
+            var fixture = LoadFixture();
+            var evidence = new RecordingEvidenceStore();
+            var publication = new RecordingCaseStore();
+            var caseStager = new FailingCaseStager();
+            var referenceStager = new FailingDocumentReferenceStager();
+            var publisher = new AircraftCasePackPublisher(evidence, publication, caseStager, referenceStager);
+            var prior = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
+            var priorBlobCount = evidence.Writes.Count;
+            var changed = CreateChangedFixture(fixture, "1.0.2");
+            var statePath = Path.Combine(Path.GetTempPath(), $"aircraft-pack-state-{Guid.NewGuid():N}.json");
+            var unrelatedStore = new CaseStateStore(statePath);
+            var unrelatedScope = unrelatedStore.CreateCase("unrelated-case", "presenter");
+            unrelatedStore.Commit(unrelatedScope, 0, new CaseCommit(
+                CaseStateStore.CreateBasisVersion(1, "unrelated basis", ""), null, "presenter", "seed", "unrelated"));
+            var unrelatedBefore = unrelatedStore.Read(unrelatedScope);
+            var auditBefore = unrelatedStore.ReadAudit(unrelatedScope);
+
+            try
+            {
+                switch (failure)
+                {
+                    case "blob": evidence.FailAfterWriteCall = evidence.Calls + 1; break;
+                    case "case": caseStager.FailCaseId = "cp-case-a"; break;
+                    case "document-reference": referenceStager.Fail = true; break;
+                    case "revision":
+                        publication.ChangeRevisionAtNextCommit = true;
+                        publication.PublishInterveningSnapshotOnRace = true;
+                        break;
+                }
+                var expectedException = failure switch
+                {
+                    "blob" => typeof(IOException),
+                    "revision" => typeof(AircraftCasePackRevisionConflictException),
+                    _ => typeof(InvalidOperationException)
+                };
+                await Assert.ThrowsAsync(expectedException, () =>
+                    publisher.PublishAsync(new AircraftCasePackLoader(changed.Root), 1));
+
+                var visible = failure == "revision" ? publication.InterveningSnapshot : prior;
+                Assert.NotNull(visible);
+                Assert.Same(visible, publication.Read());
+                Assert.Equal(failure == "revision" ? 2 : 1, visible!.Revision);
+                Assert.Equal("1.0.1", visible.PackVersion);
+                Assert.Equal(prior.Cases.Count, visible.Cases.Count);
+                for (var i = 0; i < prior.Cases.Count; i++)
+                {
+                    Assert.Same(prior.Cases[i], visible.Cases[i]);
+                    Assert.Equal(prior.Cases[i].DocumentReferences.Count, visible.Cases[i].DocumentReferences.Count);
+                    for (var j = 0; j < prior.Cases[i].DocumentReferences.Count; j++)
+                        Assert.Same(prior.Cases[i].DocumentReferences[j], visible.Cases[i].DocumentReferences[j]);
+                }
+                Assert.Same(unrelatedBefore, unrelatedStore.Read(unrelatedScope));
+                Assert.Same(auditBefore, unrelatedStore.ReadAudit(unrelatedScope));
+                Assert.Same(auditBefore[0], unrelatedStore.ReadAudit(unrelatedScope)[0]);
+                Assert.NotEmpty(evidence.Writes.Skip(priorBlobCount));
+                var visibleBlobNames = visible.Cases.SelectMany(item => item.DocumentReferences)
+                    .Select(item => item.BlobName).ToHashSet(StringComparer.Ordinal);
+                foreach (var orphan in evidence.Writes.Skip(priorBlobCount))
+                {
+                    Assert.DoesNotContain(orphan.Name, visibleBlobNames);
+                    Assert.Null(await evidence.ReadAsync(orphan.Name, orphan.Sha256));
+                }
+                Assert.Equal(failure == "revision" ? 2 : 1, publication.Revision);
+            }
+            finally
+            {
+                Directory.Delete(changed.Root, recursive: true);
+                foreach (var path in new[] { statePath, statePath + ".lock", statePath + ".tmp" })
+                    if (File.Exists(path)) File.Delete(path);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RetryIsIdempotentAndChangedSameVersionIsRejected()
     {
         var fixture = LoadFixture(); var evidence = new RecordingEvidenceStore(); var cases = new RecordingCaseStore();
@@ -209,6 +392,68 @@ public sealed class AircraftCasePackPublicationTests
         Assert.Equal(writeCount, evidence.Writes.Count);
         Assert.Equal(1, cases.Commits);
         Directory.Delete(changed.Root, recursive: true);
+    }
+
+    [Fact]
+    public async Task AC018_RetriesAreIdempotentAndVersionChangesAreRejected()
+    {
+        var fixture = LoadFixture();
+        var evidence = new RecordingEvidenceStore();
+        var publication = new RecordingCaseStore();
+        var caseStager = new RecordingCaseStager();
+        var referenceStager = new FailingDocumentReferenceStager();
+        var publisher = new AircraftCasePackPublisher(evidence, publication, caseStager, referenceStager);
+        var initial = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
+        var initialCalls = evidence.Calls;
+        var initialWrites = evidence.Writes.Count;
+        var initialCaseStages = caseStager.Calls;
+        var initialReferenceStages = referenceStager.Calls;
+
+        var replay = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 1);
+        Assert.Same(initial, replay);
+        Assert.Equal(initialCalls, evidence.Calls);
+        Assert.Equal(initialWrites, evidence.Writes.Count);
+        Assert.Equal(initialCaseStages, caseStager.Calls);
+        Assert.Equal(initialReferenceStages, referenceStager.Calls);
+        Assert.Equal(1, publication.Commits);
+
+        var sameVersionChanged = CreateChangedFixture(fixture, "1.0.1");
+        try
+        {
+            var conflict = await Assert.ThrowsAsync<AircraftCasePackValidationException>(() =>
+                publisher.PublishAsync(new AircraftCasePackLoader(sameVersionChanged.Root), 1));
+            Assert.Equal(["packVersion: must change when canonical content changes"], conflict.Errors);
+            Assert.Same(initial, publication.Read());
+            Assert.Equal(initialCalls, evidence.Calls);
+            Assert.Equal(initialWrites, evidence.Writes.Count);
+            Assert.Equal(initialCaseStages, caseStager.Calls);
+            Assert.Equal(initialReferenceStages, referenceStager.Calls);
+            Assert.Equal(1, publication.Commits);
+        }
+        finally
+        {
+            Directory.Delete(sameVersionChanged.Root, recursive: true);
+        }
+
+        var newVersionChanged = CreateChangedFixture(fixture, "1.0.2");
+        try
+        {
+            var updated = await publisher.PublishAsync(new AircraftCasePackLoader(newVersionChanged.Root), 1);
+            Assert.NotSame(initial, updated);
+            Assert.Equal(2, updated.Revision);
+            Assert.Equal("1.0.2", updated.PackVersion);
+            Assert.Equal(newVersionChanged.Manifest.Sha256, updated.Sha256);
+            Assert.Equal(3, updated.Cases.Count);
+            Assert.Equal(24, updated.Cases.Sum(item => item.DocumentReferences.Count));
+            Assert.Equal(initialCalls + 24, evidence.Calls);
+            Assert.Equal(initialCaseStages + 3, caseStager.Calls);
+            Assert.Equal(initialReferenceStages + 3, referenceStager.Calls);
+            Assert.Equal(2, publication.Commits);
+        }
+        finally
+        {
+            Directory.Delete(newVersionChanged.Root, recursive: true);
+        }
     }
     [Fact]
     public async Task PublicationRevisionRaceDoesNotExposeCandidate()
@@ -280,6 +525,18 @@ public sealed class AircraftCasePackPublicationTests
         }
         File.WriteAllText(Path.Combine(root, "manifest.json"), JsonSerializer.Serialize(manifest, WebJson));
         return (root, manifest, files);
+    }
+    private static string CreateFixtureDirectory(Fixture fixture, string manifestJson, string? omitPath = null)
+    {
+        var root = Directory.CreateTempSubdirectory("aircraft-case-pack-validation-").FullName;
+        File.WriteAllText(Path.Combine(root, "manifest.json"), manifestJson);
+        foreach (var path in fixture.Manifest.Files.Where(path => !StringComparer.Ordinal.Equals(path, omitPath)))
+        {
+            var target = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.WriteAllBytes(target, fixture.Files[path]);
+        }
+        return root;
     }
     private static Dictionary<string, byte[]> CopyFiles(IReadOnlyDictionary<string, byte[]> files) =>
         files.ToDictionary(pair => pair.Key, pair => (byte[])pair.Value.Clone(), StringComparer.Ordinal);
