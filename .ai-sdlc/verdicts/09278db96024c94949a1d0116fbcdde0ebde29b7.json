@@ -1,0 +1,255 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 443,
+  "branch": "ai-sdlc/issue-443",
+  "commitSha": "09278db96024c94949a1d0116fbcdde0ebde29b7",
+  "round": 0,
+  "pipelineVersion": "747290d-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset flow handles actor and expected-revision conflicts, but an altered variant is rejected as an unsupported target before the command ID conflict check. This violates AC-023 for a reused command ID with a different payload.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Runs/CasePackBlockedVariantReset.cs",
+          "line": 18,
+          "message": "A reused command ID with a different variant does not follow AC-023’s command conflict behavior because variant validation runs before the stored command identity check.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Reset rejects any variant other than \"blocked\" before calling the store, where an existing command ID would be checked against its stored payload.",
+            "failureScenario": "After accepting command ID \"cmd-1\" for variant \"blocked\", retrying \"cmd-1\" with the same actor, case, and expected revision but a different variant returns 422 unsupported_target instead of the required 409 command_id_conflict."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named tests cover the acceptance criteria’s reset, replay, conflict, atomicity, and race scenarios. I found no concrete defect in the changed code or tests.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable through the changed code. The reset validates its target and command fields, and the store commits the receipt, audit event, and run state together.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 1,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackBlockedVariantResetTests.cs",
+      "backend/AirlineDemo.Api.Tests/SqlCaseStateStoreTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 196,
+      "total": 219,
+      "percent": 89.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 20,
+          "total": 20,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 92,
+          "total": 109,
+          "missed": [
+            391,
+            411,
+            412,
+            413,
+            414,
+            415,
+            416,
+            417,
+            957,
+            958,
+            962,
+            963,
+            969,
+            970,
+            973,
+            974,
+            992
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/ICaseStateStore.cs",
+          "covered": 0,
+          "total": 1,
+          "missed": [
+            36
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261020120000_CasePackResetReceipts.cs",
+          "covered": 26,
+          "total": 27,
+          "missed": [
+            37
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 38,
+          "total": 38,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/CasePackBlockedVariantReset.cs",
+          "covered": 20,
+          "total": 24,
+          "missed": [
+            22,
+            28,
+            29,
+            30
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
