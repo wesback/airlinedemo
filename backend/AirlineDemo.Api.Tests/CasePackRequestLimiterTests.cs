@@ -413,6 +413,7 @@ public sealed class CasePackRequestLimiterTests
         var session = factory.Services.GetRequiredService<DemoSessionStore>()
             .Create(new DemoUser("user-a", "Reader", "presenter", [visibleCase.CaseId]));
         client.DefaultRequestHeaders.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+        var caseStore = factory.Services.GetRequiredService<ICaseStateStore>();
 
         using var response = await client.GetAsync("/api/v1/cases", TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -433,7 +434,11 @@ public sealed class CasePackRequestLimiterTests
         }, resultCase.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
         Assert.Equal(visibleCase.CaseId, resultCase.GetProperty("caseId").GetString());
         Assert.True(resultCase.GetProperty("synthetic").GetBoolean());
-        Assert.Equal(0, resultCase.GetProperty("caseRevision").GetInt64());
+        var owner = caseStore.OwnerOf(visibleCase.CaseId);
+        var expectedRevision = owner is null
+            ? 0L
+            : caseStore.Read(caseStore.AuthorizeCase(visibleCase.CaseId, owner)).Revision;
+        Assert.Equal(expectedRevision, resultCase.GetProperty("caseRevision").GetInt64());
         Assert.Equal(6, resultCase.GetProperty("status").EnumerateObject().Count());
     }
 
