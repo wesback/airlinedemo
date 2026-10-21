@@ -12,6 +12,11 @@ public sealed class AircraftCasePackPublicationTests
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
+    private sealed record ApplicationVisibleState(
+        AircraftCasePackSnapshot? Pack,
+        CaseState? UnrelatedCase,
+        IReadOnlyList<AuditEvent> Audit);
+
     private sealed class RecordingEvidenceStore : IEvidenceBlobStore
     {
         public readonly List<EvidenceBlobVersion> Writes = [];
@@ -35,16 +40,24 @@ public sealed class AircraftCasePackPublicationTests
     }
     private sealed class RecordingCaseStore : IAircraftCasePackSnapshotStore
     {
-        private AircraftCasePackSnapshot? _snapshot;
+        private ApplicationVisibleState _visibleState;
         private long _revision;
+
+        public RecordingCaseStore(CaseState? unrelatedCase = null, IReadOnlyList<AuditEvent>? audit = null)
+        {
+            _visibleState = new ApplicationVisibleState(null, unrelatedCase, audit ?? Array.Empty<AuditEvent>());
+        }
+
         public int Commits { get; private set; }
         public int Reads { get; private set; }
         public bool ChangeRevisionAtNextCommit { get; set; }
         public bool PublishInterveningSnapshotOnRace { get; set; }
         public AircraftCasePackSnapshot? InterveningSnapshot { get; private set; }
+        public ApplicationVisibleState? InterveningApplicationState { get; private set; }
         public long Revision => _revision;
-        public AircraftCasePackSnapshot? VisibleSnapshot => _snapshot;
-        public AircraftCasePackSnapshot? Read() { Reads++; return _snapshot; }
+        public AircraftCasePackSnapshot? VisibleSnapshot => _visibleState.Pack;
+        public AircraftCasePackSnapshot? Read() { Reads++; return _visibleState.Pack; }
+        public ApplicationVisibleState ReadApplicationState() => _visibleState;
         public bool TryCommit(long expectedRevision, AircraftCasePackSnapshot snapshot)
         {
             Commits++;
@@ -52,12 +65,19 @@ public sealed class AircraftCasePackPublicationTests
             {
                 ChangeRevisionAtNextCommit = false;
                 _revision++;
-                if (PublishInterveningSnapshotOnRace && _snapshot is not null)
-                    _snapshot = new AircraftCasePackSnapshot(_revision, _snapshot.Manifest, _snapshot.Files, _snapshot.Cases);
-                InterveningSnapshot = _snapshot;
+                if (PublishInterveningSnapshotOnRace && _visibleState.Pack is not null)
+                    _visibleState = _visibleState with
+                    {
+                        Pack = new AircraftCasePackSnapshot(
+                            _revision, _visibleState.Pack.Manifest, _visibleState.Pack.Files, _visibleState.Pack.Cases)
+                    };
+                InterveningSnapshot = _visibleState.Pack;
+                InterveningApplicationState = _visibleState;
             }
             if (_revision != expectedRevision) return false;
-            _snapshot = snapshot; _revision = snapshot.Revision; return true;
+            _visibleState = _visibleState with { Pack = snapshot };
+            _revision = snapshot.Revision;
+            return true;
         }
     }
     private sealed class RecordingCaseStager : IAircraftCasePackCaseStager
@@ -292,23 +312,23 @@ public sealed class AircraftCasePackPublicationTests
         {
             var fixture = LoadFixture();
             var evidence = new RecordingEvidenceStore();
-            var publication = new RecordingCaseStore();
             var caseStager = new FailingCaseStager();
             var referenceStager = new FailingDocumentReferenceStager();
-            var publisher = new AircraftCasePackPublisher(evidence, publication, caseStager, referenceStager);
-            var prior = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
-            var priorBlobCount = evidence.Writes.Count;
             var changed = CreateChangedFixture(fixture, "1.0.2");
             var statePath = Path.Combine(Path.GetTempPath(), $"aircraft-pack-state-{Guid.NewGuid():N}.json");
             var unrelatedStore = new CaseStateStore(statePath);
             var unrelatedScope = unrelatedStore.CreateCase("unrelated-case", "presenter");
             unrelatedStore.Commit(unrelatedScope, 0, new CaseCommit(
                 CaseStateStore.CreateBasisVersion(1, "unrelated basis", ""), null, "presenter", "seed", "unrelated"));
-            var unrelatedBefore = unrelatedStore.Read(unrelatedScope);
-            var auditBefore = unrelatedStore.ReadAudit(unrelatedScope);
+            var publication = new RecordingCaseStore(
+                unrelatedStore.Read(unrelatedScope), unrelatedStore.ReadAudit(unrelatedScope));
+            var publisher = new AircraftCasePackPublisher(evidence, publication, caseStager, referenceStager);
 
             try
             {
+                var prior = await publisher.PublishAsync(new AircraftCasePackLoader(FixtureRoot()), 0);
+                var priorBlobCount = evidence.Writes.Count;
+                var beforeAttempt = publication.ReadApplicationState();
                 switch (failure)
                 {
                     case "blob": evidence.FailAfterWriteCall = evidence.Calls + 1; break;
@@ -328,8 +348,14 @@ public sealed class AircraftCasePackPublicationTests
                 await Assert.ThrowsAsync(expectedException, () =>
                     publisher.PublishAsync(new AircraftCasePackLoader(changed.Root), 1));
 
-                var visible = failure == "revision" ? publication.InterveningSnapshot : prior;
+                var expectedState = failure == "revision"
+                    ? publication.InterveningApplicationState
+                    : beforeAttempt;
+                Assert.NotNull(expectedState);
+                var afterAttempt = publication.ReadApplicationState();
+                var visible = expectedState!.Pack;
                 Assert.NotNull(visible);
+                Assert.Same(expectedState.Pack, afterAttempt.Pack);
                 Assert.Same(visible, publication.Read());
                 Assert.Equal(failure == "revision" ? 2 : 1, visible!.Revision);
                 Assert.Equal("1.0.1", visible.PackVersion);
@@ -341,9 +367,7 @@ public sealed class AircraftCasePackPublicationTests
                     for (var j = 0; j < prior.Cases[i].DocumentReferences.Count; j++)
                         Assert.Same(prior.Cases[i].DocumentReferences[j], visible.Cases[i].DocumentReferences[j]);
                 }
-                Assert.Same(unrelatedBefore, unrelatedStore.Read(unrelatedScope));
-                Assert.Same(auditBefore, unrelatedStore.ReadAudit(unrelatedScope));
-                Assert.Same(auditBefore[0], unrelatedStore.ReadAudit(unrelatedScope)[0]);
+                AssertSameApplicationState(expectedState, afterAttempt);
                 Assert.NotEmpty(evidence.Writes.Skip(priorBlobCount));
                 var visibleBlobNames = visible.Cases.SelectMany(item => item.DocumentReferences)
                     .Select(item => item.BlobName).ToHashSet(StringComparer.Ordinal);
@@ -361,6 +385,23 @@ public sealed class AircraftCasePackPublicationTests
                     if (File.Exists(path)) File.Delete(path);
             }
         }
+    }
+
+    private static void AssertSameApplicationState(ApplicationVisibleState expected, ApplicationVisibleState actual)
+    {
+        Assert.NotNull(expected.UnrelatedCase);
+        Assert.NotNull(actual.UnrelatedCase);
+        Assert.Same(expected.UnrelatedCase, actual.UnrelatedCase);
+        Assert.Equal(expected.UnrelatedCase!.CaseId, actual.UnrelatedCase!.CaseId);
+        Assert.Equal(expected.UnrelatedCase.Owner, actual.UnrelatedCase.Owner);
+        Assert.Equal(expected.UnrelatedCase.Revision, actual.UnrelatedCase.Revision);
+        Assert.Equal(expected.UnrelatedCase.Basis, actual.UnrelatedCase.Basis);
+        Assert.Equal(expected.UnrelatedCase.ReceiptIds, actual.UnrelatedCase.ReceiptIds);
+        Assert.Equal(expected.UnrelatedCase.ReceiptFingerprints, actual.UnrelatedCase.ReceiptFingerprints);
+        Assert.Equal(expected.Audit, actual.Audit);
+        Assert.Equal(expected.Audit.Count, actual.Audit.Count);
+        for (var i = 0; i < expected.Audit.Count; i++)
+            Assert.Same(expected.Audit[i], actual.Audit[i]);
     }
 
     [Fact]
