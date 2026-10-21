@@ -221,6 +221,8 @@ public sealed class CasePackRequestLimiterTests
             {
                 new HttpResetAttempt("accepted", 0, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
                 new HttpResetAttempt("denied-role", 0, "presenter", "technical-reviewer", new { commandId = "reset-2", expectedRevision = 1L, variant = "blocked" }, HttpStatusCode.Forbidden),
+                new HttpResetAttempt("replayed", 0, "presenter", "presenter", new { commandId = "reset-1", expectedRevision = 0L, variant = "blocked" }, HttpStatusCode.OK),
+                new HttpResetAttempt("invalid-after-denied-role", 0, "presenter", "presenter", new { commandId = "", expectedRevision = 1L, variant = "blocked" }, HttpStatusCode.TooManyRequests),
             },
             new[]
             {
