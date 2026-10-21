@@ -393,11 +393,15 @@ public sealed class CasePackRequestLimiterTests
         var cases = root.GetProperty("cases");
         Assert.Equal(1, cases.GetArrayLength());
         var resultCase = cases[0];
-        Assert.Equal(4, resultCase.EnumerateObject().Count());
+        Assert.Equal(new[]
+        {
+            "activityId", "aircraftCategory", "capabilityLabel", "caseId", "caseRevision",
+            "currentRunId", "name", "nextAction", "owner", "status", "synthetic",
+        }, resultCase.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
         Assert.Equal(visibleCase.CaseId, resultCase.GetProperty("caseId").GetString());
-        Assert.Equal(visibleCase.Synthetic, resultCase.GetProperty("synthetic").GetBoolean());
-        Assert.Equal(visibleCase.AircraftCount, resultCase.GetProperty("aircraftCount").GetInt32());
-        Assert.Equal(visibleCase.EngineCount, resultCase.GetProperty("engineCount").GetInt32());
+        Assert.True(resultCase.GetProperty("synthetic").GetBoolean());
+        Assert.Equal(0, resultCase.GetProperty("caseRevision").GetInt64());
+        Assert.Equal(6, resultCase.GetProperty("status").EnumerateObject().Count());
     }
 
     [Fact]
