@@ -852,6 +852,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         using var csrf = await client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
         Assert.Equal(beforeCsrf, store.CaptureState());
+        Assert.Equal(1, windowStore.ActiveCount(presenter.Value.User.Id, CasePackRequestLimiter.ResetEndpoint, clock.Current));
 
         var missingRequest = new HttpRequestMessage(HttpMethod.Post,
             "/api/v1/cases/cp-case-c/reset-blocked-variant") { Content = JsonContent.Create(new { contractVersion = 1, commandId = "missing-csrf", expectedRevision = 0L, variant = "blocked" }) };
@@ -860,6 +861,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         using var missingCsrf = await client.SendAsync(missingRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, missingCsrf.StatusCode);
         Assert.Equal(beforeMissingCsrf, store.CaptureState());
+        Assert.Equal(2, windowStore.ActiveCount(presenter.Value.User.Id, CasePackRequestLimiter.ResetEndpoint, clock.Current));
 
         var outOfScope = CreateSession(host, "presenter", "cp-case-a");
         var beforeScope = store.CaptureState();
@@ -1057,7 +1059,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         var cases = new (string Stage, Session Session, string CaseId, object Body, HttpStatusCode Expected)[
         ]
         {
-            ("role", CreateSession(host, "technical-reviewer", "cp-case-c"), "cp-case-c",
+            ("role", CreateSession(host, "technical-reviewer", "cp-case-c"), "cp-case-a",
                 new { contractVersion = 1, commandId = "m03-role", expectedRevision = 0L, variant = "other" }, HttpStatusCode.Forbidden),
             ("scope", CreateSession(host, "presenter", "cp-case-a"), "cp-case-c",
                 new { contractVersion = 1, commandId = "m03-scope", expectedRevision = 0L, variant = "other" }, HttpStatusCode.NotFound),
@@ -1073,7 +1075,7 @@ public sealed class CasePackEndpointsTests : IDisposable
             store.ResetCheckCounts();
             var before = store.CaptureState();
             HttpResponseMessage response;
-            if (test.Stage == "antiForgery")
+            if (test.Stage is "role" or "scope" or "antiForgery")
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/cases/{test.CaseId}/reset-blocked-variant")
                 { Content = JsonContent.Create(test.Body) };
