@@ -151,11 +151,12 @@ public sealed class CasePackBlockedVariantResetTests : IDisposable
         public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => inner.ReadAudit(scope);
         public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit) => inner.Commit(scope, expectedRevision, commit);
         public CasePackResetCommitResult CommitBlockedVariantReset(
-            CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
+            CaseScope scope, long expectedRevision, string actor, string commandId, string variant,
+            DateTimeOffset? auditAt = null)
         {
             var observed = inner.Read(scope);
             inner.Commit(scope, observed.Revision, new CaseCommit(null, null, actor, "concurrent-write", "revision advanced"));
-            return inner.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant);
+            return inner.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant, auditAt);
         }
         public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope) => inner.ListWorkItems(scope);
         public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor) =>

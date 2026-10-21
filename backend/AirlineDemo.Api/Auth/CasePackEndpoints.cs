@@ -148,7 +148,7 @@ public static class CasePackEndpoints
 
         try
         {
-            var reset = new CasePackBlockedVariantReset(caseStates);
+            var reset = new CasePackBlockedVariantReset(caseStates, time);
             var result = reset.Reset(scope, session.User.Id, body.CommandId,
                 body.ExpectedRevision.Value, body.Variant);
             return Results.Ok(result.Receipt);

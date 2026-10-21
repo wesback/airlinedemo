@@ -57,10 +57,15 @@ public sealed class CasePackEndpointsTests : IDisposable
         public CaseStateStore Inner { get; } = inner;
         public int ReadCalls { get; private set; }
         public int WriteCalls { get; private set; }
+        public int OwnerCalls { get; private set; }
+        public int AuthorizeCalls { get; private set; }
+        public int ResetCommitCalls { get; private set; }
         public bool ThrowOnRead { get; set; }
 
-        public CaseScope AuthorizeCase(string caseId, string owner) => Inner.AuthorizeCase(caseId, owner);
-        public string? OwnerOf(string caseId) => Inner.OwnerOf(caseId);
+        public CaseScope AuthorizeCase(string caseId, string owner)
+        { AuthorizeCalls++; return Inner.AuthorizeCase(caseId, owner); }
+        public string? OwnerOf(string caseId)
+        { OwnerCalls++; return Inner.OwnerOf(caseId); }
         public CaseScope CreateCase(string caseId, string owner) { WriteCalls++; return Inner.CreateCase(caseId, owner); }
         public CaseState Read(CaseScope scope)
         {
@@ -78,9 +83,11 @@ public sealed class CasePackEndpointsTests : IDisposable
         }
         public void ResetReadCount() => ReadCalls = 0;
         public CasePackResetCommitResult CommitBlockedVariantReset(
-            CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
+            CaseScope scope, long expectedRevision, string actor, string commandId, string variant,
+            DateTimeOffset? auditAt = null)
         {
-            var result = Inner.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant);
+            ResetCommitCalls++;
+            var result = Inner.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant, auditAt);
             if (!result.Replayed) WriteCalls++;
             return result;
         }
@@ -106,6 +113,10 @@ public sealed class CasePackEndpointsTests : IDisposable
                     state.Audit.ToArray());
             });
             return JsonSerializer.Serialize(cases);
+        }
+        public void ResetCheckCounts()
+        {
+            ReadCalls = 0; WriteCalls = 0; OwnerCalls = 0; AuthorizeCalls = 0; ResetCommitCalls = 0;
         }
         public void ResetWriteCount() => WriteCalls = 0;
     }
@@ -763,14 +774,16 @@ public sealed class CasePackEndpointsTests : IDisposable
     public async Task AC014_ResetEndpointRequiresPresenterAndCommits()
     {
         var store = CreateStore();
-        using var host = CreateHost(store);
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        using var host = CreateHost(store, time: clock);
         SeedCases(store);
         using var client = host.CreateClient();
         var presenter = CreateSession(host, "presenter", "cp-case-c");
         var before = store.CaptureState();
 
         using var accepted = await SendResetAsync(client, "cp-case-c", presenter,
-            new { contractVersion = 1, commandId = "reset-014", expectedRevision = 0L, variant = "blocked" });
+            new { contractVersion = 1, commandId = "reset-014", expectedRevision = 0L, variant = "blocked",
+                actor = "caller-actor", reasonCode = "caller_reason", at = "2000-01-01T00:00:00Z" });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         using var receiptJson = await ReadJsonAsync(accepted);
         Assert.Equal(["auditEventId", "caseId", "commandId", "contractVersion", "newRevision", "newRunId", "priorRevision"],
@@ -785,7 +798,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(presenter.Value.User.Id, audit.Actor);
         Assert.Equal("presenter_reset_blocked_variant", audit.Action);
         Assert.Contains("reasonCode=presenter_reset_blocked_variant", audit.Detail, StringComparison.Ordinal);
-        Assert.NotEqual(default, audit.At);
+        Assert.Equal(clock.Current, audit.At);
     }
 
     [Fact]
@@ -928,36 +941,72 @@ public sealed class CasePackEndpointsTests : IDisposable
     public async Task M03_ResetAuthorizationChecksRunInRequiredOrder()
     {
         var store = CreateStore();
-        using var host = CreateHost(store);
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        var windowStore = new InMemoryCasePackRequestWindowStore();
+        using var host = CreateHost(store, windowStore, clock);
         SeedCases(store);
         using var client = host.CreateClient();
-        var cBody = new { contractVersion = 1, commandId = "m03", expectedRevision = 0L, variant = "blocked" };
+        var blockedBody = new { contractVersion = 1, commandId = "m03", expectedRevision = 0L, variant = "blocked" };
 
-        var technical = CreateSession(host, "technical-reviewer", "cp-case-c");
-        var beforeRole = store.CaptureState();
-        using var roleRejected = await SendResetAsync(client, "cp-case-c", technical, cBody);
-        Assert.Equal(HttpStatusCode.Forbidden, roleRejected.StatusCode);
-        Assert.Equal(beforeRole, store.CaptureState());
-        Assert.Equal(0, store.ReadCalls);
-        Assert.Equal(0, store.WriteCalls);
+        var cases = new (string Stage, Session Session, string CaseId, object Body, HttpStatusCode Expected)[
+        ]
+        {
+            ("role", CreateSession(host, "technical-reviewer", "cp-case-c"), "cp-case-c", blockedBody, HttpStatusCode.Forbidden),
+            ("scope", CreateSession(host, "presenter", "cp-case-a"), "cp-case-c", blockedBody, HttpStatusCode.NotFound),
+            ("antiForgery", CreateSession(host, "presenter", "cp-case-c"), "cp-case-c", blockedBody, HttpStatusCode.BadRequest),
+            ("variant", CreateSession(host, "presenter", "cp-case-c"), "cp-case-c",
+                new { contractVersion = 1, commandId = "m03-other", expectedRevision = 0L, variant = "other" }, HttpStatusCode.UnprocessableEntity),
+            ("unsupportedCase", CreateSession(host, "presenter", "cp-case-a"), "cp-case-a", blockedBody, HttpStatusCode.UnprocessableEntity),
+        };
 
-        var outOfScope = CreateSession(host, "presenter", "cp-case-a");
-        var beforeScope = store.CaptureState();
-        using var scopeRejected = await SendResetAsync(client, "cp-case-c", outOfScope, cBody);
-        Assert.Equal(HttpStatusCode.NotFound, scopeRejected.StatusCode);
-        Assert.Equal(beforeScope, store.CaptureState());
-        Assert.Equal(0, store.ReadCalls);
+        foreach (var test in cases)
+        {
+            store.ResetCheckCounts();
+            var before = store.CaptureState();
+            HttpResponseMessage response;
+            if (test.Stage == "antiForgery")
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/cases/{test.CaseId}/reset-blocked-variant")
+                { Content = JsonContent.Create(test.Body) };
+                request.Headers.Add("Cookie", test.Session.Cookie);
+                request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, "bad");
+                response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+            }
+            else
+            {
+                response = await SendResetAsync(client, test.CaseId, test.Session, test.Body);
+            }
+            using (response)
+            {
+                Assert.Equal(test.Expected, response.StatusCode);
+                Assert.Equal(before, store.CaptureState());
+                if (test.Stage is "role" or "scope" or "antiForgery" or "variant" or "unsupportedCase")
+                    Assert.Equal(0, store.ReadCalls);
+                Assert.Equal(0, store.WriteCalls);
+            }
+        }
 
         var presenter = CreateSession(host, "presenter", "cp-case-c");
-        var invalidRequest = new HttpRequestMessage(HttpMethod.Post,
-            "/api/v1/cases/cp-case-c/reset-blocked-variant") { Content = JsonContent.Create(cBody) };
-        invalidRequest.Headers.Add("Cookie", presenter.Cookie);
-        invalidRequest.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, "bad");
-        var beforeAntiForgery = store.CaptureState();
-        using var antiForgeryRejected = await client.SendAsync(invalidRequest, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, antiForgeryRejected.StatusCode);
-        Assert.Equal(beforeAntiForgery, store.CaptureState());
-        Assert.Equal(0, store.ReadCalls);
+        using var accepted = await SendResetAsync(client, "cp-case-c", presenter, blockedBody);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+
+        store.ResetCheckCounts();
+        var replayBefore = store.CaptureState();
+        using var replay = await SendResetAsync(client, "cp-case-c", presenter, blockedBody);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal(replayBefore, store.CaptureState());
+        Assert.Equal(1, store.ResetCommitCalls);
+        Assert.Equal(0, store.WriteCalls);
+
+        clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
+        store.ResetCheckCounts();
+        var staleBefore = store.CaptureState();
+        using var stale = await SendResetAsync(client, "cp-case-c", presenter,
+            new { contractVersion = 1, commandId = "m03-stale", expectedRevision = 99L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal("stale_revision", (await ReadJsonAsync(stale)).RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(staleBefore, store.CaptureState());
+        Assert.Equal(1, store.ResetCommitCalls);
         Assert.Equal(0, store.WriteCalls);
     }
 

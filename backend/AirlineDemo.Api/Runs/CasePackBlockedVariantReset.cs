@@ -11,6 +11,10 @@ public sealed class CasePackBlockedVariantResetException(string code, int status
 /// <summary>Starts a new Case C blocked-variant run through the case-state store's atomic commit.</summary>
 public sealed class CasePackBlockedVariantReset(ICaseStateStore store)
 {
+    private TimeProvider? _timeProvider;
+    public CasePackBlockedVariantReset(ICaseStateStore store, TimeProvider timeProvider) : this(store)
+        => _timeProvider = timeProvider;
+
     public CasePackResetCommitResult Reset(
         CaseScope scope, string actor, string commandId, long expectedRevision, string variant)
     {
@@ -21,7 +25,8 @@ public sealed class CasePackBlockedVariantReset(ICaseStateStore store)
             throw new CasePackBlockedVariantResetException("validation_error", 400, "Reset command fields are invalid.");
         try
         {
-            return store.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant);
+            return store.CommitBlockedVariantReset(scope, expectedRevision, actor, commandId, variant,
+                _timeProvider?.GetUtcNow());
         }
         catch (ArgumentException exception) when (exception.ParamName == "variant")
         {

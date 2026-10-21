@@ -316,8 +316,9 @@ public sealed class SqlCaseStateStore : ICaseStateStore
     }
 
     public CasePackResetCommitResult CommitBlockedVariantReset(
-        CaseScope scope, long expectedRevision, string actor, string commandId, string variant)
-        => CasePackResetCommitter.Commit(this, scope, expectedRevision, actor, commandId, variant);
+        CaseScope scope, long expectedRevision, string actor, string commandId, string variant,
+        DateTimeOffset? auditAt = null)
+        => CasePackResetCommitter.Commit(this, scope, expectedRevision, actor, commandId, variant, auditAt);
 
     public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope)
     {
