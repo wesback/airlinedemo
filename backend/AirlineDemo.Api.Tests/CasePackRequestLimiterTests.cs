@@ -51,9 +51,10 @@ public sealed class CasePackRequestLimiterTests
             CancellationToken cancellationToken)
         {
             var cutoff = attemptedAt - CasePackRequestLimiter.RollingWindow;
+            var limit = CasePackRequestLimiter.MaxRequestsForEndpoint(endpoint);
             var activeCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (!_raced && activeCount == CasePackRequestLimiter.MaxRequests - 1)
+            if (!_raced && activeCount == limit - 1)
             {
                 _attempts.Add((userId, endpoint, attemptedAt));
                 _raced = true;
@@ -61,14 +62,17 @@ public sealed class CasePackRequestLimiterTests
 
             var currentCount = _attempts.Count(attempt => attempt.User == userId
                 && attempt.Endpoint == endpoint && attempt.At > cutoff);
-            if (activeCount >= CasePackRequestLimiter.MaxRequests
-                || currentCount >= CasePackRequestLimiter.MaxRequests)
+            if (activeCount >= limit || currentCount >= limit)
                 return Task.FromResult(false);
 
             _attempts.Add((userId, endpoint, attemptedAt));
             return Task.FromResult(true);
         }
     }
+
+    private sealed record ResetAdmission(string Outcome, int AgeSeconds, string User, string Endpoint, bool Expected);
+
+    private sealed record ResetScenario(string Name, ResetAdmission[] Attempts);
 
     [Theory]
     [InlineData("case-list", 28, 0, "user-a", "case-list", "user-a", true)]
@@ -183,6 +187,89 @@ public sealed class CasePackRequestLimiterTests
 
         Assert.False(await racingLimiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.CaseListEndpoint));
         Assert.Equal(CasePackRequestLimiter.MaxRequests, racingStore.Count);
+    }
+
+    [Fact]
+    public async Task AC030_ResetAttemptsCountEveryAuthenticatedOutcome()
+    {
+        var reset = CasePackRequestLimiter.ResetEndpoint;
+        var scenarios = new[]
+        {
+            new ResetScenario("two attempts", [
+                new("accepted", 0, "user-a", reset, true),
+                new("denied-role", 0, "user-a", reset, true),
+            ]),
+            new ResetScenario("three attempts", [
+                new("accepted", 0, "user-a", reset, true),
+                new("denied-role", 0, "user-a", reset, true),
+                new("invalid", 0, "user-a", reset, true),
+            ]),
+            new ResetScenario("fourth attempt before expiry", [
+                new("accepted", 59, "user-a", reset, true),
+                new("denied-role", 59, "user-a", reset, true),
+                new("invalid", 59, "user-a", reset, true),
+                new("replayed", 59, "user-a", reset, false),
+            ]),
+            new ResetScenario("oldest attempt expires at boundary", [
+                new("accepted", 60, "user-a", reset, true),
+                new("denied-role", 0, "user-a", reset, true),
+                new("invalid", 0, "user-a", reset, true),
+                new("replayed", 0, "user-a", reset, true),
+            ]),
+            new ResetScenario("separate user and endpoints", [
+                new("accepted", 0, "user-a", reset, true),
+                new("denied-role", 0, "user-a", reset, true),
+                new("invalid", 0, "user-a", reset, true),
+                new("accepted", 0, "user-b", reset, true),
+                new("accepted", 0, "user-a", CasePackRequestLimiter.CaseListEndpoint, true),
+                new("accepted", 0, "user-a", CasePackRequestLimiter.SceneEndpoint, true),
+            ]),
+        };
+
+        foreach (var scenario in scenarios)
+        {
+            var time = new AdjustableTime();
+            var limiter = new CasePackRequestLimiter(new InMemoryCasePackRequestWindowStore(), time);
+            foreach (var attempt in scenario.Attempts)
+            {
+                time.Current = Now.AddSeconds(-attempt.AgeSeconds);
+                Assert.Equal(attempt.Expected,
+                    await limiter.TryRecordAttemptAsync(attempt.User, attempt.Endpoint));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AC030_ConcurrentResetAdmissionIsAtomic()
+    {
+        var time = new AdjustableTime();
+        var store = new InMemoryCasePackRequestWindowStore();
+        var limiter = new CasePackRequestLimiter(store, time);
+        for (var attempt = 0; attempt < CasePackRequestLimiter.MaxResetAttempts - 1; attempt++)
+            Assert.True(await limiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
+
+        var ready = 0;
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<bool> ConcurrentAttempt()
+        {
+            if (Interlocked.Increment(ref ready) == 2) start.TrySetResult();
+            await start.Task;
+            return await limiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint);
+        }
+
+        var results = await Task.WhenAll(ConcurrentAttempt(), ConcurrentAttempt());
+        Assert.Equal(1, results.Count(result => result));
+        Assert.Equal(1, results.Count(result => !result));
+        Assert.Equal(CasePackRequestLimiter.MaxResetAttempts,
+            store.ActiveCount("user-a", CasePackRequestLimiter.ResetEndpoint, Now));
+
+        var racingStore = new RacingStore();
+        var racingLimiter = new CasePackRequestLimiter(racingStore, time);
+        for (var attempt = 0; attempt < CasePackRequestLimiter.MaxResetAttempts - 1; attempt++)
+            Assert.True(await racingLimiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
+
+        Assert.False(await racingLimiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
+        Assert.Equal(CasePackRequestLimiter.MaxResetAttempts, racingStore.Count);
     }
 
     [Theory]

@@ -29,8 +29,17 @@ public sealed class CasePackRequestLimiter(ICasePackRequestWindowStore store, Ti
 {
     public const string CaseListEndpoint = "case-list";
     public const string SceneEndpoint = "scene";
+    public const string ResetEndpoint = "reset";
     public const int MaxRequests = 30;
+    public const int MaxResetAttempts = 3;
     public static readonly TimeSpan RollingWindow = TimeSpan.FromSeconds(60);
+
+    public static int MaxRequestsForEndpoint(string endpoint) => endpoint switch
+    {
+        CaseListEndpoint or SceneEndpoint => MaxRequests,
+        ResetEndpoint => MaxResetAttempts,
+        _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, "Unsupported case-pack endpoint."),
+    };
 
     public Task<bool> TryRecordAttemptAsync(
         string authenticatedUserId,
@@ -38,8 +47,7 @@ public sealed class CasePackRequestLimiter(ICasePackRequestWindowStore store, Ti
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(authenticatedUserId);
-        if (endpoint is not (CaseListEndpoint or SceneEndpoint))
-            throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, "Unsupported case-pack read endpoint.");
+        _ = MaxRequestsForEndpoint(endpoint);
 
         return store.TryRecordAttemptAsync(authenticatedUserId, endpoint, timeProvider.GetUtcNow(), cancellationToken);
     }
@@ -71,7 +79,7 @@ public sealed class SqlCasePackRequestWindowStore(DbContextOptions<CaseStateDbCo
             .ExecuteDeleteAsync(cancellationToken);
         var attempts = db.CasePackRequestWindows.Where(row =>
             row.UserHash == userHash && row.Endpoint == endpoint && row.RequestedAtTicks > cutoff);
-        if (await attempts.CountAsync(cancellationToken) >= CasePackRequestLimiter.MaxRequests)
+        if (await attempts.CountAsync(cancellationToken) >= CasePackRequestLimiter.MaxRequestsForEndpoint(endpoint))
         {
             await transaction.RollbackAsync(cancellationToken);
             return false;
@@ -114,7 +122,7 @@ public sealed class InMemoryCasePackRequestWindowStore : ICasePackRequestWindowS
             _attempts.RemoveAll(attempt => attempt.RequestedAtTicks <= cutoff);
             if (_attempts.Count(attempt => attempt.UserHash == userHash
                     && attempt.Endpoint == endpoint && attempt.RequestedAtTicks > cutoff)
-                >= CasePackRequestLimiter.MaxRequests)
+                >= CasePackRequestLimiter.MaxRequestsForEndpoint(endpoint))
                 return Task.FromResult(false);
 
             _attempts.Add(new Attempt(userHash, endpoint, now));
