@@ -1,0 +1,367 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 444,
+  "branch": "ai-sdlc/issue-444",
+  "commitSha": "598401d404a46164a48445620aae47485bd61d7e",
+  "round": 0,
+  "pipelineVersion": "18314a8",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint implementation appears to apply authentication, limiter, authorization, target, and reset checks in the intended flow. The required tests leave gaps in M-03 precedence, M-14 request and limiter outcomes, quota accounting, and the other-actor conflict guarantees.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 942,
+          "message": "M-03’s ordering test does not prove the specified call counts or paired-input precedence. Add the table’s role and scope cases with later invalid values and assert each named store operation is uncalled.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder checks ReadCalls and WriteCalls for rejected requests, but does not assert the required zero OwnerOf, AuthorizeCase, and CommitBlockedVariantReset calls for role and scope rejections. Its role and scope inputs also omit the later invalid values required by the table.",
+            "failureScenario": "If a role-rejected request calls OwnerOf, or a scope-rejected request calls AuthorizeCase before returning its expected status, the test still passes. The required paired invalid-target precedence is not established."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 770,
+          "message": "The M-14 acceptance criterion has no named test. Add M14_ResetRouteCoversRequestAndLimiterOutcomes covering its listed request and limiter cases, including exact status and error code.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added tests include no M14_ResetRouteCoversRequestAndLimiterOutcomes test. The named AC-014, AC-015, AC-016/AC-023, and M-03 tests do not cover the full M-14 input table, including malformed JSON, limiter-store IOException, and unsupported path version.",
+            "failureScenario": "If malformed JSON returns 500 instead of 400 invalid_request, or a request-window store IOException returns the wrong response, the required test suite still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 812,
+          "message": "AC-015 does not verify the required limiter behavior for unauthenticated, denied-role, and invalid requests. Assert the request-window store’s exact attempt counts for those cases.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC015_ResetRejectsRolesScopeAndAntiForgeryWithoutMutation exhausts the quota using accepted reset requests. Its unauthenticated case checks case-state writes but does not assert zero attempts in the request-window store; it also does not prove denied-role or invalid requests consume quota.",
+            "failureScenario": "If unauthenticated requests are recorded, or denied-role and invalid requests do not consume quota, the test can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 858,
+          "message": "The other-actor replay case does not prove the required no-receipt and no-mutation guarantees. Assert the response shape and unchanged state around that request.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC016_And_AC023_ResetReplayRevisionAndConflictResponsesAreExact checks that another actor receives 409 command_id_conflict, but does not compare state before and after that request or assert that the response has no receipt.",
+            "failureScenario": "If the other-actor conflict path mutates state or includes a receipt while still returning 409 command_id_conflict, the test passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds meaningful endpoint coverage, including fixed server time, quota exhaustion, replay, and stale revisions. However, M-03's required ordering proof is incomplete, the M14 request and limiter error-path test is absent, and the unauthenticated quota and other-actor conflict cases omit required assertions.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 928,
+          "message": "M-03's test does not prove the required precedence: it omits assertions for the named store-call counters and the paired invalid-stage cases. Add the acceptance table cases and assert each specified operation is uncalled.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder asserts ReadCalls and WriteCalls for rejected stages, but does not assert OwnerCalls, AuthorizeCalls, or ResetCommitCalls. Its cases also test rejection stages independently rather than pairing earlier failures with later invalid inputs as the acceptance table requires.",
+            "failureScenario": "If a role-rejected request calls OwnerOf or AuthorizeCase before returning 403, or an invalid anti-forgery request reaches the reset commit before returning 400, the test can still pass. The required combined role, scope, invalid-token, Case A, and variant case is absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 770,
+          "message": "The M14 acceptance criterion has no test. Add M14_ResetRouteCoversRequestAndLimiterOutcomes covering the listed request and limiter outcomes, including exact status and error codes.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The acceptance criteria name M14_ResetRouteCoversRequestAndLimiterOutcomes, but the changed test file adds AC014, AC015, AC016/AC023, and M03 tests only. No test covers the listed request-validation cases or the limiter IOException path.",
+            "failureScenario": "If malformed JSON, a missing or invalid commandId, a negative revision, or an IOException from the request-window store maps to the wrong status or error code, the added tests do not detect it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 808,
+          "message": "AC-015 does not verify that unauthenticated requests consume no quota. Assert the request-window store records zero attempts for the user and reset endpoint.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC015_ResetRejectsRolesScopeAndAntiForgeryWithoutMutation sends an unauthenticated request and checks 401 and case-state equality, but does not assert that the in-memory request-window store recorded zero attempts for that user and endpoint.",
+            "failureScenario": "If the endpoint records an unauthenticated attempt before returning 401, this test still passes because it checks only the response and case state."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 900,
+          "message": "AC-016/AC-023's other-actor conflict case does not assert the required absence of a receipt and state mutation. Capture state before the request and assert it is unchanged, with no receipt in the response.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC016_And_AC023_ResetReplayRevisionAndConflictResponsesAreExact checks that another actor reusing a command ID receives 409 command_id_conflict, but does not compare case state before and after or assert that no receipt was returned.",
+            "failureScenario": "If the endpoint mutates case state or returns a receipt while responding 409 to another actor's command-ID reuse, the test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint includes the expected authentication, role, scope, anti-forgery, and target checks. The added tests leave required authorization-order and request-limiter behaviors unproven.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 928,
+          "message": "M-03's ordering test does not prove the required store-call invariants or paired-input precedence cases. Add the specified counter assertions and table cases.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder asserts read and write counts for rejected requests, but does not assert the required OwnerOf, AuthorizeCase, and CommitBlockedVariantReset counts or pair earlier-stage failures with the later invalid inputs in the acceptance table.",
+            "failureScenario": "If a role-rejected request calls OwnerOf before returning 403, the current test still passes because it never checks OwnerCalls. The same gap applies to AuthorizeCase on scope rejection."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 770,
+          "message": "The request and limiter error-path criterion has no named test in this change. Add M14_ResetRouteCoversRequestAndLimiterOutcomes covering the listed inputs and exact responses.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criteria name M14_ResetRouteCoversRequestAndLimiterOutcomes, but no such test is added. The existing tests do not cover the specified malformed JSON, missing and invalid command fields, unsupported path version, or limiter store IOException cases.",
+            "failureScenario": "If malformed JSON or a request-window IOException is mapped to the wrong status or error code, the tests in this change can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 815,
+          "message": "AC-015's test does not assert that an unauthenticated request records zero limiter attempts for the reset endpoint.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC-015 requires the in-memory request-window store to record zero attempts for an unauthenticated request, but the test asserts only the 401 response and unchanged case state.",
+            "failureScenario": "If the endpoint charges the limiter before confirming a session, the unauthenticated request still returns 401 and leaves case state unchanged, so the current assertions pass while consuming quota."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackBlockedVariantResetTests.cs",
+      "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 52,
+      "total": 67,
+      "percent": 77.6,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 45,
+          "total": 60,
+          "missed": [
+            104,
+            105,
+            106,
+            110,
+            120,
+            130,
+            131,
+            132,
+            137,
+            139,
+            141,
+            143,
+            160,
+            161,
+            162
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateStore.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/SqlCaseStateStore.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/CasePackBlockedVariantReset.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
