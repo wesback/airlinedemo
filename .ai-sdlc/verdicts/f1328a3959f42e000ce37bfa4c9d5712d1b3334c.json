@@ -1,0 +1,216 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 457,
+  "branch": "ai-sdlc/issue-457",
+  "commitSha": "f1328a3959f42e000ce37bfa4c9d5712d1b3334c",
+  "round": 3,
+  "pipelineVersion": "0995812",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest change routes the test through the production reset endpoint, resolving the previous endpoint coverage concern. The new middleware’s case-sensitive path check leaves a reachable quota bypass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Admission/CasePackRequestLimiter.cs",
+          "line": 255,
+          "message": "Reset quota enforcement can be bypassed with different path casing. Normalize the path segments or match the route case-insensitively. OWASP A01:2025.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The middleware recognizes reset requests using case-sensitive comparisons of the raw path segments. The mapped ASP.NET route `/api/runs/{runId}/reset` accepts case-insensitive route matches.",
+            "failureScenario": "A signed-in user sends repeated POST requests to `/API/RUNS/run-a/RESET`. The reset endpoint matches and processes them, but the middleware skips quota recording, so the user can exceed the three-attempt limit."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated test calls the production reset endpoint and checks the fourth attempt’s 429 response and error code, resolving the prior finding. The round 4 changes meet the named test criteria without a concrete defect.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated integration test exercises the production reset endpoint, resolving the prior coverage finding. The middleware’s path matcher leaves a reachable case-variation bypass around the reset quota.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Admission/CasePackRequestLimiter.cs",
+          "line": 254,
+          "message": "A06:2025 Insecure Design: the case-sensitive path check can be bypassed with differently cased route literals, so authenticated reset attempts avoid the quota.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The middleware matches reset paths using case-sensitive string comparisons, while the ASP.NET Core route is mapped as /api/runs/{runId}/reset and route literals match case-insensitively.",
+            "failureScenario": "An authenticated user sends repeated POST requests to /API/runs/run-a/reset. Routing can dispatch them to the reset endpoint, but this matcher skips quota admission, allowing resets without the three-attempt limit."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
