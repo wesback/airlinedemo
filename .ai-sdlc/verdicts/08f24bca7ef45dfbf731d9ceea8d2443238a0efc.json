@@ -1,0 +1,274 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 457,
+  "branch": "ai-sdlc/issue-457",
+  "commitSha": "08f24bca7ef45dfbf731d9ceea8d2443238a0efc",
+  "round": 2,
+  "pipelineVersion": "0995812",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The denied-role quota test gap from the previous round remains. The test does not detect an endpoint that skips quota recording for denied-role requests received below the limit.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 224,
+          "message": "The prior AC-030 finding remains: the endpoint test does not prove that a denied-role request below the limit consumes a quota slot. Follow that 403 response with enough authenticated requests to verify the slot was used.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC030_ResetAttemptsCountEveryAuthenticatedOutcome sends a denied-role request while under the limit, but that scenario ends after the 403 response. The other denied-role endpoint scenario sends the request only after the quota is full.",
+            "failureScenario": "If the endpoint stops recording quota for denied-role requests below the limit, these tests still pass: the under-limit scenario makes no later requests to check quota, and the full-limit scenario is rate-limited before role handling."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The denied-role scenario still checks only the 403 response; it does not verify quota consumption. The previous major test finding remains unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 223,
+          "message": "AC-030's denied-role quota behavior remains unverified. After a denied-role response below the limit, send enough authenticated attempts to show that it consumed a slot.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The endpoint scenario sends an accepted request followed by a denied-role request and asserts the denied-role response is 403. It makes no later request to check whether that denied attempt consumed a quota slot.",
+            "failureScenario": "If the endpoint stops recording quota for denied-role requests below the limit, both requests still return the expected statuses and this test passes. It does not verify the denied attempt used one of the three slots."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previously reported AC-030 test gap remains: the endpoint test does not prove a denied-role request received below the limit consumes quota. I found no separate security vulnerability in the reviewed delta.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 223,
+          "message": "AC-030’s denied-role quota behavior remains unverified through the endpoint. Follow a denied-role response received below the limit with enough authenticated requests to prove it consumed one of the three slots.",
+          "confidence": 0.89,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The first endpoint scenario sends an accepted request and then a denied-role request, but ends after asserting the 403 response. It does not check whether that request consumed a quota slot.",
+            "failureScenario": "If denied-role requests skip quota recording while under the limit, this scenario still passes. A later authenticated request would reveal the missing quota consumption, but the test makes no such request."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 45,
+      "total": 58,
+      "percent": 77.6,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/CasePackRequestLimiter.cs",
+          "covered": 9,
+          "total": 9,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Runs/DemoRunResetEndpoints.cs",
+          "covered": 35,
+          "total": 48,
+          "missed": [
+            34,
+            36,
+            40,
+            45,
+            46,
+            47,
+            51,
+            69,
+            70,
+            71,
+            77,
+            78,
+            79
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
