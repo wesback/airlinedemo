@@ -285,6 +285,7 @@ public sealed class CasePackEndpointsTests : IDisposable
             Assert.Equal(HttpStatusCode.OK, warmup.StatusCode);
             _ = await warmup.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
         }
+        clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
 
         var samples = new double[100];
         for (var index = 0; index < samples.Length; index++)
