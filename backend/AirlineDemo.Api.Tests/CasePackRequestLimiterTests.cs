@@ -226,6 +226,24 @@ public sealed class CasePackRequestLimiterTests
     }
 
     [Fact]
+    public async Task AC030_HostLimiterAdmitsThreeResetAttemptsThenDeniesTheFourth()
+    {
+        var time = new AdjustableTime();
+        var store = new InMemoryCasePackRequestWindowStore();
+        using var factory = ReadFactory(store, time);
+        using var scope = factory.Services.CreateScope();
+        var limiter = scope.ServiceProvider.GetRequiredService<CasePackRequestLimiter>();
+
+        for (var attempt = 1; attempt <= CasePackRequestLimiter.MaxResetRequests; attempt++)
+            Assert.True(await limiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
+
+        Assert.False(await limiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint));
+        Assert.True(await limiter.TryRecordAttemptAsync("user-b", CasePackRequestLimiter.ResetEndpoint));
+        Assert.Equal(CasePackRequestLimiter.MaxResetRequests,
+            store.ActiveCount("user-a", CasePackRequestLimiter.ResetEndpoint, Now));
+    }
+
+    [Fact]
     public async Task AC030_ConcurrentResetAdmissionIsAtomic()
     {
         var path = Path.Combine(Path.GetTempPath(), "case-pack-reset-limit-" + Guid.NewGuid().ToString("N") + ".sqlite");
