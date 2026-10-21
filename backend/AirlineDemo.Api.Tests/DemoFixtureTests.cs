@@ -50,6 +50,7 @@ public sealed class DemoFixtureTests
         foreach (var expected in ExpectedUsers)
         {
             var actual = Assert.Single(users, user => user.Id == expected.Id);
+            Assert.Equal(expected.Role, actual.Role);
             Assert.Equal(expected.CaseScopes, actual.CaseScopes);
         }
     }
@@ -85,9 +86,27 @@ public sealed class DemoFixtureTests
             Assert.Equal(expected.Id, root.GetProperty("id").GetString());
             Assert.Equal(expected.DisplayName, root.GetProperty("displayName").GetString());
             Assert.Equal(expected.Role, root.GetProperty("role").GetString());
-            Assert.Equal(expected.CaseScopes, root.GetProperty("caseScopes").EnumerateArray().Select(e => e.GetString()!).ToArray());
+            var caseScopes = root.GetProperty("caseScopes").EnumerateArray().Select(e => e.GetString()!).ToArray();
+            Assert.Equal(expected.CaseScopes, caseScopes);
+            if (expected.Id == "exec-1")
+            {
+                Assert.Equal("exec-1", root.GetProperty("id").GetString());
+                Assert.Equal("executive", root.GetProperty("role").GetString());
+                Assert.Equal(new[] { "cp-case-a", "cp-case-b", "cp-case-c" }, caseScopes);
+            }
             Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("csrfToken").GetString()));
         }
+
+        using var executiveClient = factory.CreateClient();
+        using var executiveSignIn = await executiveClient.PostAsJsonAsync(
+            "/api/auth/sign-in", new { userId = "exec-1", passcode = Passcode }, ct);
+        Assert.Equal(HttpStatusCode.OK, executiveSignIn.StatusCode);
+        using var executiveJson = JsonDocument.Parse(await executiveSignIn.Content.ReadAsStringAsync(ct));
+        Assert.Equal("exec-1", executiveJson.RootElement.GetProperty("id").GetString());
+        Assert.Equal("executive", executiveJson.RootElement.GetProperty("role").GetString());
+        Assert.Equal(
+            new[] { "cp-case-a", "cp-case-b", "cp-case-c" },
+            executiveJson.RootElement.GetProperty("caseScopes").EnumerateArray().Select(scope => scope.GetString()).ToArray());
     }
 
     [Theory]

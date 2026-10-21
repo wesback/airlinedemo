@@ -61,6 +61,7 @@ public sealed class TechnicalReviewTests : IDisposable
     [Theory]
     [InlineData("presenter")]
     [InlineData("viewer")]
+    [InlineData("executive")]
     public void Unauthorized_role_is_denied_without_decision(string role)
     {
         var (store, rev) = WithBasis(NewStore(), "evidence v1");
