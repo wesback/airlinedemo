@@ -183,9 +183,33 @@ public sealed class CasePackSceneProjectionTests
         var valid = CasePackSceneProjection.Build(pack, validBasis, "presenter");
         Assert.NotNull(valid);
         var witness = Assert.Single(valid.Evidence);
+        Assert.Equal((1, 1, 1), (witness.DocumentVersion, witness.BasisVersion, witness.Page));
         Assert.Equal((1, 1), (witness.DocumentVersion, witness.BasisVersion));
-        Assert.Contains(valid.DocumentRefs, item => item.BasisId == "basis-v2" && item.UsableAsEvidence);
+        Assert.Contains(valid.DocumentRefs, item => item.BasisId == "basis-v2" && item.DocumentVersion == 1 && item.UsableAsEvidence);
         Assert.Contains(valid.DocumentRefs, item => item.BasisId == "basis-v1" && item.DocumentVersion == 1 && item.UsableAsEvidence);
+
+        var source = Pack();
+        var newerCase = source.Cases[0] with
+        {
+            Documents = source.Cases[0].Documents.Select(document => document with
+                { Evidence = document.Evidence with { Version = 2 } }).ToArray(),
+            DocumentReferences = source.Cases[0].DocumentReferences.Select(reference => reference with
+                { Version = 2 }).ToArray()
+        };
+        var newerPack = new AircraftCasePackSnapshot(source.Revision, source.Manifest, source.Files,
+            [newerCase, .. source.Cases.Skip(1)]);
+        var independentTuple = validBasis with
+        {
+            JourneyEvents = [new CaseJourneyEvent("independent-event", "current-run", 2, CaseId,
+                "evidence-reviewed", "basis-v2", 2, "presenter", "Independent versions", "AI agent",
+                [new CaseJourneyWitness("independent-witness", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1)])]
+        };
+        var independent = CasePackSceneProjection.Build(newerPack, independentTuple, "presenter");
+        Assert.NotNull(independent);
+        var independentWitness = Assert.Single(independent.Evidence, item => item.WitnessId == "independent-witness");
+        Assert.Equal((1, 1), (independentWitness.DocumentVersion, independentWitness.BasisVersion));
+        Assert.Contains(independent.DocumentRefs, item => item.DocumentVersion == 2 && item.BasisVersion == 2 && item.UsableAsEvidence);
+        Assert.Contains(independent.DocumentRefs, item => item.DocumentVersion == 1 && item.BasisVersion == 1 && item.UsableAsEvidence);
 
         foreach (var mutation in new[] { "case", "document", "document-version", "basis-id", "basis-version", "run", "page" })
         {
@@ -221,6 +245,85 @@ public sealed class CasePackSceneProjectionTests
                 Assert.Null(CasePackSceneProjection.Build(pack, badState, "presenter"));
             }
         }
+
+        foreach (var status in new[] { "blocked", "failed", "partial" })
+        {
+            var documentStatus = status == "failed" ? "rejected-permanent"
+                : status == "blocked" ? "rejected-retryable" : "rejected-permanent";
+            var packages = PackageStore(status, documentStatus);
+            var statusState = State(CaseId, 33) with
+            {
+                JourneyEvents = [new CaseJourneyEvent(status + "-event", "current-run", 1, CaseId,
+                    "evidence-reviewed", "basis-v1", 1, "presenter", status + " evidence", "AI agent",
+                    [new CaseJourneyWitness(status + "-witness", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1)])]
+            };
+            var statusScene = CasePackSceneProjection.Build(pack, statusState, "presenter", packages);
+            Assert.NotNull(statusScene);
+            Assert.DoesNotContain(statusScene.Evidence, item => item.WitnessId == status + "-witness");
+            Assert.DoesNotContain(statusScene.History.Single().WitnessIds, item => item == status + "-witness");
+            Assert.All(statusScene.DocumentRefs.Where(item => item.DocumentId == "case-a/aircraft-summary.txt"),
+                item => Assert.False(item.UsableAsEvidence));
+        }
+    }
+
+    [Fact]
+    public void AC027_ArrHistoryReaderUsesExactSelectorsAndRetainsOlderRuns()
+    {
+        var events = new List<CaseJourneyEvent>();
+        for (var index = 1; index <= 100; index++)
+            events.Add(new CaseJourneyEvent("old-" + index, "old-run-" + index, index, CaseId,
+                "evidence-reviewed", "basis-v1", 1, "presenter", "Older run", "AI agent", []));
+        for (var index = 1; index <= 25; index++)
+            events.Add(new CaseJourneyEvent("current-" + index, "current-run", 100 + index, CaseId,
+                "evidence-reviewed", "basis-v1", 1, "presenter", "Current run", "AI agent", []));
+        var store = new SnapshotStore(State(CaseId, 25) with { JourneyEvents = events });
+        var reader = new ArrCaseHistorySource(store);
+
+        var selection = reader.Read(CaseId, "current-run", "basis-v1");
+        Assert.NotNull(selection);
+        Assert.Equal((CaseId, "current-run", "basis-v1", 25, true),
+            (selection.CaseId, selection.RunId, selection.BasisId, selection.Events.Count, selection.OlderHistoryAvailable));
+        Assert.Equal(25, selection.Events.Count(item => item.RunId == "current-run"));
+        Assert.Null(reader.Read("cp-case-b", "current-run", "basis-v1"));
+        Assert.Null(reader.Read(CaseId, "wrong-run", "basis-v1"));
+        Assert.Null(reader.Read(CaseId, "current-run", "wrong-basis"));
+
+        var deniedStore = new SnapshotStore(State(CaseId, 25), denyRead: true);
+        Assert.Null(new ArrCaseHistorySource(deniedStore).Read(CaseId, "current-run", "basis-v1"));
+    }
+
+    private static EvidencePackageStore PackageStore(string packageState, string documentStatus)
+    {
+        var packages = new EvidencePackageStore();
+        var document = new EvidenceDocumentResult("aircraft-summary.txt", documentStatus,
+            documentStatus == "accepted" ? "accepted" : "no usable evidence", documentStatus == "accepted" ? 1 : null, null);
+        packages.Submit("pkg-" + packageState, CaseId,
+            () => new EvidencePackageOutcome(packageState, [document]));
+        return packages;
+    }
+
+    [Theory]
+    [InlineData("blocked", "accepted")]
+    [InlineData("failed", "rejected-permanent")]
+    [InlineData("failed", "rejected-retryable")]
+    [InlineData("partial", "rejected-permanent")]
+    public void AC028_BlockedFailedOrPartialReferenceHasNoWitness(string packageState, string documentStatus)
+    {
+        var packages = PackageStore(packageState, documentStatus);
+        var state = State(CaseId, 32) with
+        {
+            JourneyEvents = [new CaseJourneyEvent("status-event", "current-run", 1, CaseId,
+                "evidence-reviewed", "basis-v1", 1, "presenter", "Status evidence", "AI agent",
+                [new CaseJourneyWitness("status-witness", "case-a/aircraft-summary.txt", 1, 1, "basis-v1", 1)])]
+        };
+
+        var scene = CasePackSceneProjection.Build(Pack(), state, "presenter", packages);
+        Assert.NotNull(scene);
+        var references = scene.DocumentRefs.Where(item => item.DocumentId == "case-a/aircraft-summary.txt").ToArray();
+        Assert.NotEmpty(references);
+        Assert.All(references, reference => Assert.False(reference.UsableAsEvidence));
+        Assert.DoesNotContain(scene.Evidence, item => item.WitnessId == "status-witness");
+        Assert.DoesNotContain(scene.History.Single().WitnessIds, item => item == "status-witness");
     }
 
     private sealed record ArrSelector(string CaseId, string RunId, string BasisId);
@@ -268,13 +371,13 @@ public sealed class CasePackSceneProjectionTests
             "presenter", "Evidence reviewed", label, witnesses);
     private static JsonObject Clone(JsonElement value) => JsonNode.Parse(value.GetRawText())!.AsObject();
 
-    private sealed class SnapshotStore(CaseState state) : ICaseStateStore
+    private sealed class SnapshotStore(CaseState state, bool denyRead = false) : ICaseStateStore
     {
         public int ReadCalls { get; private set; }
         public CaseScope AuthorizeCase(string caseId, string owner) => new(caseId);
         public string? OwnerOf(string caseId) => caseId == state.CaseId ? Owner : null;
         public CaseScope CreateCase(string caseId, string owner) => throw new NotSupportedException();
-        public CaseState Read(CaseScope scope) { ReadCalls++; return state; }
+        public CaseState Read(CaseScope scope) { ReadCalls++; return denyRead ? throw new CaseAccessDeniedException() : state; }
         public BasisVersion GetBasisVersion(CaseScope scope, int version) => throw new NotSupportedException();
         public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => throw new NotSupportedException();
         public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit) => throw new NotSupportedException();

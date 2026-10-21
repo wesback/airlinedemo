@@ -165,19 +165,23 @@ public static class CasePackSceneProjection
             var ids = new List<string>();
             foreach (var sourceWitness in source.Witnesses ?? [])
             {
-                if (sourceWitness is null || sourceWitness.Page < 1 || string.IsNullOrWhiteSpace(sourceWitness.DocumentId) ||
+                if (sourceWitness is null || string.IsNullOrWhiteSpace(sourceWitness.WitnessId) || sourceWitness.Page < 1 || string.IsNullOrWhiteSpace(sourceWitness.DocumentId) ||
                     sourceWitness.DocumentVersion < 1 || sourceWitness.BasisVersion < 1 ||
                     string.IsNullOrWhiteSpace(sourceWitness.BasisId) ||
                     !ResolveDocument(published, sourceWitness.DocumentId, out var document) || !ExactDocumentPage(pack, document, sourceWitness.Page)) return null;
-                var status = PackageStatus(packages, state.CaseId, document.Path, sourceWitness.DocumentVersion);
+                var status = PackageStatus(packages, state.CaseId, document.Path, sourceWitness.DocumentVersion, allowHistoricVersion: true);
                 var expectedBasisId = "basis-v" + sourceWitness.BasisVersion;
                 if (!StringComparer.Ordinal.Equals(sourceWitness.BasisId, expectedBasisId)
                     || !state.Basis.Any(item => item.Version == sourceWitness.BasisVersion)) return null;
-                var documentVersionMatchesCurrent = sourceWitness.BasisVersion == currentBasisVersion &&
-                    sourceWitness.DocumentVersion == document.Evidence.Version;
-                var documentVersionMatchesHistory = sourceWitness.BasisVersion != currentBasisVersion &&
-                    sourceWitness.BasisVersion >= 1 && sourceWitness.BasisVersion == sourceWitness.DocumentVersion;
-                if (!documentVersionMatchesCurrent && !documentVersionMatchesHistory) return null;
+                var witnessMatchesCurrentTuple = StringComparer.Ordinal.Equals(sourceWitness.BasisId, currentBasisId)
+                    && sourceWitness.BasisVersion == currentBasisVersion
+                    && sourceWitness.DocumentVersion == document.Evidence.Version;
+                var witnessMatchesHistoricTuple = !witnessMatchesCurrentTuple
+                    && sourceWitness.DocumentVersion >= 1
+                    && sourceWitness.DocumentVersion <= document.Evidence.Version
+                    && sourceWitness.BasisVersion != currentBasisVersion
+                    && !StringComparer.Ordinal.Equals(sourceWitness.BasisId, currentBasisId);
+                if (!witnessMatchesCurrentTuple && !witnessMatchesHistoricTuple) return null;
                 var reference = AddRef(refs, state.CaseId, document.Evidence.Path,
                     sourceWitness.DocumentVersion, sourceWitness.BasisId, sourceWitness.BasisVersion,
                     document.Path, status);
@@ -374,12 +378,16 @@ public static class CasePackSceneProjection
         return null;
     }
     private readonly record struct ReferenceStatus(string State, bool Retryable, bool Usable);
-    private static ReferenceStatus PackageStatus(EvidencePackageStore? packages, string caseId, string path, int expectedVersion = 1)
+    private static ReferenceStatus PackageStatus(EvidencePackageStore? packages, string caseId, string path, int expectedVersion = 1,
+        bool allowHistoricVersion = false)
     {
         if (packages is null) return new("accepted", false, true);
         var package = packages.ListForCase(caseId).LastOrDefault();
+        if (package?.State == "blocked") return new("unprocessed", false, false);
+        if (package?.State == "failed") return new("unprocessed", false, false);
+        if (package?.State == "partial") return new("unprocessed", true, false);
         var document = package?.Documents?.LastOrDefault(item => item.FileName == path || item.FileName == Path.GetFileName(path) || path.EndsWith('/' + item.FileName, StringComparison.Ordinal));
-        return document?.Status switch { "accepted" => document.Version == expectedVersion ? new("accepted", false, true) : new("unprocessed", true, false), "rejected-retryable" => new("rejected-retryable", true, false), "rejected-permanent" => new("rejected-permanent", false, false), _ => new("unprocessed", true, false) };
+        return document?.Status switch { "accepted" => document.Version == expectedVersion || allowHistoricVersion && document.Version >= expectedVersion ? new("accepted", false, true) : new("unprocessed", true, false), "rejected-retryable" => new("rejected-retryable", true, false), "rejected-permanent" => new("rejected-permanent", false, false), _ => new("unprocessed", true, false) };
     }
     private static EvidenceReference AddRef(Dictionary<string, EvidenceReference> refs, string caseId, string documentId,
         int documentVersion, string basisId, int basisVersion, string displayLabel, ReferenceStatus status)
