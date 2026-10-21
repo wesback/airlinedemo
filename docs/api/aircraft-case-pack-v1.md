@@ -84,4 +84,5 @@ scene returns HTTP 422 with this exact error envelope and no partial scene:
 `{"contractVersion":1,"error":{"code":"scene_payload_limit","message":"scene_payload_limit"}}`
 
 Unauthenticated reads return 401, unsupported versions return 400 `unsupported_contract_version`, and a missing or out-of-scope
-case returns the same empty 404 response. All data remains case-scoped and role-filtered.
+case returns the exact 404 response `{"contractVersion":1,"error":{"code":"not_found","message":"Not found."}}`.
+All data remains case-scoped and role-filtered.

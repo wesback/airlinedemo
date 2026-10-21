@@ -222,7 +222,10 @@ public static class CasePackSceneProjection
         }
         if (objects.Count != 4 || objects.Select(item => item.ObjectId).Distinct(StringComparer.Ordinal).Count() != 4) return null;
 
-        var canReset = label != CapabilityLabels.Unknown && role == "presenter" && state.CaseId == "cp-case-c";
+        var activeBlockedVariant = packages?.ListForCase(state.CaseId)
+            .LastOrDefault()?.State == "blocked";
+        var canReset = label != CapabilityLabels.Unknown && role == "presenter"
+            && state.CaseId == "cp-case-c" && activeBlockedVariant == true;
         var allowed = canReset ? new[] { "resetBlockedVariant" } : Array.Empty<string>();
         var name = state.CaseId switch { "cp-case-a" => "Case A", "cp-case-b" => "Case B", "cp-case-c" => "Case C", _ => state.CaseId };
         var summary = new CaseSummary(state.CaseId, name, category, state.Revision, currentRun, states,

@@ -413,6 +413,7 @@ public sealed class CasePackRequestLimiterTests
         var session = factory.Services.GetRequiredService<DemoSessionStore>()
             .Create(new DemoUser("user-a", "Reader", "presenter", [visibleCase.CaseId]));
         client.DefaultRequestHeaders.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+        var caseStore = factory.Services.GetRequiredService<ICaseStateStore>();
 
         using var response = await client.GetAsync("/api/v1/cases", TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -433,7 +434,11 @@ public sealed class CasePackRequestLimiterTests
         }, resultCase.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray());
         Assert.Equal(visibleCase.CaseId, resultCase.GetProperty("caseId").GetString());
         Assert.True(resultCase.GetProperty("synthetic").GetBoolean());
-        Assert.Equal(0, resultCase.GetProperty("caseRevision").GetInt64());
+        var owner = caseStore.OwnerOf(visibleCase.CaseId);
+        var expectedRevision = owner is null
+            ? 0L
+            : caseStore.Read(caseStore.AuthorizeCase(visibleCase.CaseId, owner)).Revision;
+        Assert.Equal(expectedRevision, resultCase.GetProperty("caseRevision").GetInt64());
         Assert.Equal(6, resultCase.GetProperty("status").EnumerateObject().Count());
     }
 
@@ -447,6 +452,14 @@ public sealed class CasePackRequestLimiterTests
         Assert.NotNull(snapshot);
         var sceneCase = snapshot.Cases.First(scene =>
             scene.Components.Count > 0 && scene.Documents.Count > 0);
+        var caseStore = factory.Services.GetRequiredService<ICaseStateStore>();
+        if (caseStore.OwnerOf(sceneCase.CaseId) is null)
+        {
+            var scope = caseStore.CreateCase(sceneCase.CaseId, "user-a");
+            caseStore.Commit(scope, 0, new CaseCommit(
+                CaseStateStore.CreateBasisVersion(1, "current basis", string.Empty),
+                null, "user-a", "scene-ready", "seeded", At: Now));
+        }
         var session = factory.Services.GetRequiredService<DemoSessionStore>()
             .Create(new DemoUser("user-a", "Reader", "presenter", [sceneCase.CaseId]));
         client.DefaultRequestHeaders.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
@@ -458,39 +471,17 @@ public sealed class CasePackRequestLimiterTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(body);
         var root = json.RootElement;
-        Assert.Equal(3, root.EnumerateObject().Count());
+        Assert.Equal(11, root.EnumerateObject().Count());
         Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
         Assert.Equal(snapshot.PackVersion, root.GetProperty("packVersion").GetString());
         var resultCase = root.GetProperty("case");
-        Assert.Equal(6, resultCase.EnumerateObject().Count());
         Assert.Equal(sceneCase.CaseId, resultCase.GetProperty("caseId").GetString());
-        Assert.Equal(sceneCase.Synthetic, resultCase.GetProperty("synthetic").GetBoolean());
-        Assert.Equal(sceneCase.AircraftCount, resultCase.GetProperty("aircraftCount").GetInt32());
-        Assert.Equal(sceneCase.EngineCount, resultCase.GetProperty("engineCount").GetInt32());
-
-        var components = resultCase.GetProperty("components");
-        Assert.Equal(sceneCase.Components.Count, components.GetArrayLength());
-        for (var index = 0; index < sceneCase.Components.Count; index++)
-        {
-            var expected = sceneCase.Components[index];
-            var actual = components[index];
-            Assert.Equal(2, actual.EnumerateObject().Count());
-            Assert.Equal(expected.ComponentId, actual.GetProperty("componentId").GetString());
-            Assert.Equal(expected.EvidenceDocumentPaths,
-                actual.GetProperty("evidenceDocumentPaths").EnumerateArray()
-                    .Select(path => path.GetString()).ToArray());
-        }
-
-        var documents = resultCase.GetProperty("documents");
-        Assert.Equal(sceneCase.Documents.Count, documents.GetArrayLength());
-        for (var index = 0; index < sceneCase.Documents.Count; index++)
-        {
-            var expected = sceneCase.Documents[index];
-            var actual = documents[index];
-            Assert.Equal(2, actual.EnumerateObject().Count());
-            Assert.Equal(expected.Path, actual.GetProperty("path").GetString());
-            Assert.Equal(expected.Synthetic, actual.GetProperty("synthetic").GetBoolean());
-        }
+        Assert.True(resultCase.GetProperty("synthetic").GetBoolean());
+        Assert.Equal("2026-10-01", root.GetProperty("scenarioDate").GetString());
+        Assert.False(root.GetProperty("canResetBlockedVariant").GetBoolean());
+        Assert.Empty(root.GetProperty("allowedActions").EnumerateArray());
+        Assert.Equal(4, root.GetProperty("objects").GetArrayLength());
+        Assert.Equal(0, root.GetProperty("history").GetArrayLength());
     }
 
     [Fact]
@@ -513,7 +504,7 @@ public sealed class CasePackRequestLimiterTests
             var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-            Assert.Equal(string.Empty, body);
+            Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"not_found\",\"message\":\"Not found.\"}}", body);
         }
     }
 

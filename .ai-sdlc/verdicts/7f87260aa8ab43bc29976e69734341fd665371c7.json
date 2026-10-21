@@ -1,0 +1,281 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 455,
+  "branch": "ai-sdlc/issue-455",
+  "commitSha": "7f87260aa8ab43bc29976e69734341fd665371c7",
+  "round": 0,
+  "pipelineVersion": "18314a8",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint and projection changes broadly implement the requested scene behavior, but the diff omits all three tests explicitly required by the acceptance criteria. That leaves the required error, access-control, and reset-permission behavior without criterion-mapped regression coverage.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 58,
+          "message": "The change does not include the criterion-mapped tests `CasePackEndpointsTests.AC013_SceneHidesUnknownAndOutOfScopeCases`, `CasePackEndpointsTests.AC011_SceneRejectsUnsupportedVersionMethodAndStoreFailure`, or `CasePackEndpointsTests.AC024_SceneResetPermissionMatchesRoleScopeAndVariantTable`. Each behavior criterion requires a test in this change.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The route and projection implement the scene behavior, but the diff changes only CasePackRequestLimiterTests.cs and contains none of the three tests named by AC-013, AC-011, and AC-024.",
+            "failureScenario": "If unknown and out-of-scope cases stop returning identical 404 envelopes, version and method errors expose scene data, or reset permission is granted for the wrong variant, the required named tests are absent from this change to catch those regressions."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint and projection implement the requested scene behavior, but the three acceptance criteria that require dedicated tests are not covered by the changed tests. The named AC013, AC011, and AC024 tests are absent, leaving the specified security, error, and reset-permission cases unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 87,
+          "message": "AC-009 / AC-013 / M-02 / M-06 lack the required CasePackEndpointsTests.AC013_SceneHidesUnknownAndOutOfScopeCases test. Existing scene tests cover only a basic in-scope read and two simple unknown/out-of-scope values, not the specified input table, unauthenticated read, counting store, and no-state-change assertions.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "GetScene authenticates, checks session scope, reads the published snapshot and case store, then builds the response.",
+            "failureScenario": "If an unknown or out-of-scope identifier such as a quote-containing, slash-containing, or path-like value reaches a different lookup path, the current tests do not assert the required identical 404 envelope or zero case-store changes; the named AC013 test is absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 64,
+          "message": "AC-011 / NFR-007 / M-15 lack the required CasePackEndpointsTests.AC011_SceneRejectsUnsupportedVersionMethodAndStoreFailure test. The changed tests do not verify the v2 response, non-GET response, or exact generic 500 envelope and unchanged state on a scene-store failure.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The endpoint maps explicit non-GET methods and GetScene handles unsupported versions and exceptions from limiter, stores, history, or projection.",
+            "failureScenario": "If a store exception leaks details or an unsupported-version request includes scene data, no changed test exercises those paths; the required AC011 test is absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Projection/CasePackSceneProjection.cs",
+          "line": 225,
+          "message": "AC-024 lacks the required CasePackEndpointsTests.AC024_SceneResetPermissionMatchesRoleScopeAndVariantTable test. No changed test verifies reset permission across the specified role, scope, case, and variant combinations.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "BuildState derives activeBlockedVariant from the last package returned for the case, then uses it with role and case ID to set canReset and allowedActions.",
+            "failureScenario": "If the active package is blocked but another role or case receives reset permission, or a presenter viewing a non-blocked variant receives it, the changed tests would still pass; the required AC024 table test is absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff does not show a concrete exploitable security vulnerability. The acceptance criteria’s required endpoint tests are missing, so key authorization, error-handling, and reset-permission regressions could pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 58,
+          "message": "Major test gap: the required endpoint tests for AC-009/AC-013, AC-011, and AC-024 are absent from this change, leaving the authorization, error, and reset-permission behavior unverified.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new scene endpoint handles authentication, version checks, case scope, projection failures, and HTTP errors. The diff updates only the two CasePackRequestLimiterTests and adds none of the named CasePackEndpointsTests.",
+            "failureScenario": "A regression that returns scene data for an out-of-scope case, leaks an exception detail, or accepts a non-GET request could pass the changed tests. AC-009/AC-013, AC-011, and AC-024 therefore lack their specified tests: AC013_SceneHidesUnknownAndOutOfScopeCases, AC011_SceneRejectsUnsupportedVersionMethodAndStoreFailure, and AC024_SceneResetPermissionMatchesRoleScopeAndVariantTable."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 37,
+      "total": 57,
+      "percent": 64.9,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 31,
+          "total": 51,
+          "missed": [
+            66,
+            67,
+            68,
+            86,
+            89,
+            91,
+            105,
+            109,
+            113,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            129,
+            130,
+            131,
+            132
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Projection/CasePackSceneProjection.cs",
+          "covered": 4,
+          "total": 4,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
