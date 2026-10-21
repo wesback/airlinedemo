@@ -1,0 +1,270 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 444,
+  "branch": "ai-sdlc/issue-444",
+  "commitSha": "4243313f4aea7345ecdc5707716dd67394df250e",
+  "round": 1,
+  "pipelineVersion": "18314a8",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changes address the prior quota, missing-token, replay-case, and audit provenance findings. The M-03 ordering test still does not prove the required ordering across all stages.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 928,
+          "message": "M-03’s required authorization-order test remains incomplete. Make it table-driven and verify each rejected stage prevents calls to every later check, including variant, replay, and revision.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder tests role, scope, and anti-forgery rejections, but is not table-driven and does not exercise the supported-target, replay, or revision stages. Its counters observe store reads and writes, not calls to those later checks.",
+            "failureScenario": "If variant validation moves after replay lookup, the current tests still pass because they never verify that an unsupported variant causes zero replay checks. Similar ordering changes involving revision checks would go undetected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover the missing anti-forgery cases, unsupported cases, actor conflict, and quota exhaustion. The required authorization-order proof and exact server-derived audit time remain unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 942,
+          "message": "M-03's required ordering test remains incomplete. Add table-driven cases asserting that each rejected stage makes zero calls to every later check, including variant, replay, and revision.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder checks role, scope, and anti-forgery rejection, but is not table-driven and does not exercise variant, replay, or revision ordering. Its store counters do not assert calls to each later check.",
+            "failureScenario": "If replay lookup moves before variant validation, or revision checking moves before replay lookup, this test still passes without detecting the order violation."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 788,
+          "message": "AC-014's audit provenance check still does not prove the server derives the time. Inject a fixed clock and assert the exact recorded timestamp.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC014_ResetEndpointRequiresPresenterAndCommits checks the audit timestamp only with Assert.NotEqual(default, audit.At); it does not set or assert an expected server time.",
+            "failureScenario": "If the reset records an arbitrary non-default timestamp instead of the server-provided time, the test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests address the quota, missing anti-forgery token, Case A/B, and cross-actor replay gaps. The required authorization-order coverage remains incomplete, and the audit timestamp assertion does not establish server-derived time.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 928,
+          "message": "M-03 remains unproven: the test is not table-driven and does not verify zero calls to later checks at every rejected stage, including variant, replay, and revision.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "M03_ResetAuthorizationChecksRunInRequiredOrder covers role, scope, and anti-forgery rejection, but does not exercise the supported-case/variant, replay, or revision checks. Its assertions also do not prove that each rejected stage skips all later checks.",
+            "failureScenario": "If replay lookup runs before anti-forgery validation, or revision checking runs before variant validation, this test can still pass because it has no cases or counters for those stages."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs",
+          "line": 798,
+          "message": "AC-014's provenance test still does not verify that the audit time is derived by the server, or that caller-supplied provenance fields are ignored.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC014_ResetEndpointRequiresPresenterAndCommits checks the stored actor and reason, but only asserts that the audit timestamp is non-default; its request does not include caller-supplied actor, time, or reason values.",
+            "failureScenario": "If reset handling records a caller-provided timestamp instead of the server time, the test can still pass as long as that timestamp is non-default."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackEndpointsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 45,
+      "total": 60,
+      "percent": 75,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 45,
+          "total": 60,
+          "missed": [
+            104,
+            105,
+            106,
+            110,
+            120,
+            130,
+            131,
+            132,
+            137,
+            139,
+            141,
+            143,
+            160,
+            161,
+            162
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
