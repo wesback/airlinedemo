@@ -1,0 +1,258 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 456,
+  "branch": "ai-sdlc/issue-456",
+  "commitSha": "6232cc2d60e9c8c4e9a4740604cd821c3e361c85",
+  "round": 0,
+  "pipelineVersion": "d1f69f2",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The rolling-window store and direct limiter tests are present, but no case-list or scene route invokes the limiter. As a result, the acceptance criterion for limiting endpoint reads and returning 429 is not met.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 33,
+          "message": "The limiter is registered but never applied to the case-list or scene endpoints. The routes therefore do not enforce the quota or return the required 429 response; the tests exercise the limiter directly and do not cover endpoint behavior.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Program.cs registers CasePackRequestLimiter, but the case-list and scene routes do not call it; the only endpoint-key references are in the limiter and its tests.",
+            "failureScenario": "An authenticated user makes more than 30 case-list or scene requests within 60 seconds. The route continues to its normal handler, so the request is not denied with HTTP 429 and can return case data."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover the limiter's in-memory count and concurrency behavior, but do not establish that case-list and scene requests use it or produce the required 429 response.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs",
+          "line": 66,
+          "message": "AC-029's route-level behavior is not implemented or tested: the limiter is only registered and exercised directly, so requests to the case-list and scene endpoints are not shown to be limited or to return 429 without case data.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC029_ReadLimitsUsePerUserEndpointRollingWindows calls CasePackRequestLimiter directly and asserts only a boolean; the diff registers the limiter but does not connect it to case-list or scene routes.",
+            "failureScenario": "After 30 active attempts, a client calls a case-list or scene route. Because the route does not invoke the limiter, it can still return case data instead of HTTP 429 with error.code rate_limit_exceeded. The named test passes without detecting this."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The limiter store and direct limiter tests are added, but no case-list or scene route uses the limiter, so the required request limit and 429 response are not enforced.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 33,
+          "message": "The shared limiter is registered but not enforced by the read endpoints, leaving the required quota bypassable (OWASP A06:2025).",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Program registers CasePackRequestLimiter, but the diff does not call it from any case-list or scene read endpoint. The added tests call the limiter directly and do not exercise HTTP routes.",
+            "failureScenario": "An authenticated user sends 31 requests to a case-list or scene read endpoint within 60 seconds. The endpoint never checks or records the quota, so it can return case data instead of HTTP 429 with error.code rate_limit_exceeded."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackRequestLimiterTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 105,
+      "total": 120,
+      "percent": 87.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/CasePackRequestLimiter.cs",
+          "covered": 72,
+          "total": 86,
+          "missed": [
+            42,
+            63,
+            64,
+            65,
+            66,
+            67,
+            144,
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/CaseStateDbContext.cs",
+          "covered": 10,
+          "total": 10,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Persistence/Migrations/20261020010000_CasePackRequestWindows.cs",
+          "covered": 22,
+          "total": 23,
+          "missed": [
+            35
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
