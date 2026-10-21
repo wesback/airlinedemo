@@ -119,6 +119,7 @@ app.MapEvidenceEndpoints();
 app.MapAssessmentEndpoints();
 app.MapMockResponseEndpoints();
 app.MapFinanceEndpoints();
+app.MapCaseHistoryEndpoints();
 app.MapDemoRunReset();
 app.MapSourceModeEndpoints();
 app.MapSourceReadEndpoints();
