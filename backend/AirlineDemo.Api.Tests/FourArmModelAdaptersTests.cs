@@ -87,8 +87,8 @@ public sealed class FourArmModelAdaptersTests
         Assert.Equal(FourArmModelAdapters.MaximumModelCalls, client.Calls - modelCallsBefore);
         client.ReplyFactory = null;
 
-        var timed = Setup(options => new InvestigationLimits(options with { Timeout = TimeSpan.FromMilliseconds(50) }));
-        timed.Client.ResponseDelay = TimeSpan.FromMilliseconds(250);
+        var timed = Setup(options => new InvestigationLimits(options with { Timeout = TimeSpan.FromMilliseconds(150) }));
+        timed.Client.ResponseDelay = TimeSpan.FromMilliseconds(600);
         var durationLimit = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() => timed.Adapter.ExecuteAsync(EvaluationArm.B, input, manifest));
         Assert.Equal(InvestigationBreach.Time, durationLimit.Breach);
         Assert.Equal(1, timed.Client.Calls);

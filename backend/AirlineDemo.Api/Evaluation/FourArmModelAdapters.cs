@@ -99,9 +99,9 @@ public sealed class FourArmModelAdapters
         {
             response = await agent.RunAsync(Packet(basis), cancellationToken: linked.Token);
         }
-        catch (Exception) when (limits.Breach is not null)
+        catch (Exception) when (limits.Breach is not null || limits.ExecutionToken.IsCancellationRequested)
         {
-            throw new InvestigationLimitExceededException(limits.Breach.Value);
+            throw new InvestigationLimitExceededException(limits.Breach ?? InvestigationBreach.Time);
         }
         if (limits.Breach is { } breach) throw new InvestigationLimitExceededException(breach);
         var answer = response.Text ?? throw new EvaluationAdapterOutputException("model returned no text");
