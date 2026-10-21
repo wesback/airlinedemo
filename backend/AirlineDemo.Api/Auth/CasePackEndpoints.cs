@@ -113,6 +113,7 @@ public static class CasePackEndpoints
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
             return Error(StatusCodes.Status503ServiceUnavailable, "rate_limit_unavailable", "rate_limit_unavailable");
         }
 
@@ -123,7 +124,7 @@ public static class CasePackEndpoints
 
         if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal)
             || caseStates.OwnerOf(caseId) is not { } owner)
-            return SceneNotFound();
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return SceneNotFound(); }
 
         CaseScope scope;
         try { scope = caseStates.AuthorizeCase(caseId, owner); }
@@ -204,6 +205,7 @@ public static class CasePackEndpoints
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body?.CommandId);
             return Error(StatusCodes.Status500InternalServerError,
                 "internal_error", "The request could not be completed.");
         }
