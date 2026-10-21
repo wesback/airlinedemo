@@ -1,7 +1,14 @@
 using AirlineDemo.Api.Admission;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Persistence;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.Net;
+using System.Text.Json;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -14,6 +21,18 @@ public sealed class CasePackRequestLimiterTests
         public DateTimeOffset Current { get; set; } = Now;
         public override DateTimeOffset GetUtcNow() => Current;
     }
+
+    private static WebApplicationFactory<Program> ReadFactory(
+        InMemoryCasePackRequestWindowStore store,
+        AdjustableTime time) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(time);
+                services.RemoveAll<ICasePackRequestWindowStore>();
+                services.AddSingleton<ICasePackRequestWindowStore>(store);
+            }));
 
     private sealed class RacingStore : ICasePackRequestWindowStore
     {
@@ -113,6 +132,36 @@ public sealed class CasePackRequestLimiterTests
 
         Assert.False(await racingLimiter.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.CaseListEndpoint));
         Assert.Equal(CasePackRequestLimiter.MaxRequests, racingStore.Count);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/cases", "case-list")]
+    [InlineData("/api/v1/cases/cp-case-a/scene", "scene")]
+    public async Task AC029_ReadRoutesReturn429WithoutCaseDataWhenWindowIsFull(string path, string endpoint)
+    {
+        var time = new AdjustableTime();
+        var store = new InMemoryCasePackRequestWindowStore();
+        for (var attempt = 0; attempt < CasePackRequestLimiter.MaxRequests; attempt++)
+            Assert.True(await store.TryRecordAttemptAsync("user-a", endpoint, Now, CancellationToken.None));
+
+        using var factory = ReadFactory(store, time);
+        using var client = factory.CreateClient();
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var session = sessions.Create(new DemoUser("user-a", "Reader", "presenter", ["cp-case-a"]));
+        client.DefaultRequestHeaders.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+
+        using var response = await client.GetAsync(path, TestContext.Current.CancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        using var json = JsonDocument.Parse(responseBody);
+        var root = json.RootElement;
+        Assert.Equal(2, root.EnumerateObject().Count());
+        Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
+        var error = root.GetProperty("error");
+        Assert.Equal(2, error.EnumerateObject().Count());
+        Assert.Equal("rate_limit_exceeded", error.GetProperty("code").GetString());
+        Assert.Equal("rate_limit_exceeded", error.GetProperty("message").GetString());
     }
 
     [Fact]
