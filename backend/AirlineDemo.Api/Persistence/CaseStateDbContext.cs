@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using AirlineDemo.Api.SourceSystems;
+using AirlineDemo.Api.Admission;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -156,6 +157,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CaseJourneyEventRow> CaseJourneyEvents => Set<CaseJourneyEventRow>();
     public DbSet<CasePackResetReceiptRow> CasePackResetReceipts => Set<CasePackResetReceiptRow>();
     public DbSet<SourceReadWindowRow> SourceReadWindows => Set<SourceReadWindowRow>();
+    public DbSet<CasePackRequestWindowRow> CasePackRequestWindows => Set<CasePackRequestWindowRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -167,6 +169,16 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.SessionHash).HasMaxLength(32).IsFixedLength();
             e.HasIndex(x => new { x.CaseHash, x.SessionHash, x.RequestedAtTicks }).HasDatabaseName("IX_source_read_windows_session_window");
             e.HasIndex(x => new { x.CaseHash, x.ReleasedAtTicks, x.ExpiresAtTicks }).HasDatabaseName("IX_source_read_windows_case_lease");
+        });
+
+        modelBuilder.Entity<CasePackRequestWindowRow>(e =>
+        {
+            e.ToTable("case_pack_request_windows", "dbo");
+            e.HasKey(x => x.AttemptId);
+            e.Property(x => x.UserHash).HasMaxLength(32).IsFixedLength();
+            e.Property(x => x.Endpoint).HasMaxLength(32).IsRequired();
+            e.HasIndex(x => new { x.UserHash, x.Endpoint, x.RequestedAtTicks })
+                .HasDatabaseName("IX_case_pack_request_windows_user_endpoint_window");
         });
 
         modelBuilder.Entity<InvestigationTraceRow>(e =>
