@@ -112,14 +112,7 @@ app.UseTransportSecurityHeaders();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();
 app.MapCaseEndpoints();
-app.MapGet("/api/v{version:int}/cases", (
-    int version,
-    HttpContext http,
-    DemoSessionStore sessions,
-    CasePackRequestLimiter limiter,
-    IAircraftCasePackSnapshotStore snapshots,
-    CancellationToken cancellationToken) =>
-    Program.ReadCasePackCasesAsync(version, http, sessions, limiter, snapshots, cancellationToken));
+app.MapCasePackEndpoints();
 app.MapGet("/api/v{version:int}/cases/{caseId}/scene", (
     int version,
     string caseId,
@@ -148,34 +141,6 @@ app.Run();
 
 public partial class Program
 {
-    internal static async Task<IResult> ReadCasePackCasesAsync(
-        int version,
-        HttpContext http,
-        DemoSessionStore sessions,
-        CasePackRequestLimiter limiter,
-        IAircraftCasePackSnapshotStore snapshots,
-        CancellationToken cancellationToken)
-    {
-        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
-        if (session is null) return CasePackReadError(StatusCodes.Status401Unauthorized, "unauthenticated");
-        if (version != 1) return CasePackReadError(StatusCodes.Status400BadRequest, "unsupported_contract_version");
-        if (!await limiter.TryRecordAttemptAsync(session.User.Id, CasePackRequestLimiter.CaseListEndpoint, cancellationToken))
-            return CasePackReadError(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded");
-
-        var snapshot = snapshots.Read();
-        if (snapshot is null) return CasePackReadError(StatusCodes.Status503ServiceUnavailable, "case_pack_unavailable");
-        var visibleCases = snapshot.Cases
-            .Where(item => session.User.CaseScopes.Contains(item.CaseId, StringComparer.Ordinal))
-            .Select(item => new
-            {
-                caseId = item.CaseId,
-                synthetic = item.Synthetic,
-                aircraftCount = item.AircraftCount,
-                engineCount = item.EngineCount,
-            });
-        return Results.Ok(new { contractVersion = 1, packVersion = snapshot.PackVersion, cases = visibleCases });
-    }
-
     internal static async Task<IResult> ReadCasePackSceneAsync(
         int version,
         string caseId,
