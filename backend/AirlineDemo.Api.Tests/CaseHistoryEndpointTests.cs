@@ -110,6 +110,13 @@ public sealed class CaseHistoryEndpointTests : IDisposable
         Assert.Equal(1, olderWitness.GetProperty("page").GetInt32());
         Assert.Equal("basis-older", olderWitness.GetProperty("basisId").GetString());
         Assert.Equal(1, olderWitness.GetProperty("basisVersion").GetInt32());
+        var secondOlderWitness = olderEvents[1].GetProperty("witnesses")[0];
+        Assert.Equal("witness-older-2", secondOlderWitness.GetProperty("witnessId").GetString());
+        Assert.Equal("document-001", secondOlderWitness.GetProperty("documentId").GetString());
+        Assert.Equal(1, secondOlderWitness.GetProperty("documentVersion").GetInt32());
+        Assert.Equal(2, secondOlderWitness.GetProperty("page").GetInt32());
+        Assert.Equal("basis-older", secondOlderWitness.GetProperty("basisId").GetString());
+        Assert.Equal(1, secondOlderWitness.GetProperty("basisVersion").GetInt32());
 
         using var current = await GetHistoryAsync(client, "/api/cases/case-001/history", reviewer);
         Assert.Equal(HttpStatusCode.OK, current.StatusCode);
