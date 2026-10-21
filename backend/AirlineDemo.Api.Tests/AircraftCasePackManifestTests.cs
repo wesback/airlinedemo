@@ -63,7 +63,7 @@ public sealed class AircraftCasePackManifestTests
     }
 
     [Fact]
-    public void AC001_PackManifestUsesArrFixtureDateAndValidContentHash()
+    public void ProductionFixtureHasSupportedIdentityVersionAndHash()
     {
         var root = FixtureRoot();
         var manifestPath = Path.Combine(root, "manifest.json");
@@ -78,9 +78,20 @@ public sealed class AircraftCasePackManifestTests
 
         Assert.Empty(result.Errors);
         Assert.NotNull(result.Manifest);
-        Assert.Equal("1.0.2", result.Manifest.PackVersion);
-        Assert.Equal("2026-10-01", result.Manifest.ScenarioDate);
-        Assert.Equal("issue-473", result.Manifest.ProductOwnerReviewReference);
+        var manifest = result.Manifest!;
+        Assert.Equal("1.0.2", manifest.PackVersion);
+        Assert.Equal(manifest.Sha256, AircraftCasePackManifest.ComputeSha256(manifest, files));
+        Assert.Equal("2026-10-01", manifest.ScenarioDate);
+        Assert.Equal("issue-473", manifest.ProductOwnerReviewReference);
+
+        var unsupportedVersion = manifest with { PackVersion = "1.0.1", Sha256 = "" };
+        unsupportedVersion = unsupportedVersion with
+        {
+            Sha256 = AircraftCasePackManifest.ComputeSha256(unsupportedVersion, files)
+        };
+        Assert.Equal(
+            ["packVersion: fictional identity labels require version 1.0.2 or later"],
+            AircraftCasePackManifest.Validate(unsupportedVersion, files));
     }
 
     [Fact]
