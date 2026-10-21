@@ -1,0 +1,287 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 442,
+  "branch": "ai-sdlc/issue-442",
+  "commitSha": "e1bfeb4ab9a46dcc9489efe91710ebe1d493d5e7",
+  "round": 0,
+  "pipelineVersion": "d0f2752",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The projection includes case-binding checks, but the AC-009 test does not exercise the foreign-case journey-event case required by the acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackSceneProjectionTests.cs",
+          "line": 31,
+          "message": "AC-009's named test does not cover its cross-case journey-event negative case, so it would not catch removal of that case-binding check.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC009_ProjectionKeepsOneCaseAndRevision tests a foreign-case assessment, which is rejected by the assessment check. It does not supply a foreign-case journey event.",
+            "failureScenario": "If the projection stops rejecting journey events whose CaseId differs from the requested case, the AC-009 test still passes because its cross-case input is an assessment. The required foreign-event case is not covered."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The projection has a specific case-isolation check for journey events, but AC-009's test only exercises a foreign-case assessment. That leaves the required event and witness isolation behavior untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackSceneProjectionTests.cs",
+          "line": 30,
+          "message": "AC-009's named test does not exercise the specified foreign-case event and witness failure case. Add a case that supplies a foreign-case JourneyEvent with a witness and asserts the projection returns no scene.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC009_ProjectionKeepsOneCaseAndRevision constructs its cross-case input by replacing only Assessments. The projection separately checks JourneyEvents for a mismatched CaseId.",
+            "failureScenario": "If the JourneyEvents case-isolation check is removed, the named test still passes because its cross-case input contains no foreign-case event, object mapping, document reference, or witness. A foreign-case event could then reach the scene without this test detecting the AC-009 violation."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The projection uses one store read and includes the requested object counts. AC-009's test does not verify several explicitly required cross-case rejection paths.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackSceneProjectionTests.cs",
+          "line": 31,
+          "message": "AC-009's named test does not cover the required foreign-case event, document reference, or witness cases. Add negative cases that exercise those projection paths and assert that no scene is emitted.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC009_ProjectionKeepsOneCaseAndRevision supplies a cross-case assessment, while the projection's cross-case guards separately inspect journey events, published documents, component mappings, and witnesses.",
+            "failureScenario": "If a regression allows a foreign-case witness or journey event into the scene, this test still passes because it never supplies either input; the criterion's required negative cases remain unverified."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackSceneProjectionTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 214,
+      "total": 276,
+      "percent": 77.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Projection/CasePackSceneProjection.cs",
+          "covered": 214,
+          "total": 276,
+          "missed": [
+            14,
+            23,
+            24,
+            45,
+            47,
+            49,
+            51,
+            53,
+            55,
+            57,
+            59,
+            69,
+            74,
+            85,
+            97,
+            100,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            159,
+            167,
+            168,
+            169,
+            172,
+            206,
+            236,
+            240,
+            241,
+            242,
+            243,
+            244,
+            245,
+            246,
+            247,
+            248,
+            249,
+            281,
+            283,
+            302,
+            303,
+            304,
+            310,
+            311,
+            312,
+            324,
+            325,
+            330,
+            331,
+            332,
+            333
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
