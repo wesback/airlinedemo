@@ -337,7 +337,7 @@ public sealed class AircraftCasePackPublicationTests
             var evidence = new RecordingEvidenceStore();
             var caseStager = new FailingCaseStager();
             var referenceStager = new FailingDocumentReferenceStager();
-            var changed = CreateChangedFixture(fixture, "1.0.2");
+            var changed = CreateChangedFixture(fixture, "1.0.3");
             var statePath = Path.Combine(Path.GetTempPath(), $"aircraft-pack-state-{Guid.NewGuid():N}.json");
             var unrelatedStore = new CaseStateStore(statePath);
             var unrelatedScope = unrelatedStore.CreateCase("unrelated-case", "presenter");
@@ -382,7 +382,7 @@ public sealed class AircraftCasePackPublicationTests
                 Assert.Same(expectedState.Pack, afterAttempt.Pack);
                 Assert.Same(visible, publication.Read());
                 Assert.Equal(failure == "revision" ? 2 : 1, visible!.Revision);
-                Assert.Equal("1.0.1", visible.PackVersion);
+                Assert.Equal("1.0.2", visible.PackVersion);
                 Assert.Equal(prior.Cases.Count, visible.Cases.Count);
                 for (var i = 0; i < prior.Cases.Count; i++)
                 {
@@ -495,7 +495,7 @@ public sealed class AircraftCasePackPublicationTests
         Assert.Equal(initialReferenceStages, referenceStager.Calls);
         Assert.Equal(1, publication.Commits);
 
-        var sameVersionChanged = CreateChangedFixture(fixture, "1.0.1");
+        var sameVersionChanged = CreateChangedFixture(fixture, "1.0.2");
         try
         {
             var conflict = await Assert.ThrowsAsync<AircraftCasePackValidationException>(() =>
@@ -513,13 +513,13 @@ public sealed class AircraftCasePackPublicationTests
             Directory.Delete(sameVersionChanged.Root, recursive: true);
         }
 
-        var newVersionChanged = CreateChangedFixture(fixture, "1.0.2");
+        var newVersionChanged = CreateChangedFixture(fixture, "1.0.3");
         try
         {
             var updated = await publisher.PublishAsync(new AircraftCasePackLoader(newVersionChanged.Root), 1);
             Assert.NotSame(initial, updated);
             Assert.Equal(2, updated.Revision);
-            Assert.Equal("1.0.2", updated.PackVersion);
+            Assert.Equal("1.0.3", updated.PackVersion);
             Assert.Equal(newVersionChanged.Manifest.Sha256, updated.Sha256);
             Assert.Equal(3, updated.Cases.Count);
             Assert.Equal(24, updated.Cases.Sum(item => item.DocumentReferences.Count));
