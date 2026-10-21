@@ -251,8 +251,10 @@ public sealed class CasePackResetRequestRateLimitMiddleware(RequestDelegate next
     private static bool TryGetResetRunId(HttpRequest request, out string runId)
     {
         var segments = request.Path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (segments is { Length: 4 } && segments[0] == "api"
-            && segments[1] == "runs" && segments[3] == "reset")
+        if (segments is { Length: 4 }
+            && string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[1], "runs", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[3], "reset", StringComparison.OrdinalIgnoreCase))
         {
             runId = segments[2];
             return true;

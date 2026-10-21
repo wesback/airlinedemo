@@ -133,20 +133,22 @@ public sealed class CasePackRequestLimiterTests
     }
 
     [Theory]
-    [InlineData(2, 59, "accepted", 200, 2)]
-    [InlineData(2, 30, "accepted", 200, 2)]
-    [InlineData(3, 59, "accepted", 200, 3)]
-    [InlineData(4, 59, "accepted", 429, 3)]
-    [InlineData(3, 60, "accepted", 200, 1)]
-    [InlineData(3, 59, "denied-role", 403, 3)]
-    [InlineData(3, 59, "invalid", 400, 3)]
-    [InlineData(3, 59, "replayed", 409, 3)]
+    [InlineData(2, 59, "accepted", 200, 2, "/api/runs/run-a/reset")]
+    [InlineData(2, 30, "accepted", 200, 2, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "accepted", 200, 3, "/api/runs/run-a/reset")]
+    [InlineData(4, 59, "accepted", 429, 3, "/api/runs/run-a/reset")]
+    [InlineData(4, 59, "accepted", 429, 3, "/API/RUNS/run-a/ReSeT")]
+    [InlineData(3, 60, "accepted", 200, 1, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "denied-role", 403, 3, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "invalid", 400, 3, "/api/runs/run-a/reset")]
+    [InlineData(3, 59, "replayed", 409, 3, "/api/runs/run-a/reset")]
     public async Task AC030_ResetAttemptsCountEveryAuthenticatedOutcome(
         int totalAttempts,
         int oldestAgeSeconds,
         string outcome,
         int expectedStatus,
-        int expectedActiveResetAttempts)
+        int expectedActiveResetAttempts,
+        string resetPath)
     {
         var directory = Path.Combine(Path.GetTempPath(), "case-pack-reset-http-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -184,7 +186,7 @@ public sealed class CasePackRequestLimiterTests
                 _ => new { newRunId = "run-new", fixtureId = "fixture", applicationVersion = "1.0.0" },
             };
             using var response = await client.PostAsJsonAsync(
-                "/api/runs/run-a/reset", body, TestContext.Current.CancellationToken);
+                resetPath, body, TestContext.Current.CancellationToken);
             var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             Assert.Equal((HttpStatusCode)expectedStatus, response.StatusCode);
