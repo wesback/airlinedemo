@@ -131,7 +131,10 @@ public static class CasePackEndpoints
         catch (CaseAccessDeniedException) { return SceneNotFound(); }
 
         if (!DemoAuthEndpoints.HasValidAntiForgery(http, session))
+        {
+            CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
             return Error(StatusCodes.Status400BadRequest, "anti_forgery_failed", "Anti-forgery validation failed.");
+        }
 
         CasePackResetBlockedVariantRequest? body;
         try

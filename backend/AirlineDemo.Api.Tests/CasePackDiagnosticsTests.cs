@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Runs;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
@@ -25,7 +28,7 @@ public sealed class CasePackDiagnosticsTests
     }
 
     [Fact]
-    public void AC022_OperationAndOutcomeTableEmitsOnlyApprovedFields()
+    public async Task AC022_OperationAndOutcomeTableEmitsOnlyApprovedFields()
     {
         var logger = new CaptureLogger();
         var expectedEvents = new[] { "pack_load", "case_list", "scene_projection", "reset" };
@@ -68,10 +71,40 @@ public sealed class CasePackDiagnosticsTests
         Assert.DoesNotContain("caseId", withoutIdentifiers.Keys);
         Assert.DoesNotContain("commandId", withoutIdentifiers.Keys);
         Assert.DoesNotContain("packVersion", withoutIdentifiers.Keys);
+
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Demo:Passcode"] = "operation-path-passcode",
+                ["Persistence:EvidenceProvider"] = "Memory",
+            })).ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CaptureLoggerProvider(logger))));
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        var operationStore = factory.Services.GetRequiredService<ICaseStateStore>();
+        if (operationStore.OwnerOf("cp-case-c") is null)
+            operationStore.CreateCase("cp-case-c", "operation-owner");
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var presenter = sessions.Create(new DemoUser("operation-presenter", "Operation Presenter", "presenter", ["cp-case-c"]));
+        using var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/cases");
+        listRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+        using var listResponse = await client.SendAsync(listRequest, ct);
+        using var sceneRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/cases/cp-case-c/scene");
+        sceneRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+        using var sceneResponse = await client.SendAsync(sceneRequest, ct);
+        using var deniedResetRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant");
+        deniedResetRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+        deniedResetRequest.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, presenter.CsrfToken);
+        deniedResetRequest.Content = JsonContent.Create(new { contractVersion = 2, commandId = "operation-reset-1", expectedRevision = 0L, variant = "blocked" });
+        using var deniedReset = await client.SendAsync(deniedResetRequest, ct);
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        Assert.Contains(logger.Events, fields => fields.TryGetValue("eventType", out var value) && Equals(value, "scene_projection"));
+        Assert.Equal(HttpStatusCode.BadRequest, deniedReset.StatusCode);
+        Assert.Contains(logger.Events, fields => fields.TryGetValue("eventType", out var value) && Equals(value, "case_list"));
+        Assert.Contains(logger.Events, fields => fields.TryGetValue("eventType", out var value) && Equals(value, "reset") && fields.TryGetValue("outcome", out var outcome) && Equals(outcome, "invalid"));
     }
 
     [Fact]
-    public void AC022_SecretAndContentCanariesNeverReachDiagnostics()
+    public async Task AC022_SecretAndContentCanariesNeverReachDiagnostics()
     {
         var propertyNames = new[] { "documentText", "prompt", "response", "cookie", "passcode", "token", "authorization", "connectionString", "credential", "auditDetail" };
         var canaries = propertyNames.Select((name, index) => $"{name}-canary-{index}").ToArray();
@@ -86,6 +119,36 @@ public sealed class CasePackDiagnosticsTests
             Assert.DoesNotContain(propertyName, fields.Keys, StringComparer.OrdinalIgnoreCase);
         }
         Assert.Empty(TelemetryRedaction.Redact(injected));
+
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Demo:Passcode"] = "canary-passcode",
+                ["Persistence:EvidenceProvider"] = "Memory",
+            })).ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CaptureLoggerProvider(logger))));
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        var caseStore = factory.Services.GetRequiredService<ICaseStateStore>();
+        if (caseStore.OwnerOf("cp-case-c") is null)
+            caseStore.CreateCase("cp-case-c", "canary-owner");
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var presenter = sessions.Create(new DemoUser("canary-presenter", "Canary Presenter", "presenter", ["cp-case-c"]));
+        using var resetRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant");
+        resetRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+        resetRequest.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, presenter.CsrfToken);
+        resetRequest.Content = JsonContent.Create(new Dictionary<string, object?>
+        {
+            ["contractVersion"] = 1,
+            ["commandId"] = "canary-command-1",
+            ["expectedRevision"] = 0L,
+            ["variant"] = "blocked",
+            ["documentText"] = canaries[0], ["prompt"] = canaries[1], ["response"] = canaries[2],
+            ["cookie"] = canaries[3], ["passcode"] = canaries[4], ["token"] = canaries[5],
+            ["authorization"] = canaries[6], ["connectionString"] = canaries[7],
+            ["credential"] = canaries[8], ["auditDetail"] = canaries[9],
+        });
+        using var resetResponse = await client.SendAsync(resetRequest, ct);
+        Assert.Equal(HttpStatusCode.BadRequest, resetResponse.StatusCode);
 
         var activityTags = new List<KeyValuePair<string, string?>>();
         using var listener = new ActivityListener
@@ -142,6 +205,21 @@ public sealed class CasePackDiagnosticsTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var auditCountAfter = caseStore.ReadAudit(auditScope).Count;
         Assert.Equal(auditCountBefore, auditCountAfter);
+
+        var resetScope = caseStore.AuthorizeCase("cp-case-c", "nfr006-owner");
+        var resetBeforeReplay = caseStore.ReadAudit(resetScope).Count;
+        var replayCommandId = "nfr006-replay-" + Guid.NewGuid().ToString("N");
+        var resetResult = caseStore.CommitBlockedVariantReset(resetScope, caseStore.Read(resetScope).Revision, "nfr006-owner", replayCommandId, "blocked");
+        var auditCountAfterAcceptedReset = caseStore.ReadAudit(resetScope).Count;
+        Assert.Equal(resetBeforeReplay + 1, auditCountAfterAcceptedReset);
+        var replayResult = caseStore.CommitBlockedVariantReset(resetScope, resetResult.Receipt.PriorRevision, "nfr006-owner", replayCommandId, "blocked");
+        Assert.True(replayResult.Replayed);
+        Assert.Equal(auditCountAfterAcceptedReset, caseStore.ReadAudit(resetScope).Count);
+
+        var rejectedCountBefore = caseStore.ReadAudit(resetScope).Count;
+        Assert.Throws<ArgumentException>(() => caseStore.CommitBlockedVariantReset(resetScope, caseStore.Read(resetScope).Revision, "nfr006-owner", "nfr006-rejected-command", "unsupported"));
+        Assert.Equal(rejectedCountBefore, caseStore.ReadAudit(resetScope).Count);
+
         Assert.DoesNotContain(logger.Events.SelectMany(e => e.Keys), key => key.Equals("auditDetail", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(logger.Events.SelectMany(e => e.Values).OfType<string>(), value => value.Contains("canary", StringComparison.OrdinalIgnoreCase));
     }
