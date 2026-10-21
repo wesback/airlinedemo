@@ -29,11 +29,34 @@ public sealed class CasePackSceneProjectionTests
         Assert.All(scene.Objects, item => Assert.Equal(CaseId, item.CaseId));
         Assert.All(scene.History, item => Assert.False(string.IsNullOrWhiteSpace(item.RunId)));
 
-        var crossCase = State(CaseId, 7) with
+        var crossCaseAssessment = State(CaseId, 7) with
         {
             Assessments = [new CaseAssessment("a", "cp-case-b", "basis-v1", 1, "Review", "reason", [], null, null)]
         };
-        Assert.Null(CasePackSceneProjection.Build(pack, crossCase, "presenter"));
+        Assert.Null(CasePackSceneProjection.Build(pack, crossCaseAssessment, "presenter"));
+
+        var crossCaseEvent = State(CaseId, 7) with
+        {
+            JourneyEvents = [Event("AI agent", "cp-case-b",
+                [new CaseJourneyWitness("witness-b-event", "case-b/foreign.txt", 1, 1, "basis-v1", 1)])]
+        };
+        Assert.Null(CasePackSceneProjection.Build(pack, crossCaseEvent, "presenter"));
+
+        var source = Pack();
+        var first = source.Cases[0] with
+        {
+            Components = [new PublishedAircraftCasePackComponent("bad", ["case-b/foreign.txt"])]
+        };
+        var crossCaseDocument = new AircraftCasePackSnapshot(source.Revision, source.Manifest, source.Files,
+            [first, .. source.Cases.Skip(1)]);
+        Assert.Null(CasePackSceneProjection.Build(crossCaseDocument, State(CaseId, 7), "presenter"));
+
+        var crossCaseWitness = State(CaseId, 7) with
+        {
+            JourneyEvents = [Event("AI agent", CaseId,
+                [new CaseJourneyWitness("witness-b", "case-b/foreign.txt", 1, 1, "basis-v1", 1)])]
+        };
+        Assert.Null(CasePackSceneProjection.Build(pack, crossCaseWitness, "presenter"));
     }
 
     [Theory]
@@ -129,8 +152,10 @@ public sealed class CasePackSceneProjectionTests
     private static CaseState State(string caseId, long revision) => new(caseId, Owner, revision,
         [new BasisVersion(1, "current basis", "digest", "basis-digest", new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero))],
         [], [], new Dictionary<string, string>(), [], [], [], [], [], []);
-    private static CaseJourneyEvent Event(string label) => new("event-1", "run-1", 1, CaseId,
-        "evidence-reviewed", "basis-v1", 1, "presenter", "Evidence reviewed", label, []);
+    private static CaseJourneyEvent Event(string label) => Event(label, CaseId, []);
+    private static CaseJourneyEvent Event(string label, string eventCaseId, IReadOnlyList<CaseJourneyWitness> witnesses) =>
+        new("event-1", "run-1", 1, eventCaseId, "evidence-reviewed", "basis-v1", 1,
+            "presenter", "Evidence reviewed", label, witnesses);
     private static JsonObject Clone(JsonElement value) => JsonNode.Parse(value.GetRawText())!.AsObject();
 
     private sealed class SnapshotStore(CaseState state) : ICaseStateStore
