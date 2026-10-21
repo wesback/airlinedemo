@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Dashboard;
@@ -44,7 +45,11 @@ public sealed record CasePackResetBlockedVariantRequest(
     int? ContractVersion,
     string? CommandId,
     long? ExpectedRevision,
-    string? Variant);
+    string? Variant)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
 
 public static class CasePackEndpoints
 {
@@ -125,22 +130,54 @@ public static class CasePackEndpoints
         CasePackResetBlockedVariantRequest? body;
         try
         {
-            body = await http.Request.ReadFromJsonAsync<CasePackResetBlockedVariantRequest>(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(http.Request.Body, cancellationToken: cancellationToken);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return ValidationError();
+
+            JsonElement contractVersion = default;
+            JsonElement commandId = default;
+            JsonElement expectedRevision = default;
+            JsonElement variant = default;
+            var contractFound = false;
+            var commandFound = false;
+            var revisionFound = false;
+            var variantFound = false;
+            foreach (var property in root.EnumerateObject())
+            {
+                switch (property.Name)
+                {
+                    case "contractVersion": if (contractFound) return ValidationError(); contractVersion = property.Value; contractFound = true; break;
+                    case "commandId": if (commandFound) return ValidationError(); commandId = property.Value; commandFound = true; break;
+                    case "expectedRevision": if (revisionFound) return ValidationError(); expectedRevision = property.Value; revisionFound = true; break;
+                    case "variant": if (variantFound) return ValidationError(); variant = property.Value; variantFound = true; break;
+                    default: return ValidationError();
+                }
+            }
+
+            if (!contractFound || contractVersion.ValueKind != JsonValueKind.Number
+                || !contractVersion.TryGetInt32(out var versionValue)
+                || !commandFound || commandId.ValueKind != JsonValueKind.String
+                || !revisionFound || expectedRevision.ValueKind != JsonValueKind.Number
+                || !expectedRevision.TryGetInt64(out var revisionValue)
+                || !variantFound || variant.ValueKind != JsonValueKind.String)
+                return ValidationError();
+            if (versionValue != ContractVersion)
+                return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+
+            body = new CasePackResetBlockedVariantRequest(
+                versionValue, commandId.GetString(), revisionValue, variant.GetString());
         }
         catch (JsonException)
         {
-            return Error(StatusCodes.Status400BadRequest, "invalid_request", "Request body must be a valid reset command.");
+            return ValidationError();
         }
 
-        if (body is null || body.ContractVersion is null || body.CommandId is null
-            || body.ExpectedRevision is null || body.Variant is null)
-            return Error(StatusCodes.Status400BadRequest, "invalid_request", "contractVersion, commandId, expectedRevision and variant are required.");
-        if (body.ContractVersion != ContractVersion)
-            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
-        if (!Regex.IsMatch(body.CommandId, "^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking))
-            return Error(StatusCodes.Status400BadRequest, "invalid_request", "commandId must be 1-64 ASCII letters, digits, hyphens, or underscores.");
-        if (body.ExpectedRevision < 0)
-            return Error(StatusCodes.Status400BadRequest, "invalid_request", "expectedRevision must be nonnegative.");
+        static IResult ValidationError() => Error(StatusCodes.Status400BadRequest, "validation_error", "Reset command fields are invalid.");
+
+        if (!Regex.IsMatch(body.CommandId!, "^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)
+            || body.ExpectedRevision < 0)
+            return ValidationError();
 
         if (!string.Equals(caseId, "cp-case-c", StringComparison.Ordinal)
             || !string.Equals(body.Variant, "blocked", StringComparison.Ordinal))
@@ -149,17 +186,18 @@ public static class CasePackEndpoints
         try
         {
             var reset = new CasePackBlockedVariantReset(caseStates, time);
-            var result = reset.Reset(scope, session.User.Id, body.CommandId,
-                body.ExpectedRevision.Value, body.Variant);
+            var result = reset.Reset(scope, session.User.Id, body.CommandId!,
+                body.ExpectedRevision.Value, body.Variant!);
             return Results.Ok(result.Receipt);
         }
         catch (CasePackBlockedVariantResetException exception)
         {
             return Error(exception.StatusCode, exception.Code, exception.Message);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return Error(StatusCodes.Status503ServiceUnavailable, "audit_write_failed", "The reset could not be recorded.");
+            return Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed.");
         }
     }
 

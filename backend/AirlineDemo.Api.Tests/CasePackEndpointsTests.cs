@@ -791,8 +791,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         var before = store.CaptureState();
 
         using var accepted = await SendResetAsync(client, "cp-case-c", presenter,
-            new { contractVersion = 1, commandId = "reset-014", expectedRevision = 0L, variant = "blocked",
-                actor = "caller-actor", reasonCode = "caller_reason", at = "2000-01-01T00:00:00Z" });
+            new { contractVersion = 1, commandId = "reset-014", expectedRevision = 0L, variant = "blocked" });
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         using var receiptJson = await ReadJsonAsync(accepted);
         Assert.Equal(["auditEventId", "caseId", "commandId", "contractVersion", "newRevision", "newRunId", "priorRevision"],
@@ -920,7 +919,7 @@ public sealed class CasePackEndpointsTests : IDisposable
         };
         malformedRequest.Headers.Add("Cookie", presenter.Cookie);
         malformedRequest.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, presenter.Value.CsrfToken);
-        await AssertResetErrorAsync(HttpStatusCode.BadRequest, "invalid_request", malformedRequest);
+        await AssertResetErrorAsync(HttpStatusCode.BadRequest, "validation_error", malformedRequest);
 
         foreach (var body in new object[]
         {
@@ -936,7 +935,7 @@ public sealed class CasePackEndpointsTests : IDisposable
                 { Content = JsonContent.Create(body) };
             request.Headers.Add("Cookie", bodyPresenter.Cookie);
             request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, bodyPresenter.Value.CsrfToken);
-            await AssertResetErrorAsync(HttpStatusCode.BadRequest, "invalid_request", request);
+            await AssertResetErrorAsync(HttpStatusCode.BadRequest, "validation_error", request);
         }
 
         clock.Current = clock.Current.Add(CasePackRequestLimiter.RollingWindow);
@@ -970,9 +969,137 @@ public sealed class CasePackEndpointsTests : IDisposable
         var acceptedLimiterPresenter = CreateSession(acceptedLimiterHost, "presenter", "cp-case-c");
         using var auditFailure = await SendResetAsync(acceptedLimiterClient, "cp-case-c", acceptedLimiterPresenter,
             new { contractVersion = 1, commandId = "m14-audit", expectedRevision = 0L, variant = "blocked" });
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, auditFailure.StatusCode);
+        Assert.Equal(HttpStatusCode.InternalServerError, auditFailure.StatusCode);
         using var auditJson = await ReadJsonAsync(auditFailure);
-        Assert.Equal("audit_write_failed", auditJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal("internal_error", auditJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task AC030_ResetBodyAcceptsAndRejectsExactContractCases()
+    {
+        var store = CreateStore();
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        using var host = CreateHost(store, new InMemoryCasePackRequestWindowStore(), clock);
+        SeedCases(store);
+        using var client = host.CreateClient();
+
+        var acceptedIds = new[] { "A", "a", "0", "-", "_", "AA", new string('A', 63), new string('A', 64) };
+        for (var index = 0; index < acceptedIds.Length; index++)
+        {
+            var session = CreateSession(host, "presenter", "cp-case-c");
+            var body = new Dictionary<string, object?> { ["contractVersion"] = 1, ["commandId"] = acceptedIds[index], ["expectedRevision"] = index, ["variant"] = "blocked" };
+            using var response = await SendResetAsync(client, "cp-case-c", session, body);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        foreach (var invalidId in new[] { "", new string('A', 65), "a b", "é", "a.b", "a/b" })
+        {
+            var session = CreateSession(host, "presenter", "cp-case-c");
+            var before = store.CaptureState();
+            using var response = await SendResetAsync(client, "cp-case-c", session,
+                new Dictionary<string, object?> { ["contractVersion"] = 1, ["commandId"] = invalidId, ["expectedRevision"] = acceptedIds.Length, ["variant"] = "blocked" });
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using var json = await ReadJsonAsync(response);
+            Assert.Equal("validation_error", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+            Assert.Equal(before, store.CaptureState());
+        }
+
+        foreach (var body in new Dictionary<string, object?>[]
+        {
+            new() { ["contractVersion"] = 1, ["commandId"] = "revision-negative", ["expectedRevision"] = -1, ["variant"] = "blocked" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "revision-missing", ["variant"] = "blocked" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "revision-null", ["expectedRevision"] = null, ["variant"] = "blocked" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "revision-fraction", ["expectedRevision"] = 1.5, ["variant"] = "blocked" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "revision-string", ["expectedRevision"] = "1", ["variant"] = "blocked" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "variant-missing", ["expectedRevision"] = acceptedIds.Length },
+            new() { ["contractVersion"] = 1, ["commandId"] = "variant-null", ["expectedRevision"] = acceptedIds.Length, ["variant"] = null },
+            new() { ["contractVersion"] = 1, ["commandId"] = "variant-number", ["expectedRevision"] = acceptedIds.Length, ["variant"] = 1 },
+            new() { ["contractVersion"] = 1, ["commandId"] = "extra-actor", ["expectedRevision"] = acceptedIds.Length, ["variant"] = "blocked", ["actor"] = "other" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "extra-time", ["expectedRevision"] = acceptedIds.Length, ["variant"] = "blocked", ["time"] = "2026-10-21T10:00:00Z" },
+            new() { ["contractVersion"] = 1, ["commandId"] = "extra-reason", ["expectedRevision"] = acceptedIds.Length, ["variant"] = "blocked", ["reason"] = "requested" },
+        })
+        {
+            var session = CreateSession(host, "presenter", "cp-case-c");
+            var before = store.CaptureState();
+            using var response = await SendResetAsync(client, "cp-case-c", session, body);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using var json = await ReadJsonAsync(response);
+            Assert.Equal("validation_error", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+            Assert.Equal(before, store.CaptureState());
+        }
+
+        var baselineSession = CreateSession(host, "presenter", "cp-case-c");
+        using var baseline = await SendResetAsync(client, "cp-case-c", baselineSession,
+            new { contractVersion = 1, commandId = "baseline-target", expectedRevision = acceptedIds.Length, variant = "baseline" });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, baseline.StatusCode);
+        var staleSession = CreateSession(host, "presenter", "cp-case-c");
+        using var stale = await SendResetAsync(client, "cp-case-c", staleSession,
+            new { contractVersion = 1, commandId = "stale-command", expectedRevision = 99L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var staleJson = await ReadJsonAsync(stale);
+        Assert.Equal("stale_revision", staleJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task AC030_ResetEndpointCountsEveryAuthenticatedAttempt()
+    {
+        var store = CreateStore();
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        var windowStore = new InMemoryCasePackRequestWindowStore();
+        using var host = CreateHost(store, windowStore, clock);
+        SeedCases(store);
+        using var client = host.CreateClient();
+
+        var unauthenticated = new HttpRequestMessage(HttpMethod.Post,
+            "/api/v1/cases/cp-case-c/reset-blocked-variant")
+        { Content = JsonContent.Create(new { contractVersion = 1, commandId = "quota-unauthenticated", expectedRevision = 0L, variant = "blocked" }) };
+        using var unauthenticatedResponse = await client.SendAsync(unauthenticated, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticatedResponse.StatusCode);
+        Assert.Equal(0, windowStore.TotalCount(CasePackRequestLimiter.ResetEndpoint));
+
+        var body = new { contractVersion = 1, commandId = "quota-accepted", expectedRevision = 0L, variant = "blocked" };
+        var presenter = CreateSession(host, "presenter", "cp-case-c");
+        using var accepted = await SendResetAsync(client, "cp-case-c", presenter, body);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        using var replayed = await SendResetAsync(client, "cp-case-c", presenter, body);
+        Assert.Equal(HttpStatusCode.OK, replayed.StatusCode);
+        using var malformed = await SendResetAsync(client, "cp-case-c", presenter,
+            new { contractVersion = 1, commandId = "a b", expectedRevision = 1L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        var beforeFourth = store.CaptureState();
+        using var exhausted = await SendResetAsync(client, "cp-case-c", presenter,
+            new { contractVersion = 1, commandId = "quota-fourth", expectedRevision = 1L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, exhausted.StatusCode);
+        using var exhaustedJson = await ReadJsonAsync(exhausted);
+        Assert.Equal("rate_limit_exceeded", exhaustedJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(beforeFourth, store.CaptureState());
+        Assert.Equal(3, windowStore.ActiveCount(presenter.Value.User.Id, CasePackRequestLimiter.ResetEndpoint, clock.Current));
+
+        var denied = CreateSession(host, "technical-reviewer", "cp-case-c");
+        using var deniedResponse = await SendResetAsync(client, "cp-case-c", denied, body);
+        Assert.Equal(HttpStatusCode.Forbidden, deniedResponse.StatusCode);
+        Assert.Equal(1, windowStore.ActiveCount(denied.Value.User.Id, CasePackRequestLimiter.ResetEndpoint, clock.Current));
+    }
+
+    [Fact]
+    public async Task M15_ResetStoreFailureReturnsGenericErrorWithoutMutation()
+    {
+        var store = CreateStore();
+        var clock = new AdjustableTime { Current = new DateTimeOffset(2026, 10, 21, 10, 0, 0, TimeSpan.Zero) };
+        using var host = CreateHost(store, new InMemoryCasePackRequestWindowStore(), clock);
+        SeedCases(store);
+        using var client = host.CreateClient();
+        var session = CreateSession(host, "presenter", "cp-case-c");
+        var before = store.CaptureState();
+        store.ThrowOnResetCommit = true;
+
+        using var response = await SendResetAsync(client, "cp-case-c", session,
+            new { contractVersion = 1, commandId = "store-failure", expectedRevision = 0L, variant = "blocked" });
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        var raw = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"internal_error\",\"message\":\"The request could not be completed.\"}}", raw);
+        Assert.Equal(before, store.CaptureState());
+        Assert.Equal(0, store.WriteCalls);
     }
 
     [Fact]
