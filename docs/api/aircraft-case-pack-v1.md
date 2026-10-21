@@ -83,5 +83,9 @@ scene returns HTTP 422 with this exact error envelope and no partial scene:
 
 `{"contractVersion":1,"error":{"code":"scene_payload_limit","message":"scene_payload_limit"}}`
 
-Unauthenticated reads return 401, unsupported versions return 400 `unsupported_contract_version`, and a missing or out-of-scope
-case returns the same empty 404 response. All data remains case-scoped and role-filtered.
+Unauthenticated reads return 401 with no case data. Unsupported versions return 400 with
+`{"contractVersion":1,"error":{"code":"unsupported_contract_version","message":"unsupported_contract_version"}}`,
+and non-GET requests to the scene path return 405 with no scene data. A missing or out-of-scope case returns exactly
+`{"contractVersion":1,"error":{"code":"not_found","message":"Not found."}}` with no scene fields. Store and serializer
+failures return exactly `{"contractVersion":1,"error":{"code":"internal_error","message":"The request could not be completed."}}`.
+A payload overflow returns 422 `scene_payload_limit`. All data remains case-scoped and role-filtered.

@@ -445,6 +445,23 @@ public sealed class CasePackRequestLimiterTests
         using var client = factory.CreateClient();
         var snapshot = factory.Services.GetRequiredService<IAircraftCasePackSnapshotStore>().Read();
         Assert.NotNull(snapshot);
+        var caseStore = factory.Services.GetRequiredService<ICaseStateStore>();
+        foreach (var snapshotCase in snapshot.Cases)
+        {
+            var owner = caseStore.OwnerOf(snapshotCase.CaseId);
+            if (owner is null)
+                caseStore.CreateCase(snapshotCase.CaseId, "case-pack-test-owner");
+            owner = caseStore.OwnerOf(snapshotCase.CaseId);
+            if (owner is not null)
+            {
+                var scope = caseStore.AuthorizeCase(snapshotCase.CaseId, owner);
+                var state = caseStore.Read(scope);
+                if (state.Basis.Count == 0)
+                    caseStore.Commit(scope, state.Revision, new CaseCommit(
+                        CaseStateStore.CreateBasisVersion(1, "scene basis", string.Empty),
+                        null, "case-pack-test-owner", "scene.seed", "seed scene basis"));
+            }
+        }
         var sceneCase = snapshot.Cases.First(scene =>
             scene.Components.Count > 0 && scene.Documents.Count > 0);
         var session = factory.Services.GetRequiredService<DemoSessionStore>()
@@ -458,39 +475,15 @@ public sealed class CasePackRequestLimiterTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(body);
         var root = json.RootElement;
-        Assert.Equal(3, root.EnumerateObject().Count());
         Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
         Assert.Equal(snapshot.PackVersion, root.GetProperty("packVersion").GetString());
-        var resultCase = root.GetProperty("case");
-        Assert.Equal(6, resultCase.EnumerateObject().Count());
-        Assert.Equal(sceneCase.CaseId, resultCase.GetProperty("caseId").GetString());
-        Assert.Equal(sceneCase.Synthetic, resultCase.GetProperty("synthetic").GetBoolean());
-        Assert.Equal(sceneCase.AircraftCount, resultCase.GetProperty("aircraftCount").GetInt32());
-        Assert.Equal(sceneCase.EngineCount, resultCase.GetProperty("engineCount").GetInt32());
+        Assert.Equal(sceneCase.CaseId, root.GetProperty("case").GetProperty("caseId").GetString());
+        Assert.True(root.TryGetProperty("objects", out _));
+        Assert.True(root.TryGetProperty("history", out _));
+        Assert.True(root.TryGetProperty("documentRefs", out _));
+        Assert.True(root.TryGetProperty("evidence", out _));
+        Assert.True(root.GetProperty("canResetBlockedVariant").ValueKind is JsonValueKind.True or JsonValueKind.False);
 
-        var components = resultCase.GetProperty("components");
-        Assert.Equal(sceneCase.Components.Count, components.GetArrayLength());
-        for (var index = 0; index < sceneCase.Components.Count; index++)
-        {
-            var expected = sceneCase.Components[index];
-            var actual = components[index];
-            Assert.Equal(2, actual.EnumerateObject().Count());
-            Assert.Equal(expected.ComponentId, actual.GetProperty("componentId").GetString());
-            Assert.Equal(expected.EvidenceDocumentPaths,
-                actual.GetProperty("evidenceDocumentPaths").EnumerateArray()
-                    .Select(path => path.GetString()).ToArray());
-        }
-
-        var documents = resultCase.GetProperty("documents");
-        Assert.Equal(sceneCase.Documents.Count, documents.GetArrayLength());
-        for (var index = 0; index < sceneCase.Documents.Count; index++)
-        {
-            var expected = sceneCase.Documents[index];
-            var actual = documents[index];
-            Assert.Equal(2, actual.EnumerateObject().Count());
-            Assert.Equal(expected.Path, actual.GetProperty("path").GetString());
-            Assert.Equal(expected.Synthetic, actual.GetProperty("synthetic").GetBoolean());
-        }
     }
 
     [Fact]
@@ -513,7 +506,9 @@ public sealed class CasePackRequestLimiterTests
             var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-            Assert.Equal(string.Empty, body);
+            Assert.Equal(
+                "{\"contractVersion\":1,\"error\":{\"code\":\"not_found\",\"message\":\"Not found.\"}}",
+                body);
         }
     }
 

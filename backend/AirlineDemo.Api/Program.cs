@@ -12,6 +12,7 @@ using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Security;
 using AirlineDemo.Api.SourceSystems;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Projection;
 using AirlineDemo.Api.Runs;
 using AirlineDemo.Api.Reviews;
 using AirlineDemo.Api.Requests;
@@ -39,6 +40,8 @@ builder.Services.AddSingleton<MockRequestInbox>();
 builder.Services.AddSingleton<AssessmentExecutionService>();
 builder.Services.AddEvidenceBlobStore(builder.Configuration);
 builder.Services.AddSingleton<IAircraftCasePackSnapshotStore, InMemoryAircraftCasePackSnapshotStore>();
+builder.Services.AddSingleton<IArrCaseHistorySource>(sp =>
+    new ArrCaseHistorySource(sp.GetRequiredService<ICaseStateStore>()));
 builder.Services.AddSingleton<IAircraftCasePackCaseStager, AircraftCasePackCaseStager>();
 builder.Services.AddSingleton<IAircraftCasePackDocumentReferenceStager, AircraftCasePackDocumentReferenceStager>();
 builder.Services.AddSingleton(new AircraftCasePackLoader(
@@ -113,15 +116,6 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapDemoAuth();
 app.MapCaseEndpoints();
 app.MapCasePackEndpoints();
-app.MapGet("/api/v{version:int}/cases/{caseId}/scene", (
-    int version,
-    string caseId,
-    HttpContext http,
-    DemoSessionStore sessions,
-    CasePackRequestLimiter limiter,
-    IAircraftCasePackSnapshotStore snapshots,
-    CancellationToken cancellationToken) =>
-    Program.ReadCasePackSceneAsync(version, caseId, http, sessions, limiter, snapshots, cancellationToken));
 app.MapDashboardEndpoints();
 app.MapReadinessSummaryEndpoints();
 app.MapTechnicalReviewEndpoints();
@@ -141,54 +135,6 @@ app.Run();
 
 public partial class Program
 {
-    internal static async Task<IResult> ReadCasePackSceneAsync(
-        int version,
-        string caseId,
-        HttpContext http,
-        DemoSessionStore sessions,
-        CasePackRequestLimiter limiter,
-        IAircraftCasePackSnapshotStore snapshots,
-        CancellationToken cancellationToken)
-    {
-        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
-        if (session is null) return CasePackReadError(StatusCodes.Status401Unauthorized, "unauthenticated");
-        if (version != 1) return CasePackReadError(StatusCodes.Status400BadRequest, "unsupported_contract_version");
-        if (!await limiter.TryRecordAttemptAsync(session.User.Id, CasePackRequestLimiter.SceneEndpoint, cancellationToken))
-            return CasePackReadError(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded");
-
-        var snapshot = snapshots.Read();
-        var sceneCase = snapshot?.Cases.SingleOrDefault(item =>
-            string.Equals(item.CaseId, caseId, StringComparison.Ordinal));
-        if (sceneCase is null || !session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
-            return Results.NotFound();
-
-        return Results.Ok(new
-        {
-            contractVersion = 1,
-            packVersion = snapshot!.PackVersion,
-            @case = new
-            {
-                caseId = sceneCase.CaseId,
-                synthetic = sceneCase.Synthetic,
-                aircraftCount = sceneCase.AircraftCount,
-                engineCount = sceneCase.EngineCount,
-                components = sceneCase.Components.Select(component => new
-                {
-                    componentId = component.ComponentId,
-                    evidenceDocumentPaths = component.EvidenceDocumentPaths,
-                }),
-                documents = sceneCase.Documents.Select(document => new
-                {
-                    path = document.Path,
-                    synthetic = document.Synthetic,
-                }),
-            },
-        });
-    }
-
-    private static IResult CasePackReadError(int statusCode, string code) =>
-        Results.Json(new { contractVersion = 1, error = new { code, message = code } }, statusCode: statusCode);
-
     internal static void RegisterProductionEvaluationExecutors(IServiceCollection services)
     {
         foreach (var arm in Enum.GetValues<EvaluationArm>())

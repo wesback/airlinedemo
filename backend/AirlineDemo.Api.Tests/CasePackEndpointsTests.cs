@@ -4,6 +4,8 @@ using System.Text.Json;
 using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Finance;
+using AirlineDemo.Api.Evidence;
+using AirlineDemo.Api.Projection;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Requests;
@@ -194,6 +196,12 @@ public sealed class CasePackEndpointsTests : IDisposable
             store, [caseId], "technical-reviewer", "technical-reviewer", caseId,
             new TechnicalReviewCommand(4, 1, "accept", "Current basis approved."), "trace-a");
         Assert.Equal(TechnicalReviewOutcome.Recorded, review.Outcome);
+        var current = store.Read(scope);
+        store.Commit(scope, current.Revision, new CaseCommit(
+            null, null, "case-pack-test-owner", "scene.seed", "Seed current scene label",
+            At: at, JourneyEvent: new CaseJourneyEventDraft(
+                "scene-event-" + caseId, "scene-run-" + caseId, caseId,
+                "evidence-reviewed", "basis-v1", 1, "presenter", "Current scene", "AI agent", [])));
     }
 
     private static void AssertStatus(
@@ -267,6 +275,124 @@ public sealed class CasePackEndpointsTests : IDisposable
         Assert.Equal(0, store.WriteCalls);
         Assert.Equal(baseline, store.CaptureState());
     }
+    [Fact]
+    public async Task AC013_SceneHidesUnknownAndOutOfScopeCases()
+    {
+        var store = CreateStore();
+        using var host = CreateHost(store);
+        SeedCases(store);
+        SeedCurrentArrProjection(store.Inner, "cp-case-a");
+        using var client = host.CreateClient();
+        var inScope = CreateSession(host, "presenter", "cp-case-a");
+        var outOfScope = CreateSession(host, "presenter", "cp-case-a");
+        var baseline = store.CaptureState();
+
+        using (var unauthenticated = await SendAsync(client, HttpMethod.Get,
+                   "/api/v1/cases/cp-case-a/scene"))
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+            using var json = await ReadJsonAsync(unauthenticated);
+            Assert.Equal(1, json.RootElement.GetProperty("contractVersion").GetInt32());
+            Assert.False(json.RootElement.TryGetProperty("case", out _));
+        }
+
+        using var success = await SendAsync(client, HttpMethod.Get,
+            "/api/v1/cases/cp-case-a/scene", inScope);
+        Assert.Equal(HttpStatusCode.OK, success.StatusCode);
+        using var successJson = await ReadJsonAsync(success);
+        Assert.Equal("cp-case-a", successJson.RootElement.GetProperty("case").GetProperty("caseId").GetString());
+
+        const string notFound = "{\"contractVersion\":1,\"error\":{\"code\":\"not_found\",\"message\":\"Not found.\"}}";
+        foreach (var value in new[] { "cp-case-b", "cp-case-z", "cp-case-a\"", "*", "path/like/id", "cp-case-path-like" })
+        {
+            var session = value == "cp-case-b" ? outOfScope : inScope;
+            using var response = await SendAsync(client, HttpMethod.Get,
+                $"/api/v1/cases/{value}/scene", session);
+            var responseBodyForStatus = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{value}: {response.StatusCode}: {responseBodyForStatus}");
+            var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            Assert.True(responseBody == notFound, $"{value}: {responseBody}");
+            using var json = await ReadJsonAsync(response);
+            Assert.False(json.RootElement.TryGetProperty("case", out _));
+            Assert.False(json.RootElement.TryGetProperty("objects", out _));
+            Assert.False(json.RootElement.TryGetProperty("history", out _));
+            Assert.False(json.RootElement.TryGetProperty("documentRefs", out _));
+            Assert.False(json.RootElement.TryGetProperty("evidence", out _));
+        }
+
+        Assert.Equal(0, store.WriteCalls);
+        Assert.Equal(baseline, store.CaptureState());
+    }
+
+    [Fact]
+    public async Task AC011_SceneRejectsUnsupportedVersionMethodAndStoreFailure()
+    {
+        var store = CreateStore();
+        using var host = CreateHost(store);
+        SeedCases(store);
+        SeedCurrentArrProjection(store.Inner, "cp-case-a");
+        using var client = host.CreateClient();
+        var session = CreateSession(host, "presenter", CaseIds);
+        var baseline = store.CaptureState();
+
+        using var unsupported = await SendAsync(client, HttpMethod.Get,
+            "/api/v2/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.BadRequest, unsupported.StatusCode);
+        Assert.Equal("unsupported_contract_version",
+            (await ReadJsonAsync(unsupported)).RootElement.GetProperty("error").GetProperty("code").GetString());
+
+        using var nonGet = await SendAsync(client, HttpMethod.Post,
+            "/api/v1/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, nonGet.StatusCode);
+        using var methodJson = await ReadJsonAsync(nonGet);
+        Assert.False(methodJson.RootElement.TryGetProperty("case", out _));
+        Assert.Equal(1, methodJson.RootElement.GetProperty("contractVersion").GetInt32());
+
+        store.ThrowOnRead = true;
+        using var failed = await SendAsync(client, HttpMethod.Get,
+            "/api/v1/cases/cp-case-a/scene", session);
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        Assert.Equal(
+            "{\"contractVersion\":1,\"error\":{\"code\":\"internal_error\",\"message\":\"The request could not be completed.\"}}",
+            await failed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, store.WriteCalls);
+        Assert.Equal(baseline, store.CaptureState());
+    }
+
+    [Theory]
+    [InlineData("presenter", "cp-case-c", true, true)]
+    [InlineData("presenter", "cp-case-a", true, false)]
+    [InlineData("presenter", "cp-case-c", false, false)]
+    [InlineData("technical-reviewer", "cp-case-c", true, false)]
+    public async Task AC024_SceneResetPermissionMatchesRoleScopeAndVariantTable(
+        string role, string caseId, bool blockedVariant, bool expected)
+    {
+        var store = CreateStore();
+        using var host = CreateHost(store);
+        SeedCases(store);
+        SeedCurrentArrProjection(store.Inner, caseId);
+        if (blockedVariant)
+        {
+            var packages = host.Services.GetRequiredService<EvidencePackageStore>();
+            packages.Submit("blocked-package", caseId, () => new EvidencePackageOutcome(
+                "blocked", [new EvidenceDocumentResult("blocked-document.txt", "rejected-retryable",
+                    "blocked", null, null)]));
+        }
+        using var client = host.CreateClient();
+        var session = CreateSession(host, role, caseId);
+
+        using var response = await SendAsync(client, HttpMethod.Get,
+            $"/api/v1/cases/{caseId}/scene", session);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = await ReadJsonAsync(response);
+        Assert.Equal(expected, json.RootElement.GetProperty("canResetBlockedVariant").GetBoolean());
+        var actions = json.RootElement.GetProperty("allowedActions").EnumerateArray()
+            .Select(item => item.GetString()).ToArray();
+        Assert.Equal(expected ? ["resetBlockedVariant"] : [], actions);
+        Assert.Equal(0, store.WriteCalls);
+    }
+
     [Fact]
     public async Task AC020_CaseListP95MeetsOneSecondBudget()
     {

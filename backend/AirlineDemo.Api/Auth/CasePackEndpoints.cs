@@ -6,6 +6,8 @@ using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
+using AirlineDemo.Api.Projection;
+using AirlineDemo.Api.Evidence;
 namespace AirlineDemo.Api.Auth;
 
 /// <summary>The versioned envelope returned by the case-pack list endpoint.</summary>
@@ -52,6 +54,26 @@ public static class CasePackEndpoints
             .Produces(StatusCodes.Status500InternalServerError)
             .Produces(StatusCodes.Status503ServiceUnavailable);
         app.MapPost("/api/v{version:int}/cases", () => Results.StatusCode(StatusCodes.Status405MethodNotAllowed))
+            .ExcludeFromDescription();
+
+        app.MapGet("/api/v{version:int}/cases/{caseId}/scene", GetScene)
+            .WithName("GetCasePackScene")
+            .WithSummary("Read an authorized case-pack scene")
+            .WithDescription("Returns the exact published scene projection for one signed-in user's in-scope case.")
+            .Produces<SceneEnvelope>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status422UnprocessableEntity)
+            .Produces(StatusCodes.Status500InternalServerError);
+        app.MapMethods("/api/v{version:int}/cases/{caseId}/scene", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+            static () => Error(StatusCodes.Status405MethodNotAllowed, "method_not_allowed", "Method not allowed."))
+            .ExcludeFromDescription();
+        app.MapGet("/api/v{version:int}/cases/{*casePath}", GetPathScene)
+            .ExcludeFromDescription();
+        app.MapMethods("/api/v{version:int}/cases/{*casePath}",
+            ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+            () => Error(StatusCodes.Status405MethodNotAllowed, "method_not_allowed", "Method not allowed."))
             .ExcludeFromDescription();
         return app;
     }
@@ -105,6 +127,97 @@ public static class CasePackEndpoints
             return Error(StatusCodes.Status500InternalServerError, "internal_error", "The request could not be completed.");
         }
     }
+    private static async Task<IResult> GetPathScene(
+        int version,
+        string casePath,
+        HttpContext http,
+        DemoSessionStore sessions,
+        CasePackRequestLimiter limiter,
+        IAircraftCasePackSnapshotStore snapshots,
+        ICaseStateStore caseStates,
+        EvidencePackageStore packages,
+        IArrCaseHistorySource history,
+        ILogger<DemoSessionStore> logger,
+        CancellationToken cancellationToken) => await GetScene(
+            version, casePath.EndsWith("/scene", StringComparison.Ordinal)
+                ? casePath[..^"/scene".Length]
+                : casePath,
+            http, sessions, limiter, snapshots, caseStates, packages, history, logger, cancellationToken);
+
+    private static async Task<IResult> GetScene(
+        int version,
+        string caseId,
+        HttpContext http,
+        DemoSessionStore sessions,
+        CasePackRequestLimiter limiter,
+        IAircraftCasePackSnapshotStore snapshots,
+        ICaseStateStore caseStates,
+        EvidencePackageStore packages,
+        IArrCaseHistorySource history,
+        ILogger<DemoSessionStore> logger,
+        CancellationToken cancellationToken)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null)
+            return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "unauthenticated");
+        if (version != ContractVersion)
+            return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+
+        try
+        {
+            if (!await limiter.TryRecordAttemptAsync(
+                    session.User.Id, CasePackRequestLimiter.SceneEndpoint, cancellationToken))
+                return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded");
+
+            var snapshot = snapshots.Read();
+            if (snapshot is null)
+                return Error(StatusCodes.Status503ServiceUnavailable, "case_pack_unavailable", "case_pack_unavailable");
+
+            var published = snapshot.Cases.SingleOrDefault(item =>
+                StringComparer.Ordinal.Equals(item.CaseId, caseId));
+            if (published is null || !session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
+                return SceneNotFound();
+
+            var owner = caseStates.OwnerOf(caseId);
+            if (owner is null)
+                return SceneNotFound();
+
+            var scope = caseStates.AuthorizeCase(caseId, owner);
+            SceneBuildResult result;
+            try
+            {
+                result = CasePackSceneProjection.BuildResult(
+                    caseStates, scope, snapshot, session.User.Role, packages, history);
+            }
+            catch (CaseAccessDeniedException)
+            {
+                return SceneNotFound();
+            }
+
+            if (result.PayloadLimit)
+                return Error(StatusCodes.Status422UnprocessableEntity,
+                    CasePackSceneProjection.PayloadLimitCode, CasePackSceneProjection.PayloadLimitCode);
+            if (!result.Succeeded)
+                return Error(StatusCodes.Status500InternalServerError,
+                    "internal_error", "The request could not be completed.");
+
+            return Results.Ok(result.Scene);
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return SceneNotFound();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(exception, "Case-pack scene read failed.");
+            return Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed.");
+        }
+    }
+
+    private static IResult SceneNotFound() => Error(
+        StatusCodes.Status404NotFound, "not_found", "Not found.");
+
     private static CasePackCaseSummary Project(
         string caseId, string name, string category, CaseState? state, string role, DateTimeOffset now)
     {
