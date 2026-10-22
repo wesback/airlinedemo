@@ -1,5 +1,6 @@
 import { createElement, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { projectHangarSourceSummary, SOURCE_UNAVAILABLE_TEXT, type CaseListEntry, type HangarSourceSummaryEntry, type SourceSummaryReader } from './sourceSummary';
+import { HANGAR_MANIFEST_ERROR, openValidatedHangarRack } from './dataRoomAdapter';
 
 export const HANGAR_RACK_MENU_INVALID_ENTRY = 'Unknown or out-of-scope identifier';
 export const HANGAR_RACK_MENU_OPEN_LABEL = 'Open data rack';
@@ -10,6 +11,7 @@ export type HangarRackMenuOptions = {
   entries?: HangarRackMenuEntry[]; onOpen?:()=>unknown; onClose?:()=>unknown;
   onSelect?:HangarRackSelectionHandler; onConfirm?:HangarRackSelectionHandler;
   onFocusWalk?:()=>unknown; walkRegion?:()=>unknown; transport?:((request:unknown)=>unknown);
+  manifest?: unknown; loaderCalls?: { count: number; loader?: () => unknown };
 };
 
 export class HangarRackMenuController {
@@ -19,7 +21,10 @@ export class HangarRackMenuController {
   getState(){return {open:this.opened,highlightedIndex:this.highlighted,highlightedCaseId:this.highlighted>=0?this.entries[this.highlighted]?.caseId:null,opened:this.opened,inside:this.inside,error:this.error};}
   getEntries(){return this.entries.map(e=>({...e,sources:e.sources?.map(s=>({...s}))??null}));}
   setEntries(entries:HangarRackMenuEntry[]){this.entries=entries;this.highlighted=entries.length?0:-1;this.error='';}
-  open(){if(this.opened)return false;this.opened=true;if(this.highlighted<0&&this.entries.length)this.highlighted=0;this.options.onOpen?.();return true;}
+  open(){if(this.opened)return false;const result=openValidatedHangarRack(()=>{
+    this.opened=true;if(this.highlighted<0&&this.entries.length)this.highlighted=0;this.options.onOpen?.();return true;
+  },this.options.manifest,this.options.loaderCalls);
+    if(!result.opened){this.error=HANGAR_MANIFEST_ERROR;return false;}return true;}
   explicitOpen(){return this.open();}
   openFromControl(){return this.open();}
   close(reason:'escape'|'confirm'|'action'='escape'){if(!this.opened)return false;this.opened=false;this.highlighted=-1;this.options.onClose?.();if(reason==='escape')this.options.onFocusWalk?.();return true;}

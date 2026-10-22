@@ -21,18 +21,23 @@ describe('Hangar rack and avatar manifest', () => {
     expect(buildHangarRackDescriptor(manifest)).toEqual({ valid: true, units: result.units, openRack: true });
     const loader = vi.fn();
     const opened = vi.fn();
-    expect(openValidatedHangarRack(opened, manifest, { count: 0 })).toEqual({ opened: true, value: undefined });
+    expect(openValidatedHangarRack(opened, manifest, { count: 0, loader })).toEqual({ opened: true, value: undefined });
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(loader).toHaveBeenCalledTimes(1);
 
     const duplicate = clone(); duplicate.rack.units[1].source = 'technical';
     const missing = clone(); delete missing.rack.units[2].source;
     const extra = clone(); extra.rack.units.push({ node: 'RackUnitExtra', source: 'extra' });
     const unknown = clone(); unknown.rack.units[4].node = 'UnknownNode';
     for (const bad of [duplicate, missing, extra, unknown]) {
+      const badOpened = vi.fn(); const badLoader = vi.fn(); const loaderCalls = { count: 0, loader: badLoader };
       expect(validateHangarRackAvatarManifest(bad)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
       expect(buildHangarRackDescriptor(bad).valid).toBe(false);
-      expect(openValidatedHangarRack(vi.fn(), bad).opened).toBe(false);
-      expect(loader).not.toHaveBeenCalled();
+      expect(openValidatedHangarRack(badOpened, bad, loaderCalls)).toEqual({ opened: false, reason: HANGAR_MANIFEST_ERROR });
+      expect(badOpened).not.toHaveBeenCalled();
+      expect(badLoader).not.toHaveBeenCalled();
     }
+    expect(loader).toHaveBeenCalledTimes(1);
 
     expect(result.units.map(unit => unit.node)).toEqual(['RackUnitTechnical', 'RackUnitMaintenance', 'RackUnitFinance', 'RackUnitRecords', 'RackUnitContracts']);
   });

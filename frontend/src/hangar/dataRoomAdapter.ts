@@ -65,10 +65,14 @@ export const loadAvatarAsset = <T>(bytes: unknown, options: Parameters<typeof lo
 
 export const validateRackUnitMappings = validateHangarRackAvatarManifest;
 export const buildRackDescriptor = buildHangarRackDescriptor;
-export function openValidatedHangarRack(onOpen: () => unknown, input: unknown = sceneManifest, loaderCalls = { count: 0 }) {
+export function openValidatedHangarRack(onOpen: () => unknown, input: unknown = sceneManifest, loaderCalls: { count: number; loader?: () => unknown } = { count: 0 }) {
   const descriptor = buildHangarRackDescriptor(input);
   if (!descriptor.valid) return { opened: false, reason: HANGAR_MANIFEST_ERROR };
   if (loaderCalls.count !== 0) return { opened: false, reason: HANGAR_ASSET_INVALID };
+  if (typeof loaderCalls.loader === 'function') {
+    try { loaderCalls.loader(); } catch { return { opened: false, reason: HANGAR_ASSET_INVALID }; }
+    loaderCalls.count += 1;
+  }
   const result = onOpen();
   return { opened: true, value: result };
 }
