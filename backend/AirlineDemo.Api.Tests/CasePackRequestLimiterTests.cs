@@ -291,6 +291,46 @@ public sealed class CasePackRequestLimiterTests
     }
 
     [Fact]
+    public async Task SharedSqliteConnectionIsTouchedOnlyInsideTheGate()
+    {
+        // AC030 flaked in CI: the store read the provider from a fresh context before taking its SQLite gate, which registers
+        // EF Core's SQLite functions on the shared connection while the other attempt had a statement running on it.
+        var path = Path.Combine(Path.GetTempPath(), "case-pack-gate-" + Guid.NewGuid().ToString("N") + ".sqlite");
+        try
+        {
+            await using var connection = new SqliteConnection($"Data Source={path}");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlite(connection).Options;
+            await using (var db = new CaseStateDbContext(options))
+                await db.Database.MigrateAsync();
+            var store = new SqlCasePackRequestWindowStore(options);
+            var gate = (SemaphoreSlim)typeof(SqlCasePackRequestWindowStore)
+                .GetField("SqliteGate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .GetValue(null)!;
+
+            // Another attempt holds the gate and has a statement running on the shared connection.
+            await gate.WaitAsync();
+            Task<bool> attempt;
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT 1 UNION ALL SELECT 2";
+                using var reader = command.ExecuteReader();
+                reader.Read();
+                attempt = store.TryRecordAttemptAsync("user-a", CasePackRequestLimiter.ResetEndpoint, Now, CancellationToken.None);
+                await Task.Delay(200);
+                Assert.False(attempt.IsFaulted, attempt.Exception?.InnerException?.Message);
+            }
+            gate.Release();
+            Assert.True(await attempt);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task UnsupportedEndpointIsRejected()
     {
         var limiter = new CasePackRequestLimiter(new InMemoryCasePackRequestWindowStore(), new AdjustableTime());

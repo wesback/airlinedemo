@@ -64,6 +64,12 @@ public sealed class SqlCasePackRequestWindowStore(DbContextOptions<CaseStateDbCo
 {
     private static readonly SemaphoreSlim SqliteGate = new(1, 1);
 
+    // Read from the options, never from a context: a context's first database access registers EF Core's SQLite functions
+    // on a shared open connection, and SQLite refuses that while another attempt has a statement running on it
+    // (AC030_ConcurrentResetAdmissionIsAtomic failed in CI with "unable to delete/modify user-function").
+    private readonly bool sqlite = options.Extensions.Any(extension =>
+        extension.GetType().Namespace?.StartsWith("Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal) == true);
+
     public async Task<bool> TryRecordAttemptAsync(
         string userId,
         string endpoint,
@@ -73,13 +79,13 @@ public sealed class SqlCasePackRequestWindowStore(DbContextOptions<CaseStateDbCo
         var now = attemptedAt.UtcDateTime.Ticks;
         var cutoff = now - CasePackRequestLimiter.RollingWindow.Ticks;
         var userHash = Hash(userId);
-        await using var db = new CaseStateDbContext(options);
-        var sqlite = string.Equals(db.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal);
         if (sqlite)
             await SqliteGate.WaitAsync(cancellationToken);
 
         try
         {
+            // The context is created and disposed inside the gate.
+            await using var db = new CaseStateDbContext(options);
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
             if (!sqlite)
