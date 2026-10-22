@@ -1,0 +1,345 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 508,
+  "branch": "ai-sdlc/issue-508",
+  "commitSha": "d3da8325bfddd15781ffe325d82d6465c558f582",
+  "round": 0,
+  "pipelineVersion": "459fc5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 6,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The validator misses the required depth and strided-accessor checks. The load boundary and fallback component are absent, and the validator tests omit several required contract cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/glbValidator.ts",
+          "line": 152,
+          "message": "Strided accessor bounds are not validated through the final element, so out-of-range accessor data can pass validation.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Accessor bounds use count × component count × component size and never account for bufferView.byteStride.",
+            "failureScenario": "A VEC2 float accessor with count 2, byteStride 16, byteOffset 0, and a 20-byte bufferView passes the 16-byte packed-length check, although its final element ends at byte 24 and exceeds the view."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/glbValidator.ts",
+          "line": 85,
+          "message": "The validator does not enforce the required maximum JSON depth of 128.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "containsForbidden recursively traverses parsed JSON without tracking or enforcing nesting depth.",
+            "failureScenario": "A GLB with otherwise valid JSON nested to depth 129 is traversed without rejection and can return valid, although the acceptance criterion requires asset_invalid."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 1,
+          "message": "The load boundary required by the second acceptance criterion and its named test, GLB_load_gate_orders_validation_loader_and_fallback, are missing.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff adds no loadValidatedHangarAsset implementation or HangarAssetLoader.test.tsx.",
+            "failureScenario": "A caller has no required boundary to validate bytes before invoking its renderer loader; malformed bytes cannot be shown to skip the loader and call the fallback callback exactly once with asset_invalid."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarAssetFallback.tsx",
+          "line": 1,
+          "message": "The fallback component required by the third acceptance criterion is missing.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff adds no HangarAssetFallback component or HangarAssetLoader.test.tsx.",
+            "failureScenario": "When validation fails, there is no component to render the required role=alert text, and no test GLB_invalid_asset_renders_visible_fallback to catch its absence."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGlbValidator.test.ts",
+          "line": 22,
+          "message": "The first acceptance criterion's named structure contract test and required input table are missing.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named GLB_structure_contract_table is absent; GLB_malformed_contract_table covers only a few malformed inputs and uses Node file-system fixtures.",
+            "failureScenario": "A regression accepting version 1, a second JSON chunk, invalid UTF-8, a URI, an unsupported image MIME type, or an out-of-range bufferView can pass the current test. The test also does not use the required in-memory inputs."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGlbValidator.test.ts",
+          "line": 56,
+          "message": "The fourth acceptance criterion's named test and required invalid-limit cases are missing.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "GLB_input_and_limits_contract is absent; GLB_validator_has_no_renderer_dependency checks a negative limit but not fractional, infinite, or unsafe-integer limits.",
+            "failureScenario": "A regression accepting limit 1.5, Infinity, or Number.MAX_SAFE_INTEGER + 1 would pass the current limit assertions."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 6,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The validator misses the specified nesting-depth and strided-accessor checks. The required loader boundary, fallback component, and acceptance-criterion tests are also absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/glbValidator.ts",
+          "line": 85,
+          "message": "The validator does not enforce the required maximum JSON depth of 128.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After parsing JSON, containsForbidden recursively walks objects and arrays without tracking nesting depth.",
+            "failureScenario": "A structurally valid GLB with JSON nested to depth 129 is accepted, although the acceptance criterion requires {\"valid\":false,\"reason\":\"asset_invalid\"}."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/glbValidator.ts",
+          "line": 152,
+          "message": "Accessor range validation ignores byteStride and can accept data extending beyond its bufferView.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Accessor byte length is calculated as count × component count × component size; the range check does not use bufferView.byteStride.",
+            "failureScenario": "A VEC2 accessor with 4-byte components, count 2, stride 16, and a 20-byte bufferView passes the packed 16-byte range check, although its final element ends at byte 24."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGlbValidator.test.ts",
+          "line": 22,
+          "message": "Criterion 1's GLB_structure_contract_table test is missing. The current test also uses Node file fixtures instead of the required in-memory GLB inputs.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test is named GLB_malformed_contract_table and covers only a few malformed inputs; it does not construct the acceptance criterion's listed cases or its depth and stride cases.",
+            "failureScenario": "A regression accepting a second JSON chunk, invalid UTF-8, a URI, an unsupported MIME type, an out-of-range bufferView, or depth-129 JSON can pass the tests in this change."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 1,
+          "message": "Criterion 2 is not implemented: the validation load boundary and its required test are absent.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff adds no loadValidatedHangarAsset implementation or injected-loader boundary, and no GLB_load_gate_orders_validation_loader_and_fallback test.",
+            "failureScenario": "A caller cannot use the required boundary to validate bytes before invoking the renderer loader or to call the fallback callback once for invalid bytes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarAssetFallback.tsx",
+          "line": 1,
+          "message": "Criterion 3 is not implemented: the fallback component and its required test are absent.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff adds no HangarAssetFallback component or GLB_invalid_asset_renders_visible_fallback test.",
+            "failureScenario": "When validation fails, there is no component in this change to render the required alert text."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGlbValidator.test.ts",
+          "line": 56,
+          "message": "Criterion 4's named GLB_input_and_limits_contract test is missing, along with its required invalid-limit cases.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test GLB_validator_has_no_renderer_dependency checks a negative limit but does not test the required GLB_input_and_limits_contract cases for fractional, infinite, or unsafe-integer limits.",
+            "failureScenario": "A regression accepting a limit of 1.5, Infinity, or Number.MAX_SAFE_INTEGER + 1 would pass the current limits test."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The validator has two input-controlled gaps: it accepts JSON deeper than the specified limit and can accept strided accessor data beyond its bufferView.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/glbValidator.ts",
+          "line": 85,
+          "message": "JSON nesting is unbounded: depth 129 is accepted, and deeper input can escape validation with an uncaught recursion error.",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "After JSON.parse, containsForbidden recursively traverses every nested object and array without enforcing the required depth limit of 128.",
+            "failureScenario": "An attacker supplies a GLB with JSON nested to depth 129; validation accepts it. Deeper input within the size limit can exhaust the call stack and throw RangeError instead of returning asset_invalid, bypassing callers’ invalid-asset handling. OWASP A10:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/glbValidator.ts",
+          "line": 152,
+          "message": "Accessor range validation ignores byteStride and accepts data extending past its bufferView.",
+          "confidence": 0.88,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Accessor byte length is calculated as tightly packed count × component count × component size; the range check does not account for byteStride.",
+            "failureScenario": "A GLB declares a VEC2 accessor with 4-byte components, count 2, byteStride 16, and a 20-byte bufferView. The packed length is 16, so validation accepts it, but the final strided element ends at byte 24, outside the view. A consumer trusting validation can receive malformed accessor data. OWASP A06:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarGlbValidator.test.ts",
+      "frontend/tests/fixtures/hangar-malformed.glb",
+      "frontend/tests/fixtures/hangar-valid.glb"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
