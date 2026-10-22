@@ -1,0 +1,223 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 526,
+  "branch": "ai-sdlc/issue-526",
+  "commitSha": "aba95ab795c7ac5dde4fd8dd1f6fefb5dc0ad70e",
+  "round": 1,
+  "pipelineVersion": "9a3f750",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added validation blocks opening the rack for invalid mappings, and the updated test checks that callbacks and loaders are skipped. However, the UI hides the error in that failure state, so the required visible rejection is missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/rackMenu.ts",
+          "line": 27,
+          "message": "The invalid-manifest error is stored while the rack menu remains closed, but the UI only renders errors inside the closed menu. Render the error outside that conditional so users can see why opening failed.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When manifest validation fails, open() leaves opened false and sets error. The component renders that error only inside the state.open conditional at line 69.",
+            "failureScenario": "With a duplicate or unknown rack mapping, a user opens the rack and the menu stays closed, but the manifest error is also hidden; the invalid mapping does not fail visibly as required."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix wires validation into the rack menu, but the test still exercises only the adapter helper. A regression in the production menu integration could pass the required test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarRackAvatarManifest.test.ts",
+          "line": 35,
+          "message": "The exact five-unit mapping test still does not verify the production rack menu’s required rejection. Exercise HangarRackMenuController.open with each invalid manifest and assert the menu remains closed, exposes the manifest error, and makes zero loader calls.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The negative cases call openValidatedHangarRack directly. The production HangarRackMenuController.open integration added in rackMenu.ts is not exercised, and the test does not assert the menu state or visible error.",
+            "failureScenario": "If HangarRackMenuController.open bypasses validation and opens the menu for a duplicate mapping, this test still passes because it only checks the adapter helper’s callback and loader."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The rack flow now validates the manifest and blocks opening on invalid mappings. The manifest failure is still not visible to users because the error is rendered only inside the closed menu.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/rackMenu.ts",
+          "line": 27,
+          "message": "Invalid rack manifests now prevent the menu from opening, but the required visible error remains hidden because the component renders it only when the menu is open.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "When manifest validation fails, open() sets this.error and returns without opening the menu. The component renders the error only inside the state.open branch at line 69.",
+            "failureScenario": "If the manifest contains a duplicate unit and a user opens the rack, the menu stays closed and the error state is set but never rendered, so the required visible manifest error is absent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarRackAvatarAssets.test.ts",
+      "frontend/tests/HangarRackAvatarManifest.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

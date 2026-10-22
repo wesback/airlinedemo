@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HangarRackMenu, { HangarRackMenuController, HANGAR_RACK_MENU_INVALID_ENTRY, HANGAR_RACK_MENU_OPEN_LABEL } from '../src/hangar/rackMenu';
+import sceneManifest from '../src/hangar/sceneManifest.json';
+import { HANGAR_MANIFEST_ERROR } from '../src/hangar/dataRoomAdapter';
 import { HANGAR_SOURCE_IDS } from '../src/hangar/sourceSummary';
 
 const entries=[
@@ -54,6 +56,14 @@ describe('HangarRackMenu',()=>{
    const selection=vi.fn(); const controller=new HangarRackMenuController(entries,{onSelect:selection}); controller.open();
    expect(controller.confirm('cp-case-b')).toBe(true); expect(selection).toHaveBeenCalledTimes(1); expect(selection).toHaveBeenCalledWith('cp-case-b'); expect(controller.getState().open).toBe(false);
    controller.open(); expect(controller.confirm('cp-case-c')).toBe(false); expect(controller.confirm('DOES-NOT-EXIST')).toBe(false); expect(controller.getState().error).toBe(HANGAR_RACK_MENU_INVALID_ENTRY); expect(selection).toHaveBeenCalledTimes(1);
+ });
+
+ it('HangarRackMenu exposes invalid manifest and stays closed',()=>{
+   const invalid=JSON.parse(JSON.stringify(sceneManifest)); invalid.rack.units[1].source='technical';
+   render(<HangarRackMenu entries={entries} manifest={invalid}/>);
+   fireEvent.click(screen.getByRole('button',{name:HANGAR_RACK_MENU_OPEN_LABEL}));
+   expect(screen.queryByRole('menu',{name:'Data rack menu'})).toBeNull();
+   expect(screen.getByRole('alert').textContent).toBe(HANGAR_MANIFEST_ERROR);
  });
 
  it('HangarRackMenu transport isolation',()=>{
