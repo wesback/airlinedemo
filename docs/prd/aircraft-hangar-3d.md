@@ -1,12 +1,12 @@
 ---
 prd_id: "aircraft-hangar-3d"
 title: "Aircraft Hangar 3D Presentation Layer"
-status: "draft"
-version: "0.3.0"
+status: "approved"
+version: "0.3.1"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-14"
-last_updated: "2026-10-19"
+last_updated: "2026-10-22"
 product_goal_ids: ["GOAL-001"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Hangar 3D Presentation Layer
 
-> **aircraft-hangar-3d** | Status: Draft | Version: 0.3.0 | Last Updated: 2026-10-19
+> **aircraft-hangar-3d** | Status: Approved | Version: 0.3.1 | Last Updated: 2026-10-22
 
 ## Executive Summary
 
@@ -38,6 +38,16 @@ The layer is a presentation surface over the server-owned case data and commands
 Version 0.3.0 adds a Data Room: a 3D server rack with one unit for each of the five synthetic source systems of the [Synthetic Source-System Stubs PRD](aircraft-source-systems.md) (SS), and a small presenter avatar that the user walks across the hangar floor with the arrow keys. Standing in front of the rack opens a game-style menu of the aircraft in scope, each with its five-source coverage; confirming one with Enter draws a guide line from the avatar to that aircraft. The rack, avatar, menu and line are presentation controls over the SS source summary and grant no authority.
 
 Dependency order is enforced by staged PRD merges: ARR prerequisites are delivered first, then CP is merged and delivered, then HG is merged. Draft documents can be reviewed together but are not merged together. This is a draft proposal. Acceptance criteria describe future verification and do not claim that any scene, asset, or demo exists.
+
+## Research Readiness
+
+Research status: `Not required`
+
+Rationale: Hangar mode is a presentation layer over contracts that are already delivered and tested on the default branch (the CP case list and scene projection, the ARR case resources and the SS source summary). Its third-party code is pinned and audited by a merged story (#506), and asset bytes are structurally validated before loading (#508). Asset rights are limited to `Project-authored` declarations or verified `CC0-1.0` grants (DD-015), so no licence research is needed. The remaining uncertainties are product hypotheses (AS-005, AS-006) checked by manual release items, not external facts that could change scope, security or story order.
+
+Research artifact: Not applicable.
+
+Planning blockers: None.
 
 ## Product Context
 
@@ -82,6 +92,12 @@ The frontend today is a health-check stub. Almost everything the hangar relies o
 | DD-020 | The guide line is informational. It is computed in the client from the scene manifest's walkable floor and footprints, carries no status, colour meaning or authority, and is never transmitted. Avatar position, menu state and route are client state and are not sent to the server or to diagnostics. |
 | DD-021 | The avatar is a generic fictional low-detail figure wearing a yellow safety hard hat, with no real person's likeness and no brand or company marks on the hat or clothing, and is an asset under DD-015. The hat is appearance only: its colour carries no meaning, never changes, and is not a status, role or permission (DD-004, DD-005). The hat is distinguished by its shape as well as its colour, so the avatar stays easy to find against the floor and aircraft for users who cannot rely on colour. |
 | DD-022 | The camera follows the avatar by default in the Data Room. Follow mode is an orbit whose target is the avatar's position, specified under Follow camera; it is a third-person view, never first-person, and it can be switched off with a labelled control. Choosing an overview or aircraft preset turns it off. |
+| DD-023 | State-changing requests from Hangar mode use the existing signed-in session and the existing `X-CSRF-Token` header; Hangar adds no new authentication or anti-forgery mechanism. |
+| DD-024 | The Case C blocked-variant reset sends the CP reset body exactly: `{ contractVersion: 1, commandId, expectedRevision, variant: "blocked" }`. |
+| DD-025 | An unsupported browser, missing WebGL 2, an unsupported contract version, a malformed or oversized asset, and a failed refresh each show the visible non-3D fallback; none of them leaves a blank or partial scene. |
+| DD-026 | A failed source-summary request or an unsupported source-summary contract version shows only `source summary unavailable` for that case, with no inferred or cached coverage. |
+| DD-027 | Asset rights are accepted only from an approved `Project-authored` declaration or a verified `CC0-1.0` grant, and every asset carries a synthetic marker (DD-015). |
+| DD-028 | The three aircraft categories, the rack, the avatar, its hard hat and the guide line are illustrative synthetic presentation assets; none depicts a real aircraft type, operator, person or brand. |
 
 ## Product Goals
 
@@ -521,12 +537,12 @@ Recorded by the product owner at each release candidate on the demo baseline. Th
 ### Approval Checklist
 
 * Product Sponsor: Not assigned.
-* Product Owner: Not assigned.
+* Product Owner: Approved by merging pull request #223 on 2026-10-22.
 * Technical Lead: Not assigned.
 * Quality Lead: Not assigned.
 * Legal/Compliance: Not assigned; synthetic data only, subject to normal review.
 
-Approval date: Not approved.
+Approval date: 2026-10-22 (Product Owner). Other roles are not assigned; synthetic data only.
 
 ### Waivers
 
@@ -534,7 +550,7 @@ None requested.
 
 ### Handoff Readiness
 
-Draft only. Merge this PRD only after a named person approves its pull request and verifies delivered CP behavior/fixture approval and ARR endpoint prerequisites on the default branch. ARR, CP and HG merges are staged separately. Generated HG stories cite this PRD path and local IDs, with real `Depends on #N` lines only for stories within their HG plan. Accepted design targets are not implementation or release evidence.
+Approved by the Product Owner on 2026-10-22 (pull request #223). Version 0.3.1 records the planner's assumed defaults as DD-023 to DD-028 and the research readiness, and changes no requirement. The original gate: merge this PRD only after a named person approves its pull request and verifies delivered CP behavior/fixture approval and ARR endpoint prerequisites on the default branch. ARR, CP and HG merges are staged separately. Generated HG stories cite this PRD path and local IDs, with real `Depends on #N` lines only for stories within their HG plan. Accepted design targets are not implementation or release evidence.
 
 ## Disclaimer
 
@@ -544,7 +560,7 @@ This document defines draft requirements for a fictional, synthetic demonstrator
 
 * Template Version: 1.0.0.
 * Canonical Template: `docs/templates/prd-template.md`.
-* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.7.0); [Aircraft Case Pack](aircraft-case-pack.md) (CP, dependency); [Synthetic Source-System Stubs](aircraft-source-systems.md) (SS, source summary dependency for the Data Room).
+* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.9.2); [Aircraft Case Pack](aircraft-case-pack.md) (CP, dependency); [Synthetic Source-System Stubs](aircraft-source-systems.md) (SS, source summary dependency for the Data Room).
 * Derived from the untracked draft `aircraft-hangar-demo-mode` v0.1.0, which this PRD and CP replace.
 * License: CC-BY 4.0 (Microsoft HVE-Core).
 * Attribution: Microsoft HVE-Core Team.

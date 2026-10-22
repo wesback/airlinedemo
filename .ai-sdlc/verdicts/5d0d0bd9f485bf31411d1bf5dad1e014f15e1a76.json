@@ -1,0 +1,193 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 534,
+  "branch": "ai-sdlc/issue-534",
+  "commitSha": "5d0d0bd9f485bf31411d1bf5dad1e014f15e1a76",
+  "round": 0,
+  "pipelineVersion": "459fc5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The documentation covers the requested lifecycle, and the bootstrap flow applies the saved plan only after confirmation. The teardown script can destroy resources from a different initialized Terraform state than the resource group it reports.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/destroy-deployment.sh",
+          "line": 53,
+          "message": "The required resource group does not constrain the destroy target. Bind the operation to the intended backend and inputs, or verify that the selected Terraform deployment matches RESOURCE_GROUP_NAME before destroying.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The script checks RESOURCE_GROUP_NAME and prints it after destruction, but the terraform destroy command targets whichever state is currently initialized. BACKEND_CONFIG_FILE and TFVARS_FILE are optional, and RESOURCE_GROUP_NAME is never passed to Terraform or checked against the selected state and inputs.",
+            "failureScenario": "An operator sets RESOURCE_GROUP_NAME to the intended demo group while the working directory has a different deployment's cached backend initialized. After passing --yes, Terraform destroys the other state's resources, then the script reports that it destroyed resources for the configured group."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The lifecycle tests cover the main confirmation and authentication flows, but they do not catch bootstrap applying a plan different from the one it displayed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/tests/test_deployment_scripts.py",
+          "line": 67,
+          "message": "Assert that the exact plan path passed to `terraform show` is also passed to `terraform apply`; the acceptance criterion requires applying the displayed saved plan.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The bootstrap test finds the displayed plan and the applied plan independently, then checks only their order; it never compares their paths.",
+            "failureScenario": "If bootstrap displays one saved plan but applies a different .tfplan file, the test still passes. An operator could review one set of changes while Terraform applies another."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability reachable in the changed code. The scripts quote configuration values, verify the Azure tenant and subscription before Terraform operations, and require confirmation before applying or destroying resources.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "scripts/tests/__pycache__/test_deployment_scripts.cpython-312.pyc",
+      "scripts/tests/test_deployment_scripts.py"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

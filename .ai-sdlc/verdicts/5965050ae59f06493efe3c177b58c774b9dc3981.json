@@ -1,0 +1,235 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 534,
+  "branch": "ai-sdlc/issue-534",
+  "commitSha": "5965050ae59f06493efe3c177b58c774b9dc3981",
+  "round": 0,
+  "pipelineVersion": "459fc5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The teardown script can destroy a state from a different subscription because it validates only the resource group name. Its named lifecycle test also omits the required full-ID mismatch cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/destroy-deployment.sh",
+          "line": 62,
+          "message": "Compare the state's full resource ID with the configured subscription and resource group before destroying; matching only the group name allows a different subscription's deployment to be destroyed.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After reading azurerm_resource_group.demo, the script extracts only its name and compares that with RESOURCE_GROUP_NAME. It never checks the state's full id against the configured subscription and resource group.",
+            "failureScenario": "If the initialized state contains /subscriptions/another-subscription/resourceGroups/rg-airline-demo and the configured resource group is rg-airline-demo, the name comparison passes and terraform destroy runs against that state, despite the required subscription mismatch."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "scripts/tests/test_deployment_scripts.py",
+          "line": 122,
+          "message": "The named teardown test does not cover the acceptance criterion's full resource ID cases, including the same resource group name under a different subscription; add those fake state ID cases and assert no destroy call on mismatches.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The teardown test varies STATE_GROUP and checks resource-group names, but it does not provide or assert state IDs for a matching subscription, a different resource group ID, or the same group name under a different subscription.",
+            "failureScenario": "If the script accepts a state ID under another subscription when the resource group name matches, the named teardown test still passes, so it does not prove the full-ID comparison required by the second acceptance criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The teardown script does not meet the acceptance criterion requiring an exact full-ID match before destroy. Its test does not cover a same-name resource group under a different subscription or a missing state ID.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/destroy-deployment.sh",
+          "line": 64,
+          "message": "The teardown guard must compare the full state resource ID, case-insensitively, with the configured subscription and resource group path. Comparing only the group name allows destruction of a same-named resource group in another subscription.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After reading azurerm_resource_group.demo from the initialized state, the script extracts only its name and compares that name with RESOURCE_GROUP_NAME. It never checks the state resource's full ID or subscription.",
+            "failureScenario": "If the selected state contains /subscriptions/other-subscription/resourceGroups/rg-airline-demo and the configured resource group is rg-airline-demo, the name comparison succeeds and terraform destroy runs despite the subscription mismatch. The named test also misses this case and does not reject a missing state ID."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The teardown guard does not bind destruction to the configured subscription. A state from another subscription with the same resource group name passes the current check.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/destroy-deployment.sh",
+          "line": 60,
+          "message": "The destroy guard checks only the resource group name, so the same name in another subscription passes and can be destroyed. Compare the full state resource ID with the configured subscription and resource group before destroying (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "After initializing the configured backend, the script reads azurerm_resource_group.demo but extracts and compares only its name. It never checks the state resource's subscription ID.",
+            "failureScenario": "If the selected state belongs to another subscription but contains a resource group named rg-airline-demo, the name comparison passes and, after --yes, terraform destroy targets that state. This violates the criterion requiring an exact, case-insensitive match of the full resource ID."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "scripts/tests/__pycache__/test_deployment_scripts.cpython-312.pyc",
+      "scripts/tests/test_deployment_scripts.py"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

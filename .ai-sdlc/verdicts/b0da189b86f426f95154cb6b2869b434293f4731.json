@@ -1,0 +1,223 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 534,
+  "branch": "ai-sdlc/issue-534",
+  "commitSha": "b0da189b86f426f95154cb6b2869b434293f4731",
+  "round": 1,
+  "pipelineVersion": "459fc5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new test assertions verify that the group variable is passed, but they do not establish that it constrains the Terraform state being destroyed. The previously reported wrong-state destruction scenario remains reachable.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/destroy-deployment.sh",
+          "line": 58,
+          "message": "The prior finding remains: passing RESOURCE_GROUP_NAME as a Terraform variable does not bind destroy to that resource group or verify the selected state. Ensure the initialized deployment matches the requested resource group before destruction.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The script initializes the backend selected by BACKEND_CONFIG_FILE, then runs `terraform destroy` against that state. Passing `resource_group_name` as a variable does not limit destruction to resources in that group; Terraform destroys resources tracked in the initialized state.",
+            "failureScenario": "If the configured backend points to another deployment’s state, an operator can pass `--yes`; Terraform destroys the resources tracked in that state, then the script reports that it destroyed resources for RESOURCE_GROUP_NAME."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The bootstrap test now checks that the displayed and applied plan paths match. The teardown change still does not ensure the selected Terraform state belongs to the configured resource group.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/destroy-deployment.sh",
+          "line": 57,
+          "message": "The resource group still does not constrain the destroy target. Verify that the initialized state matches RESOURCE_GROUP_NAME before destroying, or otherwise bind destruction to the intended deployment.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The script initializes whichever backend BACKEND_CONFIG_FILE selects, then runs terraform destroy against that backend's current state. Passing RESOURCE_GROUP_NAME as a Terraform variable does not restrict which state resources destroy targets.",
+            "failureScenario": "An operator supplies a backend configuration for a different deployment while setting RESOURCE_GROUP_NAME to the intended group. After passing --yes, Terraform destroys resources in the selected backend's state, then reports success for the configured group."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed test now checks that bootstrap displays and applies the same plan. The previous teardown targeting finding remains: an explicitly supplied backend can still select a different deployment's state.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "scripts/destroy-deployment.sh",
+          "line": 53,
+          "message": "The resource group argument does not verify which deployment the selected Terraform state contains. Check the selected state against RESOURCE_GROUP_NAME before destroying.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The script passes RESOURCE_GROUP_NAME as a Terraform variable and initializes the backend named by BACKEND_CONFIG_FILE, but it never checks that the initialized state belongs to that resource group.",
+            "failureScenario": "An operator supplies a backend config for another deployment and the intended resource group name. After confirming with --yes, Terraform destroys resources in the selected backend's state, then reports the configured resource group."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "scripts/tests/__pycache__/test_deployment_scripts.cpython-312.pyc",
+      "scripts/tests/test_deployment_scripts.py"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
