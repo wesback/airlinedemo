@@ -27,6 +27,13 @@ describe('HangarRoutePlanner',()=>{
     expect(unreachable).toMatchObject({status:'unreachable',reachable:false,route:[],points:[],line:false});expect(unreachable.message).toContain('unreachable');
     expect(planHangarRoute(undefined,{x:0,z:0},config)).toMatchObject({status:'unreachable',route:[],line:false,message:'No route: marker is missing'});
 
+    const rawMarkerConnector=planHangarRoute(
+      {x:-4,z:-4},
+      {x:1.2,z:4},
+      {...config,aircraftFootprints:[{x:0.92,z:4,width:0.04,depth:1}]},
+    );
+    expect(rawMarkerConnector).toMatchObject({status:'unreachable',reachable:false,route:[],points:[],line:false});
+
     const selection=vi.fn();const planner=new HangarRoutePlanner({...config,avatar:{x:3,z:3},onSelect:selection});
     const arrival=planner.confirm({x:3.5,z:3.5}, {x:3,z:3}, 'AIR-1');
     expect(arrival).toMatchObject({status:'arrival',arrival:true,line:false,route:[]});
