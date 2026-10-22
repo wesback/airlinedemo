@@ -90,7 +90,8 @@ describe('dependency audit workflow', () => {
       mkdirSync(join(frontendRoot, 'node_modules/.bin'), { recursive: true });
       mkdirSync(join(auditRoot, 'artifacts/audit'), { recursive: true });
       const fakeNpm = join(frontendRoot, 'node_modules/.bin/npm');
-      writeFileSync(fakeNpm, '#!/bin/sh\nprintf \'{"metadata":{"vulnerabilities":{"total":0}},"vulnerabilities":{}}\\n\'\n', { mode: 0o755 });
+      const npmArgsLog = join(auditRoot, 'npm-args.txt');
+      writeFileSync(fakeNpm, '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HANGAR_FAKE_NPM_ARGS_LOG"\nprintf \'{"metadata":{"vulnerabilities":{"total":0}},"vulnerabilities":{}}\\n\'\n', { mode: 0o755 });
       const auditStepRunStart = auditStep.indexOf('        run: |\n');
       const auditRun = auditStep.slice(auditStepRunStart + '        run: |\n'.length)
         .split('\n')
@@ -98,10 +99,11 @@ describe('dependency audit workflow', () => {
         .join('\n');
       const executed = spawnSync('/bin/bash', ['-c', auditRun], {
         cwd: frontendRoot,
-        env: { ...process.env, PATH: `${join(frontendRoot, 'node_modules/.bin')}:${process.env.PATH}` },
+        env: { ...process.env, PATH: `${join(frontendRoot, 'node_modules/.bin')}:${process.env.PATH}`, HANGAR_FAKE_NPM_ARGS_LOG: npmArgsLog },
         encoding: 'utf8',
       });
       expect(executed.status).toBe(0);
+      expect(readFileSync(npmArgsLog, 'utf8')).toBe('audit\n--json\n');
       const evidencePath = join(auditRoot, 'artifacts/audit/npm-audit.json');
       const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'));
       expect(evidence.metadata).toEqual({ vulnerabilities: { total: 0 } });
