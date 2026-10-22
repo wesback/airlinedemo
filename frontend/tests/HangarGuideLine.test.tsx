@@ -1,7 +1,10 @@
+import { createElement, type ComponentType } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HangarGuideLineController, createHangarGuideLineController } from '../src/hangar/guideLine';
 import HangarGuideLineAdapter from '../src/hangar/GuideLineAdapter';
+import App, { type HangarEntryAppProps } from '../src/App';
+import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
 
 const floor=[{x:-5,z:-5},{x:5,z:-5},{x:5,z:5},{x:-5,z:5}];
 const config={walkablePolygon:floor,aircraftFootprints:[{x:1,z:1,width:2,depth:2}],avatarRadius:0.3,gridSize:0.25,avatar:{x:-4,z:-4}};
@@ -64,7 +67,7 @@ describe('Hangar guide line',()=>{
     expect(selection).toHaveBeenCalledTimes(0);
   });
 
-  it('Hangar guide line reduced motion and transport isolation',()=>{
+  it('Hangar guide line reduced motion and transport isolation',async()=>{
     const transport=vi.fn(); const selection=vi.fn();
     const {container}=render(<HangarGuideLineAdapter config={config} marker={{x:4,z:4}} avatar={{x:-4,z:-4}} aircraftId="AIR-1" onSelect={selection} reducedMotion transport={transport}/>);
     expect(container.querySelector('[data-static-line="true"]')).toBeTruthy();
@@ -79,5 +82,26 @@ describe('Hangar guide line',()=>{
     expect(container.querySelector('polyline')).toBeNull();
     expect(transport).not.toHaveBeenCalled(); expect(selection).not.toHaveBeenCalled();
     expect(container.querySelector('[role="status"],[role="button"],[aria-current],[aria-readonly],[aria-disabled]')).toBeNull();
+
+    cleanup();
+    stubCaseApi();
+    const productionSelection=vi.fn();
+    render(createElement(App as ComponentType<HangarEntryAppProps>,{
+      hangarBrowserSupported:true,hangarWebGl2Probe:{webgl2:true},hangarLazyLoader:()=>{ function ProductionScene(){return null;} return ProductionScene;},
+      hangarAircraftSelectionHandler:productionSelection,
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button',{name:'Enter Hangar'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Open data rack'}));
+    fireEvent.click(screen.getByRole('menuitem',{name:'Air One'}));
+    fireEvent.click(screen.getByRole('button',{name:'Enable reduced motion'}));
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+    expect(document.querySelector('[data-static-line="true"]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'Pointer select AIR-1'}));
+    expect(productionSelection).toHaveBeenCalledTimes(1);
+    expect(productionSelection).toHaveBeenCalledWith('AIR-1');
+    fireEvent.keyDown(screen.getByRole('button',{name:'Keyboard select AIR-2'}),{key:'Enter'});
+    expect(productionSelection).toHaveBeenCalledTimes(2);
+    expect(productionSelection).toHaveBeenLastCalledWith('AIR-2');
   });
 });

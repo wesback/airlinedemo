@@ -52,7 +52,6 @@ export default function App({
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
   const [HangarScene, setHangarScene] = useState<ComponentType | null>(null);
   const [hangarActionMessage, setHangarActionMessage] = useState('');
-  const [hangarSelectedAircraft, setHangarSelectedAircraft] = useState<string | null>(null);
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
   const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
@@ -65,7 +64,6 @@ export default function App({
     'AIR-2': { x: -4, z: 4 },
   };
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
-    setHangarSelectedAircraft(aircraftId);
     hangarAircraftSelectionHandler?.(aircraftId);
   };
 
@@ -278,6 +276,10 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       {HangarScene ? <HangarScene /> : <canvas aria-label="3D hangar scene" />}
+                      <section aria-label="Aircraft selection">
+                        <button type="button" aria-label="Pointer select AIR-1" onClick={() => sharedHangarAircraftSelectionHandler('AIR-1')}>AIR-1</button>
+                        <button type="button" aria-label="Keyboard select AIR-2" onClick={() => sharedHangarAircraftSelectionHandler('AIR-2')} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); sharedHangarAircraftSelectionHandler('AIR-2'); } }}>AIR-2</button>
+                      </section>
                       <HangarGuideLineAdapter
                         entries={hangarDataRoomEntries}
                         markers={hangarDataRoomMarkers}
