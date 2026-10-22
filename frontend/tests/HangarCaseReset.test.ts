@@ -77,4 +77,28 @@ describe('HangarCaseReset',()=>{
     expect(refreshedRetry.payload?.expectedRevision).toBe(7);
     expect(refreshedRetry.payload?.commandId).toBe('cp-reset-7');
   });
+
+  it('HangarCaseReset retries the component command with original command and revision',async()=>{
+    const transport=vi.fn(async (_url:string,_init:{body:string})=>{throw new Error('network lost');});
+    const source=envelope(7);
+    vi.spyOn(window,'confirm').mockReturnValue(true);
+    const rendered=render(createElement(HangarCaseReset,{envelope:source,csrfToken:'csrf-123',transport,commandId:'cp-reset-component',confirmReset:()=>true}));
+    const user=userEvent.setup();
+
+    await user.click(screen.getByRole('button',{name:'Reset blocked variant'}));
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(JSON.parse((transport.mock.calls[0][1] as {body:string}).body)).toEqual({
+      contractVersion:1,commandId:'cp-reset-component',expectedRevision:7,variant:'blocked',
+    });
+
+    rendered.rerender(createElement(HangarCaseReset,{envelope:envelope(8),csrfToken:'csrf-123',transport,commandId:'cp-reset-new',confirmReset:()=>true}));
+    await user.click(screen.getByRole('button',{name:'Reset blocked variant'}));
+
+    expect(transport).toHaveBeenCalledTimes(2);
+    for(const call of transport.mock.calls){
+      expect(JSON.parse((call[1] as {body:string}).body)).toEqual({
+        contractVersion:1,commandId:'cp-reset-component',expectedRevision:7,variant:'blocked',
+      });
+    }
+  });
 });
