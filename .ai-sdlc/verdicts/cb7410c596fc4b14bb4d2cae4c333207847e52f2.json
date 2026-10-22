@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 516,
+  "branch": "ai-sdlc/issue-516",
+  "commitSha": "cb7410c596fc4b14bb4d2cae4c333207847e52f2",
+  "round": 2,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added assertions still do not exercise the stale snapshot through the boundary without a current snapshot fallback. The prior major test finding remains unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarErrorBoundary.test.tsx",
+          "line": 24,
+          "message": "The prior finding remains: the test does not verify stale snapshot preservation through the boundary because it supplies a current `lastSnapshot` and reuses an already-mounted boundary. Mount a fresh boundary with the failed-refresh snapshot and assert the fallback shows its exact labelled state.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test rerenders the existing boundary, which was initialized with the current snapshot `exact`, and also passes `lastSnapshot={exact}` alongside the stale failed-refresh snapshot.",
+            "failureScenario": "If the boundary rejects `current=false` snapshots, this test still displays revision 7 from `exact`. It therefore does not prove that mounting the boundary with only the failed-refresh snapshot preserves that labelled state."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated test exercises failed refresh through a rerender, but the prior test finding remains because a previously stored current snapshot masks whether the boundary accepts a stale snapshot on mount.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarErrorBoundary.test.tsx",
+          "line": 27,
+          "message": "The previous finding remains: the test does not prove that the boundary preserves a stale failed-refresh snapshot when mounted with it. Add a case that mounts the boundary with that snapshot and asserts the exact labelled state in the fallback.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test rerenders a boundary that already stored the current snapshot as lastSnapshot, then supplies the failed-refresh snapshot alongside that same current snapshot. It never mounts the boundary with only the stale failed-refresh snapshot.",
+            "failureScenario": "If the constructor rejects snapshots with current=false, this test still passes using the previously stored current snapshot, while a boundary mounted with the failed-refresh snapshot alone omits the last labelled server state."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The test change does not resolve the prior test coverage finding. I found no security vulnerability in the reviewed delta.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarErrorBoundary.test.tsx",
+          "line": 24,
+          "message": "The carried snapshot-preservation test finding remains: mount a fresh boundary with the failed-refresh snapshot and assert its fallback displays the exact labelled state, without supplying the prior snapshot separately.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test rerenders the already-mounted boundary with the failed-refresh snapshot while also passing lastSnapshot={exact}. The boundary already holds that exact snapshot from its first render, and the explicit lastSnapshot supplies it again.",
+            "failureScenario": "If the boundary constructor rejects a stale snapshot with current=false, this test still displays revision 7 from its existing state and explicit lastSnapshot. It therefore does not prove that mounting with the failed-refresh snapshot preserves the labelled state."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarErrorBoundary.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
