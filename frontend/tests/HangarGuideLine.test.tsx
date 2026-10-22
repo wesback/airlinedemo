@@ -59,6 +59,8 @@ describe('Hangar guide line',()=>{
     fireEvent.click(screen.getByRole('menuitem',{name:'Air One'}));
     expect(closeMenu).toHaveBeenCalledTimes(1);
     expect(rendered.container.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+    const routePoints=rendered.container.querySelector('polyline')?.getAttribute('points')?.trim().split(/\s+/)??[];
+    expect(routePoints.at(-1)).toBe('4,-4');
     expect(selection).toHaveBeenCalledTimes(0);
   });
 

@@ -71,7 +71,8 @@ afterEach(() => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
     expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
-    expect(document.querySelector('polyline')).not.toBeNull();
+    const routePoints = document.querySelector('polyline')?.getAttribute('points')?.trim().split(/\s+/) ?? [];
+    expect(routePoints.at(-1)).toBe('4,-4');
     expect(screen.queryByRole('menu', { name: 'Data rack menu' })).toBeNull();
     expect(selection).not.toHaveBeenCalled();
   });

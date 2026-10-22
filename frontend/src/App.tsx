@@ -52,6 +52,7 @@ export default function App({
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
   const [HangarScene, setHangarScene] = useState<ComponentType | null>(null);
   const [hangarActionMessage, setHangarActionMessage] = useState('');
+  const [hangarSelectedAircraft, setHangarSelectedAircraft] = useState<string | null>(null);
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
   const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
@@ -64,6 +65,7 @@ export default function App({
     'AIR-2': { x: -4, z: 4 },
   };
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
+    setHangarSelectedAircraft(aircraftId);
     hangarAircraftSelectionHandler?.(aircraftId);
   };
 
@@ -288,6 +290,7 @@ export default function App({
                           onSelect: sharedHangarAircraftSelectionHandler,
                         }}
                         onSelect={sharedHangarAircraftSelectionHandler}
+                        reducedMotion={hangarReducedMotion}
                       />
                       <div aria-label="Reduced motion controls">
                         <button type="button" aria-pressed={hangarReducedMotion} onClick={() => setHangarMotionOverride(true)}>Enable reduced motion</button>
