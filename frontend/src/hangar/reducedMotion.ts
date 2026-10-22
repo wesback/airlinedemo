@@ -87,6 +87,8 @@ export class HangarReducedMotion {
   disable(): boolean { return this.setOverride(false) === false; }
   getDuration(requestedDuration: unknown): number { return getHangarMotionDuration(requestedDuration, this.reduced); }
   applyTransition<T>(target: T, requestedDuration: unknown): HangarTransitionTarget<T> { return applyHangarTransition(target, requestedDuration, this.reduced); }
+  applyCameraTransition<T>(target: T, requestedDuration: unknown): HangarTransitionTarget<T> { return this.applyTransition(target, requestedDuration); }
+  applyAvatarTransition<T>(target: T, requestedDuration: unknown): HangarTransitionTarget<T> { return this.applyTransition(target, requestedDuration); }
 }
 
 export const isHangarReducedMotionActive = shouldReduceHangarMotion;
