@@ -174,12 +174,40 @@ export function validateHangarGlb(input: unknown, limits: HangarGlbLimits | numb
       if (!rangeInside(viewOffset + accessorOffset, byteLength, viewOffset + viewLength)) invalid();
       if (viewOffset + accessorOffset + byteLength > (firstBuffer.byteLength as number)) invalid();
     }
-    if (accessor.sparse && typeof accessor.sparse === 'object') {
+    if (accessor.sparse !== undefined) {
+      if (!accessor.sparse || typeof accessor.sparse !== 'object' || Array.isArray(accessor.sparse)) invalid();
       const sparse = accessor.sparse as Record<string, unknown>;
-      for (const sparsePart of [sparse.indices, sparse.values]) {
-        if (!sparsePart || typeof sparsePart !== 'object') invalid();
+      const sparseCount = sparse.count;
+      if (!Number.isSafeInteger(sparseCount) || (sparseCount as number) <= 0 || (sparseCount as number) > (count as number)) invalid();
+
+      const sparseIndices = sparse.indices;
+      const sparseValues = sparse.values;
+      if (!sparseIndices || typeof sparseIndices !== 'object' || Array.isArray(sparseIndices)) invalid();
+      if (!sparseValues || typeof sparseValues !== 'object' || Array.isArray(sparseValues)) invalid();
+
+      const indices = sparseIndices as Record<string, unknown>;
+      const values = sparseValues as Record<string, unknown>;
+      const indexComponentSize = indices.componentType === 5121 || indices.componentType === 5123 || indices.componentType === 5125
+        ? componentSizes[indices.componentType as number]
+        : undefined;
+      if (!indexComponentSize) invalid();
+
+      for (const sparsePart of [indices, values]) {
         const part = sparsePart as Record<string, unknown>;
         if (!Number.isSafeInteger(part.bufferView) || (part.bufferView as number) < 0 || (part.bufferView as number) >= bufferViews.length) invalid();
+        const byteOffset = part.byteOffset === undefined ? 0 : part.byteOffset;
+        if (!Number.isSafeInteger(byteOffset) || (byteOffset as number) < 0) invalid();
+        const rawView = bufferViews[part.bufferView as number] as Record<string, unknown>;
+        if (rawView.buffer !== undefined && rawView.buffer !== 0) invalid();
+        const viewOffset = rawView.byteOffset ?? 0;
+        if (!Number.isSafeInteger(viewOffset) || (viewOffset as number) < 0) invalid();
+        const viewLength = rawView.byteLength;
+        if (!rangeInside(viewOffset, viewLength, firstBuffer.byteLength as number)) invalid();
+
+        const sparseByteLength = sparsePart === indices
+          ? (sparseCount as number) * indexComponentSize
+          : (sparseCount as number) * elementSize;
+        if (!rangeInside(byteOffset as number, sparseByteLength, viewLength as number)) invalid();
       }
     }
   }

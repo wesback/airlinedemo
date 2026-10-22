@@ -81,6 +81,15 @@ describe('Hangar GLB structural validation', () => {
       { name: 'accessor beyond bufferView', input: buildGlb(validDocument({ accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' }] })), valid: false },
       { name: 'strided accessor ending exactly at the view boundary', input: buildGlb(stridedDocument, binChunk(20)), valid: true },
       { name: 'strided accessor one stride too long', input: buildGlb(tooLongStride, binChunk(20)), valid: false },
+      { name: 'sparse indices exceed bufferView', input: buildGlb(validDocument({
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 24 }, { buffer: 0, byteOffset: 24, byteLength: 4 }],
+        buffers: [{ byteLength: 28 }],
+        accessors: [{ bufferView: 0, componentType: 5126, count: 2, type: 'VEC2', sparse: { count: 2, indices: { bufferView: 1, componentType: 5123, byteOffset: 1 }, values: { bufferView: 0, byteOffset: 8 } } }],
+      }), binChunk(28)), valid: false },
+      { name: 'sparse values exceed bufferView', input: buildGlb(validDocument({
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 24 }],
+        accessors: [{ bufferView: 0, componentType: 5126, count: 2, type: 'VEC2', sparse: { count: 2, indices: { bufferView: 0, componentType: 5123 }, values: { bufferView: 0, byteOffset: 20 } } }],
+      })), valid: false },
       { name: 'JSON nested to depth 128', input: buildGlb(nestedDocument(128)), valid: true },
       { name: 'JSON nested to depth 129', input: buildGlb(nestedDocument(129)), valid: false },
     ];
