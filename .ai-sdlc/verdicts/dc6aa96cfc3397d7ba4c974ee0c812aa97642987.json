@@ -1,0 +1,234 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 458,
+  "branch": "ai-sdlc/issue-458",
+  "commitSha": "dc6aa96cfc3397d7ba4c974ee0c812aa97642987",
+  "round": 0,
+  "pipelineVersion": "18314a8",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diagnostics implementation has tests for helper emissions and several runtime paths, but the required isolated runtime-operation test and helper rejection cases are not proven.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 24,
+          "message": "AC-022 runtime operation diagnostics are not effectively tested. Add the named isolated test and assert each operation's exact new event; the current helper emissions can mask missing runtime emissions.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC-022 requires AC022_RuntimeOperationsEmitIsolatedDiagnostics to exercise publisher success and failure plus authenticated list, scene, and reset operations, checking only events added by each operation. The test instead calls diagnostic helpers directly, then searches the shared logger for matching events without isolating operation emissions.",
+            "failureScenario": "If a runtime operation stops emitting its diagnostic, the helper calls or host startup events can still satisfy the shared logger assertions. The required publisher failure path and per-operation event-count assertions are also absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 24,
+          "message": "The helper contract test omits its required negative cases. Assert that unknown event and outcome values each throw ArgumentException and add no captured event.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC-022 requires AC022_OperationAndOutcomeTableEmitsOnlyApprovedFields to test that event type `other` and outcome `other` each throw ArgumentException without emitting an event. The test only exercises listed event and outcome values.",
+            "failureScenario": "If CasePackDiagnostics.Emit accepts an unknown event type or outcome and emits an event, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover several runtime paths, canary inputs, and audit behavior, but the required isolated runtime assertions and failed pack-load case are missing. The helper contract’s required invalid event and outcome cases are also untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 22,
+          "message": "AC-022 runtime-operation coverage is incomplete. Add the named AC022_RuntimeOperationsEmitIsolatedDiagnostics test, exercise successful and failed PublishAsync loads, and assert exactly one new event with the expected outcome and complete key set for each operation.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test emits every event and outcome through diagnostic helpers before issuing runtime requests, then searches the same logger for matching events. It does not call AircraftCasePackPublisher.PublishAsync with a failing loader or assert isolated event counts and exact fields for each operation.",
+            "failureScenario": "If pack loading stops emitting diagnostics, or emits the wrong outcome or identifiers, helper-generated events can still satisfy the assertions. The required failed pack-load path is never exercised."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs",
+          "line": 22,
+          "message": "AC-022’s required negative contract case is untested. Assert that event type other and outcome other each throw ArgumentException and leave the captured event count unchanged.",
+          "confidence": 1,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC022_OperationAndOutcomeTableEmitsOnlyApprovedFields calls helper methods only with listed event types and outcomes; it contains no call using event type other or outcome other and no assertion that rejection emits no event.",
+            "failureScenario": "If the helper accepts an unknown event type or outcome and emits an event, the test still passes, despite the criterion requiring ArgumentException and no captured event."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability was found in the changed code. Diagnostic fields use constrained identifiers and approved outcomes, and operation failures do not expose exception details.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/CasePackDiagnosticsTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

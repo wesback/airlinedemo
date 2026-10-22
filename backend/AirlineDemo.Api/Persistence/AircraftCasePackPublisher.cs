@@ -1,7 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using AirlineDemo.Api.Fixtures;
+using AirlineDemo.Api.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -139,7 +142,8 @@ public sealed class AircraftCasePackPublisher(
     IEvidenceBlobStore evidenceStore,
     IAircraftCasePackSnapshotStore snapshotStore,
     IAircraftCasePackCaseStager caseStager,
-    IAircraftCasePackDocumentReferenceStager? documentReferenceStager = null)
+    IAircraftCasePackDocumentReferenceStager? documentReferenceStager = null,
+    ILogger<AircraftCasePackPublisher>? logger = null)
 {
     private static readonly HashSet<string> EvaluationCaseIds = CreateEvaluationCaseIds();
 
@@ -150,39 +154,72 @@ public sealed class AircraftCasePackPublisher(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        var pack = load();
-        var manifest = pack.ValidatedManifest;
-        var current = snapshotStore.Read();
-        var provenanceErrors = ValidateCaseIdentifiers(manifest.Cases.Select(item => item.CaseId));
-        if (provenanceErrors.Count > 0) throw new AircraftCasePackValidationException(provenanceErrors);
-
-        if (current is not null)
+        var started = Stopwatch.GetTimestamp();
+        ILogger diagnosticsLogger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AircraftCasePackPublisher>.Instance;
+        try
         {
-            var errors = CompareVersions(current.Manifest, manifest, current.Files, pack.Files);
-            if (errors.Count > 0) throw new AircraftCasePackValidationException(errors);
-            if (StringComparer.Ordinal.Equals(current.PackVersion, manifest.PackVersion)
-                && StringComparer.Ordinal.Equals(current.Sha256, manifest.Sha256))
-                return current;
-        }
+            var pack = load();
+            var manifest = pack.ValidatedManifest;
+            var current = snapshotStore.Read();
+            var provenanceErrors = ValidateCaseIdentifiers(manifest.Cases.Select(item => item.CaseId));
+            if (provenanceErrors.Count > 0) throw new AircraftCasePackValidationException(provenanceErrors);
 
-        var cases = new List<PublishedAircraftCasePackCase>(manifest.Cases.Count);
-        foreach (var record in manifest.Cases)
-        {
-            var blobs = new Dictionary<string, EvidenceBlobVersion>(StringComparer.Ordinal);
-            foreach (var document in record.Documents!)
+            if (current is not null)
             {
-                var identity = record.CaseId + "\0" + document.Path;
-                var documentId = "case-pack-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
-                blobs.Add(document.Path, await evidenceStore.StoreAsync(documentId, pack.ReadFile(document.Path), cancellationToken));
+                var errors = CompareVersions(current.Manifest, manifest, current.Files, pack.Files);
+                if (errors.Count > 0) throw new AircraftCasePackValidationException(errors);
+                if (StringComparer.Ordinal.Equals(current.PackVersion, manifest.PackVersion)
+                    && StringComparer.Ordinal.Equals(current.Sha256, manifest.Sha256))
+                {
+                    CasePackDiagnostics.PackLoad(diagnosticsLogger, "success", CasePackDiagnostics.ElapsedMilliseconds(started), manifest.PackVersion);
+                    return current;
+                }
             }
-            var references = (documentReferenceStager ?? new AircraftCasePackDocumentReferenceStager()).Stage(record, blobs);
-            cases.Add(caseStager.Stage(record, references));
-        }
 
-        var snapshot = new AircraftCasePackSnapshot(expectedRevision + 1, manifest, pack.Files, cases);
-        if (!snapshotStore.TryCommit(expectedRevision, snapshot))
-            throw new AircraftCasePackRevisionConflictException();
-        return snapshot;
+            var cases = new List<PublishedAircraftCasePackCase>(manifest.Cases.Count);
+            foreach (var record in manifest.Cases)
+            {
+                var blobs = new Dictionary<string, EvidenceBlobVersion>(StringComparer.Ordinal);
+                foreach (var document in record.Documents!)
+                {
+                    var identity = record.CaseId + "\0" + document.Path;
+                    var documentId = "case-pack-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
+                    blobs.Add(document.Path, await evidenceStore.StoreAsync(documentId, pack.ReadFile(document.Path), cancellationToken));
+                }
+                var references = (documentReferenceStager ?? new AircraftCasePackDocumentReferenceStager()).Stage(record, blobs);
+                cases.Add(caseStager.Stage(record, references));
+            }
+
+            var snapshot = new AircraftCasePackSnapshot(expectedRevision + 1, manifest, pack.Files, cases);
+            if (!snapshotStore.TryCommit(expectedRevision, snapshot))
+                throw new AircraftCasePackRevisionConflictException();
+            CasePackDiagnostics.PackLoad(diagnosticsLogger, "success", CasePackDiagnostics.ElapsedMilliseconds(started), manifest.PackVersion);
+            return snapshot;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (AircraftCasePackValidationException)
+        {
+            CasePackDiagnostics.PackLoad(diagnosticsLogger, "validation_failed", CasePackDiagnostics.ElapsedMilliseconds(started));
+            throw;
+        }
+        catch (AircraftCasePackRevisionConflictException)
+        {
+            CasePackDiagnostics.PackLoad(diagnosticsLogger, "conflict", CasePackDiagnostics.ElapsedMilliseconds(started));
+            throw;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or InvalidDataException)
+        {
+            CasePackDiagnostics.PackLoad(diagnosticsLogger, "validation_failed", CasePackDiagnostics.ElapsedMilliseconds(started));
+            throw;
+        }
+        catch (Exception)
+        {
+            CasePackDiagnostics.PackLoad(diagnosticsLogger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started));
+            throw;
+        }
     }
     public static IReadOnlyList<string> CompareVersions(AircraftCasePackManifest previous, AircraftCasePackManifest current,
         IReadOnlyDictionary<string, byte[]> previousFiles, IReadOnlyDictionary<string, byte[]> currentFiles)

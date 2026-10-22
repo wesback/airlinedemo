@@ -79,7 +79,7 @@ public static partial class TelemetryRedaction
 
     private static readonly HashSet<string> DeniedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "source.raw_record_id", "recordid", "record.id", "payload",
+        "source.raw_record_id", "recordid", "record.id", "payload", "response", "connectionstring", "credential", "auditdetail", "documenttext", "auditDetail",
         "prompt", "gen_ai.prompt", "gen_ai.content.prompt",
         "document", "document.text", "document.content", "evidence.text",
         "passcode", "cookie", "set-cookie", "authorization", "token", "access_token",
