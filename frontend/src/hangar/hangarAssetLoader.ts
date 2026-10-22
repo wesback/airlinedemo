@@ -1,4 +1,5 @@
 import { HANGAR_ASSET_INVALID, validateHangarGlbResult, type HangarGlbLimits } from './glbValidator';
+import { validateHangarResource, validateHangarAssetRecord } from './assetPolicy';
 
 export type HangarAssetFailure = typeof HANGAR_ASSET_INVALID;
 
@@ -8,14 +9,22 @@ export type HangarAssetLoadOptions<T> = {
   /** Called exactly once, with the reason, when the bytes are rejected. */
   onFallback: (reason: HangarAssetFailure) => void;
   limits?: HangarGlbLimits;
+  resource?: unknown;
+  provenance?: unknown;
 };
 
 /** Validates the bytes, then calls the loader once; invalid bytes never reach the loader and are reported once. */
 export function loadValidatedHangarAsset<T>(
   bytes: unknown,
-  { loader, onFallback, limits }: HangarAssetLoadOptions<T>,
+  { loader, onFallback, limits, resource, provenance }: HangarAssetLoadOptions<T>,
 ): { loaded: true; value: T } | { loaded: false; reason: HangarAssetFailure } {
   const result = validateHangarGlbResult(bytes, limits);
+  if (result.valid && provenance !== undefined) {
+    try { validateHangarAssetRecord(provenance); } catch { onFallback(HANGAR_ASSET_INVALID); return { loaded: false, reason: HANGAR_ASSET_INVALID }; }
+  }
+  if (result.valid && resource !== undefined) {
+    try { validateHangarResource(resource); } catch { onFallback(HANGAR_ASSET_INVALID); return { loaded: false, reason: HANGAR_ASSET_INVALID }; }
+  }
   if (!result.valid) {
     onFallback(result.reason);
     return { loaded: false, reason: result.reason };
