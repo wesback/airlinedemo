@@ -46,10 +46,18 @@ describe('HangarSceneRefresh', () => {
     const malformed = applyServerRefresh(first, envelope({ contractVersion: 99 }));
     expect(malformed.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
     expect(canAdmitHangarCommands(malformed.snapshot)).toBe(false);
+    const malformedV1 = await refreshHangarScene(() => envelope({ case: { ...envelope().case, permission: undefined } }), first);
+    expect(malformedV1.valid).toBe(false);
+    expect(malformedV1.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+    expect(canAdmitHangarCommands(malformedV1.snapshot)).toBe(false);
     const stale = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseRevision: 6 } }));
     expect(stale.valid).toBe(false);
     expect(stale.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
     expect(canAdmitHangarCommands(stale.snapshot)).toBe(false);
+    const switchedCaseObjects = allIds('B').map((objectId, index) => ({ objectId, kind: ['aircraft','engine','component','component'][index], caseId: 'cp-case-b' }));
+    const switchedCase = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseId: 'cp-case-b', caseRevision: 2 }, objects: switchedCaseObjects }));
+    expect(switchedCase.valid).toBe(true);
+    expect(switchedCase.snapshot).toMatchObject({ caseId: 'cp-case-b', revision: 2, current: true });
   });
 
   it('HangarSceneRefresh unsupported contract fallback', () => {

@@ -26,7 +26,7 @@ export function snapshotFromServer(envelope: unknown, injected?: unknown): Serve
 export function replaceWithServerSnapshot(previous: ServerSceneSnapshot|null, envelope: unknown, injected?: unknown): RefreshResult {
   const snapshot=snapshotFromServer(envelope,injected);
   if(!snapshot)return {snapshot:previous?{...previous,current:false,fallbackReason:'refresh_failed'}:null,scene:null,valid:false,stale:true,error:'Unsupported or malformed scene refresh'};
-  if(previous && previous.revision!==null && snapshot.revision!==null && snapshot.revision < previous.revision) {
+  if(previous && previous.caseId===snapshot.caseId && previous.revision!==null && snapshot.revision!==null && snapshot.revision < previous.revision) {
     const staleSnapshot: ServerSceneSnapshot={...previous,current:false,fallbackReason:'refresh_failed'};
     return {snapshot:staleSnapshot,scene:null,valid:false,stale:true,error:'Stale scene revision'};
   }
