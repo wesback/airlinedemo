@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import GuidedJourney, { buildCaseAJourney, openCaseAOlderHistory } from '../src/hangar/guidedJourney';
+import GuidedJourney, { buildCaseAJourney, buildCaseBJourney, buildCaseCJourney, openCaseAOlderHistory } from '../src/hangar/guidedJourney';
 
 const witness=(id:string, caseId='cp-case-a')=>({witnessId:id,evidenceRefId:'ref-a',caseId,documentId:'case-a/llp.txt',documentVersion:2,page:4,basisId:'basis-a',basisVersion:2,displayLabel:`Evidence ${id}`});
 const event=(eventId:string,sequence:number,eventType:string,witnessIds:string[]=[])=>({eventId,sequence,eventType,runId:'run-a',caseId:'cp-case-a',basisId:'basis-a',basisVersion:2,actorRole:'technical-reviewer',summary:`Recorded ${eventType}`,capabilityLabel:'Rules-based',witnessIds});
@@ -45,5 +45,39 @@ describe('Case A guided journey',()=>{
     const {container}=render(createElement(GuidedJourney,{scene:payload}));
     expect(container.querySelector('script')).toBeNull();expect(container.textContent).not.toContain('<script>window.payloadCanary=true</script>');expect(container.textContent).not.toContain('PERSON-123');expect(container.textContent).not.toContain('PAYLOAD-CANARY');expect(container.textContent).not.toContain('private@example.test');
     const future=screen.getAllByRole('button',{name:'Review'}); expect(future).toBeTruthy();
+  });
+
+  it('Case B journey has no request step',()=>{
+    const bEvent=(id:string,seq:number,type:string,witnessIds:string[])=>({...event(id,seq,type,witnessIds),caseId:'cp-case-b',runId:'run-b'});
+    const b={...scene(),case:{caseId:'cp-case-b'},history:[bEvent('b-finding',1,'finding-recorded',['wit-finding']),bEvent('b-review',2,'internal-review-completed',['wit-review']),bEvent('b-request',3,'request-created',['wit-request'])],evidence:[witness('wit-finding','cp-case-b'),witness('wit-review','cp-case-b'),witness('wit-request','cp-case-b')],currentRunId:'run-b'};
+    const journey=buildCaseBJourney(b);
+    expect(journey.steps.map(step=>step.label)).toEqual(['Finding','Internal review']);
+    expect(journey.steps.some(step=>/request/i.test(step.label))).toBe(false);
+    expect(buildCaseBJourney({...b,history:[...b.history,{...event('b-synthetic',4,'request-created',[]),label:'Request'}]}).steps.some(step=>/request/i.test(step.label))).toBe(false);
+  });
+
+  it('Case C journey labels blocked variant',()=>{
+    const c={...scene(),case:{caseId:'cp-case-c'},variant:'blocked',currentRunId:'run-c',history:[{...event('c-finding',1,'finding-recorded',['wit-finding']),caseId:'cp-case-c',runId:'run-c'},{...event('c-review',2,'review-completed',['wit-review']),caseId:'cp-case-c',runId:'run-c'},{...event('c-accept',3,'acceptance-recorded',['wit-request']),caseId:'cp-case-c',runId:'run-c'}],evidence:[witness('wit-finding','cp-case-c'),witness('wit-review','cp-case-c'),witness('wit-request','cp-case-c')]};
+    const blocked=buildCaseCJourney(c);
+    expect(blocked.variant).toBe('blocked');expect(blocked.steps.map(step=>step.label)).toEqual(['Finding','Review','blocked','retryable']);expect(blocked.steps.map(step=>step.label)).not.toContain('Acceptance');expect(blocked.steps.map(step=>step.label)).not.toContain('Request');
+    const baselineHistory=[{...event('c-finding',1,'finding-recorded',['wit-finding']),caseId:'cp-case-c',runId:'run-c'},{...event('c-review',2,'review-completed',['wit-review']),caseId:'cp-case-c',runId:'run-c'},{...event('c-response',4,'partner-response-recorded',['wit-response']),caseId:'cp-case-c',runId:'run-c'},{...event('c-basis',5,'new-basis-created',['wit-basis']),caseId:'cp-case-c',runId:'run-c'}];
+    const baselineEvidence=[witness('wit-finding','cp-case-c'),witness('wit-review','cp-case-c'),witness('wit-response','cp-case-c'),witness('wit-basis','cp-case-c')];
+    const baseline=buildCaseCJourney({...c,variant:'baseline',history:baselineHistory,evidence:baselineEvidence});expect(baseline.variant).toBe('baseline');expect(baseline.steps.map(step=>step.label)).toEqual(['Finding','Review','Response','New basis']);expect(baseline.steps.map(step=>step.label)).not.toContain('Acceptance');expect(baseline.steps.map(step=>step.label)).not.toContain('blocked');expect(baseline.steps.map(step=>step.label)).not.toContain('retryable');
+    const summaryOnly=buildCaseCJourney({...c,variant:undefined,history:[{...event('c-finding',1,'finding-recorded',['wit-finding']),summary:'Blocked retryable processing reset',caseId:'cp-case-c',runId:'run-c'}]});expect(summaryOnly.variant).toBe('baseline');expect(summaryOnly.steps.map(step=>step.label)).not.toContain('blocked');expect(summaryOnly.steps.map(step=>step.label)).not.toContain('retryable');
+    const retryableEvent=buildCaseCJourney({...c,variant:undefined,history:[{...event('c-finding',1,'finding-recorded',['wit-finding']),caseId:'cp-case-c',runId:'run-c',variant:'retryable'}]});expect(retryableEvent.variant).toBe('blocked');expect(retryableEvent.steps.map(step=>step.label)).toEqual(['Finding','blocked','retryable']);
+  });
+
+  it('Case B and C journey preserve older-history omission semantics',async()=>{
+    const b=buildCaseBJourney({...scene(),case:{caseId:'cp-case-b'},olderHistoryAvailable:true,currentRunId:'run-b',history:[]});
+    expect((await openCaseAOlderHistory(b,null)).error).toBe('Unable to access delivered ARR older history');
+    const adapter=vi.fn(async()=>({caseId:'cp-case-b',runId:'run-b',basisId:'basis-a',events:[event('old-b-review',1,'internal-review-completed',['wit-review'])]}));
+    expect((await openCaseAOlderHistory({...b,basisId:'basis-a'},adapter)).ok).toBe(true);
+    const c=buildCaseCJourney({...scene(),case:{caseId:'cp-case-c'},olderHistoryAvailable:false,currentRunId:'run-c',history:[]});
+    expect((await openCaseAOlderHistory(c,adapter)).error).toBe('Older history access is unavailable');
+    render(createElement(GuidedJourney,{scene:{...scene(),case:{caseId:'cp-case-c'},olderHistoryAvailable:false,currentRunId:'run-c',history:[]}}));
+    expect(screen.getByRole('status').textContent).toBe('Older history unavailable');expect(screen.queryByRole('button',{name:'Open delivered ARR older history'})).toBeNull();cleanup();
+    expect((await openCaseAOlderHistory({...b,olderHistoryAvailable:true,basisId:'basis-a'},async()=>({caseId:'cp-case-c',runId:'run-b',basisId:'basis-a',events:[]}))).error).toContain('Out-of-scope');
+    const window=buildCaseBJourney({...scene(),case:{caseId:'cp-case-b'},olderHistoryAvailable:true,currentRunId:'run-b',history:[{...event('b-finding',1,'finding-recorded',['wit-finding']),caseId:'cp-case-b',runId:'run-b'}],evidence:[witness('wit-finding','cp-case-b')]});expect(window.steps[0].future).toBe(false);
+    expect((await openCaseAOlderHistory({...b,olderHistoryAvailable:true,basisId:'basis-a'},async()=>({caseId:'cp-case-b',runId:'run-b',basisId:'basis-a',events:[]}))).ok).toBe(true);
   });
 });
