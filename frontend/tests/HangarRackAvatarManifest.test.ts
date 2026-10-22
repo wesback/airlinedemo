@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import manifest from '../src/hangar/sceneManifest.json';
+import { createHangarRackMenuController } from '../src/hangar/rackMenu';
 import {
   HANGAR_MANIFEST_ERROR,
   HANGAR_AVATAR_HARD_HAT,
@@ -34,6 +35,12 @@ describe('Hangar rack and avatar manifest', () => {
       expect(validateHangarRackAvatarManifest(bad)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
       expect(buildHangarRackDescriptor(bad).valid).toBe(false);
       expect(openValidatedHangarRack(badOpened, bad, loaderCalls)).toEqual({ opened: false, reason: HANGAR_MANIFEST_ERROR });
+      expect(badOpened).not.toHaveBeenCalled();
+      expect(badLoader).not.toHaveBeenCalled();
+
+      const rackController = createHangarRackMenuController([], { manifest: bad, loaderCalls });
+      expect(rackController.open()).toBe(false);
+      expect(rackController.getState()).toEqual(expect.objectContaining({ open: false, error: HANGAR_MANIFEST_ERROR }));
       expect(badOpened).not.toHaveBeenCalled();
       expect(badLoader).not.toHaveBeenCalled();
     }
