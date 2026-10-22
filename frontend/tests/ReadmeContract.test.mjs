@@ -19,9 +19,12 @@ describe('public-safe readiness README', () => {
       previous = index;
     }
 
-    expect(readme).toContain('scripts/bootstrap-deployment.sh');
-    expect(readme).toContain('scripts/destroy-deployment.sh --yes');
-    expect(readme).toContain('docs/aircraft-return-readiness/README.md');
+    const deploy = readme.match(/## Deploy and release\n([\s\S]*?)(?=\n## |$)/)?.[1] ?? '';
+    const teardown = readme.match(/## Teardown\n([\s\S]*?)(?=\n## |$)/)?.[1] ?? '';
+    expect(deploy).toContain('scripts/bootstrap-deployment.sh');
+    expect(deploy).toContain('docs/aircraft-return-readiness/README.md');
+    expect(teardown).toContain('scripts/destroy-deployment.sh --yes');
+    expect(teardown).toContain('docs/aircraft-return-readiness/README.md');
 
     const commands = [
       'ASPNETCORE_URLS=http://localhost:5080 dotnet run --project backend/AirlineDemo.Api',
@@ -77,5 +80,23 @@ describe('public-safe readiness README', () => {
     const config = readme.match(/## Configuration\n([\s\S]*?)(?=\n## |$)/)?.[1] ?? '';
     expect(config).toContain('operator environment');
     expect(config).toContain('Key Vault');
+
+    const requiredSettings = [
+      'AZURE_SUBSCRIPTION_ID',
+      'AZURE_TENANT_ID',
+      'RESOURCE_GROUP_NAME',
+      'TFVARS_FILE',
+      'BACKEND_CONFIG_FILE',
+      'MODEL_DEPLOYMENT_NAME',
+      'KEY_VAULT_SECRET_URI',
+      'PRESENTER_REVIEWER_CIDRS',
+      'REHEARSAL_BASE_URL',
+      'REHEARSAL_EXPECTED_ORIGIN',
+    ];
+    for (const setting of requiredSettings) {
+      expect(config, `missing configured template: ${setting}`).toMatch(
+        new RegExp(`^${setting}=<[^\\n<>]+>$`, 'm'),
+      );
+    }
   });
 });
