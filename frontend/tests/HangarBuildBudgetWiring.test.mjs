@@ -27,6 +27,8 @@ describe('Hangar build budget wiring', () => {
     expect(checker).toContain('gzipSync');
     expect(checker).toContain('hangar-build-budget.json');
     expect(checker).toContain('value.imports ?? []');
+    expect(checker).toContain('value.file ? [value.file] : []');
+    expect(checker).toContain('hangarFiles.has(rel)');
 
     const runtimeLazyLoad = readFileSync('tests/HangarEntryLazyLoad.test.tsx', 'utf8');
     expect(runtimeLazyLoad).toContain('HangarEntry lazy loads only after selection');

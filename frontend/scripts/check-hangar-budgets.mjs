@@ -61,7 +61,7 @@ const visit = (key) => {
   const value = manifest[key];
   if (!value || typeof value !== 'object') return;
   if (typeof value.file === 'string') hangarFiles.add(value.file);
-  for (const asset of [...(value.assets ?? []), ...(value.css ?? [])]) if (typeof asset === 'string') hangarAssets.add(asset);
+  for (const asset of [...(value.assets ?? []), ...(value.css ?? []), ...(typeof value.file === 'string' ? [value.file] : [])]) if (typeof asset === 'string') hangarAssets.add(asset);
   for (const dependency of [...(value.imports ?? []), ...(value.dynamicImports ?? [])]) visit(dependency);
 };
 for (const key of hangarEntryKeys) visit(key);
@@ -83,8 +83,8 @@ const walk = (directory) => {
       }
       const isModelOrTexture = /\.(glb|gltf|png|jpe?g|webp|ktx2|basis)$/i.test(name);
       const manifestAsset = entries.find(([, value]) => {
-        const candidates = [...(value.assets ?? []), ...(value.src ? [value.src] : [])];
-        return candidates.some((candidate) => typeof candidate === 'string' && candidate.includes(rel));
+        const candidates = [...(value.assets ?? []), ...(value.file ? [value.file] : []), ...(value.src ? [value.src] : [])];
+        return candidates.some((candidate) => typeof candidate === 'string' && (candidate === rel || candidate.includes(rel) || rel.includes(candidate)));
       });
       const canonicalAssetPaths = (() => {
         try {
@@ -99,7 +99,7 @@ const walk = (directory) => {
         } catch { return new Set(); }
       })();
       const canonicalAsset = [...canonicalAssetPaths].some((canonical) => rel.endsWith(canonical.split('/').at(-1)) || rel.includes(canonical));
-      const hangarAsset = isModelOrTexture && (rel.toLowerCase().includes('/hangar/') || hangarAssets.has(rel) || canonicalAsset || manifestAsset?.[0]?.toLowerCase().includes('hangar'));
+      const hangarAsset = isModelOrTexture && (rel.toLowerCase().includes('/hangar/') || hangarAssets.has(rel) || hangarFiles.has(rel) || canonicalAsset || manifestAsset?.[0]?.toLowerCase().includes('hangar'));
       if (isModelOrTexture) {
         const hangarOnly = hangarAsset;
         assets.push({ file: rel, bytes: statSync(path).size, hangarOnly });
