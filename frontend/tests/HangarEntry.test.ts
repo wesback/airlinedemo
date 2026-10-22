@@ -4,6 +4,7 @@ vi.mock('@react-three/fiber', () => ({ Canvas: () => null }));
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { type HangarEntryAppProps } from '../src/App';
+import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
 import {
   HANGAR_3D_ACTIONS,
   HANGAR_NON_3D_ACTIONS,
@@ -64,32 +65,14 @@ afterEach(() => {
   });
 
   it('hangar UI rejects fallback entry before mounting a canvas', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? 'GET';
-      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      if (url === '/api/health') return json({ status: 'ok' });
-      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-      if (url === '/api/auth/users') return json([{ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer' }]);
-      if (url === '/api/auth/sign-in') return json({ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'token' });
-      if (url === '/api/cases/case-001' && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
-      if (url === '/api/cases/case-001/dashboard' && method === 'GET') return json({ allowedDecisions: [], capabilities: [{ id: 'technical-review', name: 'Technical review', label: 'Human decision', designOnly: false, openItems: 0, nextDecisionOwner: 'Technical reviewer', evidence: [], design: null }], queue: [], activity: [] });
-      if (url === '/api/cases/case-001/technical-reviews' && method === 'GET') return json({ basisVersion: 4, decisions: [] });
-      if (url === '/api/cases/case-001/readiness' && method === 'GET') return json({ monthsUntilReturn: 9, gapsFound: 1, requestsSent: 1, heldForReview: 1, notProcessed: 2, sentence: 'Review is ready.' });
-      throw new Error(`Unexpected request: ${method} ${url}`);
-    }));
+    stubCaseApi();
 
     render(createElement(HangarApp, {
       hangarBrowserSupported: false,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: vi.fn(),
     } as HangarEntryAppProps));
-    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
-    fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await screen.findByText('Revision: 7');
+    await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
 
     await screen.findByText('Your browser is not supported. Use the current or previous major version of Chrome or Edge.');
@@ -117,12 +100,7 @@ afterEach(() => {
       hangarWebGl2Probe: null,
       hangarLazyLoader: nullLoader,
     } as HangarEntryAppProps));
-    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
-    fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await screen.findByText('Revision: 7');
+    await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByText('WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.');
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
@@ -130,32 +108,14 @@ afterEach(() => {
   });
 
   it('supported versions load once and contract fallback renders no canvas with a non-3D link', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? 'GET';
-      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      if (url === '/api/health') return json({ status: 'ok' });
-      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-      if (url === '/api/auth/users') return json([{ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer' }]);
-      if (url === '/api/auth/sign-in') return json({ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'token' });
-      if (url === '/api/cases/case-001' && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
-      if (url === '/api/cases/case-001/dashboard' && method === 'GET') return json({ allowedDecisions: [], capabilities: [{ id: 'technical-review', name: 'Technical review', label: 'Human decision', designOnly: false, openItems: 0, nextDecisionOwner: 'Technical reviewer', evidence: [], design: null }], queue: [], activity: [] });
-      if (url === '/api/cases/case-001/technical-reviews' && method === 'GET') return json({ basisVersion: 4, decisions: [] });
-      if (url === '/api/cases/case-001/readiness' && method === 'GET') return json({ monthsUntilReturn: 9, gapsFound: 1, requestsSent: 1, heldForReview: 1, notProcessed: 2, sentence: 'Review is ready.' });
-      throw new Error(`Unexpected request: ${method} ${url}`);
-    }));
+    stubCaseApi();
     const loader = vi.fn();
     render(createElement(HangarApp, {
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: loader,
     } as HangarEntryAppProps));
-    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
-    fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await screen.findByText('Revision: 7');
+    await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await waitFor(() => expect(loader).toHaveBeenCalledTimes(1));
     expect(document.querySelectorAll('canvas')).toHaveLength(1);
@@ -168,12 +128,7 @@ afterEach(() => {
       hangarLazyLoader: loader,
     } as HangarEntryAppProps));
     // A fresh mount verifies contract rejection with the same production entry path.
-    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
-    fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await screen.findByText('Revision: 7');
+    await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByText(/Unsupported hangar contract version 2/);
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
