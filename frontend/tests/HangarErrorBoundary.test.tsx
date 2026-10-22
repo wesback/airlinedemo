@@ -28,12 +28,17 @@ describe('HangarErrorBoundary', () => {
 
   it('HangarErrorBoundary sends zero mutations and retains command identity', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const mutation = vi.fn(); const arrCommand = vi.fn(); const command = { commandId: 'cp-reset-7', action: 'reset', variant: 'blocked', expectedRevision: 7 };
-    render(<HangarErrorBoundary snapshot={snapshot}><Throws /></HangarErrorBoundary>);
-    expect(claimHangarCommand(command, snapshot)).toBe(true);
-    expect(claimHangarCommand(command, snapshot)).toBe(false);
-    expect(claimHangarCommand(command, snapshot)).toBe(false);
+    resetHangarCommandDeduper();
+    const mutation = vi.fn(); const commandCallback = vi.fn(); const arrCommand = vi.fn();
+    const command = { commandId: 'cp-reset-7', action: 'reset', variant: 'blocked', expectedRevision: 7 };
+    const { rerender } = render(<HangarErrorBoundary snapshot={snapshot} entryKey="enter-1" retryCommands={[command, 'ARR:review:cp-case-a:7']} onCommand={commandCallback} onMutation={mutation}><Throws /></HangarErrorBoundary>);
+    expect(screen.getByRole('alert', { name: 'Hangar fallback' })).toBeTruthy();
+    rerender(<HangarErrorBoundary snapshot={snapshot} entryKey="enter-2" retryCommands={[command, 'ARR:review:cp-case-a:7']} onCommand={commandCallback} onMutation={mutation}><Throws /></HangarErrorBoundary>);
+    rerender(<HangarErrorBoundary snapshot={snapshot} entryKey="enter-3" assetFailure="asset_failed" retryCommands={[command, 'ARR:review:cp-case-a:7']} onCommand={commandCallback} onMutation={mutation}><div aria-label="Hangar 3D scene" /></HangarErrorBoundary>);
+
+    expect(commandCallback.mock.calls.map(call => call[0])).toEqual([command, 'ARR:review:cp-case-a:7']);
     expect(mutation).not.toHaveBeenCalled(); expect(arrCommand).not.toHaveBeenCalled();
+    expect(claimHangarCommand(command, snapshot)).toBe(false);
 
     resetHangarCommandDeduper(); const local = createHangarCommandDeduper();
     expect(local.claim('ARR:review:cp-case-a:7', snapshot)).toBe(true); expect(local.claim('ARR:review:cp-case-a:7', snapshot)).toBe(false);

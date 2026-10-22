@@ -14,15 +14,15 @@ export function isLabelledHangarSnapshot(value: unknown): value is ServerSceneSn
     typeof value.status !== 'undefined' && ['AI agent','Rules-based','Simulated','Design-only','Unknown'].includes(String(label));
 }
 export function preserveLastLabelledServerSnapshot(previous: HangarErrorSnapshot, candidate: unknown): ServerSceneSnapshot | null {
-  if (!isObject(candidate) || candidate.current !== true || !isLabelledHangarSnapshot(candidate)) return previous;
-  if (!previous?.caseId || previous.revision === null) return candidate;
+  if (!isObject(candidate) || candidate.current !== true) return previous;
+  const validShape = isLabelledHangarSnapshot(candidate);
+  if (!validShape) return previous;
+  if (!previous?.caseId || previous.revision === null) return candidate as ServerSceneSnapshot;
   if (typeof previous.caseId === 'string' && candidate.caseId === previous.caseId &&
       typeof previous.revision === 'number' && typeof candidate.revision === 'number') {
     if (candidate.revision < previous.revision) return previous;
-    if (candidate.revision === previous.revision && previous.current === false && candidate.fallbackReason !== null) return previous;
-    if (candidate.revision === previous.revision && previous.current === false) return candidate;
   }
-  return candidate;
+  return candidate as ServerSceneSnapshot;
 }
 export function preserveHangarServerSnapshot(previous: HangarErrorSnapshot, candidate: unknown): ServerSceneSnapshot | null {
   return preserveLastLabelledServerSnapshot(previous, candidate);
@@ -66,22 +66,52 @@ export function HangarFallbackPanel({ snapshot, reason }: { snapshot: HangarErro
 
 export type HangarErrorBoundaryProps = {
   children: ReactNode; snapshot?: unknown; lastSnapshot?: unknown; fallback?: ReactNode; assetFailure?: HangarBoundaryFailure | string | null;
-  resetKey?: unknown; onError?: (error: unknown, info?: ErrorInfo) => void;
+  resetKey?: unknown; entryKey?: unknown; onError?: (error: unknown, info?: ErrorInfo) => void;
+  retryCommands?: readonly HangarCommandInput[];
+  onCommand?: (command: HangarCommandInput, snapshot: ServerSceneSnapshot | null) => void;
+  onMutation?: (command: HangarCommandInput, snapshot: ServerSceneSnapshot | null) => void;
 };
 type State = { failed: boolean; failure: HangarBoundaryFailure | string | null; lastSnapshot: ServerSceneSnapshot | null };
 export class HangarErrorBoundary extends Component<HangarErrorBoundaryProps, State> {
   state: State;
   constructor(props: HangarErrorBoundaryProps) {
     super(props);
-    const snapshot = isLabelledHangarSnapshot(props.lastSnapshot) ? props.lastSnapshot : props.snapshot;
-    this.state = { failed: false, failure: null, lastSnapshot: isLabelledHangarSnapshot(snapshot) ? snapshot : null };
+    const labelledCandidate = (value: unknown): ServerSceneSnapshot | null => {
+      if (!isObject(value) || typeof value.caseId !== 'string' || typeof value.revision !== 'number' || !Number.isInteger(value.revision) ||
+          typeof value.status === 'undefined' || !['AI agent','Rules-based','Simulated','Design-only','Unknown'].includes(String(value.capabilityLabel))) return null;
+      return value as ServerSceneSnapshot;
+    };
+    const snapshot = labelledCandidate(props.lastSnapshot) ?? labelledCandidate(props.snapshot);
+    this.state = { failed: false, failure: null, lastSnapshot: snapshot };
+  }
+  public executeRetryCommands(): string[] {
+    const executed: string[] = [];
+    for (const command of this.props.retryCommands ?? []) {
+      if (!dedupeHangarCommand(command, this.state.lastSnapshot)) continue;
+      executed.push(getHangarCommandIdentifier(command, this.state.lastSnapshot));
+      this.props.onCommand?.(command, this.state.lastSnapshot);
+    }
+    return executed;
   }
   static getDerivedStateFromError(error: unknown) { return { failed: true, failure: HANGAR_RENDER_FAILURE, error }; }
-  componentDidCatch(error: unknown, info: ErrorInfo) { this.props.onError?.(error, info); }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    this.executeRetryCommands();
+    this.props.onError?.(error, info);
+  }
+  componentDidMount() {
+    if (this.props.assetFailure || this.props.entryKey !== undefined) this.executeRetryCommands();
+  }
   componentDidUpdate(previous: HangarErrorBoundaryProps) {
-    if (previous.resetKey !== this.props.resetKey || previous.assetFailure !== this.props.assetFailure) {
+    if (previous.assetFailure !== this.props.assetFailure && this.props.assetFailure) {
+      this.setState({ failed: true, failure: this.props.assetFailure });
+      this.executeRetryCommands();
+    } else if (previous.resetKey !== this.props.resetKey) {
+      const nextSnapshot = isLabelledHangarSnapshot(this.props.snapshot) ? this.props.snapshot : null;
+      this.executeRetryCommands();
       if (this.props.assetFailure) this.setState({ failed: true, failure: this.props.assetFailure });
-      else if (previous.resetKey !== this.props.resetKey) this.setState({ failed: false, failure: null });
+      else if (nextSnapshot?.current === true) this.setState({ failed: false, failure: null });
+    } else if (previous.entryKey !== this.props.entryKey && this.props.entryKey !== undefined) {
+      this.executeRetryCommands();
     }
     const next = preserveLastLabelledServerSnapshot(this.state.lastSnapshot, this.props.snapshot ?? this.props.lastSnapshot);
     if (next !== this.state.lastSnapshot) this.setState({ lastSnapshot: next });
