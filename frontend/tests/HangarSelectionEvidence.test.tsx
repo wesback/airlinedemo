@@ -50,6 +50,11 @@ describe('HangarSelectionEvidence',()=>{
     const crossCaseRef=envelope({documentRefs:[{evidenceRefId:'ref-1',caseId:'cp-case-b',documentId:'case-b/manual.txt',documentVersion:99,basisId:'basis-b',basisVersion:99,displayLabel:'Wrong case manual',processingState:'accepted',retryable:false,usableAsEvidence:true}],evidence:[{witnessId:'wrong-witness',evidenceRefId:'ref-1',caseId:'cp-case-b',documentId:'case-b/manual.txt',documentVersion:99,page:99,basisId:'basis-b',basisVersion:99}]});
     const crossRead=vi.fn(); render(<HangarSelectionEvidence envelope={crossCaseRef} manifest={manifest} identifier="SYN-CP-A-CMP-001" reader={crossRead}/>);
     expect(screen.getByRole('alert').textContent).toBe('Cross-case document reference'); expect(screen.queryByText(/case-b\/manual\.txt/)).toBeNull(); expect(screen.queryByText(/99 v99/)).toBeNull(); expect(crossRead).not.toHaveBeenCalled();
+    cleanup();
+    const encodedRead=vi.fn(); const encoded=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/manual ?draft.txt',documentVersion:2,basisId:'basis&beta=evil',basisVersion:2,displayLabel:'Encoded evidence',processingState:'accepted',retryable:false,usableAsEvidence:true}],evidence:[{witnessId:'wit-encoded',evidenceRefId:'ref-1',documentId:'case-a/manual ?draft.txt',documentVersion:2,page:3,basisId:'basis&beta=evil',basisVersion:2,displayLabel:'Encoded witness'}]});
+    render(<HangarSelectionEvidence envelope={encoded} manifest={manifest} identifier="SYN-CP-A-CMP-001" onContentOpen={encodedRead}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Open content'}));
+    expect(encodedRead).toHaveBeenCalledWith('case-a/manual%20%3Fdraft.txt?version=2&basis=basis%26beta%3Devil&basisVersion=2');
   });
   it('HangarSelectionEvidence blocks witnesses and renders markup as text',()=>{
     const read=vi.fn(); const blocked=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,basisId:'basis-v1',basisVersion:1,displayLabel:'<img src=x onerror=alert(1)>',processingState:'rejected-retryable',retryable:true,usableAsEvidence:false}],evidence:[{witnessId:'secret',evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,page:9,basisId:'basis-v1',basisVersion:1,displayLabel:'SECRET-WITNESS'}]});

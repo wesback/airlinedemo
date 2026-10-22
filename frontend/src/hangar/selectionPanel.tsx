@@ -45,6 +45,16 @@ export function resolveHangarSelection(envelope:unknown, identifier:unknown, exp
 export const activateProjectedObject=resolveHangarSelection;
 export const buildHangarSelection=resolveHangarSelection;
 
+const encodeDocumentIdentifier=(identifier:string)=>identifier.split('/').map((part)=>encodeURIComponent(part)).join('/');
+const buildContentRequest=(evidence:HangarEvidenceTuple,page?:number)=>{
+  const query=new URLSearchParams();
+  query.set('version',String(evidence.version));
+  if(page!==undefined)query.set('page',String(page));
+  query.set('basis',evidence.basisId);
+  query.set('basisVersion',String(evidence.basisVersion));
+  return `${encodeDocumentIdentifier(evidence.documentId)}?${query.toString()}`;
+};
+
 export type HangarSelectionEvidenceProps={envelope?:unknown;scene?:unknown;manifest?:unknown;objectId?:unknown;identifier?:unknown;browserIdentifier?:unknown;reader?:SelectionReader;onRead?:SelectionReader;evidenceReader?:SelectionReader;onContentOpen?:SelectionReader};
 export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identifier,browserIdentifier,reader,onRead,evidenceReader,onContentOpen}:HangarSelectionEvidenceProps){
   const source=scene??envelope; const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
@@ -62,7 +72,7 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
       {selection.evidence.map((e,i)=>{const blocked=e.blocked || e.status!==null&&(['blocked','processing','retry','pending','failed','partial','unprocessed'].some(s=>e.status!.toLowerCase().includes(s)));return <article key={`${e.documentId}-${e.version}-${e.basisId}-${e.basisVersion}-${i}`}>
         <p>{e.documentId} v{e.version} / {e.basisId} v{e.basisVersion}</p>
         {e.status!==null&&e.status.length>0&&<p>{e.displayLabel}</p>}
-        {blocked?<p role="status">Evidence processing/retry: {e.status}</p>:<div aria-label={`ARR content controls for ${e.documentId}`}><button type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(`${e.documentId}?version=${e.version}&basis=${e.basisId}&basisVersion=${e.basisVersion}`)}}>Open content</button>{e.witnesses.map((w,j)=>{const witness=isObject(w)?w:null;const page=witness?.page;return typeof page==='number'?<button key={j} type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(`${e.documentId}?version=${e.version}&page=${page}&basis=${e.basisId}&basisVersion=${e.basisVersion}`)}}>{`Page witness ${page}`}</button>:null})}</div>}
+        {blocked?<p role="status">Evidence processing/retry: {e.status}</p>:<div aria-label={`ARR content controls for ${e.documentId}`}><button type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e))}}>Open content</button>{e.witnesses.map((w,j)=>{const witness=isObject(w)?w:null;const page=witness?.page;return typeof page==='number'?<button key={j} type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e,page))}}>{`Page witness ${page}`}</button>:null})}</div>}
       </article>})}
     </section>}
   </section>;
