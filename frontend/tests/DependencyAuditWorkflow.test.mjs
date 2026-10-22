@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { validateHangarDependencyAudit } from '../src/hangar/dependencyPins.ts';
 
 function runSeverityGate(severity, dotnetLines = '') {
   const workflow = readFileSync('../.github/workflows/build.yml', 'utf8');
@@ -66,12 +67,27 @@ describe('dependency audit workflow', () => {
     expect(workflow).toContain('npm audit --json');
 
     const auditInput = { vulnerabilities: { three: { severity: 'low' } } };
-    const auditContractValidator = audit => {
-      const missing = ['three', '@react-three/fiber'].filter(name => !audit.vulnerabilities?.[name] && !audit.installed?.[name]);
-      if (missing.length) throw new Error(`Audit contract missing package: ${missing.join(', ')}`);
-    };
-    expect(() => auditContractValidator(auditInput)).toThrow('Audit contract missing package: @react-three/fiber');
-    expect(() => auditContractValidator({ installed: { three: {}, '@react-three/fiber': {} }, vulnerabilities: {} })).not.toThrow();
+    expect(() => validateHangarDependencyAudit(manifest, lock, auditInput))
+      .toThrow('Hangar audit contract missing package: @react-three/fiber');
+
+    const lockPackageInventory = Object.fromEntries(
+      Object.entries(lock.packages)
+        .filter(([name]) => name.startsWith('node_modules/'))
+        .map(([name]) => [name.slice('node_modules/'.length), {}]),
+    );
+    expect(validateHangarDependencyAudit(manifest, lock, {
+      installed: lockPackageInventory,
+      vulnerabilities: {},
+    })).toBe(true);
+
+    for (const packageName of ['three', '@react-three/fiber']) {
+      const missingPackageInventory = { ...lockPackageInventory };
+      delete missingPackageInventory[packageName];
+      expect(() => validateHangarDependencyAudit(manifest, lock, {
+        installed: missingPackageInventory,
+        vulnerabilities: {},
+      })).toThrow(`Hangar audit contract missing package: ${packageName}`);
+    }
   });
 
   it('retains the strict npm and .NET high/critical severity gate', () => {

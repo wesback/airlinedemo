@@ -37,3 +37,28 @@ export function validateHangarDependencyPins(
 }
 
 export const validateDependencyPins = validateHangarDependencyPins;
+
+export type DependencyAuditInput = {
+  installed?: Record<string, unknown>;
+  vulnerabilities?: Record<string, unknown>;
+};
+
+export function validateHangarDependencyAudit(
+  manifest: DependencyManifest | null | undefined,
+  lockfile: DependencyLockfile | null | undefined,
+  auditInput?: DependencyAuditInput | null,
+): boolean {
+  validateHangarDependencyPins(manifest, lockfile);
+
+  const auditedNames = new Set([
+    ...Object.keys(auditInput?.installed ?? {}),
+    ...Object.keys(auditInput?.vulnerabilities ?? {}),
+  ]);
+  for (const name of Object.keys(HANGAR_DEPENDENCY_PINS)) {
+    if (!auditedNames.has(name)) {
+      throw new Error(`Hangar audit contract missing package: ${name}`);
+    }
+  }
+
+  return true;
+}
