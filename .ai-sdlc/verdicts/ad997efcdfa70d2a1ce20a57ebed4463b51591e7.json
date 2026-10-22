@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 525,
+  "branch": "ai-sdlc/issue-525",
+  "commitSha": "ad997efcdfa70d2a1ce20a57ebed4463b51591e7",
+  "round": 0,
+  "pipelineVersion": "cb8a0d7",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The list and selection paths use the shared handler, but an empty scope bypasses filtering and permits out-of-scope activation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/non3dDataRoom.tsx",
+          "line": 34,
+          "message": "An explicitly empty scope leaves all entries visible and activatable. Filter to the supplied scope even when it contains no identifiers.",
+          "confidence": 0.82,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "scopedInitialEntries builds an empty Set for scope=[] and returns entries unchanged; the component passes those entries to the controller, which permits activation.",
+            "failureScenario": "When the caller supplies an empty scope, every case is rendered and can invoke the selection handler, although no case is in scope."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The empty-scope case makes out-of-scope cases selectable. The parity test also omits the unsupported-summary behavior required by the first acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/non3dDataRoom.tsx",
+          "line": 29,
+          "message": "An explicitly empty scope exposes and activates every supplied case. Preserve the empty scope as an empty result so out-of-scope entries cannot be selected.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "scopedInitialEntries receives the supplied entries and scope, then falls back to the full entries array when the filtered scope set is empty. Those entries are rendered as enabled buttons, whose activation calls the shared selection handler.",
+            "failureScenario": "When a caller supplies entries with scope=[], the list shows every entry and activating one invokes selection, even though no case is in scope."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarNon3dDataRoom.test.tsx",
+          "line": 15,
+          "message": "The parity test does not verify the criterion's failed or unsupported summary path. Add an assertion that an unsupported summary contract produces the exact unavailable text in the rendered list.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The parity test's summaryReader always returns contractVersion 1, and its assertions check available summaries. Its unavailable assertion uses a preconstructed entry rather than passing a failed or unsupported summary through the reader and projection path.",
+            "failureScenario": "If the Data Room rendered a summary as available when the reader returned an unsupported contract version, the named parity test would still pass; it never exercises that acceptance-criterion case."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The initial-entry path can render and activate cases when the supplied scope allows none.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/non3dDataRoom.tsx",
+          "line": 33,
+          "message": "A01:2025 Broken Access Control: an empty scope fails open and exposes every supplied case. Preserve the empty scope as an empty allowed set.",
+          "confidence": 0.93,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The component passes initial entries and scope to scopedInitialEntries, which uses the unfiltered entries whenever the parsed scope is empty.",
+            "failureScenario": "A caller supplies entries for cases A and B with scope=[] to represent no in-scope cases. Both cases are rendered and their buttons can invoke the selection handler, revealing content for out-of-scope cases."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarNon3dDataRoom.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

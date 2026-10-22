@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 525,
+  "branch": "ai-sdlc/issue-525",
+  "commitSha": "bb8504f2beef7023a7e82df5163614af09d7de91",
+  "round": 1,
+  "pipelineVersion": "9a3f750",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The stale-summary parity assertion has been added. The available out-of-scope activation case still is not exercised by the test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarNon3dDataRoom.test.tsx",
+          "line": 65,
+          "message": "The prior out-of-scope activation finding remains: the test does not attempt to activate the available excluded case. Exercise that case through the scoped activation path and assert zero selection calls and no content reveal.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test renders an available out-of-scope case, but calls activateHangarDataRoomCase with entries.slice(0, 1), which omits that case. The rejection therefore tests an unknown identifier, not activation of an available out-of-scope entry.",
+            "failureScenario": "If an activation path accepts an available case excluded by scope, this test can still pass because it never attempts to activate that case through the scoped list or controller."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The stale-summary assertions now check exact mode and coverage text for all five sources. The prior finding about testing activation of an available out-of-scope case remains: the helper call omits that case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarNon3dDataRoom.test.tsx",
+          "line": 65,
+          "message": "The available out-of-scope case is not actually activated in the test. Exercise the excluded case through the production selection path and assert zero selection calls and no content reveal.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test renders an available excluded case, but its activation assertion calls the helper with entries.slice(0, 1), which omits that case. The rendered excluded case has no button, so the test never attempts to activate it through the component.",
+            "failureScenario": "If an available case excluded by scope can still invoke the selection handler, this test can pass: the helper only receives the in-scope entry, and the component assertion checks that the excluded button is absent rather than exercising its activation."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed test does not yet verify the prior round’s available out-of-scope activation case. I found no security vulnerability in the changed implementation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarNon3dDataRoom.test.tsx",
+          "line": 65,
+          "message": "The activation test still does not exercise the available out-of-scope case it renders. Attempt activation of cp-case-c through the scoped component or controller and assert zero selection calls and no content reveal.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added case creates an available excluded entry, but the activation assertion passes entries.slice(0, 1), which omits that entry. It never attempts to activate cp-case-c through the component or controller.",
+            "failureScenario": "If an available excluded entry could still reach the selection handler, this test could pass because it only calls the helper with an entry list that does not contain cp-case-c."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarNon3dDataRoom.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
