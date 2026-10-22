@@ -11,8 +11,8 @@ namespace AirlineDemo.Api.Security;
 public static class TransportSecurity
 {
     public const string ContentSecurityPolicy =
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-        "object-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
+        "worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'";
 
     public const string StrictTransportSecurity = "max-age=31536000; includeSubDomains";
 
