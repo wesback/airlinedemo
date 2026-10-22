@@ -1,0 +1,295 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 509,
+  "branch": "ai-sdlc/issue-509",
+  "commitSha": "810bb898033b66172357d84a88ff9a247a195a4e",
+  "round": 1,
+  "pipelineVersion": "9ce6923",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds byte hashing and loader checks, but caller-supplied checksum metadata can still authorize different bytes, and the resource check has no production caller. The updated budget test covers rejection results but not the required loader behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 115,
+          "message": "The supplied actualChecksum can bypass hashing the asset bytes, so modified bytes can be admitted under a stale checksum.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "validateHangarAssetRecord prefers the caller-supplied actualChecksum over the digest it computes from rawBytes. loadValidatedHangarAsset passes provenance to that validator but never compares its checksum with the bytes it will load.",
+            "failureScenario": "A caller supplies modified GLB bytes and provenance whose checksum and actualChecksum both contain the original asset's digest. The record passes validation and the loader receives the modified bytes. OWASP A08:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 25,
+          "message": "The resource policy remains disconnected from production scene admission.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The resource check runs only when loadValidatedHangarAsset receives a resource argument; repository search finds no production caller of this helper.",
+            "failureScenario": "The scene's asset path does not call this helper, so an external resource can reach scene admission without invoking validateHangarResource."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 35,
+          "message": "The budget test still does not prove the criterion's required no-loader-call behavior for over-limit assets.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The budget test checks that policy results are invalid for over-limit inputs, but never passes those inputs through a loader or asserts the loader call count.",
+            "failureScenario": "If an admission caller ignores the invalid result and invokes its loader anyway, this test still passes despite the criterion requiring zero loader calls."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The follow-up adds checksum hashing and resource checks, but checksum metadata is not tied to the bytes admitted, and the loader can bypass provenance, resource, and budget checks. The embedded-resource exception is broader than the criterion allows, and the budget test no longer matches the criterion's named case or proves the loader is not called.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 115,
+          "message": "The checksum is not verified against the bytes being admitted. A supplied actualChecksum is trusted, and the loader never compares the provenance checksum with its bytes.",
+          "confidence": 0.93,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "validateHangarAssetRecord prefers the supplied actualChecksum over hashing rawBytes. loadValidatedHangarAsset validates provenance separately from the bytes it passes to the loader.",
+            "failureScenario": "A caller supplies a matching checksum and actualChecksum in provenance, then passes different GLB bytes to loadValidatedHangarAsset. Both validations pass and the changed bytes reach the loader. OWASP A08:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 22,
+          "message": "The admission checks remain bypassable: provenance and resource are optional, and this loader does not enforce asset budgets. Require the admission metadata and validate the relevant budget before calling the loader.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new provenance and resource checks run only when their optional arguments are provided; the loader then calls loader(bytes) without validating aggregate budgets.",
+            "failureScenario": "A caller loads a valid GLB without provenance or resource options, or with a model exceeding the Hangar budget. The helper skips the corresponding policy check and calls the loader."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 213,
+          "message": "The embedded-resource exception accepts arbitrary resource types. Restrict it to embedded PNG/JPEG images.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When a resource has no candidate URI, validateHangarResource returns true for embedded: true before checking its kind or image format.",
+            "failureScenario": "A caller passes { embedded: true, type: 'model' }. The resource is accepted even though the criterion permits embedded PNG/JPEG images, not embedded models."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 35,
+          "message": "The budget criterion's named test case no longer exists, and the replacement does not verify the required no-loader-call result for over-budget assets.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The acceptance criteria name the test case `asset byte budgets are exact and additive`, but the changed test is named `enforces exact per-model, JSON, and aggregate asset budgets`; it also asserts only policy validity, not that an over-budget asset makes the loader call count zero.",
+            "failureScenario": "A runner or reviewer following the named criterion cannot select that test case, and the current test would still pass if the loader admitted an over-budget asset."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds digest computation and loader checks, but caller-supplied checksum metadata can still override the computed digest, and the loader skips both checks when their optional arguments are omitted.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 115,
+          "message": "A supplied actualChecksum can bypass comparison with the asset bytes. Compute the digest from the bytes being admitted and compare that result with the declared checksum.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "validateHangarAssetRecord prefers the caller-supplied actualChecksum over a digest computed from rawBytes. The loader validates provenance separately from the bytes it passes to the renderer.",
+            "failureScenario": "A record supplies matching checksum and actualChecksum values, but the loaded GLB bytes differ. The record passes provenance validation and the altered bytes reach the loader. OWASP A08:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 12,
+          "message": "The admission checks can be bypassed by omitting the optional resource and provenance arguments. Require these values for Hangar asset loads or enforce the policy before this loader is called.",
+          "confidence": 0.87,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "resource and provenance are optional load options; the checks run only when each option is provided.",
+            "failureScenario": "A caller invokes loadValidatedHangarAsset with valid GLB bytes and only loader and onFallback. The function skips both policy checks and calls the loader, so an external resource or unverified asset can be admitted. OWASP A01:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarAssetPolicy.test.ts",
+      "frontend/tests/HangarResourcePolicy.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -1,0 +1,266 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 509,
+  "branch": "ai-sdlc/issue-509",
+  "commitSha": "c5031a3d327fc1b96c3b8ecdb3105f4852b79397",
+  "round": 2,
+  "pipelineVersion": "9ce6923",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix now ties the loader's checksum check to the bytes and rejects backslash resource paths. Production admission still does not invoke the helper, and the budget test still does not prove the required no-loader-call behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 17,
+          "message": "The admission checks are still disconnected from production scene admission. Wire the Hangar asset path through this helper so every asset is checked before it reaches the scene.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The updated helper validates resources and provenance before calling its loader, but repository search finds it called only from tests; no production source invokes it.",
+            "failureScenario": "When the Hangar scene admits an asset through its production path, that path never calls this helper, so the resource and provenance checks added here do not gate admission."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 51,
+          "message": "The budget criterion's named test is missing, and the replacement does not assert that over-budget assets cause zero loader calls.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names `asset byte budgets are exact and additive` and requires over-budget assets to produce zero loader calls. This test has a different name and checks only policy result validity; it does not invoke or spy on a loader.",
+            "failureScenario": "If an admission path calls its loader after a budget rejection, or the named test is selected by the criterion, the current test provides no failing assertion for that behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes tie the loader's checksum check to the bytes it receives and make provenance and resource options required. The production admission path still does not call the checked loader, and the budget test does not prove the required no-loader-call behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 17,
+          "message": "The admission checks remain disconnected from the production scene path. The prior-round finding is still unresolved.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new resource, provenance, and budget checks run only inside loadValidatedHangarAsset. Repository call sites show this function is used by tests but not by production code.",
+            "failureScenario": "When the Hangar scene loads an asset through its production path, it never calls this helper, so an external or unverified asset can reach the scene without these checks."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 47,
+          "message": "The budget criterion still lacks its named test case and does not prove that over-budget assets are rejected before loader use. The prior-round test finding is still unresolved.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names `asset byte budgets are exact and additive`, but the test is named `enforces exact per-model, JSON, and aggregate asset budgets`. It checks policy results, not loader calls; the new loader test also contains no oversized-model case.",
+            "failureScenario": "If the scene admission path invokes its loader for a 15,728,641-byte total, the named budget test still passes because it never calls the loader or checks its call count. The acceptance criterion's required no-loader-call behavior remains untested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change binds checksums to bytes in the validated loader path, but standalone manifest validation still accepts unchecked checksum metadata. The resource and provenance gate also has no production caller.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 114,
+          "message": "The validator accepts records without verifying their declared checksum against bytes or a computed digest. Require a verified digest before accepting the record.",
+          "confidence": 0.88,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When a record has no raw bytes, validateHangarAssetRecord only rejects a supplied checksum that mismatches; it accepts the record if no computed checksum is supplied. The standalone manifest validator calls this path without binding asset bytes.",
+            "failureScenario": "A caller validates a record containing a stale but well-formed checksum and no assetBytes or computed checksum. Validation returns true, admitting integrity metadata that was never checked against the asset. OWASP A08:2025."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/hangarAssetLoader.ts",
+          "line": 17,
+          "message": "The new admission checks remain disconnected from production scene loading, leaving the origin policy unenforced for production assets.",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The resource and provenance checks are in loadValidatedHangarAsset, but repository search finds no production caller of this helper; references are limited to tests.",
+            "failureScenario": "The production scene admits or requests an external asset through its existing path without invoking this helper, so validateHangarResource never runs and the request is not blocked. OWASP A01:2025."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarAssetLoader.test.tsx",
+      "frontend/tests/HangarAssetPolicy.test.ts",
+      "frontend/tests/HangarResourcePolicy.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

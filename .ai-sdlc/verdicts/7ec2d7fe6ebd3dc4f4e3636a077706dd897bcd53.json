@@ -1,0 +1,289 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 509,
+  "branch": "ai-sdlc/issue-509",
+  "commitSha": "7ec2d7fe6ebd3dc4f4e3636a077706dd897bcd53",
+  "round": 0,
+  "pipelineVersion": "9ce6923",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The policy does not verify asset bytes against their declared checksum, and the new resource check is not wired into an admission path. The budget test also omits the required over-limit rejection cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 36,
+          "message": "The policy validates checksum format, but does not verify the checksum against the asset bytes when actualChecksum is absent.",
+          "confidence": 0.93,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "validateHangarAssetRecord checks the declared checksum against actualChecksum only when that optional field is present; it receives no asset bytes to compute a checksum.",
+            "failureScenario": "An asset's bytes change while its record retains a syntactically valid, stale checksum and omits actualChecksum. The record passes validation and can be admitted despite the checksum mismatch."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 104,
+          "message": "The resource policy is not connected to asset admission, so it does not ensure resources are rejected before the scene loader requests them.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The diff adds validateHangarResource as a standalone predicate and exports it, but adds no call from a scene admission or transport path.",
+            "failureScenario": "A scene loader requests an external model URL without calling this new predicate; the request reaches transport because no changed production code gates admission."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 35,
+          "message": "The named budget test does not cover the criterion's one-byte-over cases or the required no-loader-call result.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named budget test asserts an exact-total valid case, but has no assertion for an over-limit total, an oversized model, or a loader call on rejection.",
+            "failureScenario": "If the implementation stops rejecting a total of 15,728,641 bytes or a 5,242,881-byte model, this test still passes, so the criterion's required rejection is not tested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation accepts resources that can resolve to an external origin and does not verify declared checksums against asset bytes. The required over-budget rejection cases are also missing from the named budget test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 48,
+          "message": "The validator does not ensure the declared checksum matches the asset. Require and verify the computed checksum before accepting the record. OWASP A08:2025.",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "validateHangarAssetRecord compares actualChecksum only when that optional field is a string; it never computes a checksum from the asset bytes.",
+            "failureScenario": "A record with a valid 64-character checksum, no actualChecksum, and asset bytes that do not match the declared checksum passes validation."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 35,
+          "message": "The budget criterion's required one-byte-over cases are untested. Add assertions that both inputs are rejected with the exact budget error.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named budget test asserts only a within-limit model and a within-limit total; it has no assertion for either over-limit input in the criterion.",
+            "failureScenario": "If the validator accepts 15,728,641 total bytes or a 5,242,881-byte model, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 105,
+          "message": "Reject backslash-based protocol-relative resource paths as well. This bypasses the external-resource restriction. OWASP A06:2025.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The string resource check rejects a leading `//` but does not reject a leading pair of backslashes, so `\\\\cdn.example/model.glb` passes.",
+            "failureScenario": "A consumer resolves that accepted resource as a browser URL; backslashes are normalized to slashes for HTTP URLs, making it an external host despite the same-origin policy."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The asset policy accepts checksum metadata without verifying the asset digest and can accept a backslash-form resource that resolves to an external origin. The named budget test also does not prove that either over-limit case is rejected.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 52,
+          "message": "The checksum is checked for format, but never required to match the asset bytes. Require and verify a computed digest before admission. OWASP A08:2025 Software and Data Integrity Failures.",
+          "confidence": 0.93,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "validateHangarAssetRecord compares a supplied actual checksum only when one is present; it accepts a record with only a well-formed checksum.",
+            "failureScenario": "A manifest supplies a valid-shaped checksum for modified asset bytes but omits actualChecksum and the other computed-checksum fields. The record passes validation, so stale or fabricated integrity metadata is accepted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/assetPolicy.ts",
+          "line": 126,
+          "message": "Reject backslash-based URL forms or parse and enforce the resolved origin before accepting a resource. This bypasses the same-origin policy. OWASP A01:2025 Broken Access Control.",
+          "confidence": 0.88,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "validateHangarResource accepts a relative-looking candidate unless it matches the scheme or slash checks; backslashes are not rejected.",
+            "failureScenario": "A caller passes `\\\\attacker.example/model.glb`. The validator accepts it, and a browser URL consumer can interpret the backslashes as a protocol-relative URL and request the attacker origin."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 43,
+          "message": "The byte-budget criterion lacks failing cases for 15,728,641 total bytes and a 5,242,881-byte model. Add those assertions to the named test.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named `asset byte budgets are exact and additive` test asserts that at-limit examples pass, but never asserts that an over-limit total or model is rejected.",
+            "failureScenario": "If the total and model over-limit checks are removed, the current test still passes, so the acceptance criterion requiring rejection at one byte over is untested."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarAssetPolicy.test.ts",
+      "frontend/tests/HangarResourcePolicy.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
