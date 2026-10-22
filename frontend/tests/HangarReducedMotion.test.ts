@@ -1,4 +1,4 @@
-import { createElement } from 'react';
+import { createElement, type ReactNode } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -13,9 +13,16 @@ import {
 import { createHangarCameraController } from '../src/hangar/cameraController';
 import { createHangarSceneMotionControllers, loadHangarScene } from '../src/hangar/entryController';
 
-vi.mock('@react-three/fiber', () => ({
-  Canvas: ({ children }: { children?: unknown }) => children,
-}));
+vi.mock('@react-three/fiber', async () => {
+  const React = await import('react');
+  return {
+    Canvas: ({ children, camera }: { children?: unknown; camera?: { position?: number[] } }) => React.createElement(
+      'div',
+      { 'data-hangar-rendered-camera-position': camera?.position?.join(',') ?? '' },
+      children as ReactNode,
+    ),
+  };
+});
 
 const memoryStorage = () => {
   const values = new Map<string, string>();
@@ -68,8 +75,16 @@ describe('HangarReducedMotion', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Move avatar' }));
     expect(screen.getByText('Move avatar').closest('[data-hangar-avatar-position]')?.getAttribute('data-hangar-avatar-position')).toBe('4,-2');
+    expect(document.querySelector('[data-hangar-avatar-mesh-position]')?.getAttribute('data-hangar-avatar-mesh-position')).toBe('4,-2');
     expect(controllers.avatar.getState()).toEqual({ x: 4, z: -2 });
     expect(controllers.avatar.transitionDuration).toBe(0);
+
+    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('12,3,18');
+    fireEvent.click(screen.getByRole('button', { name: 'Aircraft' }));
+    expect(controllers.camera.getState().radius).toBe(20);
+    expect(controllers.camera.transitionDuration).toBe(0);
+    expect(screen.getByText('Move avatar').closest('[data-hangar-camera-position]')?.getAttribute('data-hangar-camera-position')).toBe('20,0,35');
+    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('8,3,12');
   });
 
   it('HangarReducedMotion session override', () => {

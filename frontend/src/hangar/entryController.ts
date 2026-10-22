@@ -95,8 +95,7 @@ export async function selectHangarEntry<T>(options: HangarEntryOptions = {}, laz
   return { ...decision, loaderCalled: true, loadedScene };
 }
 
-export function createHangarSceneMotionControllers(targetRadius = 10) {
-  const motion = new HangarReducedMotion();
+export function createHangarSceneMotionControllers(targetRadius = 10, motion = new HangarReducedMotion()) {
   return {
     motion,
     camera: createHangarCameraController(targetRadius, motion),
@@ -132,7 +131,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
     };
     return createElement(
       'div',
-      { 'data-hangar-reduced-motion': reduced ? 'true' : 'false', 'data-hangar-camera-duration': String(controllers.camera.transitionDuration), 'data-hangar-avatar-duration': String(controllers.avatar.transitionDuration), 'data-hangar-avatar-position': `${avatarState.x},${avatarState.z}` },
+      { 'data-hangar-reduced-motion': reduced ? 'true' : 'false', 'data-hangar-camera-duration': String(controllers.camera.transitionDuration), 'data-hangar-camera-position': `${cameraState.radius},${cameraState.azimuthDegrees},${cameraState.polarDegrees}`, 'data-hangar-avatar-duration': String(controllers.avatar.transitionDuration), 'data-hangar-avatar-position': `${avatarState.x},${avatarState.z}` },
       createElement('section', { 'data-hangar-camera-region': true, 'aria-label': 'Camera controls' },
         createElement('button', { type: 'button', onClick: () => navigateCamera('overview') }, 'Overview'),
         createElement('button', { type: 'button', onClick: () => navigateCamera('aircraft') }, 'Aircraft'),
@@ -144,7 +143,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
         createElement('ambientLight', { intensity: 1 }),
         createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
-        createElement('mesh', { position: [avatarState.x, 0, avatarState.z] },
+        createElement('mesh', { position: [avatarState.x, 0, avatarState.z], 'data-hangar-avatar-mesh-position': `${avatarState.x},${avatarState.z}` },
           createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
           createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
         ),
