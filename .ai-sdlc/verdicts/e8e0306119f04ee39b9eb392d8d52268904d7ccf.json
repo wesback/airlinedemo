@@ -1,0 +1,240 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 511,
+  "branch": "ai-sdlc/issue-511",
+  "commitSha": "e8e0306119f04ee39b9eb392d8d52268904d7ccf",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Malformed envelopes can pass projection or refresh validation. In particular, refresh may mark a scene current and admit commands without validating its objects or witnesses.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneProjection.ts",
+          "line": 27,
+          "message": "Reject envelopes with a missing permission snapshot; the current check allows them through.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "validateHangarSceneEnvelope reads c.permission or c.permissions, but its condition rejects invalid permission values only when a permission value is present.",
+            "failureScenario": "A version 1 envelope with a valid case, revision, status, and objects but no case permission passes validation and returns a scene, despite the acceptance criterion requiring missing permission to produce no scene."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneRefresh.ts",
+          "line": 21,
+          "message": "Run full scene-envelope validation before accepting a refresh as current; refresh currently bypasses the validator's object, history, witness, and permission checks.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "replaceWithServerSnapshot treats snapshotFromServer's partial checks as full envelope validation and returns the original envelope as a valid scene. canAdmitHangarCommands then admits commands whenever that snapshot is current.",
+            "failureScenario": "A version 1 envelope with a valid case revision, status, capability label, canResetBlockedVariant, and allowedActions but missing objects or containing a bad witness ID produces a current snapshot and is marked valid, so commands can be admitted despite malformed scene data."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The projection validator rejects malformed object mappings and witness references, but the refresh path does not use it and can mark those same responses current. The named tests exercise projection validation and refresh behavior separately, so they do not catch malformed data being accepted through refresh.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneRefresh.ts",
+          "line": 8,
+          "message": "Refresh accepts malformed scene envelopes as authoritative. Validate the full envelope before replacing the snapshot; the projection validator already rejects these object and witness errors, but the refresh path bypasses it.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "refreshHangarScene calls replaceWithServerSnapshot, which calls snapshotFromServer. snapshotFromServer checks only the version, case, revision, status, top-level permission fields, and capability label; it does not validate the envelope’s objects, history, or witnesses.",
+            "failureScenario": "A refresh response has a valid version and snapshot fields but contains a cross-case object identifier or a history event with a missing witness. snapshotFromServer still returns a current snapshot, so canAdmitHangarCommands returns true and the malformed response can drive actions."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The scene validator accepts envelopes missing the required permission snapshot, and refresh handling treats older revisions as current. Both cases violate the acceptance criteria for validated and stale scene state.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneProjection.ts",
+          "line": 27,
+          "message": "Reject envelopes with no permission snapshot. The current check accepts a missing permission field, and the named malformed-envelope test does not cover that case.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "validateHangarSceneEnvelope allows permission and permissions to both be absent, then returns the envelope as a valid scene.",
+            "failureScenario": "A version 1 envelope with no case permission field but with the other required fields passes validation and produces a scene, despite the acceptance criterion requiring missing permission to produce no scene."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneRefresh.ts",
+          "line": 22,
+          "message": "Detect stale revisions before marking a refresh current. A valid but older server snapshot currently re-enables command admission.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "replaceWithServerSnapshot accepts any snapshot returned by snapshotFromServer and marks it current without comparing its revision to the previous snapshot.",
+            "failureScenario": "If the current snapshot is revision 7 and a refresh returns a structurally valid revision 6 envelope, the result is marked current and canAdmitHangarCommands returns true, allowing actions from stale data."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSceneRefresh.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
