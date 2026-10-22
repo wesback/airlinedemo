@@ -51,7 +51,7 @@ export function buildCaseAJourney(envelope:unknown, caseId='cp-case-a'):CaseAJou
 }
 export const buildHangarGuidedJourney=buildCaseAJourney; export const constructCaseAJourney=buildCaseAJourney;
 
-const variantLabel=(value:unknown):CaseJourneyVariant|null=>typeof value==='string'&&(value.toLowerCase()==='blocked'||value.toLowerCase()==='retryable')?'blocked':value==='baseline'? 'baseline':null;
+const variantLabel=(value:unknown):CaseJourneyVariant|null=>typeof value==='string'&&(value.toLowerCase()==='blocked'||value.toLowerCase()==='retryable')?'blocked':value==='baseline'?'baseline':null;
 
 export function buildCaseBJourney(envelope:unknown):CaseAJourney {
   const source=isObject(envelope)?envelope:{}; const base=buildCaseAJourney(source,'cp-case-b');
@@ -68,9 +68,9 @@ export function buildCaseBJourney(envelope:unknown):CaseAJourney {
 export function buildCaseCJourney(envelope:unknown):CaseAJourney {
   const source=isObject(envelope)?envelope:{}; const base=buildCaseAJourney(source,'cp-case-c');
   const caseObject=isObject(source.case)?source.case:{};
-  const declared=variantLabel(source.variant)??variantLabel(caseObject.variant)??variantLabel(source.blockedVariant);
+  const declared=variantLabel(source.variant)??variantLabel(caseObject.variant)??variantLabel(source.blockedVariant)??(source.canResetBlockedVariant===true?'blocked':null);
   const history=Array.isArray(source.history)?source.history.filter(isObject):[];
-  const eventBlocked=history.some(event=>{const raw=((text(event.eventType)??text(event.summary)??text(event.label))??'').toLowerCase();return raw.includes('blocked')||raw.includes('retryable')||raw.includes('presenter_reset');});
+  const eventBlocked=history.some(event=>text(event.eventType)==='presenter_reset_blocked_variant'||text(event.action)==='presenter_reset_blocked_variant'||text(event.variant)==='blocked'||text(event.reasonCode)==='presenter_reset_blocked_variant');
   const variant:CaseJourneyVariant=(declared??(eventBlocked?'blocked':'baseline'));
   const allowed=base.steps.filter(step=>['Finding','Review','Response','New basis','Reassessment'].includes(step.label)&&step.completed)
     .filter(step=>{const event=history.find(e=>text(e.eventId)==step.sourceEventId);const raw=event?(text(event.eventType)??text(event.label)??text(event.summary)??''):step.summary??'';return !/(request|accept|accepted|acceptance)/i.test(raw);});
