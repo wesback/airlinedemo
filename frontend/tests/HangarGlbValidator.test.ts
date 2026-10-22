@@ -1,65 +1,124 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   HANGAR_ASSET_INVALID,
   validateHangarGlb,
   validateHangarGlbResult,
 } from '../src/hangar/glbValidator';
+import {
+  assembleGlb,
+  binChunk,
+  buildGlb,
+  jsonChunk,
+  nestedDocument,
+  text,
+  validDocument,
+  type GlbChunk,
+} from './hangarGlbBuilder';
 
-const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, 'fixtures', name)));
+const INVALID = { valid: false, reason: 'asset_invalid' };
 
-function reject(input: unknown, limits?: { maxJsonBytes?: number; maxTotalBytes?: number }) {
+/** Runs the validator and counts what a renderer loader would have been given. */
+function check(input: unknown, limits?: Parameters<typeof validateHangarGlbResult>[1]) {
   const loader = vi.fn();
   const result = validateHangarGlbResult(input, limits);
-  if (result.valid) loader();
+  if (result.valid) loader(input);
   return { result, loaderCalls: loader.mock.calls.length };
 }
 
+const withBytes = (bytes: Uint8Array, edit: (view: DataView) => void) => {
+  const copy = new Uint8Array(bytes);
+  edit(new DataView(copy.buffer));
+  return copy;
+};
+
 describe('Hangar GLB structural validation', () => {
   it('GLB_valid_contract_accepts_embedded_v2_fixture', () => {
-    const valid = fixture('hangar-valid.glb');
-    const loader = vi.fn();
+    const valid = buildGlb();
+    const checked = check(valid);
+    expect(checked.result).toEqual({ valid: true });
     expect(validateHangarGlb(valid)).toBe(true);
-    loader(valid);
-    expect(loader).toHaveBeenCalledTimes(1);
+    expect(checked.loaderCalls).toBe(1);
   });
 
-  it('GLB_malformed_contract_table', () => {
-    const cases: Array<{ name: string; input: Uint8Array | null | unknown }> = [
-      { name: 'wrong magic', input: fixture('hangar-valid.glb'), },
-      { name: 'truncated', input: fixture('hangar-valid.glb').slice(0, -1) },
-      { name: 'trailing byte', input: fixture('hangar-malformed.glb') },
-      { name: 'malformed fixture', input: fixture('hangar-malformed.glb') },
-      { name: 'null', input: null },
-      { name: 'non Uint8Array', input: new ArrayBuffer(8) },
-      { name: 'zero length', input: new Uint8Array() },
-    ];
-    const wrongMagic = cases[0].input as Uint8Array;
-    const view = new DataView(wrongMagic.buffer, wrongMagic.byteOffset, wrongMagic.byteLength);
-    view.setUint32(0, 0, true);
-    cases[0].input = new Uint8Array(wrongMagic);
+  it('GLB_structure_contract_table', () => {
+    const valid = buildGlb();
+    const json = jsonChunk(validDocument());
+    const bin = binChunk();
+    const stridedDocument = validDocument({
+      buffers: [{ byteLength: 20 }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 20, byteStride: 12 }],
+      accessors: [{ bufferView: 0, componentType: 5126, count: 2, type: 'VEC2' }],
+    });
+    const tooLongStride = validDocument({
+      buffers: [{ byteLength: 20 }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 20, byteStride: 16 }],
+      accessors: [{ bufferView: 0, componentType: 5126, count: 2, type: 'VEC2' }],
+    });
 
-    for (const contractCase of cases) {
-      const loader = vi.fn();
-      let result;
-      try { validateHangarGlb(contractCase.input); result = { valid: true }; }
-      catch (error) { result = { valid: false, reason: (error as Error).message }; }
-      if (result.valid) loader();
-      expect(result).toEqual({ valid: false, reason: HANGAR_ASSET_INVALID });
-      expect(loader).toHaveBeenCalledTimes(0);
-      expect(result.reason).toBe('asset_invalid');
+    const rows: Array<{ name: string; input: Uint8Array; valid: boolean }> = [
+      { name: 'valid embedded v2', input: valid, valid: true },
+      { name: 'wrong magic', input: withBytes(valid, (v) => v.setUint32(0, 0, true)), valid: false },
+      { name: 'version 1', input: withBytes(valid, (v) => v.setUint32(4, 1, true)), valid: false },
+      { name: 'header shorter than 12 bytes', input: valid.slice(0, 11), valid: false },
+      { name: 'chunk shorter than declared', input: valid.slice(0, -4), valid: false },
+      { name: 'trailing byte', input: assembleGlb([json, bin], { trailing: 1 }), valid: false },
+      { name: 'declared length off by one', input: assembleGlb([json, bin], { lengthDelta: 1 }), valid: false },
+      { name: 'second JSON chunk', input: assembleGlb([json, json, bin]), valid: false },
+      { name: 'BIN before JSON', input: assembleGlb([bin, json]), valid: false },
+      { name: 'two BIN chunks', input: assembleGlb([json, bin, bin]), valid: false },
+      { name: 'no BIN chunk', input: assembleGlb([json]), valid: false },
+      { name: 'invalid UTF-8 JSON', input: assembleGlb([{ type: json.type, data: new Uint8Array([0xff, 0xfe, 0x20, 0x20]) }, bin]), valid: false },
+      { name: 'malformed JSON', input: assembleGlb([jsonChunk('{"asset":'), bin]), valid: false },
+      { name: 'JSON chunk of 1,048,580 bytes', input: assembleGlb([{ type: json.type, data: new Uint8Array(1_048_580).fill(0x20) }, bin]), valid: false },
+      { name: 'file of 5,242,884 bytes', input: assembleGlb([json, { ...bin, data: new Uint8Array(5_242_884) }]), valid: false },
+      { name: 'root uri', input: buildGlb(validDocument({ uri: 'a.bin' })), valid: false },
+      { name: 'nested uri', input: buildGlb(validDocument({ buffers: [{ byteLength: 24, uri: 'a.bin' }] })), valid: false },
+      { name: 'extensionsUsed', input: buildGlb(validDocument({ extensionsUsed: ['KHR_x'] })), valid: false },
+      { name: 'extensionsRequired', input: buildGlb(validDocument({ extensionsRequired: ['KHR_x'] })), valid: false },
+      { name: 'extensions object', input: buildGlb(validDocument({ extensions: {} })), valid: false },
+      { name: 'image MIME image/gltf-binary', input: buildGlb(validDocument({ images: [{ bufferView: 0, mimeType: 'image/gltf-binary' }] })), valid: false },
+      { name: 'bufferView beyond buffer', input: buildGlb(validDocument({ bufferViews: [{ buffer: 0, byteOffset: 8, byteLength: 24 }] })), valid: false },
+      { name: 'accessor beyond bufferView', input: buildGlb(validDocument({ accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' }] })), valid: false },
+      { name: 'strided accessor ending exactly at the view boundary', input: buildGlb(stridedDocument, binChunk(20)), valid: true },
+      { name: 'strided accessor one stride too long', input: buildGlb(tooLongStride, binChunk(20)), valid: false },
+      { name: 'JSON nested to depth 128', input: buildGlb(nestedDocument(128)), valid: true },
+      { name: 'JSON nested to depth 129', input: buildGlb(nestedDocument(129)), valid: false },
+    ];
+
+    for (const row of rows) {
+      const checked = check(row.input);
+      if (row.valid) {
+        expect(checked.result, row.name).toEqual({ valid: true });
+        expect(checked.loaderCalls, row.name).toBe(1);
+      } else {
+        expect(checked.result, row.name).toEqual(INVALID);
+        expect(checked.result, row.name).toHaveProperty('reason', HANGAR_ASSET_INVALID);
+        expect(checked.loaderCalls, row.name).toBe(0);
+      }
     }
   });
 
-  it('GLB_validator_has_no_renderer_dependency', () => {
-    for (const input of [null, new ArrayBuffer(8), new Uint8Array(), new Uint8Array([1])]) {
-      const checked = reject(input, { maxJsonBytes: 1_048_576, maxTotalBytes: 5_242_880 });
-      expect(checked.result).toEqual({ valid: false, reason: 'asset_invalid' });
+  it('GLB_deep_json_never_throws_out_of_the_validator', () => {
+    const depth = 100_000;
+    const deep = `{"asset":{"version":"2.0"},"extras":${'['.repeat(depth)}${']'.repeat(depth)}}`;
+    expect(() => validateHangarGlbResult(buildGlb(deep))).not.toThrow();
+    expect(validateHangarGlbResult(buildGlb(deep))).toEqual(INVALID);
+  });
+
+  it('GLB_input_and_limits_contract', () => {
+    const valid = buildGlb();
+    for (const input of [null, new ArrayBuffer(8), new Uint8Array()]) {
+      const checked = check(input, { maxJsonBytes: 1_048_576, maxTotalBytes: 5_242_880 });
+      expect(checked.result).toEqual(INVALID);
       expect(checked.loaderCalls).toBe(0);
     }
-    const negative = reject(fixture('hangar-valid.glb'), { maxJsonBytes: -1 });
-    expect(negative.result.reason).toBe('asset_invalid');
-    expect(negative.loaderCalls).toBe(0);
+    for (const limit of [-1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      for (const limits of [{ maxJsonBytes: limit }, { maxTotalBytes: limit }]) {
+        const checked = check(valid, limits);
+        expect(checked.result, JSON.stringify(limits)).toEqual(INVALID);
+        expect(checked.loaderCalls).toBe(0);
+      }
+    }
+    expect(check(valid, { maxJsonBytes: 1_048_576, maxTotalBytes: 5_242_880 }).result).toEqual({ valid: true });
   });
 });

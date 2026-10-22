@@ -3,6 +3,7 @@ export const ASSET_INVALID_REASON = HANGAR_ASSET_INVALID;
 export const GLB_ASSET_INVALID = HANGAR_ASSET_INVALID;
 export const HANGAR_DEFAULT_JSON_LIMIT = 1_048_576;
 export const HANGAR_DEFAULT_TOTAL_LIMIT = 5_242_880;
+export const HANGAR_MAX_JSON_DEPTH = 128;
 
 export type HangarGlbLimits = {
   maxJsonLength?: number;
@@ -26,6 +27,25 @@ function asSafeNumber(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) invalid();
   if (!Number.isSafeInteger(value)) invalid();
   return value;
+}
+
+/** Deepest container nesting of JSON text (the root counts as 1), found by scanning so that no recursion is needed. */
+function jsonDepth(text: string): number {
+  let depth = 0;
+  let deepest = 0;
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (char === '\\') index += 1;
+      else if (char === '"') inString = false;
+    } else if (char === '"') inString = true;
+    else if (char === '{' || char === '[') {
+      depth += 1;
+      if (depth > deepest) deepest = depth;
+    } else if (char === '}' || char === ']') depth -= 1;
+  }
+  return deepest;
 }
 
 function rangeInside(offset: unknown, length: unknown, containerLength: number): boolean {
@@ -75,6 +95,7 @@ export function validateHangarGlb(input: unknown, limits: HangarGlbLimits | numb
   let jsonText: string;
   try { jsonText = new TextDecoder('utf-8', { fatal: true }).decode(jsonBytes).replace(/[\u0020\n\r\t]*$/, ''); }
   catch { invalid(); }
+  if (jsonDepth(jsonText) > HANGAR_MAX_JSON_DEPTH) invalid();
   let json: unknown;
   try { json = JSON.parse(jsonText); }
   catch { invalid(); }
@@ -136,16 +157,22 @@ export function validateHangarGlb(input: unknown, limits: HangarGlbLimits | numb
     const componentSize = componentSizes[componentType];
     const componentCount = typeCounts[type];
     if (!componentSize || !componentCount) invalid();
-    const byteLength = (count as number) * componentCount * componentSize;
-    if (!Number.isSafeInteger(byteLength) || byteLength < 0) invalid();
+    const elementSize = componentCount * componentSize;
     if (accessor.bufferView !== undefined) {
       if (!Number.isSafeInteger(accessor.bufferView) || (accessor.bufferView as number) < 0 || (accessor.bufferView as number) >= bufferViews.length) invalid();
       const rawView = bufferViews[accessor.bufferView as number] as Record<string, unknown>;
+      // A strided view spans (count - 1) strides plus the final element; a tightly packed one spans count elements.
+      const stride = rawView.byteStride;
+      if (stride !== undefined && (!Number.isSafeInteger(stride) || (stride as number) < elementSize)) invalid();
+      const byteLength = stride !== undefined && (count as number) > 0
+        ? ((count as number) - 1) * (stride as number) + elementSize
+        : (count as number) * elementSize;
+      if (!Number.isSafeInteger(byteLength) || byteLength < 0) invalid();
       const viewOffset = (rawView.byteOffset ?? 0) as number;
       const viewLength = rawView.byteLength as number;
       const accessorOffset = (accessor.byteOffset ?? 0) as number;
       if (!rangeInside(viewOffset + accessorOffset, byteLength, viewOffset + viewLength)) invalid();
-      if (viewOffset + accessorOffset + byteLength > firstBuffer.byteLength) invalid();
+      if (viewOffset + accessorOffset + byteLength > (firstBuffer.byteLength as number)) invalid();
     }
     if (accessor.sparse && typeof accessor.sparse === 'object') {
       const sparse = accessor.sparse as Record<string, unknown>;
