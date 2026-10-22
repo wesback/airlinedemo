@@ -1,0 +1,229 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 530,
+  "branch": "ai-sdlc/issue-530",
+  "commitSha": "bde2a77d4b409fe4c4a1c541a53241aacaa9804c",
+  "round": 2,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The manifest traversal now follows static imports, and the wiring test runs the runtime lazy-load test. However, Hangar models emitted with hashed filenames can still be classified as shared and escape the asset budget.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 101,
+          "message": "The added canonical-path fallback still misses hashed output filenames, leaving the prior Hangar asset undercount defect reachable.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "For emitted model and texture files, the checker attributes Hangar ownership by comparing the output path with canonical source paths. It only matches an exact canonical basename suffix or the full canonical path.",
+            "failureScenario": "A canonical Hangar model named aircraft.glb is emitted as assets/aircraft-a1b2c3.glb, and no traversed manifest entry lists it in assets. The hashed output name matches neither comparison, so it is marked shared and its bytes are excluded; the build can pass when the Hangar asset budget is exceeded."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Static manifest imports are now traversed, and the wiring test runs the runtime lazy-load test. The previously reported asset attribution gap remains: hashed Hangar assets identified by a manifest entry’s file can still be excluded from the budget.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 102,
+          "message": "The fallback can still classify emitted Hangar model and texture files as shared when their manifest entries identify them through file. Associate output assets with manifest entries by file so these bytes count toward the Hangar budget.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fallback marks a model or texture Hangar-only based on its output path, membership in hangarAssets, a canonical path match, or a manifest entry whose assets or src contains the output path. It does not associate the output path with a manifest entry through value.file; visited entry files are recorded in hangarFiles, which this asset check does not consult.",
+            "failureScenario": "A Hangar model is emitted with a hashed output name such as assets/aircraft-a1b2.glb, and its manifest entry has file set to that output path. If the entry does not list it in assets, its src is the source path, and the canonical basename does not match the hashed name, the model is marked shared. Its bytes are excluded from the Hangar asset total, so a build over the asset budget can pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The static-import traversal and runtime lazy-load test concerns from the prior round appear addressed. The manifest asset attribution issue remains, allowing some Hangar assets to escape the budget total.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 102,
+          "message": "The fallback can still misclassify emitted Hangar model or texture files as shared because it does not associate assets with manifest entries by `value.file`.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The fallback identifies Hangar assets from emitted paths, `assets`/`src` candidates, or canonical source paths. It does not match manifest entries by their emitted `file` path; a hashed output filename can also fail the canonical basename check.",
+            "failureScenario": "A Hangar model is emitted as `assets/aircraft-hash.glb`, and its manifest entry has `file` set to that path and a Hangar source key, but no visited chunk lists it in `assets`. The asset is marked shared and excluded from the total, so an over-budget build can pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarBuildBudgetWiring.test.mjs",
+      "frontend/tests/HangarBuildBudgets.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
