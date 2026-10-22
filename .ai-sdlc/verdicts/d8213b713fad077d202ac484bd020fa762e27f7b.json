@@ -1,0 +1,221 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 514,
+  "branch": "ai-sdlc/issue-514",
+  "commitSha": "d8213b713fad077d202ac484bd020fa762e27f7b",
+  "round": 3,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new controls invoke the motion controllers, but avatar movement remains disconnected from the rendered scene. The reduced-motion acceptance criterion is still unmet.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 129,
+          "message": "The carried acceptance-criteria finding remains: avatar targets and durations are not connected to a rendered transition. The new handler only updates unused state, so reduced-motion behavior still does not apply to actual avatar navigation.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The Move avatar handler calls the controller and stores its target in avatarState, but avatarState is not used by any rendered scene object. The duration is only exposed as metadata on the wrapper element.",
+            "failureScenario": "A user clicks Move avatar with reduced motion enabled. The controller reports a zero-duration transition, but no rendered avatar consumes the target, so no avatar transition occurs and the preference does not control an actual navigation transition."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes add scene controls and respond to preference updates, but avatar targets are not connected to the rendered scene. The production avatar transition criterion remains unmet.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 130,
+          "message": "The carried acceptance-criteria finding remains: the production avatar path stores the transition target but never applies it to the rendered avatar. The helper-level test does not catch this, so avatar transitions still fail the reduced-motion requirement.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The Move avatar handler stores the controller's target in React state, but the rendered mesh keeps a fixed position at line 147. The test exercises the controller directly and does not render this scene.",
+            "failureScenario": "With reduced motion active, a user presses Move avatar. The controller returns the final target and the test passes, but the scene mesh stays at its fixed position, so the avatar transition does not apply its final target in the same update."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round delta adds reduced-motion controls and preference subscriptions. I found no security vulnerability in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

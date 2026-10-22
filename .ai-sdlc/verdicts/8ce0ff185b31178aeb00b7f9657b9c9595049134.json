@@ -1,0 +1,227 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 514,
+  "branch": "ai-sdlc/issue-514",
+  "commitSha": "8ce0ff185b31178aeb00b7f9657b9c9595049134",
+  "round": 4,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated scene applies avatar targets to the rendered mesh, and camera targets feed the Canvas camera state. Reduced-motion changes recompute both targets through the controllers; I found no remaining carried finding in the reviewed change.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation now feeds avatar state into the rendered mesh, resolving the prior wiring finding. The changed tests still allow broken rendered avatar or camera wiring to pass, so the production transition behavior is not adequately verified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 66,
+          "message": "The updated tests do not prove the acceptance criterion on the rendered Hangar transitions: the scene test checks metadata and controller state, but not the mesh position or camera navigation. Add production-path assertions for both rendered targets under system reduced motion.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The rendered-scene test clicks only “Move avatar” and checks wrapper attributes and controller state. It does not assert the rendered mesh position or exercise either camera button. The system-preference test calls the motion and camera helpers directly rather than checking those production paths.",
+            "failureScenario": "If the scene mesh stops using avatarState, or camera navigation stops using cameraState, these tests still pass. With reduced motion active, a user could then see no avatar movement or a camera that does not reach its target while the suite remains green."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round adds rendered avatar state, addressing the prior implementation finding, but its new test would pass if the rendered avatar stopped moving. I found no separate security vulnerability.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 66,
+          "message": "The new scene test does not verify that the avatar target reaches the rendered mesh. Assert the mesh position after the click so this test catches a regression in the production rendering path.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The scene test checks the wrapper's data-hangar-avatar-position attribute and the controller state, but does not inspect the rendered mesh position.",
+            "failureScenario": "If the mesh position is changed to a fixed [0, 0, 0], clicking “Move avatar” still updates the controller and wrapper attribute, so the test passes while the rendered avatar stays still."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

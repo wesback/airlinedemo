@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 514,
+  "branch": "ai-sdlc/issue-514",
+  "commitSha": "b7324a444e02325d80d6e3b567e4b22885b84552",
+  "round": 2,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The scene now creates and calls both controllers, but their results are not wired to ongoing camera or avatar transitions. The carried acceptance-criteria finding still applies.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 110,
+          "message": "The carried finding remains unresolved: camera and avatar controller results are only used during initial scene loading, not by production transition paths. Consequently, the system preference and session override do not control actual Hangar transitions.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "loadHangarScene calls the camera and avatar controllers once during scene loading. It uses the camera result to set the Canvas's initial position, but does not connect either controller to a production transition path. The scene also captures the reduced-motion value and durations before the override controls can change them.",
+            "failureScenario": "After the scene loads, a user changes the session override and triggers a camera or avatar navigation transition. No production transition consumes the updated preference or duration, so the requested transition is not governed by reduced-motion behavior; the added tests pass by calling controllers directly."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The incremental changes connect controllers to scene loading, but do not wire their durations or updated override state into production camera and avatar transitions. The acceptance criterion remains unmet.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 110,
+          "message": "The carried finding remains unresolved: the production scene does not consume reduced-motion durations for camera or avatar transitions, and changing the override does not schedule a transition. The tests exercise controller results, not the production transition path.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "App passes the controllers to loadHangarScene once. That function computes one camera overview and one avatar move during loading; the scene uses the camera target for its initial position, but does not consume either duration to run transitions. The override handlers update motion state without scheduling new transitions.",
+            "failureScenario": "A user changes the in-app override and then triggers a camera or avatar navigation transition. No production transition path applies the updated preference, so motion can continue instead of applying the final target immediately. The helper tests still pass because they call the controllers directly."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new controllers are created and called during scene loading, but their durations are not used by a production transition path, leaving the carried acceptance-criteria finding unresolved. I found no separate security vulnerability in the changed code.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 110,
+          "message": "The production wiring still does not apply reduced-motion settings to actual camera or avatar transitions. The loader performs only an initial camera preset and a no-op avatar move, then exposes duration metadata without connecting it to an animation path.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The production loader calls the avatar controller only once, moving from {x: 0, z: 0} to the same position. It reads the resulting duration into a data attribute, while the camera duration is also only exposed as an attribute; neither duration is connected to a production transition scheduler. The override handlers update preference state but do not apply it to a transition.",
+            "failureScenario": "After the Hangar scene loads, a user enables reduced motion and triggers camera or avatar navigation. No production navigation path consults the updated preference or consumes a transition duration, so the override does not control those transitions or ensure the target is applied in the same update."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

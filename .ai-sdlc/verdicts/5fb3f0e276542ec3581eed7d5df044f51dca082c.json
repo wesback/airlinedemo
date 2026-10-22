@@ -1,0 +1,222 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 514,
+  "branch": "ai-sdlc/issue-514",
+  "commitSha": "5fb3f0e276542ec3581eed7d5df044f51dca082c",
+  "round": 1,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds reduced-motion handling to camera-controller methods, but those methods have no production call sites, and avatar handling remains helper-only. The acceptance criterion is still unmet.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/cameraController.ts",
+          "line": 56,
+          "message": "The fix connects reduced-motion handling only to an otherwise unused controller and helper. Production Hangar camera and avatar transitions still do not apply the reduced-motion preference or session override.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fix routes camera-controller methods through applyCameraTransition, but no production module imports or calls HangarCameraController; the only call sites are tests. Avatar transitions still only call the reduced-motion helper directly in tests.",
+            "failureScenario": "A user triggers a camera or avatar transition through Hangar’s production UI while reduced motion is active. The UI does not pass that transition through this controller or helper, so its existing animation can retain a nonzero duration and queue motion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds camera-controller calls to the reduced-motion helper, but the returned descriptors are not connected to a production animation path, and avatar transitions remain unwired. The prior acceptance-criteria finding is unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/cameraController.ts",
+          "line": 56,
+          "message": "The previous finding remains: reduced-motion descriptors are still not wired into Hangar camera and avatar transition paths. The added controller tests exercise returned metadata, not production transitions.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Camera controller operations call applyCameraTransition, which stores and returns a duration descriptor. Repository call sites do not connect that descriptor to a Hangar animation path, and no avatar transition path calls applyAvatarTransition.",
+            "failureScenario": "With reduced motion enabled, a user triggers a camera or avatar transition through Hangar. The tests pass by checking the descriptor returned from the helper, but no production transition consumes it, so the acceptance criterion that every transition applies its final target in the same update is not demonstrated or enforced."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added camera-controller API covers only controller-level results; Hangar application and avatar transition paths still do not apply the setting.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/cameraController.ts",
+          "line": 56,
+          "message": "The carried finding remains unresolved: reduced-motion behavior is still not applied to Hangar avatar transitions, and the camera controller has no application call site. The acceptance criteria require actual camera and avatar transitions to use the reduced-motion setting.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The diff adds reduced-motion handling to the camera controller, but no Hangar application code calls that controller, and no avatar transition path calls applyAvatarTransition.",
+            "failureScenario": "With system reduced motion enabled or the session override active, a user triggers an avatar navigation transition. That path does not consult HangarReducedMotion, so it can still animate; the new tests pass because they call the helper directly."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

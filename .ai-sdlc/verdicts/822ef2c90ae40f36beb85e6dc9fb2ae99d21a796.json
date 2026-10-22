@@ -1,0 +1,276 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 514,
+  "branch": "ai-sdlc/issue-514",
+  "commitSha": "822ef2c90ae40f36beb85e6dc9fb2ae99d21a796",
+  "round": 1,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The override test now exercises the loaded scene’s Reduce motion and Allow motion controls in both directions. The system-preference test still does not verify reduced-motion behavior during camera or avatar navigation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 44,
+          "message": "The carried system-preference test finding remains: the rendered scene is tested with no override, but neither navigation control is activated. Exercise both controls and assert their rendered targets and zero durations under the matching system preference.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The system-preference test injects a matching HangarReducedMotion instance and loads the scene, but it checks only the initial camera and avatar positions. It never activates the camera or avatar controls.",
+            "failureScenario": "If a camera or avatar control stops applying its target under the system preference, this test still passes because it asserts only the unchanged initial targets. A user navigating the loaded scene could therefore get animated transitions despite reduced motion being active."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The system-preference test still omits navigation actions, and the override test changes the motion state directly before testing the `Allow motion` control. Both gaps leave required production behavior able to regress while the tests pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 72,
+          "message": "The system-preference criterion remains unverified through navigation: the test does not activate the camera and avatar controls or check their resulting targets. Add those production-path assertions and verify the no-preference case retains positive durations.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The system-preference test loads the scene and checks its initial camera and avatar positions and durations, but never activates either navigation control.",
+            "failureScenario": "If camera or avatar navigation stops applying targets immediately under the system preference, the test still passes because it only checks the initial scene state."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 106,
+          "message": "The override test does not prove that the production `Allow motion` control works. Remove the direct `motion.setOverride(false)` setup and assert that clicking the control itself stores `no-preference` and restores both requested durations.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Before clicking `Allow motion`, the test directly calls `motion.setOverride(false)`, which stores `no-preference` and notifies the scene subscription. That subscription updates the transition durations before the production control is activated.",
+            "failureScenario": "If the `Allow motion` control becomes a no-op, the test still sees the expected stored value and positive durations from the direct controller call, so it passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability is apparent in the changed code. The rendered-scene test still does not verify camera and avatar navigation under system reduced motion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 59,
+          "message": "The carried system-preference test finding remains: activate the camera and avatar controls with system reduction enabled and no override, then assert their rendered targets and zero durations.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The system-preference test renders the scene and checks initial camera and avatar positions, but never activates either control. The control test uses a session override instead of system preference.",
+            "failureScenario": "If camera or avatar controls stop applying targets under system reduced motion, the system-preference test still passes because it checks only initial state; the separate control test still passes because it enables the session override."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

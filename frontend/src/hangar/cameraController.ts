@@ -1,3 +1,5 @@
+import { HangarReducedMotion, type HangarTransitionTarget } from './reducedMotion';
+
 export const HANGAR_OVERVIEW_RADIUS_MULTIPLIER = 3;
 export const HANGAR_AIRCRAFT_RADIUS_MULTIPLIER = 2;
 export const HANGAR_MIN_RADIUS_MULTIPLIER = 1.2;
@@ -33,7 +35,8 @@ export function getHangarCameraPreset(preset: HangarCameraPreset, targetRadius: 
 export class HangarCameraController {
   private state: HangarCameraState;
   private invalidError: string | null = null;
-  constructor(targetRadius: unknown) {
+  private lastTransition: HangarTransitionTarget<HangarCameraState> | null = null;
+  constructor(targetRadius: unknown, private readonly motion: HangarReducedMotion = new HangarReducedMotion()) {
     const valid = finitePositive(targetRadius);
     this.state = valid
       ? this.makeState(targetRadius as number, (targetRadius as number) * 3, 0, 45)
@@ -49,11 +52,22 @@ export class HangarCameraController {
   getState(): HangarCameraState { return { ...this.state }; }
   get stateValue(): HangarCameraState { return this.getState(); }
   get visibleError(): string | null { return this.invalidError ?? this.state.error; }
+  get transitionDuration(): number { return this.lastTransition?.duration ?? 480; }
+  applyCameraTransition(target: HangarCameraState, requestedDuration = 480): HangarTransitionTarget<HangarCameraState> {
+    const transition = this.motion?.applyCameraTransition(target, requestedDuration) ?? {
+      target, duration: requestedDuration, immediate: requestedDuration === 0,
+    };
+    this.lastTransition = transition;
+    this.state = { ...transition.target };
+    return transition;
+  }
+  get reducedMotion(): boolean { return this.motion?.reduced ?? false; }
   setTargetRadius(targetRadius: unknown): HangarCameraControllerResult {
     if (!finitePositive(targetRadius)) return this.invalid();
     const next = targetRadius as number;
     const ratio = this.state.radius / this.state.targetRadius;
     this.state = this.makeState(next, next * (finitePositive(ratio) ? ratio : 3), this.state.azimuthDegrees, this.state.polarDegrees);
+    this.applyCameraTransition(this.state);
     return { state: this.getState(), handled: true, error: null };
   }
   updateTargetRadius(targetRadius: unknown): HangarCameraControllerResult { return this.setTargetRadius(targetRadius); }
@@ -62,6 +76,7 @@ export class HangarCameraController {
     if (preset !== 'overview' && preset !== 'aircraft') return this.invalid();
     const target = this.state.targetRadius;
     this.state = this.makeState(target, target * (preset === 'aircraft' ? 2 : 3), 0, preset === 'aircraft' ? 35 : 45);
+    this.applyCameraTransition(this.state, 480);
     return { state: this.getState(), handled: true, error: null };
   }
   overview(): HangarCameraControllerResult { return this.applyPreset('overview'); }
@@ -77,6 +92,7 @@ export class HangarCameraController {
     const angleDelta = typeof pointer.polarDelta === 'number' ? pointer.polarDelta : pointer.dy ?? 0;
     if (!Number.isFinite(azimuthDelta) || !Number.isFinite(angleDelta)) return this.invalid();
     this.state = this.makeState(this.state.targetRadius, this.state.radius, this.state.azimuthDegrees + azimuthDelta, this.state.polarDegrees + angleDelta);
+    this.applyCameraTransition(this.state, 160);
     return { state: this.getState(), handled: true, error: null };
   }
   pointerOrbit(input: HangarPointerInput | number, polarDelta = 0): HangarCameraControllerResult { return this.orbit(input, polarDelta); }
@@ -91,13 +107,14 @@ export class HangarCameraController {
     else if (key === '-' || key === '_') radius *= 1.1;
     else return { state: this.getState(), handled: false, error: null };
     this.state = this.makeState(this.state.targetRadius, radius, azimuth, polar);
+    this.applyCameraTransition(this.state, 160);
     return { state: this.getState(), handled: true, error: null };
   }
   handleKey(key: string): HangarCameraControllerResult { return this.key(key); }
   handleKeyboardKey(key: string): HangarCameraControllerResult { return this.key(key); }
 }
 
-export function createHangarCameraController(targetRadius: unknown): HangarCameraController { return new HangarCameraController(targetRadius); }
+export function createHangarCameraController(targetRadius: unknown, motion?: HangarReducedMotion): HangarCameraController { return new HangarCameraController(targetRadius, motion); }
 export const createCameraController = createHangarCameraController;
 export const applyHangarCameraPreset = (preset: HangarCameraPreset, targetRadius: number) => getHangarCameraPreset(preset, targetRadius);
 export const clampHangarRadius = (radius: number, targetRadius: number) => clamp(radius, targetRadius * HANGAR_MIN_RADIUS_MULTIPLIER, targetRadius * HANGAR_MAX_RADIUS_MULTIPLIER);

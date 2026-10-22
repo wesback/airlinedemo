@@ -1,0 +1,282 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 514,
+  "branch": "ai-sdlc/issue-514",
+  "commitSha": "2977f10ace230f3f76616dd588a0c49c76032a34",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-5",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-6",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "claude-sonnet-5.5"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation connects reduced-motion state to rendered camera and avatar targets, but the tests do not verify the required system-preference path or exercise the production override controls.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 66,
+          "message": "The test does not cover the first acceptance criterion’s production path under system reduced motion with no override. Add the named rendered-scene test that injects the matching HangarReducedMotion instance and checks both targets and the no-preference negative case.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The rendered-scene test creates controllers without injecting its media query configured with matches: true, then enables the session override at line 67. The separate system-preference assertions call helpers and controllers directly.",
+            "failureScenario": "If the loaded scene stops honoring the operating-system preference, the rendered test still passes because the session override forces reduced motion. With system reduction active and no override, camera or avatar controls could retain positive durations."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 110,
+          "message": "The test does not cover the second acceptance criterion’s production controls through the loaded scene. Add the named test that activates Reduce motion and Allow motion, checks the stored values, and verifies both rendered transition durations in each direction.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The session-override test calls HangarReducedMotion methods directly; the rendered-scene test changes the override directly on controllers. Neither test activates the production scene’s override controls or checks their session-storage values and rendered durations.",
+            "failureScenario": "If the in-app controls are removed or wired incorrectly, these tests still pass. A user selecting Reduce motion or Allow motion could therefore fail to store the override or change camera and avatar durations."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff adds reduced-motion helpers and rendered-scene assertions, but the tests do not cover the two required production paths: system preference without an override, and changing the override through the in-app controls.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 66,
+          "message": "The system-preference criterion is not covered by the required production-path test, `HangarReducedMotion renders camera and avatar targets immediately for system preference`. Add a rendered-scene test that injects a matching media query, leaves the override unset, and checks the camera and avatar targets. The existing rendered test covers the session override instead.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The rendered-scene test creates controllers without injecting its `motion` instance, then enables reduced motion with `controllers.motion.setOverride(true)`. The separate system-preference test exercises controllers directly rather than rendering the loaded scene.",
+            "failureScenario": "If the loaded scene stops honoring the operating-system preference, the rendered-scene test still passes because its session override enables reduced motion. With system reduction active and no override, camera and avatar controls could use positive durations."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 94,
+          "message": "The override criterion is not covered by the required production-control test, `HangarReducedMotion session override controls rendered transitions in both directions`. Test the labelled in-app controls through the production path, including storage and camera and avatar durations for both `Reduce motion` and `Allow motion`.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The tests load the scene and click its navigation buttons, but do not render the App controls or activate an override through those controls. The session-override test calls `motion.setOverride` directly and checks controller results.",
+            "failureScenario": "If the App controls stop storing the selected override or fail to update camera and avatar durations in either direction, these tests still pass because they bypass the controls and exercise the motion controller directly."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no security vulnerability in the changed code. The rendered transition tests do not verify the specified system-preference and in-app override behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 68,
+          "message": "The tests do not cover the acceptance criteria for rendered transitions under the system preference or for the in-app controls in both directions. Add production-path tests that inject matching media and session storage, leave the override unset for the system-preference case, and activate the labelled controls for both override cases.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The rendered-scene test creates controllers with the default motion instance, then enables reduced motion through a session override. The separate system-preference test exercises helpers and controllers directly, not the rendered scene. The tests also do not activate the in-app override controls.",
+            "failureScenario": "If the rendered scene ignores the operating-system preference, the tests still pass because the rendered test enables the session override. If the in-app controls stop storing overrides or updating rendered transition durations, the tests still pass because they never activate those controls."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
