@@ -89,9 +89,20 @@ public sealed class SqlCasePackRequestWindowStore(DbContextOptions<CaseStateDbCo
                     cancellationToken);
             }
 
-            await db.CasePackRequestWindows
-                .Where(row => row.AttemptId != Guid.Empty && row.RequestedAtTicks <= cutoff)
-                .ExecuteDeleteAsync(cancellationToken);
+            if (sqlite)
+            {
+                var expired = await db.CasePackRequestWindows
+                    .Where(row => row.AttemptId != Guid.Empty && row.RequestedAtTicks <= cutoff)
+                    .ToListAsync(cancellationToken);
+                db.CasePackRequestWindows.RemoveRange(expired);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            else
+            {
+                await db.CasePackRequestWindows
+                    .Where(row => row.AttemptId != Guid.Empty && row.RequestedAtTicks <= cutoff)
+                    .ExecuteDeleteAsync(cancellationToken);
+            }
             var attempts = db.CasePackRequestWindows.Where(row =>
                 row.UserHash == userHash && row.Endpoint == endpoint && row.RequestedAtTicks > cutoff);
             var maximum = CasePackRequestLimiter.MaximumFor(endpoint);
