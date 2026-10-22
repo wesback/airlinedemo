@@ -69,5 +69,12 @@ describe('HangarCaseReset',()=>{
     expect(first).toMatchObject({accepted:false,uncertain:true,rejected:false,status:null}); expect(first.payload).toEqual(originalPayload);
     const duplicateId=await submitHangarCaseReset({envelope:source,csrfToken:'csrf-123',commandId:'cp-reset-7',transport:uncertainTransport});
     expect(duplicateId.payload).toEqual(originalPayload);
+
+    const refreshedSource=envelope(8); const refreshedRetry=await submitHangarCaseReset({
+      envelope:refreshedSource,csrfToken:'csrf-123',commandId:'cp-reset-7',transport:uncertainTransport,
+    });
+    expect(refreshedRetry.payload).toEqual(originalPayload);
+    expect(refreshedRetry.payload?.expectedRevision).toBe(7);
+    expect(refreshedRetry.payload?.commandId).toBe('cp-reset-7');
   });
 });

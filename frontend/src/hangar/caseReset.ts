@@ -51,7 +51,8 @@ const responseOk=(response:unknown,status:number|null):boolean=>objectOf(respons
 export async function submitHangarCaseReset(options:{envelope:unknown;csrfToken?:unknown;commandId?:string;transport?:CaseResetTransport;refetch?:CaseResetRefetch}):Promise<CaseResetResult> {
   const permission=getHangarCaseResetPermission(options.envelope); if(!permission.allowed||permission.revision===null)return {accepted:false,uncertain:false,rejected:true,status:400,payload:null as never};
   const commandId=typeof options.commandId==='string'?options.commandId:createHangarCaseResetCommandId(permission.revision);
-  const payload=buildHangarCaseResetPayload(options.envelope,commandId); if(!payload||typeof options.csrfToken!=='string'||options.csrfToken.length===0)return {accepted:false,uncertain:false,rejected:true,status:400,payload};
+  const retained=[...uncertainReset.values()].find((entry)=>entry.commandId===commandId)?.payload;
+  const payload=retained?{...retained}:buildHangarCaseResetPayload(options.envelope,commandId); if(!payload||typeof options.csrfToken!=='string'||options.csrfToken.length===0)return {accepted:false,uncertain:false,rejected:true,status:400,payload};
   const transport=options.transport;if(typeof transport!=='function')return {accepted:false,uncertain:false,rejected:true,status:400,payload};
   let response:unknown; let status:number|null=null;
   try { response=await transport(`/api/v1/cases/cp-case-c/reset-blocked-variant`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':options.csrfToken},body:JSON.stringify(payload)}); status=responseStatus(response); }
@@ -75,7 +76,7 @@ export function HangarCaseReset({envelope,scene,csrfToken,transport,fetcher,refe
   const source=scene??envelope; const permission=getHangarCaseResetPermission(source); const [message,setMessage]=useState(''); const [busy,setBusy]=useState(false); const retained=useRef<{commandId:string;payload:CaseResetPayload}|null>(null);
   if(!permission.allowed)return createElement('span',{hidden:true},children??null);
   async function reset(){if(busy)return; if(confirmReset?confirmReset():typeof window==='undefined'||!window.confirm?false:window.confirm('Reset the Case C blocked variant?')){
-    setBusy(true); const id=retained.current?.commandId??commandId??commandIdFactory?.(permission.revision!)??createHangarCaseResetCommandId(permission.revision!); const payload=buildHangarCaseResetPayload(source,id); if(!payload){setBusy(false);return;} retained.current={commandId:id,payload};
+    setBusy(true); const id=retained.current?.commandId??commandId??commandIdFactory?.(permission.revision!)??createHangarCaseResetCommandId(permission.revision!); const payload=retained.current?.payload??buildHangarCaseResetPayload(source,id); if(!payload){setBusy(false);return;} retained.current={commandId:id,payload};
     const result=await submitHangarCaseReset({envelope:source,csrfToken:typeof csrfToken==='string'?csrfToken:undefined,commandId:id,transport:transport??fetcher,refetch:refetch??reader}); setBusy(false);
     setMessage(result.accepted?'Case C blocked variant reset accepted.':result.uncertain?'Reset result uncertain. Retry without changing the command.':`Reset rejected (${result.status}).`);
   }}
