@@ -15,6 +15,12 @@ describe('Hangar build budget wiring', () => {
     expect(app).toContain('selectHangarEntry');
     expect(app).toContain('hangarLazyLoader ??');
     expect(app).not.toMatch(/@react-three\/fiber.*(?:import|from)/s);
+    expect(app).not.toContain('assets/hangar/');
+    expect(app).not.toMatch(/(?:fetch\(|new URL\(|import)[^\n]*(?:\.glb|\.gltf|\.ktx2|\.basis)/);
+
+    const entry = readFileSync('src/hangar/entryController.ts', 'utf8');
+    expect(entry).toContain("await import('@react-three/fiber')");
+    expect(entry).toContain('selectHangarEntry');
 
     const checker = readFileSync('scripts/check-hangar-budgets.mjs', 'utf8');
     expect(checker).toContain('gzipSync');

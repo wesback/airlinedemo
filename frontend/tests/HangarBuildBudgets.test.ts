@@ -11,10 +11,12 @@ describe('Hangar build budgets', () => {
     expect(() => validateHangarBuildBudgets({
       hangarOnlyGzipJavaScriptBytes: HANGAR_JAVASCRIPT_GZIP_BUDGET_BYTES + 1,
       assetBytes: HANGAR_ASSET_BUDGET_BYTES,
+      dependencyChunkMappings: { 'hangar.js': { hangarOnly: true } },
     })).toThrow();
     expect(() => validateHangarBuildBudgets({
       hangarOnlyGzipJavaScriptBytes: HANGAR_JAVASCRIPT_GZIP_BUDGET_BYTES,
       assetBytes: HANGAR_ASSET_BUDGET_BYTES + 1,
+      dependencyChunkMappings: { 'hangar.js': { hangarOnly: true } },
     })).toThrow();
     expect(() => validateHangarBuildBudgets({
       chunks: [{ file: 'hangar.js', gzipBytes: 100 }],
@@ -40,5 +42,11 @@ describe('Hangar build budgets', () => {
       assets: [],
       dependencyChunkMappings: { 'hangar-a.js': 'hangar-only', 'hangar-b.js': 'hangar-only' },
     })).toThrow();
+    expect(() => validateHangarBuildBudgets({
+      chunks: [],
+      assets: [],
+      dependencyChunkMappings: null,
+    })).toThrow();
+    expect(() => validateHangarBuildBudgets()).toThrow();
   });
 });

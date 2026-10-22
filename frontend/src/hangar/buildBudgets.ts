@@ -21,7 +21,7 @@ function count(value: unknown): number {
 }
 function attributed(value: unknown): boolean | null {
   if (value === true || value === 'hangar-only' || value === 'hangar') return true;
-  if (value === false || value === 'shared' || value === null) return false;
+  if (value === false || value === 'shared') return false;
   return null;
 }
 function classifiedChunks(input: unknown, sizeKeys: string[], requireClassification = true): number {
@@ -49,7 +49,7 @@ export function validateHangarBuildBudgets(input?: HangarBuildBudgetInput | null
   let javascriptBytes = directJs === undefined ? 0 : count(directJs);
   let assetBytes = directAssets === undefined ? 0 : count(directAssets);
   if (chunkInput !== undefined) javascriptBytes = classifiedChunks(chunkInput, ['gzipBytes', 'gzipSize', 'bytes', 'size']);
-  if (assetInput !== undefined) assetBytes = classifiedChunks(assetInput, ['bytes', 'size', 'gzipBytes', 'gzipSize'], false);
+  if (assetInput !== undefined) assetBytes = classifiedChunks(assetInput, ['bytes', 'size', 'gzipBytes', 'gzipSize'], true);
 
   if (input.dependencyChunkMappings !== undefined || input.dependencyChunks !== undefined) {
     const mappings = input.dependencyChunkMappings ?? input.dependencyChunks;

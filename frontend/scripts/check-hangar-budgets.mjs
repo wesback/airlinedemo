@@ -21,9 +21,11 @@ function validate(input) {
   }
   let assets = 0;
   for (const asset of input.assets) {
+    const attribution = asset.hangarOnly ?? asset.hangarOnlyAttribution ?? asset.attribution ?? asset.classification;
+    if (!isAttributed(attribution)) throw new Error('Hangar build attribution is missing');
     const bytes = asset.bytes ?? asset.size;
     if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error('Hangar build budget metadata is missing');
-    assets += bytes;
+    if (attribution !== false && attribution !== 'shared') assets += bytes;
   }
   for (const value of Object.values(input.dependencyChunkMappings)) {
     const classification = value && typeof value === 'object' ? value.hangarOnly ?? value.hangarOnlyAttribution ?? value.attribution ?? value.classification : value;
@@ -44,30 +46,54 @@ let input;
 if (existsSync(metadataPath)) {
   input = JSON.parse(readFileSync(metadataPath, 'utf8'));
 } else {
-  const manifest = JSON.parse(readFileSync(viteManifestPath, 'utf8'));
-  const entries = Object.entries(manifest);
-  const chunks = [];
-  const assets = [];
-  const dependencyChunkMappings = {};
-  const walk = (directory) => {
-    for (const name of readdirSync(directory)) {
-      const path = join(directory, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else {
-        const rel = relative(root, path).replaceAll('\\', '/');
-        if (/\.js$/i.test(name)) {
-          const record = entries.find(([, value]) => value.file === rel);
-          const src = record?.[0] ?? '';
-          const hangarOnly = src.includes('hangar') || rel.includes('hangar');
-          chunks.push({ file: rel, gzipBytes: gzipSync(readFileSync(path)).length, hangarOnly });
-          dependencyChunkMappings[rel] = { hangarOnly };
-        }
-        if (/\.(glb|png|jpe?g|webp|ktx2|basis)$/i.test(name)) assets.push({ file: rel, bytes: statSync(path).size });
+if (!existsSync(viteManifestPath)) throw new Error('Hangar build budget metadata is missing');
+const manifest = JSON.parse(readFileSync(viteManifestPath, 'utf8'));
+const entries = Object.entries(manifest);
+const hangarEntryKeys = new Set(entries.filter(([src]) => src.toLowerCase().includes('hangar')).map(([src]) => src));
+const hangarFiles = new Set();
+const hangarAssets = new Set();
+const visited = new Set();
+const visit = (key) => {
+  if (visited.has(key)) return;
+  visited.add(key);
+  const value = manifest[key];
+  if (!value || typeof value !== 'object') return;
+  if (typeof value.file === 'string') hangarFiles.add(value.file);
+  for (const asset of [...(value.assets ?? []), ...(value.css ?? [])]) if (typeof asset === 'string') hangarAssets.add(asset);
+  for (const dynamic of value.dynamicImports ?? []) visit(dynamic);
+};
+for (const key of hangarEntryKeys) visit(key);
+
+const chunks = [];
+const assets = [];
+const dependencyChunkMappings = {};
+const walk = (directory) => {
+  for (const name of readdirSync(directory)) {
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) walk(path);
+    else {
+      const rel = relative(root, path).replaceAll('\\\\', '/');
+      if (/\.js$/i.test(name)) {
+        const record = entries.find(([, value]) => value.file === rel);
+        const hangarOnly = hangarEntryKeys.has(record?.[0]) || hangarFiles.has(rel);
+        chunks.push({ file: rel, gzipBytes: gzipSync(readFileSync(path)).length, hangarOnly });
+        dependencyChunkMappings[rel] = { hangarOnly };
+      }
+      const isModelOrTexture = /\.(glb|gltf|png|jpe?g|webp|ktx2|basis)$/i.test(name);
+      const manifestAsset = entries.find(([, value]) => {
+        const candidates = [...(value.assets ?? []), ...(value.src ? [value.src] : [])];
+        return candidates.some((candidate) => typeof candidate === 'string' && candidate.includes(rel));
+      });
+      const hangarAsset = isModelOrTexture && (rel.toLowerCase().includes('/hangar/') || hangarAssets.has(rel) || manifestAsset?.[0]?.toLowerCase().includes('hangar'));
+      if (isModelOrTexture) {
+        const hangarOnly = hangarAsset;
+        assets.push({ file: rel, bytes: statSync(path).size, hangarOnly });
       }
     }
-  };
-  walk(root);
-  input = { chunks, assets: assets.filter((asset) => asset.file.includes('hangar') || asset.file.includes('.vite/')), dependencyChunkMappings };
+  }
+};
+walk(root);
+input = { chunks, assets, dependencyChunkMappings };
 }
 
 validate(input);
