@@ -1,0 +1,215 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 538,
+  "branch": "ai-sdlc/issue-538",
+  "commitSha": "1b53639cea7845d71791a465e6b07ecaa3f70558",
+  "round": 0,
+  "pipelineVersion": "2638170",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The README covers the requested sections, links, evidence language, and public-safe context. The configuration test does not prove that each setting uses an angle-bracket template value.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReadmeContract.test.mjs",
+          "line": 78,
+          "message": "The named test does not verify the configuration-setting template requirement. Assert each required setting appears with an angle-bracket value so this acceptance criterion fails when a template is removed.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "README_contains_no_secret_shaped_values extracts the Configuration section but only checks for the phrases “operator environment” and “Key Vault”; it does not check setting names or template values.",
+            "failureScenario": "If AZURE_SUBSCRIPTION_ID=<subscription id> is changed to AZURE_SUBSCRIPTION_ID=subscription-id, the test still passes, although the acceptance criterion requires each setting to have a template value in angle brackets."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The README covers the requested content in the supplied diff, but the contract test can pass while two acceptance requirements are unmet. Add assertions scoped to the required sections and configuration entries.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReadmeContract.test.mjs",
+          "line": 29,
+          "message": "The test does not prove the Deploy and release and Teardown requirements in the first acceptance criterion. Assert the required script names and operator guide link within the relevant sections.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "README_has_the_required_sections_in_order checks the section order, then searches the entire README for the bootstrap script, destroy command, and operator guide link.",
+            "failureScenario": "If those strings are moved outside Deploy and release or Teardown, the test still passes even though those sections no longer name the required scripts or link to the full procedure."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReadmeContract.test.mjs",
+          "line": 75,
+          "message": "The test does not prove that Configuration lists each setting with an angle-bracket template value. Assert the required setting names and template-value form.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "README_contains_no_secret_shaped_values checks secret patterns and only requires the Configuration section to contain “operator environment” and “Key Vault”; it does not assert any setting names or template values.",
+            "failureScenario": "If Configuration omits every required setting, the secret-pattern checks and the two text checks can still pass, leaving the settings requirement unmet."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security defect found in the changed README or test. The configuration uses template values and directs operators to keep real values in protected environments and Key Vault.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/ReadmeContract.test.mjs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
