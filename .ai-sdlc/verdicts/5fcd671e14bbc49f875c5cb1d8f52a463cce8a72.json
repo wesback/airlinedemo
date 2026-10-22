@@ -1,0 +1,216 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 523,
+  "branch": "ai-sdlc/issue-523",
+  "commitSha": "5fcd671e14bbc49f875c5cb1d8f52a463cce8a72",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The projection validates and orders the five source summaries, and isolates request failures and unsupported contracts. Refresh can still return cached entries outside the current scope.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sourceSummary.ts",
+          "line": 94,
+          "message": "Filter refresh results to the current scope. Returning cached out-of-scope entries violates the scope criterion and can expose cached coverage in the view (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "refreshHangarSourceSummary adds fresh results to a map seeded with every previous entry, then returns every case-list entry found in that map without checking the current scope.",
+            "failureScenario": "After a refresh with all three cases cached, calling refreshHangarSourceSummary(cases, ['cp-case-b'], reader, previous) requests only case B but returns cached entries for cases A and C too."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named Vitest file is included in the build-and-gate job. The refresh helper can return cached summaries for cases outside the current scope, and the scope test does not exercise refresh with prior entries.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sourceSummary.ts",
+          "line": 95,
+          "message": "Filter refreshed entries by the current scope before returning them. As written, cached out-of-scope summaries remain visible after scope narrows, violating the criterion that out-of-scope cases produce no entry. The named scope test covers only projectHangarSourceSummary, so it would not catch this refresh path.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "refreshHangarSourceSummary gets scoped results from projectHangarSourceSummary, merges them with previous entries, then filters the case list only by whether an entry exists in byId; it never applies the current scope to the returned entries.",
+            "failureScenario": "After all three cases have previous entries, refresh with scope ['cp-case-b']. The reader is called only for cp-case-b, but the result also includes the cached cp-case-a and cp-case-c entries."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The refresh path can expose cached, out-of-scope case summaries after a user's scope narrows. The existing scope test does not exercise refresh with prior entries.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sourceSummary.ts",
+          "line": 90,
+          "message": "Refresh can return cached summaries for cases outside the current scope. Filter the returned entries by the normalized scope so a scope change cannot expose prior case data. OWASP A01:2025 Broken Access Control.",
+          "confidence": 0.92,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "refreshHangarSourceSummary copies every previous entry into byId, then returns case-list entries whenever their IDs are in byId; the return path does not check the current scope.",
+            "failureScenario": "A user previously has summaries for cases A and B, then refreshes with scope containing only B and a case list containing A and B. Case A is returned from the previous cache despite being out of scope."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSourceSummary.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
