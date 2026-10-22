@@ -30,6 +30,14 @@ describe('HangarNon3dDataRoom', () => {
     expect(screen.getByRole('status',{name:'Case C source status: unavailable'}).textContent).toBe(SOURCE_UNAVAILABLE_TEXT);
 
     cleanup();
+    const staleReader = vi.fn(async (caseId:string) => ({ contractVersion:1, caseId, sources:HANGAR_SOURCE_IDS.map(sourceId=>({sourceId,mode:'stale',coverage:false})) }));
+    render(<HangarNon3dDataRoom caseList={[{caseId:'cp-case-a',name:'Case A',category:'narrow-body'}]} scope={['cp-case-a']} summaryReader={staleReader}/>);
+    await screen.findByText('technical: mode: stale; coverage: false');
+    for (const sourceId of HANGAR_SOURCE_IDS) {
+      expect(screen.getByText(`${sourceId}: mode: stale; coverage: false`).textContent).toBe(`${sourceId}: mode: stale; coverage: false`);
+    }
+
+    cleanup();
     const unsupportedReader = vi.fn(async (caseId:string) => ({ contractVersion:2, caseId, sources:HANGAR_SOURCE_IDS.map(sourceId=>({sourceId,mode:'available',coverage:true})) }));
     render(<HangarNon3dDataRoom caseList={[{caseId:'cp-case-a',name:'Case A',category:'narrow-body'}]} scope={['cp-case-a']} summaryReader={unsupportedReader}/>);
     expect((await screen.findByRole('status',{name:'Case A source status: unavailable'})).textContent).toBe(SOURCE_UNAVAILABLE_TEXT);
@@ -46,6 +54,16 @@ describe('HangarNon3dDataRoom', () => {
     cleanup();
     render(<HangarNon3dDataRoom entries={entries} browserIdentifier='DOES-NOT-EXIST'/>);
     expect(screen.getByRole('alert').textContent).toBe('Unknown or out-of-scope identifier');
+    expect(screen.queryByRole('region',{name:/Selection/})).toBeNull();
+
+    cleanup();
+    const excludedSelection=vi.fn();
+    const availableExcluded={...entries[2],unavailable:false,sources:entries[0].sources};
+    render(<HangarNon3dDataRoom entries={[entries[0],availableExcluded]} scope={['cp-case-a']} browserIdentifier='cp-case-c' onConfirm={excludedSelection}/>);
+    expect(screen.getByText('Case A — narrow-body')).toBeTruthy();
+    expect(screen.queryByRole('button',{name:'Case C, wide-body'})).toBeNull();
+    expect(activateHangarDataRoomCase(entries.slice(0,1),'cp-case-c',excludedSelection)).toBe(false);
+    expect(excludedSelection).not.toHaveBeenCalled();
     expect(screen.queryByRole('region',{name:/Selection/})).toBeNull();
 
     cleanup();
