@@ -1,0 +1,254 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 510,
+  "branch": "ai-sdlc/issue-510",
+  "commitSha": "42dcd5c517c9aa49c3f9f535a52c55197107a0f6",
+  "round": 0,
+  "pipelineVersion": "9ce6923",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "An explicit null WebGL probe can be discarded in favor of a successful real probe, allowing 3D entry when the acceptance criteria require fallback. The tests also do not assert the no-canvas UI outcome for the null-probe case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 70,
+          "message": "Preserve an explicit null WebGL probe result as unavailable. The current nullish-coalescing selection can replace it with a successful real probe and allow 3D entry.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "App forwards an explicit null hangarWebGl2Probe as options.webgl2. getHangarEntryDecision selects the probe with nullish coalescing, which treats that null as if no probe was supplied and calls the real browser probe instead.",
+            "failureScenario": "In a supported browser where the real WebGL 2 probe succeeds, passing a null probe result proceeds to 3D entry and calls the loader instead of returning the required webgl_unavailable fallback."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 118,
+          "message": "Add an App-path assertion that a null WebGL 2 probe renders the non-3D fallback with no canvas. The current tests do not prove that required UI behavior for this input.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named fallback UI test asserts that no canvas is mounted only after an unsupported-browser input. The null-probe case in the contract eligibility test checks the controller result and loader count, but does not render App or assert that no canvas is mounted.",
+            "failureScenario": "If App mounts a canvas for a null WebGL probe in a browser whose actual WebGL probe succeeds, the current null-probe test still passes; the acceptance criterion's no-canvas behavior is unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fallback UI is tested for visible buttons and canvas absence, but the buttons are inert. This leaves the non-3D action requirement unmet.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 216,
+          "message": "The non-3D fallback displays the required action labels, but the buttons do nothing. Wire them to the corresponding actions so users can use those capabilities from the fallback.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fallback renders buttons for Select case, View status, View evidence, Follow journey, and Open review, but none has an onClick handler or other action wiring.",
+            "failureScenario": "When a user clicks any non-3D action, nothing happens, so the fallback does not provide the selection, status, evidence, journey, or review actions required by the criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerabilities found in the changed code. The Hangar loader uses a fixed import path, contract text is rendered through React escaping, and I found no untrusted input reaching an injection or authorization-sensitive path.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "diff-coverage",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 0,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AccessibleReviewNavigation.test.tsx",
+      "frontend/tests/HangarEntry.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": false,
+      "measured": true,
+      "covered": 8,
+      "total": 13,
+      "percent": 61.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Admission/CasePackRequestLimiter.cs",
+          "covered": 8,
+          "total": 13,
+          "missed": [
+            101,
+            102,
+            103,
+            104,
+            105
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
