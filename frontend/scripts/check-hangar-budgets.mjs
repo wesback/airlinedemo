@@ -49,7 +49,9 @@ if (existsSync(metadataPath)) {
 if (!existsSync(viteManifestPath)) throw new Error('Hangar build budget metadata is missing');
 const manifest = JSON.parse(readFileSync(viteManifestPath, 'utf8'));
 const entries = Object.entries(manifest);
-const hangarEntryKeys = new Set(entries.filter(([src]) => src.toLowerCase().includes('hangar')).map(([src]) => src));
+const hangarEntryKeys = new Set(entries
+  .filter(([key, value]) => key.toLowerCase().includes('hangar') || value?.src?.toLowerCase?.().includes('hangar'))
+  .map(([key]) => key));
 const hangarFiles = new Set();
 const hangarAssets = new Set();
 const visited = new Set();
@@ -60,7 +62,7 @@ const visit = (key) => {
   if (!value || typeof value !== 'object') return;
   if (typeof value.file === 'string') hangarFiles.add(value.file);
   for (const asset of [...(value.assets ?? []), ...(value.css ?? [])]) if (typeof asset === 'string') hangarAssets.add(asset);
-  for (const dynamic of value.dynamicImports ?? []) visit(dynamic);
+  for (const dependency of [...(value.imports ?? []), ...(value.dynamicImports ?? [])]) visit(dependency);
 };
 for (const key of hangarEntryKeys) visit(key);
 
@@ -84,7 +86,20 @@ const walk = (directory) => {
         const candidates = [...(value.assets ?? []), ...(value.src ? [value.src] : [])];
         return candidates.some((candidate) => typeof candidate === 'string' && candidate.includes(rel));
       });
-      const hangarAsset = isModelOrTexture && (rel.toLowerCase().includes('/hangar/') || hangarAssets.has(rel) || manifestAsset?.[0]?.toLowerCase().includes('hangar'));
+      const canonicalAssetPaths = (() => {
+        try {
+          const provenance = JSON.parse(readFileSync(join(process.cwd(), 'src/assets/hangar/hangar-provenance.json'), 'utf8'));
+          const manifest = JSON.parse(readFileSync(join(process.cwd(), 'src/hangar/sceneManifest.json'), 'utf8'));
+          const paths = [
+            ...(provenance.assets ?? []).map((asset) => asset.path),
+            manifest.rack?.path, manifest.avatar?.path,
+            ...(manifest.aircraft?.models ?? []).map((asset) => asset.path),
+          ];
+          return new Set(paths.filter((path) => typeof path === 'string'));
+        } catch { return new Set(); }
+      })();
+      const canonicalAsset = [...canonicalAssetPaths].some((canonical) => rel.endsWith(canonical.split('/').at(-1)) || rel.includes(canonical));
+      const hangarAsset = isModelOrTexture && (rel.toLowerCase().includes('/hangar/') || hangarAssets.has(rel) || canonicalAsset || manifestAsset?.[0]?.toLowerCase().includes('hangar'));
       if (isModelOrTexture) {
         const hangarOnly = hangarAsset;
         assets.push({ file: rel, bytes: statSync(path).size, hangarOnly });

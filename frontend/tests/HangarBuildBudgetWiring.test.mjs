@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 describe('Hangar build budget wiring', () => {
@@ -25,5 +26,15 @@ describe('Hangar build budget wiring', () => {
     const checker = readFileSync('scripts/check-hangar-budgets.mjs', 'utf8');
     expect(checker).toContain('gzipSync');
     expect(checker).toContain('hangar-build-budget.json');
+    expect(checker).toContain('value.imports ?? []');
+
+    const runtimeLazyLoad = readFileSync('tests/HangarEntryLazyLoad.test.tsx', 'utf8');
+    expect(runtimeLazyLoad).toContain('HangarEntry lazy loads only after selection');
+    expect(runtimeLazyLoad).toContain('modelRequest).not.toHaveBeenCalled()');
+    expect(runtimeLazyLoad).toContain('hangarLazyLoader');
+    const runtime = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', '--run', 'tests/HangarEntryLazyLoad.test.tsx'], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
+    });
+    expect(runtime.status).toBe(0);
   });
 });
