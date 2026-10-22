@@ -45,7 +45,7 @@ describe('Hangar guide line',()=>{
     expect(first.liveText).toBe('right, 8.00 metres');
     const moved=guide.acceptedStep({x:-3.5,z:-4});
     expect(moved.liveText).toBe('right, 7.50 metres');
-    expect(guide.step(false,{x:-3,z:-4}).liveText).toBe('right, 7.50 metres');
+    expect(guide.step(false,{x:-3,z:-4}).liveText).toBeNull();
     const second=guide.confirm({x:-4,z:4},'AIR-2',{x:-3.5,z:-4});
     expect(second.status).toBe('route'); expect(second.liveText).not.toBe(first.liveText);
     expect(guide.escape()).toMatchObject({status:'cleared',line:false,liveText:null});

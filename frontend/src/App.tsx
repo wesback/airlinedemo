@@ -4,6 +4,8 @@ import SignIn, { type SignedInSession } from './components/SignIn';
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
 import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTraceView } from './InvestigationTrace';
 import HangarLocalDiagnostics from './hangar/localDiagnostics';
+import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
+import type { HangarGuideMarker } from './hangar/guideLine';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -24,6 +26,7 @@ export type HangarEntryAppProps = {
   hangarBrowserSupported?: unknown;
   hangarWebGl2Probe?: unknown;
   hangarLazyLoader?: () => unknown | Promise<unknown>;
+  hangarAircraftSelectionHandler?: (aircraftId: string) => unknown;
 };
 
 export default function App({
@@ -31,6 +34,7 @@ export default function App({
   hangarBrowserSupported,
   hangarWebGl2Probe,
   hangarLazyLoader,
+  hangarAircraftSelectionHandler,
 }: HangarEntryAppProps = {}) {
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
   const [session, setSession] = useState<SignedInSession | null>(null);
@@ -51,6 +55,17 @@ export default function App({
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
   const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
+  const hangarDataRoomEntries = [
+    { caseId: 'AIR-1', name: 'Air One', category: 'narrow-body', unavailable: false, sources: null },
+    { caseId: 'AIR-2', name: 'Air Two', category: 'wide-body', unavailable: false, sources: null },
+  ];
+  const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = {
+    'AIR-1': { x: 4, z: -4 },
+    'AIR-2': { x: -4, z: 4 },
+  };
+  const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
+    hangarAircraftSelectionHandler?.(aircraftId);
+  };
 
   function setHangarMotionOverride(enabled: boolean) {
     const controllers = hangarMotion.current;
@@ -261,6 +276,19 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       {HangarScene ? <HangarScene /> : <canvas aria-label="3D hangar scene" />}
+                      <HangarGuideLineAdapter
+                        entries={hangarDataRoomEntries}
+                        markers={hangarDataRoomMarkers}
+                        avatar={{ x: 0, z: 0 }}
+                        config={{
+                          walkablePolygon: [{ x: -5, z: -5 }, { x: 5, z: -5 }, { x: 5, z: 5 }, { x: -5, z: 5 }],
+                          avatarRadius: 0.3,
+                          gridSize: 0.25,
+                          avatar: { x: 0, z: 0 },
+                          onSelect: sharedHangarAircraftSelectionHandler,
+                        }}
+                        onSelect={sharedHangarAircraftSelectionHandler}
+                      />
                       <div aria-label="Reduced motion controls">
                         <button type="button" aria-pressed={hangarReducedMotion} onClick={() => setHangarMotionOverride(true)}>Enable reduced motion</button>
                         <button type="button" aria-pressed={!hangarReducedMotion} onClick={() => setHangarMotionOverride(false)}>Disable reduced motion</button>

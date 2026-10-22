@@ -31,7 +31,7 @@ export class HangarGuideLineController {
     } else this.liveText = result.status === 'arrival' ? 'Arrival' : result.status === 'unreachable' ? result.message : null;
     return this.state(result);
   }
-  step(accepted: boolean, avatar: HangarGuideMarker): HangarGuideLineState { return accepted ? this.acceptedStep(avatar) : this.state(this.planner.getRoute(), false); }
+  step(accepted: boolean, avatar: HangarGuideMarker): HangarGuideLineState { if (accepted) return this.acceptedStep(avatar); this.liveText = null; return this.state(this.planner.getRoute(), false); }
   escape(): HangarGuideLineState { this.marker = null; this.liveText = null; return this.state(this.planner.escape()); }
   clear(): HangarGuideLineState { return this.escape(); }
   recompute(avatar: HangarGuideMarker): HangarGuideLineState { return this.acceptedStep(avatar); }
