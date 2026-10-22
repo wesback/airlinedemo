@@ -28,6 +28,11 @@ describe('HangarNon3dDataRoom', () => {
     cleanup();
     render(<HangarNon3dDataRoom entries={[...entries.slice(0,2), { ...entries[2], unavailable:true, sources:null }]} onSelect={vi.fn()}/>);
     expect(screen.getByRole('status',{name:'Case C source status: unavailable'}).textContent).toBe(SOURCE_UNAVAILABLE_TEXT);
+
+    cleanup();
+    const unsupportedReader = vi.fn(async (caseId:string) => ({ contractVersion:2, caseId, sources:HANGAR_SOURCE_IDS.map(sourceId=>({sourceId,mode:'available',coverage:true})) }));
+    render(<HangarNon3dDataRoom caseList={[{caseId:'cp-case-a',name:'Case A',category:'narrow-body'}]} scope={['cp-case-a']} summaryReader={unsupportedReader}/>);
+    expect((await screen.findByRole('status',{name:'Case A source status: unavailable'})).textContent).toBe(SOURCE_UNAVAILABLE_TEXT);
   });
 
   it('HangarNon3dDataRoom activates shared selection', async () => {
@@ -42,6 +47,13 @@ describe('HangarNon3dDataRoom', () => {
     render(<HangarNon3dDataRoom entries={entries} browserIdentifier='DOES-NOT-EXIST'/>);
     expect(screen.getByRole('alert').textContent).toBe('Unknown or out-of-scope identifier');
     expect(screen.queryByRole('region',{name:/Selection/})).toBeNull();
+
+    cleanup();
+    const emptyScopeSelection=vi.fn();
+    render(<HangarNon3dDataRoom entries={entries} scope={[]} onConfirm={emptyScopeSelection}/>);
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+    fireEvent.click(document.body);
+    expect(emptyScopeSelection).not.toHaveBeenCalled();
   });
 
   it('HangarNon3dDataRoom keyboard parity', async () => {

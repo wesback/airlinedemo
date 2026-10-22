@@ -35,7 +35,7 @@ function scopedInitialEntries(entries: HangarSourceSummaryEntry[] | null | undef
     : scope && typeof scope === 'object' && Array.isArray((scope as {caseScopes?: unknown}).caseScopes)
       ? new Set(((scope as {caseScopes: unknown[]}).caseScopes).filter((item): item is string => typeof item === 'string'))
       : null;
-  return scoped && scoped.size > 0 ? entries.filter(entry => scoped.has(entry.caseId)) : entries;
+  return scoped ? entries.filter(entry => scoped.has(entry.caseId)) : entries;
 }
 
 export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, summaryReader, onSelect, onConfirm, onActivate, browserIdentifier }: HangarNon3dDataRoomProps) {
