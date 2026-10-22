@@ -24,7 +24,8 @@ describe('HangarSelectionEvidence',()=>{
     expect(screen.getByRole('region',{name:'Selection SYN-CP-A-AIR-001'})).toBeTruthy();
     cleanup();
     const crossCaseEnvelope=envelope({objects:[{objectId:'SYN-CP-B-AIR-001',kind:'aircraft',caseId:'cp-case-b',evidenceIds:[],status:{assessment:'ready'},owner:'Cross-case owner',nextAction:{text:'Cross-case action'},capabilityLabel:'Rules-based'}],case:{caseId:'cp-case-a',caseRevision:7,status:{assessment:'ready'},owner:'Technical reviewer',nextAction:{text:'Review evidence'},capabilityLabel:'Rules-based'}});
-    const crossCaseRead=vi.fn(); render(<HangarSelectionEvidence envelope={crossCaseEnvelope} manifest={manifest} identifier="SYN-CP-B-AIR-001" reader={crossCaseRead}/>);
+    const crossCaseManifest={objectIds:[...manifest.objectIds,'SYN-CP-B-AIR-001']};
+    const crossCaseRead=vi.fn(); render(<HangarSelectionEvidence envelope={crossCaseEnvelope} manifest={crossCaseManifest} identifier="SYN-CP-B-AIR-001" reader={crossCaseRead}/>);
     expect(screen.getByText('Unknown or out-of-scope identifier')).toBeTruthy(); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(crossCaseRead).not.toHaveBeenCalled();
     cleanup();
     const absentRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="DOES-NOT-EXIST" reader={absentRead}/>);
