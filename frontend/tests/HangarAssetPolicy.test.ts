@@ -67,6 +67,8 @@ describe('Hangar asset policy', () => {
       { path: 'assets/font.woff2', kind: 'font' },
       { embedded: true, kind: 'application/octet-stream' },
       { markup: '<script>alert(1)</script>' },
+      { extensionsUsed: ['KHR_draco_mesh_compression'] },
+      { path: 'assets/hangar/model.glb', url: 'https://cdn.example/model.glb' },
     ]) {
       expect(validateHangarResourceResult(resource)).toEqual({ valid: false, reason: 'resource_rejected' });
     }

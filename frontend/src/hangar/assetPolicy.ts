@@ -200,12 +200,23 @@ export function validateHangarResource(resource: unknown): true {
   };
   if (typeof resource === 'string') { validateUri(resource); return true; }
   if (!resource || typeof resource !== 'object' || Array.isArray(resource)) reject();
+  const locationKeys = ['path', 'assetPath', 'relativePath', 'resourceUrl', 'url', 'src'];
+  const visit = (value: Record<string, unknown>): void => {
+    let suppliedLocations = 0;
+    for (const [key, child] of Object.entries(value)) {
+      if (/^(uri|modelUri|modelURL|modelUrl|textureUri|fontUri|cdnUrl|externalUri|extensions|extensionsUsed|extensionsRequired)$/i.test(key)) reject();
+      if (typeof child === 'string') {
+        if (/^[a-z][a-z0-9+.-]*:/i.test(child.trim()) || /^(?:https?:|data:|blob:|javascript:|file:|\/\/)/i.test(child.trim())) reject();
+        if (/<[^>]*>|[<>]/u.test(child)) reject();
+        if (locationKeys.includes(key)) suppliedLocations += 1;
+      }
+      if (child && typeof child === 'object' && !Array.isArray(child)) visit(child as Record<string, unknown>);
+      if (Array.isArray(child) && child.some(item => !/string|number|boolean/.test(typeof item))) reject();
+    }
+    if (suppliedLocations > 1) reject();
+  };
   const value = resource as Record<string, unknown>;
-  for (const key of Object.keys(value)) {
-    if (/^(uri|modelUri|modelURL|modelUrl|textureUri|fontUri|cdnUrl|externalUri|extensions|extensionsUsed|extensionsRequired)$/i.test(key)) reject();
-    const child = value[key];
-    if (typeof child === 'string' && /<[^>]*>|[<>]/u.test(child)) reject();
-  }
+  visit(value);
   const candidate = value.url ?? value.src ?? value.path ?? value.assetPath ?? value.relativePath ?? value.resourceUrl;
   if (candidate !== undefined) validateUri(candidate);
   else {

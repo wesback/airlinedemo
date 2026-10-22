@@ -105,11 +105,14 @@ describe('Hangar asset load boundary', () => {
     expect(validateHangarGlbResult(overModelLimit, { maxTotalBytes: 5_242_884 })).toEqual({ valid: true });
     rejected(admit(overModelLimit, { aggregateBytes: 5_242_884 }));
     rejected(admit(overModelLimit, { aggregateBytes: 5_242_884, limits: { maxTotalBytes: 6_000_000 } }));
+    rejected(admit(atModelLimit, { limits: { maxTotalBytes: 5_242_879 } }));
+    rejected(admit(bytes, { limits: { maxTotalBytes: 0 } }));
 
     accepted(admit(glbWithJsonChunk(1_048_576)));
     const overJsonLimit = glbWithJsonChunk(1_048_580);
     expect(validateHangarGlbResult(overJsonLimit, { maxJsonBytes: 1_048_580 })).toEqual({ valid: true });
     rejected(admit(overJsonLimit));
+    rejected(admit(buildGlb(), { limits: { maxJsonBytes: 10 } }));
   });
 
   it('GLB_invalid_asset_renders_visible_fallback', () => {

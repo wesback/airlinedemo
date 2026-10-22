@@ -18,7 +18,16 @@ export type HangarAssetLoadOptions<T> = {
   aggregateBytes: number;
 };
 
-const capped = (value: number | undefined, cap: number) => (typeof value === 'number' && value < cap ? value : cap);
+const capped = (values: unknown[], cap: number): number => {
+  let effective = cap;
+  for (const value of values) {
+    if (value !== undefined) {
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return -1;
+      effective = Math.min(effective, value);
+    }
+  }
+  return effective;
+};
 
 /**
  * The admission boundary for every Hangar asset: structure, model and JSON caps, aggregate budget, resource origin and
@@ -31,7 +40,10 @@ export function loadValidatedHangarAsset<T>(
 ): { loaded: true; value: T } | { loaded: false; reason: HangarAssetFailure } {
   const reject = () => { onFallback(HANGAR_ASSET_INVALID); return { loaded: false, reason: HANGAR_ASSET_INVALID } as const; };
   if (!(bytes instanceof Uint8Array)) return reject();
-  const glbLimits = { maxTotalBytes: capped(limits?.maxTotalBytes, HANGAR_MODEL_LIMIT), maxJsonBytes: capped(limits?.maxJsonBytes, HANGAR_JSON_LIMIT) };
+  const maxTotalBytes = capped([limits?.maxTotalBytes, limits?.totalLimitBytes, limits?.maxTotal, limits?.totalLimit, limits?.maxTotalLength, limits?.totalLimitBytes], HANGAR_MODEL_LIMIT);
+  const maxJsonBytes = capped([limits?.maxJsonBytes, limits?.jsonLimitBytes, limits?.maxJson, limits?.jsonLimit, limits?.maxJsonLength, limits?.maxJsonChunkBytes], HANGAR_JSON_LIMIT);
+  if (maxTotalBytes < 0 || maxJsonBytes < 0) return reject();
+  const glbLimits = { maxTotalBytes, maxJsonBytes };
   if (!validateHangarGlbResult(bytes, glbLimits).valid) return reject();
   if (!Number.isSafeInteger(aggregateBytes) || aggregateBytes < bytes.length || aggregateBytes > HANGAR_TOTAL_ASSET_LIMIT) return reject();
   try {
