@@ -27,6 +27,8 @@ class LifecycleScriptTests(unittest.TestCase):
             "RESOURCE_GROUP_NAME": "rg-airline-demo", "TFVARS_FILE": "/tmp/readiness.tfvars",
             "BACKEND_CONFIG_FILE": "/tmp/backend.hcl", "AZ_FAIL": "0", "TF_FAIL": "0",
             "STATE_GROUP": "rg-airline-demo", "STATE_SHOW_FAIL": "0",
+            "STATE_ID": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo",
+            "STATE_ID_MISSING": "0",
         })
 
     def tearDown(self):
@@ -40,7 +42,8 @@ class LifecycleScriptTests(unittest.TestCase):
         return ('if [ "${TF_FAIL:-0}" = "1" ] && echo "$*" | grep -q " destroy "; then exit 1; fi\n'
                 'if echo "$*" | grep -q " state show "; then\n'
                 '  if [ "${STATE_SHOW_FAIL:-0}" = "1" ]; then exit 1; fi\n'
-                '  printf \'# azurerm_resource_group.demo:\\nresource "azurerm_resource_group" "demo" {\\n    id       = "/subscriptions/s/resourceGroups/%s"\\n    location = "westeurope"\\n    name     = "%s"\\n}\\n\' "$STATE_GROUP" "$STATE_GROUP"\n'
+                '  if [ "${STATE_ID_MISSING:-0}" = "1" ]; then exit 0; fi\n'
+                '  printf \'# azurerm_resource_group.demo:\\nresource "azurerm_resource_group" "demo" {\\n    id       = "%s"\\n    location = "westeurope"\\n    name     = "%s"\\n}\\n\' "${STATE_ID:-/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo}" "$STATE_GROUP"\n'
                 'fi\n')
 
     def calls(self):
@@ -99,6 +102,13 @@ class LifecycleScriptTests(unittest.TestCase):
         destroy_calls = [c for c in self.calls() if " destroy " in c]
         self.assertEqual(1, len(destroy_calls))
         self.assertTrue(destroy_calls[0].endswith(" destroy -var-file=/tmp/readiness.tfvars -var=resource_group_name=rg-airline-demo -auto-approve"))
+        self.assertEqual("Destroyed deployment resources for rg-airline-demo.\n", success.stdout)
+
+        self.log.unlink(missing_ok=True)
+        env = self.env.copy(); env["STATE_ID"] = "/SUBSCRIPTIONS/00000000-0000-0000-0000-000000000000/RESOURCEGROUPS/RG-AIRLINE-DEMO"
+        case_insensitive = self.run_script(DESTROY, args=("--yes",), env=env)
+        self.assertEqual(0, case_insensitive.returncode, case_insensitive.stderr)
+        self.assertEqual(1, len([c for c in self.calls() if " destroy " in c]))
         self.assertIn("Destroyed deployment resources for rg-airline-demo.", success.stdout)
 
         self.log.unlink(missing_ok=True)
@@ -127,14 +137,27 @@ class LifecycleScriptTests(unittest.TestCase):
         self.assertLess(calls.index(init), calls.index(state))
         self.assertLess(calls.index(state), calls.index(destroy))
 
-        for state_group in ("rg-other-deployment", "rg-airline-demo-2", "rg-airline"):
+        mismatches = (
+            "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-other-deployment",
+            "other-subscription/resourceGroups/rg-airline-demo",
+            "/subscriptions/other-subscription/resourceGroups/rg-airline-demo",
+        )
+        for state_id in mismatches:
             self.log.unlink(missing_ok=True)
-            env = self.env.copy(); env["STATE_GROUP"] = state_group
+            env = self.env.copy(); env["STATE_ID"] = state_id
             wrong_state = self.run_script(DESTROY, args=("--yes",), env=env)
             self.assertEqual(3, wrong_state.returncode)
-            self.assertIn(f'belongs to resource group "{state_group}", not "rg-airline-demo"', wrong_state.stderr)
+            self.assertIn("Terraform state mismatch", wrong_state.stderr)
             self.assertNotIn("Destroyed deployment resources", wrong_state.stdout)
             self.assertEqual([], [c for c in self.calls() if " destroy " in c])
+
+        self.log.unlink(missing_ok=True)
+        env = self.env.copy(); env["STATE_ID_MISSING"] = "1"
+        missing_id = self.run_script(DESTROY, args=("--yes",), env=env)
+        self.assertEqual(3, missing_id.returncode)
+        self.assertIn("Cannot read the resource group ID from the Terraform state", missing_id.stderr)
+        self.assertNotIn("Destroyed deployment resources", missing_id.stdout)
+        self.assertEqual([], [c for c in self.calls() if " destroy " in c])
 
         self.log.unlink(missing_ok=True)
         env = self.env.copy(); env["STATE_SHOW_FAIL"] = "1"
