@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 518,
+  "branch": "ai-sdlc/issue-518",
+  "commitSha": "ffdad510f189dcb5e96027fed52a995bad32bcee",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Case B test covers request omission, and the Case C test covers blocked and retryable labels. The Case C baseline-history behavior is not protected by an assertion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 69,
+          "message": "The Case C test does not prove the baseline-history behavior required by the criterion. Assert the expected recorded baseline steps so the test fails if that history is dropped.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The Case C test checks the blocked labels, then checks only that the baseline variant is named baseline and has no Acceptance label; it never asserts that recorded baseline history is present.",
+            "failureScenario": "If buildCaseCJourney returns an empty steps array for baseline history, the named test still passes, although Case C no longer renders its baseline history."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new tests cover the named builder paths, but Case C can fabricate a blocked variant from summary text. The older-history test also leaves the required visible unavailable state unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/guidedJourney.ts",
+          "line": 68,
+          "message": "Free-text summaries can incorrectly turn baseline history into the blocked variant and add steps that the server did not record. Determine the variant from a structured server field or event type.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "buildCaseCJourney sets eventBlocked by searching eventType, summary, and label for the substrings \"blocked\" or \"retryable\"; when no variant is declared, it uses that result as the journey variant.",
+            "failureScenario": "A baseline Case C event has a summary such as \"No action is blocked.\" With no declared variant, eventBlocked becomes true, so the builder appends fabricated blocked and retryable steps to baseline history."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 72,
+          "message": "The older-history criterion's test does not verify its required visible unavailable state. Add a rendered UI assertion for the unavailable message.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The older-history test calls openCaseAOlderHistory and asserts returned error strings, but does not render GuidedJourney or assert the unavailable-history status in the UI.",
+            "failureScenario": "If GuidedJourney stops displaying the unavailable-history message while the helper continues returning the same error, this test still passes even though the criterion requires a visible unavailable history state."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed code has no clear security vulnerability. The older-history criterion's visible unavailable-state behavior is not proven by its named test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 68,
+          "message": "The older-history criterion also requires a visible unavailable history state when no window is available. The named test does not render the component or assert that state; add an assertion covering this criterion.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The older-history test builds a Case C journey with olderHistoryAvailable false and checks the returned error, but never renders GuidedJourney or checks its unavailable-history status.",
+            "failureScenario": "If the UI stops showing the unavailable-history state when no older-history window is available, this test still passes, leaving the visible-state behavior in the criterion unverified."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarGuidedJourney.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
