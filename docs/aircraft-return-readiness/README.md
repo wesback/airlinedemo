@@ -122,7 +122,7 @@ export BACKEND_CONFIG_FILE='/absolute/path/backend.hcl'
 scripts/destroy-deployment.sh --yes
 ```
 
-The script requires the exact `--yes` argument and prints a success message only after Terraform destroy succeeds. A direct saved-plan destroy remains available for evidence-retention workflows:
+The script requires the exact `--yes` argument and reads the resource group from the Terraform state selected by `BACKEND_CONFIG_FILE` and refuses to destroy (exit 3) when it differs from `RESOURCE_GROUP_NAME` or cannot be read, so a backend that points at another deployment is never destroyed. It prints a success message only after Terraform destroy succeeds. A direct saved-plan destroy remains available for evidence-retention workflows:
 
 ```sh
 terraform -chdir=infra/terraform plan -destroy -var-file=/absolute/path/readiness.tfvars -out=/absolute/path/destroy.tfplan

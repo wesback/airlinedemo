@@ -26,6 +26,7 @@ class LifecycleScriptTests(unittest.TestCase):
             "AZURE_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000000",
             "RESOURCE_GROUP_NAME": "rg-airline-demo", "TFVARS_FILE": "/tmp/readiness.tfvars",
             "BACKEND_CONFIG_FILE": "/tmp/backend.hcl", "AZ_FAIL": "0", "TF_FAIL": "0",
+            "STATE_GROUP": "rg-airline-demo", "STATE_SHOW_FAIL": "0",
         })
 
     def tearDown(self):
@@ -36,7 +37,11 @@ class LifecycleScriptTests(unittest.TestCase):
                 'if echo "$*" | grep -q "tenantId"; then printf "11111111-1111-1111-1111-111111111111\\n"; else printf "00000000-0000-0000-0000-000000000000\\n"; fi\n')
 
     def _terraform_body(self):
-        return ('if [ "${TF_FAIL:-0}" = "1" ] && echo "$*" | grep -q " destroy "; then exit 1; fi\n')
+        return ('if [ "${TF_FAIL:-0}" = "1" ] && echo "$*" | grep -q " destroy "; then exit 1; fi\n'
+                'if echo "$*" | grep -q " state show "; then\n'
+                '  if [ "${STATE_SHOW_FAIL:-0}" = "1" ]; then exit 1; fi\n'
+                '  printf \'# azurerm_resource_group.demo:\\nresource "azurerm_resource_group" "demo" {\\n    id       = "/subscriptions/s/resourceGroups/%s"\\n    location = "westeurope"\\n    name     = "%s"\\n}\\n\' "$STATE_GROUP" "$STATE_GROUP"\n'
+                'fi\n')
 
     def calls(self):
         if not self.log.exists():
@@ -112,6 +117,33 @@ class LifecycleScriptTests(unittest.TestCase):
         self.assertNotEqual(0, auth_fail.returncode)
         self.assertFalse(any(" destroy " in c for c in self.calls()))
 
+        # The selected state must belong to RESOURCE_GROUP_NAME, and it is read after init and before destroy.
+        self.log.unlink(missing_ok=True)
+        self.run_script(DESTROY, args=("--yes",))
+        calls = self.calls()
+        init = next(c for c in calls if "init -backend-config=/tmp/backend.hcl" in c)
+        state = next(c for c in calls if " state show " in c and c.endswith("azurerm_resource_group.demo"))
+        destroy = next(c for c in calls if " destroy " in c)
+        self.assertLess(calls.index(init), calls.index(state))
+        self.assertLess(calls.index(state), calls.index(destroy))
+
+        for state_group in ("rg-other-deployment", "rg-airline-demo-2", "rg-airline"):
+            self.log.unlink(missing_ok=True)
+            env = self.env.copy(); env["STATE_GROUP"] = state_group
+            wrong_state = self.run_script(DESTROY, args=("--yes",), env=env)
+            self.assertEqual(3, wrong_state.returncode)
+            self.assertIn(f'belongs to resource group "{state_group}", not "rg-airline-demo"', wrong_state.stderr)
+            self.assertNotIn("Destroyed deployment resources", wrong_state.stdout)
+            self.assertEqual([], [c for c in self.calls() if " destroy " in c])
+
+        self.log.unlink(missing_ok=True)
+        env = self.env.copy(); env["STATE_SHOW_FAIL"] = "1"
+        unreadable_state = self.run_script(DESTROY, args=("--yes",), env=env)
+        self.assertEqual(3, unreadable_state.returncode)
+        self.assertIn("Cannot read the resource group from the Terraform state", unreadable_state.stderr)
+        self.assertEqual([], [c for c in self.calls() if " destroy " in c])
+
+        self.log.unlink(missing_ok=True)
         env = self.env.copy(); env["TF_FAIL"] = "1"
         failed_destroy = self.run_script(DESTROY, args=("--yes",), env=env)
         self.assertNotEqual(0, failed_destroy.returncode)

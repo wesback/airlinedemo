@@ -55,6 +55,18 @@ if [ -z "${TFVARS_FILE:-}" ]; then
 fi
 
 terraform -chdir=infra/terraform init -backend-config="$BACKEND_CONFIG_FILE"
+# The backend file selects the state; make sure that state is the deployment named by RESOURCE_GROUP_NAME
+# before anything is destroyed, so a backend that points at another deployment is refused.
+state_output=$(terraform -chdir=infra/terraform state show -no-color azurerm_resource_group.demo) || {
+  printf 'Cannot read the resource group from the Terraform state selected by %s\n' "$BACKEND_CONFIG_FILE" >&2
+  exit 3
+}
+state_group=$(printf '%s\n' "$state_output" | awk '$1 == "name" && $2 == "=" { gsub(/"/, "", $3); print $3; exit }')
+if [ "$state_group" != "$resource_group" ]; then
+  printf 'Terraform state mismatch: the selected state belongs to resource group "%s", not "%s"; refusing to destroy\n' "$state_group" "$resource_group" >&2
+  exit 3
+fi
+
 terraform -chdir=infra/terraform destroy -var-file="$TFVARS_FILE" -var="resource_group_name=$resource_group" -auto-approve
 
 printf 'Destroyed deployment resources for %s.\n' "$resource_group"
