@@ -94,6 +94,16 @@ describe('HangarNon3dDataRoom', () => {
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     fireEvent.click(document.body);
     expect(emptyScopeSelection).not.toHaveBeenCalled();
+
+    cleanup();
+    const malformedScopeSelection=vi.fn();
+    for (const malformedScope of ['cp-case-a', ['cp-case-a', 42], [''], { caseScopes: ['cp-case-a', 42] }, { caseScopes: 'cp-case-a' }, { caseScopes: [''], unexpected: true }, null]) {
+      cleanup();
+      render(<HangarNon3dDataRoom entries={entries} scope={malformedScope} onConfirm={malformedScopeSelection}/>);
+      expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+      expect(new HangarNon3dDataRoomController(scopedInitialEntries(entries, malformedScope), malformedScopeSelection).activate('cp-case-a')).toBe(false);
+      expect(malformedScopeSelection).not.toHaveBeenCalled();
+    }
   });
 
   it('HangarNon3dDataRoom keyboard parity', async () => {

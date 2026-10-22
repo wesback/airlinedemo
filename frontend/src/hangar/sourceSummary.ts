@@ -19,9 +19,17 @@ const isName=(v:unknown):v is string=>typeof v==='string'&&v.trim().length>0;
 const sourcesSet=new Set<string>(HANGAR_SOURCE_IDS);
 
 function normalizeScope(scope: unknown): Set<string> {
-  if (Array.isArray(scope)) return new Set(scope.filter(isName));
-  if (isObject(scope) && Array.isArray(scope.caseScopes)) return new Set(scope.caseScopes.filter(isName));
-  return new Set<string>();
+  if (scope === undefined) return new Set<string>();
+  let identifiers: unknown[];
+  if (Array.isArray(scope)) {
+    identifiers = scope;
+  } else if (isObject(scope) && Array.isArray(scope.caseScopes) && Object.keys(scope).every(key => key === 'caseScopes')) {
+    identifiers = scope.caseScopes;
+  } else {
+    return new Set<string>();
+  }
+  if (!identifiers.every(identifier => typeof identifier === 'string' && identifier.trim().length > 0)) return new Set<string>();
+  return new Set(identifiers as string[]);
 }
 
 function normalizeCase(value: unknown): {caseId:string;name:string;category:string}|null {

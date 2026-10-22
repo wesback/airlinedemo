@@ -29,13 +29,35 @@ export function activateHangarDataRoomCase(entries: HangarSourceSummaryEntry[], 
   return confirmHangarRackMenuEntry(entries, identifier, handler);
 }
 
+export function hasValidHangarDataRoomScope(scope: unknown): boolean {
+  if (scope === undefined) return true;
+  const identifiers = Array.isArray(scope)
+    ? scope
+    : scope !== null && typeof scope === 'object'
+      && Array.isArray((scope as { caseScopes?: unknown }).caseScopes)
+      && Object.keys(scope).every(key => key === 'caseScopes')
+      ? (scope as { caseScopes: unknown[] }).caseScopes
+      : null;
+  return identifiers !== null && identifiers.every(identifier => typeof identifier === 'string' && identifier.trim().length > 0);
+}
+
 export function scopedInitialEntries(entries: HangarSourceSummaryEntry[] | null | undefined, scope: unknown): HangarSourceSummaryEntry[] {
   if (!entries) return [];
-  const scoped = Array.isArray(scope) ? new Set(scope.filter((item): item is string => typeof item === 'string'))
-    : scope && typeof scope === 'object' && Array.isArray((scope as {caseScopes?: unknown}).caseScopes)
-      ? new Set(((scope as {caseScopes: unknown[]}).caseScopes).filter((item): item is string => typeof item === 'string'))
-      : null;
-  return scoped ? entries.filter(entry => scoped.has(entry.caseId)) : entries;
+  if (scope === undefined) return entries;
+
+  let identifiers: unknown[];
+  if (Array.isArray(scope)) {
+    identifiers = scope;
+  } else if (scope !== null && typeof scope === 'object' && Array.isArray((scope as { caseScopes?: unknown }).caseScopes)
+      && Object.keys(scope).every(key => key === 'caseScopes')) {
+    identifiers = (scope as { caseScopes: unknown[] }).caseScopes;
+  } else {
+    return [];
+  }
+
+  if (!identifiers.every(identifier => typeof identifier === 'string' && identifier.trim().length > 0)) return [];
+  const scoped = new Set(identifiers as string[]);
+  return entries.filter(entry => scoped.has(entry.caseId));
 }
 
 export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, summaryReader, onSelect, onConfirm, onActivate, browserIdentifier }: HangarNon3dDataRoomProps) {
