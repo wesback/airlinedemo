@@ -67,7 +67,11 @@ export function getHangarEntryDecision(options: HangarEntryOptions = {}): Hangar
   const browserSupported = options.browserSupported !== undefined
     ? isHangarBrowserSupported(options.browserSupported)
     : isHangarBrowserSupported(browserValue);
-  const probeInput = options.webgl2Probe ?? options.webgl2 ?? options.probe;
+  const probeInput = options.webgl2Probe !== undefined
+    ? options.webgl2Probe
+    : options.webgl2 !== undefined
+      ? options.webgl2
+      : options.probe;
   const hasProbeInput = probeInput !== undefined;
   const probe = hasProbeInput ? probeWebGl2(probeInput) : probeWebGl2();
   const contractValid = options.contractVersion === undefined || options.contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION;

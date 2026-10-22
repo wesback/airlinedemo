@@ -19,6 +19,7 @@ describe('HangarEntry', () => {
     expect(getHangarEntryDecision({ browserSupported: false, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
     expect(getHangarEntryDecision({ browserSupported: true, webgl2: null }).fallbackReason).toBe('webgl_unavailable');
     expect(getHangarEntryDecision({ browserSupported: false, webgl2: null })).toMatchObject({ mode: 'fallback', fallbackReason: 'unsupported_browser' });
+    expect(getHangarEntryDecision({ browserSupported: true, webgl2: { webgl2: true }, webgl2Probe: null }).fallbackReason).toBe('webgl_unavailable');
   });
 
   it('HangarEntry contract eligibility cases', async () => {
@@ -105,6 +106,35 @@ afterEach(() => {
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
     const names = ['Select case', 'View status', 'View evidence', 'Follow journey', 'Open review'];
     for (const name of names) expect(screen.getByRole('button', { name })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Select case' }));
+    expect(await screen.findByText('Case selected.')).toBeTruthy();
+    for (const [name, message] of [
+      ['View status', 'Case status selected.'],
+      ['View evidence', 'Case evidence selected.'],
+      ['Follow journey', 'Case journey selected.'],
+      ['Open review', 'Technical review selected.'],
+    ]) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      expect(await screen.findByText(message)).toBeTruthy();
+    }
+
+    cleanup();
+    const nullLoader = vi.fn();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: null,
+      hangarLazyLoader: nullLoader,
+    } as HangarEntryAppProps));
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
+    fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Revision: 7');
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByText('WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.');
+    expect(document.querySelectorAll('canvas')).toHaveLength(0);
+    expect(nullLoader).not.toHaveBeenCalled();
   });
 
   it('supported versions load once and contract fallback renders no canvas with a non-3D link', async () => {

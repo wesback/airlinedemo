@@ -46,6 +46,28 @@ export default function App({
   const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
   const [HangarScene, setHangarScene] = useState<ComponentType | null>(null);
+  const [hangarActionMessage, setHangarActionMessage] = useState('');
+
+  function runNon3dAction(action: 'selection' | 'status' | 'evidence' | 'journey' | 'review') {
+    const selector = {
+      selection: '#case-heading',
+      status: '.readiness-summary',
+      evidence: '#capabilities-heading',
+      journey: '#activity-heading',
+      review: '#technical-review-heading, #capabilities-heading',
+    }[action];
+    const target = document.querySelector<HTMLElement>(selector);
+    if (target && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target?.focus();
+    if (typeof target?.scrollIntoView === 'function') target.scrollIntoView();
+    setHangarActionMessage({
+      selection: 'Case selected.',
+      status: 'Case status selected.',
+      evidence: 'Case evidence selected.',
+      journey: 'Case journey selected.',
+      review: 'Technical review selected.',
+    }[action]);
+  }
 
   async function enterHangar() {
     setHangarView('loading');
@@ -188,7 +210,7 @@ export default function App({
       {session && (
         <section aria-labelledby="case-heading">
           {data && <ReadinessSummary summary={data.readiness} />}
-          <h2 id="case-heading">Case case-001</h2>
+          <h2 id="case-heading" tabIndex={-1}>Case case-001</h2>
           {loadingCase && <p role="status">Loading case data…</p>}
           {caseError && <p role="alert">{caseError}</p>}
           {data && (
@@ -213,11 +235,12 @@ export default function App({
                     <section id="non-3d-list" aria-labelledby="non-3d-heading">
                       <h3 id="non-3d-heading">Non-3D hangar</h3>
                       <ul>
-                        <li><button type="button">Select case</button></li>
-                        <li><button type="button">View status</button></li>
-                        <li><button type="button">View evidence</button></li>
-                        <li><button type="button">Follow journey</button></li>
-                        <li><button type="button">Open review</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('selection')}>Select case</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('status')}>View status</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('evidence')}>View evidence</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('journey')}>Follow journey</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('review')}>Open review</button></li>
+                        <li><p role="status">{hangarActionMessage}</p></li>
                       </ul>
                     </section>
                   )}
