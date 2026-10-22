@@ -39,7 +39,8 @@ export function validateHangarDependencyPins(
 export const validateDependencyPins = validateHangarDependencyPins;
 
 export type DependencyAuditInput = {
-  installed?: Record<string, unknown>;
+  metadata?: unknown;
+  error?: unknown;
   vulnerabilities?: Record<string, unknown>;
 };
 
@@ -50,15 +51,11 @@ export function validateHangarDependencyAudit(
 ): boolean {
   validateHangarDependencyPins(manifest, lockfile);
 
-  const auditedNames = new Set([
-    ...Object.keys(auditInput?.installed ?? {}),
-    ...Object.keys(auditInput?.vulnerabilities ?? {}),
-  ]);
-  for (const name of Object.keys(HANGAR_DEPENDENCY_PINS)) {
-    const lockName = lockfile?.packages?.[`node_modules/${name}`]?.version;
-    if (!lockName || !auditedNames.has(name)) {
-      throw new Error(`Hangar audit contract missing package: ${name}`);
-    }
+  if (!auditInput?.metadata || auditInput.error !== undefined) {
+    throw new Error('Hangar audit evidence is missing metadata or contains an npm error');
+  }
+  if (typeof auditInput.vulnerabilities !== 'object' || auditInput.vulnerabilities === null) {
+    throw new Error('Hangar audit evidence is missing vulnerability data');
   }
 
   return true;

@@ -71,27 +71,44 @@ describe('dependency audit workflow', () => {
     expect(auditStep).toContain('working-directory: frontend');
     expect(auditStep).toContain('npm audit --json > ../artifacts/audit/npm-audit.json');
 
-    const auditInput = { vulnerabilities: { three: { severity: 'low' } } };
-    expect(() => validateHangarDependencyAudit(manifest, lock, auditInput))
-      .toThrow('Hangar audit contract missing package: @react-three/fiber');
-
-    const lockPackageInventory = Object.fromEntries(
-      Object.entries(lock.packages)
-        .filter(([name]) => name.startsWith('node_modules/'))
-        .map(([name]) => [name.slice('node_modules/'.length), {}]),
-    );
     expect(validateHangarDependencyAudit(manifest, lock, {
-      installed: lockPackageInventory,
-      vulnerabilities: {},
+      metadata: {},
+      vulnerabilities: { three: { severity: 'low' } },
     })).toBe(true);
+    expect(() => validateHangarDependencyAudit(manifest, lock, {
+      vulnerabilities: { three: { severity: 'low' } },
+    })).toThrow('Hangar audit evidence is missing metadata or contains an npm error');
+    expect(() => validateHangarDependencyAudit(manifest, lock, {
+      metadata: {},
+      error: { code: 'EAUDITNOENDPOINT' },
+      vulnerabilities: {},
+    })).toThrow('Hangar audit evidence is missing metadata or contains an npm error');
 
-    for (const packageName of ['three', '@react-three/fiber']) {
-      const missingPackageInventory = { ...lockPackageInventory };
-      delete missingPackageInventory[packageName];
-      expect(() => validateHangarDependencyAudit(manifest, lock, {
-        installed: missingPackageInventory,
-        vulnerabilities: {},
-      })).toThrow(`Hangar audit contract missing package: ${packageName}`);
+    const auditRoot = mkdtempSync(join(tmpdir(), 'hangar-npm-audit-'));
+    try {
+      const frontendRoot = join(auditRoot, 'frontend');
+      mkdirSync(join(frontendRoot, 'node_modules/.bin'), { recursive: true });
+      mkdirSync(join(auditRoot, 'artifacts/audit'), { recursive: true });
+      const fakeNpm = join(frontendRoot, 'node_modules/.bin/npm');
+      writeFileSync(fakeNpm, '#!/bin/sh\nprintf \'{"metadata":{"vulnerabilities":{"total":0}},"vulnerabilities":{}}\\n\'\n', { mode: 0o755 });
+      const auditStepRunStart = auditStep.indexOf('        run: |\n');
+      const auditRun = auditStep.slice(auditStepRunStart + '        run: |\n'.length)
+        .split('\n')
+        .map(line => line.startsWith('          ') ? line.slice(10) : line)
+        .join('\n');
+      const executed = spawnSync('/bin/bash', ['-c', auditRun], {
+        cwd: frontendRoot,
+        env: { ...process.env, PATH: `${join(frontendRoot, 'node_modules/.bin')}:${process.env.PATH}` },
+        encoding: 'utf8',
+      });
+      expect(executed.status).toBe(0);
+      const evidencePath = join(auditRoot, 'artifacts/audit/npm-audit.json');
+      const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'));
+      expect(evidence.metadata).toEqual({ vulnerabilities: { total: 0 } });
+      expect(evidence.vulnerabilities).toEqual({});
+      expect(validateHangarDependencyAudit(manifest, lock, evidence)).toBe(true);
+    } finally {
+      rmSync(auditRoot, { recursive: true, force: true });
     }
   });
 
