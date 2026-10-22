@@ -21,10 +21,9 @@ export function validateHangarSceneEnvelope(envelope: unknown): ProjectionResult
   if (!isObject(c)||typeof revision!== 'number'||!Number.isInteger(revision)||revision<0) return {valid:false,scene:null,error:'Missing or invalid scene revision'};
   if (!nonempty(c.caseId)||!HANGAR_CASE_IDS.includes(c.caseId as typeof HANGAR_CASE_IDS[number])) return {valid:false,scene:null,error:'Invalid scene case identifier'};
   if (typeof c.status!=='object'||c.status===null||Array.isArray(c.status)||typeof envelope.canResetBlockedVariant!== 'boolean'||!Array.isArray(envelope.allowedActions)||!Array.isArray(envelope.history)||!Array.isArray(envelope.evidence)||!Array.isArray(envelope.documentRefs)) return {valid:false,scene:null,error:'Malformed hangar scene envelope'};
-  if (typeof c.capabilityLabel==='string'&&!HANGAR_CAPABILITY_LABELS.includes(c.capabilityLabel as typeof HANGAR_CAPABILITY_LABELS[number])) return {valid:false,scene:null,error:'Unknown capability label'};
+  if (typeof c.capabilityLabel!=='string'||!HANGAR_CAPABILITY_LABELS.includes(c.capabilityLabel as typeof HANGAR_CAPABILITY_LABELS[number])) return {valid:false,scene:null,error:'Unknown capability label'};
   const permission = c.permission ?? c.permissions;
-  if (typeof envelope.canResetBlockedVariant!== 'boolean'||!Array.isArray(envelope.allowedActions)||
-      (permission !== undefined && typeof permission!== 'boolean' && (!isObject(permission) || typeof permission.canResetBlockedVariant!== 'boolean'))) return {valid:false,scene:null,error:'Missing scene permission snapshot'};
+  if (permission === undefined || (typeof permission!== 'boolean' && (!isObject(permission) || typeof permission.canResetBlockedVariant!== 'boolean'))) return {valid:false,scene:null,error:'Missing scene permission snapshot'};
   if (!Array.isArray(envelope.objects)||envelope.objects.length!==4) return {valid:false,scene:null,error:'Invalid scene object set'};
   const allowedKinds=new Set(['aircraft','engine','component']); const ids=new Set<string>();
   for (const o of envelope.objects) {
@@ -35,7 +34,7 @@ export function validateHangarSceneEnvelope(envelope: unknown): ProjectionResult
     if (ids.has(o.objectId)) return {valid:false,scene:null,error:'Duplicate scene object identifier'};
     ids.add(o.objectId);
   }
-  for (const event of envelope.history) if (!isObject(event)||!Array.isArray(event.witnessIds)||event.sequence!==undefined&&!positive(event.sequence)) return {valid:false,scene:null,error:'Missing scene history'};
+  for (const event of envelope.history) if (!isObject(event)||!Array.isArray(event.witnessIds)||(event.sequence!==undefined&&!positive(event.sequence))) return {valid:false,scene:null,error:'Missing scene history'};
   const witnesses=envelope.evidence as unknown[];
   const witnessIds=new Set(witnesses.filter(isObject).map(w=>w.witnessId));
   for (const event of envelope.history) for (const id of (event as Record<string,unknown>).witnessIds as unknown[]) if(typeof id!=='string'||!witnessIds.has(id)) return {valid:false,scene:null,error:'Bad witness ID'};

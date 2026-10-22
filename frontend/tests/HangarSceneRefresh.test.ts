@@ -22,6 +22,7 @@ describe('HangarSceneRefresh', () => {
   it('HangarSceneRefresh rejects malformed or unsupported envelopes', () => {
     expect(validateHangarSceneEnvelope(envelope()).valid).toBe(true);
     for (const bad of [envelope({ contractVersion: 2 }), envelope({ case: { caseId: 'cp-case-a' } }),
+      envelope({ case: { ...envelope().case, permission: undefined } }),
       envelope({ history: [{ witnessIds: ['missing'] }] }), envelope({ objects: [
         { objectId: 'SYN-CP-B-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' }, ...envelope().objects.slice(1) ] })]) {
       expect(validateHangarSceneEnvelope(bad)).toMatchObject({ valid: false, scene: null }); expect(bad.contractVersion === 2 || !('objects' in bad) ? 1 : 1).toBe(1);
@@ -44,6 +45,11 @@ describe('HangarSceneRefresh', () => {
     expect(canAdmitHangarCommands(failed.snapshot)).toBe(false);
     const malformed = applyServerRefresh(first, envelope({ contractVersion: 99 }));
     expect(malformed.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+    expect(canAdmitHangarCommands(malformed.snapshot)).toBe(false);
+    const stale = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseRevision: 6 } }));
+    expect(stale.valid).toBe(false);
+    expect(stale.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+    expect(canAdmitHangarCommands(stale.snapshot)).toBe(false);
   });
 
   it('HangarSceneRefresh unsupported contract fallback', () => {
@@ -60,6 +66,8 @@ describe('HangarSceneRefresh', () => {
       envelope({ objects: [...envelope().objects.slice(0, 3), envelope().objects[2]] }),
       envelope({ objects: envelope().objects.map((o, i) => i === 3 ? { ...o, objectId: 'SYN-CP-B-CMP-002' } : o) }),
       envelope({ objects: [...envelope().objects.slice(0, 3), { ...envelope().objects[3], objectId: 'unknown-node' }] }),
+      envelope({ objects: envelope().objects.slice(0, 3) }),
+      { ...envelope(), objects: undefined },
     ]) {
       const result=buildHangarSceneDescriptor(broken, validManifest(), activate);
       expect(result.valid).toBe(false); expect(result.descriptor).toBeNull(); expect(result.error).toContain('Visible mapping error');
