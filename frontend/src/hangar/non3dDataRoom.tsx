@@ -29,7 +29,7 @@ export function activateHangarDataRoomCase(entries: HangarSourceSummaryEntry[], 
   return confirmHangarRackMenuEntry(entries, identifier, handler);
 }
 
-function scopedInitialEntries(entries: HangarSourceSummaryEntry[] | null | undefined, scope: unknown): HangarSourceSummaryEntry[] {
+export function scopedInitialEntries(entries: HangarSourceSummaryEntry[] | null | undefined, scope: unknown): HangarSourceSummaryEntry[] {
   if (!entries) return [];
   const scoped = Array.isArray(scope) ? new Set(scope.filter((item): item is string => typeof item === 'string'))
     : scope && typeof scope === 'object' && Array.isArray((scope as {caseScopes?: unknown}).caseScopes)

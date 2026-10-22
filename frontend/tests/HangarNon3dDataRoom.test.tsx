@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import HangarNon3dDataRoom, { HangarNon3dDataRoomController, activateHangarDataRoomCase } from '../src/hangar/non3dDataRoom';
+import HangarNon3dDataRoom, { HangarNon3dDataRoomController, activateHangarDataRoomCase, scopedInitialEntries } from '../src/hangar/non3dDataRoom';
 import { HANGAR_SOURCE_IDS, SOURCE_UNAVAILABLE_TEXT } from '../src/hangar/sourceSummary';
 
 const entries = [
@@ -62,9 +62,19 @@ describe('HangarNon3dDataRoom', () => {
     render(<HangarNon3dDataRoom entries={[entries[0],availableExcluded]} scope={['cp-case-a']} browserIdentifier='cp-case-c' onConfirm={excludedSelection}/>);
     expect(screen.getByText('Case A — narrow-body')).toBeTruthy();
     expect(screen.queryByRole('button',{name:'Case C, wide-body'})).toBeNull();
-    expect(activateHangarDataRoomCase(entries.slice(0,1),'cp-case-c',excludedSelection)).toBe(false);
-    expect(excludedSelection).not.toHaveBeenCalled();
+    // Attempt every activation the component offers: only the in-scope case reaches the shared handler.
+    for (const button of screen.getAllByRole('button')) { fireEvent.click(button); fireEvent.keyDown(button,{key:'Enter'}); }
+    expect(excludedSelection.mock.calls.map(([caseId])=>caseId)).toEqual(['cp-case-a','cp-case-a']);
+    expect(screen.queryByText('Case C — wide-body')).toBeNull();
     expect(screen.queryByRole('region',{name:/Selection/})).toBeNull();
+    // The controller built from the component's own scoping refuses the available excluded case.
+    const scopedSelection=vi.fn();
+    const scopedController=new HangarNon3dDataRoomController(scopedInitialEntries([entries[0],availableExcluded],['cp-case-a']),scopedSelection);
+    expect(scopedController.activate('cp-case-c')).toBe(false);
+    expect(scopedController.confirm('cp-case-c')).toBe(false);
+    expect(scopedSelection).not.toHaveBeenCalled();
+    expect(scopedController.activate('cp-case-a')).toBe(true);
+    expect(scopedSelection).toHaveBeenCalledTimes(1);
 
     cleanup();
     const emptyScopeSelection=vi.fn();
