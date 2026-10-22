@@ -1,0 +1,216 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 524,
+  "branch": "ai-sdlc/issue-524",
+  "commitSha": "4aeadc7f5e323cef1d7cfa4aa1a8941d07c328ea",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The controller implements zone-entry state transitions, but the rendered walk region never invokes them. The named lifecycle test exercises only the controller and does not catch the missing component behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/rackMenu.ts",
+          "line": 55,
+          "message": "The rendered interaction zone is not wired to the controller’s zone-entry behavior, so entering it cannot open the menu or move focus into it as required.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "HangarRackMenu renders the walk-region section without an event handler or other connection to HangarRackMenuController.enterZone, stepInside, or updateZone. The zone-entry test calls the controller directly rather than exercising the rendered component.",
+            "failureScenario": "When a user enters the rendered walk region, no code opens the menu or moves focus into it; the menu stays closed unless the separate Open data rack button is clicked."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The controller has zone-entry methods, but the rendered component does not connect its walk region to them. The current zone test exercises the controller directly and does not verify the user-facing behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/rackMenu.ts",
+          "line": 54,
+          "message": "The rendered menu is not wired to zone entry. Connect the walk-region interaction to the controller and cover it through the rendered component so entering the zone opens the menu and moves focus into it.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "HangarRackMenu renders the walk-region section without an event handler that calls the controller's enterZone or stepInside methods. The zone methods exist only on the separately instantiated controller, and the component does not expose that controller.",
+            "failureScenario": "When a user enters or focuses the rendered walk region, no handler opens the menu or moves focus into it. The named test calls controller.enterZone() directly, so it passes while the rendered component does not satisfy the zone-entry behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The explicit open control and controller navigation are implemented, but entering the rendered interaction zone never opens the menu or moves focus into it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/rackMenu.ts",
+          "line": 56,
+          "message": "Wire interaction-zone entry to the controller and focus lifecycle. The zone-entry behavior is only exercised directly on the controller in the test, so it does not cover the rendered production path.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The rendered walk-region section has no event handler that calls the controller's enterZone, stepInside, or updateZone methods. The only rendered open trigger is the explicit button.",
+            "failureScenario": "A user enters the interaction zone in the rendered hangar; no controller method runs, so the menu stays closed and focus does not move into it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarRackMenu.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
