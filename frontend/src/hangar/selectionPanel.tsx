@@ -5,7 +5,7 @@ const isObject=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!=
 const text=(v:unknown):string|null=>typeof v==='string'&&v.trim().length>0?v:null;
 const integer=(v:unknown):number|null=>typeof v==='number'&&Number.isInteger(v)&&v>=0?v:null;
 
-export type HangarEvidenceTuple={documentId:string;version:number;basisId:string;basisVersion:number;displayLabel:string;witnesses:unknown[];status:string|null};
+export type HangarEvidenceTuple={documentId:string;version:number;basisId:string;basisVersion:number;displayLabel:string;witnesses:unknown[];status:string|null;blocked:boolean};
 export type HangarSelection={objectId:string;caseId:string;kind:string;status:unknown;owner:string;nextAction:string;capabilityLabel:string;evidence:HangarEvidenceTuple[];error:string|null};
 export type SelectionReader=(identifier:string)=>unknown|Promise<unknown>;
 
@@ -29,13 +29,15 @@ export function resolveHangarSelection(envelope:unknown, identifier:unknown, exp
     const basisId=text(ref.basisId); const basisVersion=integer(ref.basisVersion); const displayLabel=text(ref.displayLabel);
     if(!documentId||version===null||!basisId||basisVersion===null||!displayLabel){error='Unresolved evidence mapping';continue;}
     const processing=text(ref.processingState)??''; const usable=ref.usableAsEvidence===true;
-    if(!usable || ['blocked','processing','retry','pending','failed','partial','unprocessed'].includes(processing.toLowerCase()) || ref.retryable===true && !usable){
-      const normalizedProcessing=processing.toLowerCase();
-      const blockedStatus=!usable?(normalizedProcessing==='accepted'||normalizedProcessing==='usable'||normalizedProcessing===''?(ref.retryable===true?'retry':'processing'):processing):(processing||'processing');
-      evidence.push({documentId,version,basisId,basisVersion,displayLabel,witnesses:[],status:blockedStatus});continue;
+    const normalizedProcessing=processing.toLowerCase();
+    const knownBlocked=['blocked','processing','retry','pending','failed','partial','unprocessed'].includes(normalizedProcessing);
+    const usableState=usable && (normalizedProcessing===''||normalizedProcessing==='accepted'||normalizedProcessing==='usable');
+    if(!usableState || knownBlocked || normalizedProcessing.includes('retry') || normalizedProcessing.includes('reject')){
+      const blockedStatus=!usable?(processing|| (ref.retryable===true?'retry':'processing')):(processing||'processing');
+      evidence.push({documentId,version,basisId,basisVersion,displayLabel,witnesses:[],status:blockedStatus,blocked:true});continue;
     }
     const witnesses=(envelope.evidence as unknown[]).filter((w)=>isObject(w)&&w.evidenceRefId===evidenceId&&w.caseId!==undefined&&w.caseId!==c.caseId?false:isObject(w)&&w.evidenceRefId===evidenceId&&w.documentId===documentId&&w.documentVersion===version&&w.basisId===basisId&&w.basisVersion===basisVersion).map((w)=>isObject(w)?({witnessId:text(w.witnessId),evidenceRefId:evidenceId,documentId,documentVersion:version,page:integer(w.page),basisId,basisVersion,displayLabel:text(w.displayLabel)}):w);
-    evidence.push({documentId,version,basisId,basisVersion,displayLabel,witnesses,status:processing||null});
+    evidence.push({documentId,version,basisId,basisVersion,displayLabel,witnesses,status:processing||null,blocked:false});
   }
   const projectedStatus=object.status!==undefined?object.status:(isObject(c.status)?c.status:undefined);
   return {objectId:identifier,caseId:String(c.caseId),kind:text(object.kind)??'object',status:projectedStatus,owner:text(object.owner)??text(c.owner)??'Unknown',nextAction:isObject(object.nextAction)?text(object.nextAction.text)??'Unknown':text(object.nextAction)??(isObject(c.nextAction)?text(c.nextAction.text)??'Unknown':text(c.nextAction)??'Unknown'),capabilityLabel:text(object.capabilityLabel)??text(c.capabilityLabel)??'Unknown',evidence,error};
@@ -57,7 +59,7 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
       <p>Status: {typeof selection.status==='object'&&selection.status!==null?Object.entries(selection.status).map(([key,value])=>`${key}: ${value ?? 'none'}`).join('; '):String(selection.status)}</p>
       <p>Owner: {selection.owner}</p><p>Next action: {selection.nextAction}</p><p>Capability: {selection.capabilityLabel}</p>
       {evidenceError&&<p role="alert">{evidenceError}</p>}
-      {selection.evidence.map((e,i)=>{const blocked=e.status!==null&&(['blocked','processing','retry','pending','failed','partial','unprocessed'].some(s=>e.status!.toLowerCase().includes(s)));return <article key={`${e.documentId}-${e.version}-${e.basisId}-${e.basisVersion}-${i}`}>
+      {selection.evidence.map((e,i)=>{const blocked=e.blocked || e.status!==null&&(['blocked','processing','retry','pending','failed','partial','unprocessed'].some(s=>e.status!.toLowerCase().includes(s)));return <article key={`${e.documentId}-${e.version}-${e.basisId}-${e.basisVersion}-${i}`}>
         <p>{e.documentId} v{e.version} / {e.basisId} v{e.basisVersion}</p>
         {e.status!==null&&e.status.length>0&&<p>{e.displayLabel}</p>}
         {blocked?<p role="status">Evidence processing/retry: {e.status}</p>:<div aria-label={`ARR content controls for ${e.documentId}`}><button type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(`${e.documentId}?version=${e.version}&basis=${e.basisId}&basisVersion=${e.basisVersion}`)}}>Open content</button>{e.witnesses.map((w,j)=>{const witness=isObject(w)?w:null;const page=witness?.page;return typeof page==='number'?<button key={j} type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(`${e.documentId}?version=${e.version}&page=${page}&basis=${e.basisId}&basisVersion=${e.basisVersion}`)}}>{`Page witness ${page}`}</button>:null})}</div>}

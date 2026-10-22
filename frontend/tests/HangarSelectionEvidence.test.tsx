@@ -23,7 +23,8 @@ describe('HangarSelectionEvidence',()=>{
     expect(casesRead).toHaveBeenCalledTimes(1); expect(casesRead).toHaveBeenCalledWith('SYN-CP-A-AIR-001');
     expect(screen.getByRole('region',{name:'Selection SYN-CP-A-AIR-001'})).toBeTruthy();
     cleanup();
-    const crossCaseRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="syn-cp-a-air-001" reader={crossCaseRead}/>);
+    const crossCaseEnvelope=envelope({objects:[{objectId:'SYN-CP-B-AIR-001',kind:'aircraft',caseId:'cp-case-b',evidenceIds:[],status:{assessment:'ready'},owner:'Cross-case owner',nextAction:{text:'Cross-case action'},capabilityLabel:'Rules-based'}],case:{caseId:'cp-case-a',caseRevision:7,status:{assessment:'ready'},owner:'Technical reviewer',nextAction:{text:'Review evidence'},capabilityLabel:'Rules-based'}});
+    const crossCaseRead=vi.fn(); render(<HangarSelectionEvidence envelope={crossCaseEnvelope} manifest={manifest} identifier="SYN-CP-B-AIR-001" reader={crossCaseRead}/>);
     expect(screen.getByText('Unknown or out-of-scope identifier')).toBeTruthy(); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(crossCaseRead).not.toHaveBeenCalled();
     cleanup();
     const absentRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="DOES-NOT-EXIST" reader={absentRead}/>);
@@ -46,5 +47,9 @@ describe('HangarSelectionEvidence',()=>{
     const read=vi.fn(); const blocked=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,basisId:'basis-v1',basisVersion:1,displayLabel:'<img src=x onerror=alert(1)>',processingState:'rejected-retryable',retryable:true,usableAsEvidence:false}],evidence:[{witnessId:'secret',evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,page:9,basisId:'basis-v1',basisVersion:1,displayLabel:'SECRET-WITNESS'}]});
     const {container}=render(<HangarSelectionEvidence envelope={blocked} manifest={manifest} identifier="SYN-CP-A-CMP-001" onContentOpen={read}/>);
     expect(screen.getByRole('status').textContent).toContain('Evidence processing/retry: rejected-retryable'); expect(screen.queryByRole('button',{name:'Open content'})).toBeNull(); expect(screen.queryByRole('button',{name:/witness/i})).toBeNull(); expect(screen.queryByText('SECRET-WITNESS')).toBeNull(); expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeTruthy(); expect(container.querySelector('img')).toBeNull(); expect(read).not.toHaveBeenCalled();
+    cleanup();
+    const unknownState=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/queued.txt',documentVersion:5,basisId:'basis-v1',basisVersion:1,displayLabel:'Queued evidence',processingState:'queued-review',retryable:false,usableAsEvidence:false}],evidence:[{witnessId:'hidden',evidenceRefId:'ref-1',documentId:'case-a/queued.txt',documentVersion:5,page:12,basisId:'basis-v1',basisVersion:1,displayLabel:'HIDDEN-WITNESS'}]});
+    render(<HangarSelectionEvidence envelope={unknownState} manifest={manifest} identifier="SYN-CP-A-CMP-001" onContentOpen={read}/>);
+    expect(screen.getByRole('status').textContent).toBe('Evidence processing/retry: queued-review'); expect(screen.queryByRole('button',{name:'Open content'})).toBeNull(); expect(screen.queryByRole('button',{name:/witness/i})).toBeNull(); expect(screen.queryByText('HIDDEN-WITNESS')).toBeNull(); expect(read).not.toHaveBeenCalled();
   });
 });
