@@ -3,6 +3,7 @@ import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
 import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTraceView } from './InvestigationTrace';
+import HangarLocalDiagnostics from './hangar/localDiagnostics';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -49,6 +50,7 @@ export default function App({
   const [hangarActionMessage, setHangarActionMessage] = useState('');
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
+  const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
 
   function setHangarMotionOverride(enabled: boolean) {
     const controllers = hangarMotion.current;
@@ -90,6 +92,7 @@ export default function App({
   }
 
   async function enterHangar() {
+    const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     setHangarView('loading');
     setHangarSceneLoaded(false);
     setHangarScene(null);
@@ -108,6 +111,12 @@ export default function App({
       contractVersion: hangarContractVersion,
       webgl2,
     }, hangarLazyLoader ?? (() => loadHangarScene(hangarMotionControllers)));
+    const endedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    const fallbackReason = decision.fallbackReason && decision.fallbackReason !== 'contract_invalid'
+      ? decision.fallbackReason as 'unsupported_browser' | 'webgl_unavailable'
+      : null;
+    const webgl2Available = webgl2 !== null && typeof webgl2 === 'object';
+    setHangarDiagnostics({ sceneLoadDurationMs: Math.max(0, Math.round(endedAt - startedAt)), webgl2Available, browserSupported, fallbackReason });
     if (decision.mode === '3d') {
       if (typeof decision.loadedScene === 'function') setHangarScene(decision.loadedScene as ComponentType);
       setHangarSceneLoaded(true);
@@ -245,6 +254,10 @@ export default function App({
               {hangarView !== 'regular' && hangarView !== 'loading' && (
                 <section aria-labelledby="hangar-heading">
                   <h2 id="hangar-heading">Hangar</h2>
+                  <HangarLocalDiagnostics
+                    session={session}
+                    {...hangarDiagnostics}
+                  />
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       {HangarScene ? <HangarScene /> : <canvas aria-label="3D hangar scene" />}

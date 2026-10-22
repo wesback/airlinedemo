@@ -1,0 +1,215 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 520,
+  "branch": "ai-sdlc/issue-520",
+  "commitSha": "6583fb3007920c16a162c77db65a68b4b9f98ad9",
+  "round": 0,
+  "pipelineVersion": "cb8a0d7",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The presenter diagnostics panel displays the requested fields and fallback codes. The test for zero network requests uses a transport spy that is not connected to any request path, so it cannot catch a regression that sends a request.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 28,
+          "message": "The test does not verify the zero-network-request behavior required by the second acceptance criterion. Connect the spy to the request path or assert through a fake network boundary that would observe requests from the panel and capability/render outcomes.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test passes a `transport` spy as a prop, but the component does not receive or call that transport; the spy is disconnected from any network-request path.",
+            "failureScenario": "If opening the panel or handling a fallback starts a request through `fetch` or another transport, these assertions still observe zero calls on the unused spy and pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The success panel fields are asserted, but the tests do not verify fallback rendering or non-presenter UI behavior. The transport spy is not connected to the request path, so it cannot prove the zero-network-request criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 17,
+          "message": "The named test does not prove the presenter-only panel displays the exact fallback codes or stays hidden for a non-presenter. Add assertions through the rendered component for those cases.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test checks each fallback code through buildHangarLocalDiagnostics, but does not render the panel with any fallback code or render it as a non-presenter.",
+            "failureScenario": "If the component displays null instead of asset_load_failed, or displays diagnostics to a non-presenter while the builder remains correct, the named test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 26,
+          "message": "The zero-request test does not observe the network path, so it can pass with a request added outside the unused transport prop. Use a counting fake on the actual request path or otherwise assert that the request mechanism receives zero calls.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test passes a transport mock as a prop, but HangarLocalDiagnostics does not use that prop as a request transport; the assertion only checks that the disconnected mock was not called.",
+            "failureScenario": "If opening diagnostics or handling an outcome makes a direct fetch request, the injected transport mock remains untouched and this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability found in the changed code. The panel displays local browser and scene diagnostics, and its transport prop is unused.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarLocalDiagnostics.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
