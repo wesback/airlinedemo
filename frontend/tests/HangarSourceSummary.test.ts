@@ -84,5 +84,13 @@ describe('HangarSourceSummary', () => {
     ], { caseScopes: ['cp-case-b'] }, reader);
     expect(browserSupplied.map(entry => entry.caseId)).toEqual(['cp-case-b']);
     expect(reader).toHaveBeenCalledTimes(2);
+
+    const previous = await projectHangarSourceSummary(cases, ['cp-case-a','cp-case-b'], reader);
+    const refreshReader = vi.fn(async (caseId: string) => summary(caseId));
+    const narrowed = await refreshHangarSourceSummary(cases, ['cp-case-b'], refreshReader, previous);
+    expect(narrowed.map(entry => entry.caseId)).toEqual(['cp-case-b']);
+    expect(narrowed[0]).toMatchObject({ caseId: 'cp-case-b', unavailable: false });
+    expect(refreshReader).toHaveBeenCalledTimes(1);
+    expect(refreshReader).toHaveBeenCalledWith('cp-case-b');
   });
 });

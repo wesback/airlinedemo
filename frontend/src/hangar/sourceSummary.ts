@@ -89,10 +89,12 @@ export async function projectHangarSourceSummary(caseList:unknown, scope:unknown
 }
 
 export async function refreshHangarSourceSummary(caseList:unknown, scope:unknown, reader:SourceSummaryReader, previous:HangarSourceSummaryEntry[]=[]):Promise<HangarSourceSummaryEntry[]> {
+  const scoped=normalizeScope(scope);
   const fresh=await projectHangarSourceSummary(caseList,scope,reader);
   const byId=new Map(previous.map(entry=>[entry.caseId,entry]));
   for (const entry of fresh) byId.set(entry.caseId,entry);
-  return Array.isArray(caseList)?caseList.map(raw=>normalizeCase(raw)).filter((c):c is {caseId:string;name:string;category:string}=>!!c&&byId.has(c.caseId)).map(c=>byId.get(c.caseId)!):[];
+  const list=Array.isArray(caseList)?caseList:(isObject(caseList)&&Array.isArray(caseList.cases)?caseList.cases:[]);
+  return list.map(raw=>normalizeCase(raw)).filter((c):c is {caseId:string;name:string;category:string}=>!!c&&scoped.has(c.caseId)&&byId.has(c.caseId)).map(c=>byId.get(c.caseId)!);
 }
 
 export const buildHangarSourceSummary=projectHangarSourceSummary;
