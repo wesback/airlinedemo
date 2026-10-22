@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
@@ -18,7 +18,19 @@ function loadError(error: unknown): string {
       : 'Unable to load case data. Try again later.';
 }
 
-export default function App() {
+export type HangarEntryAppProps = {
+  hangarContractVersion?: unknown;
+  hangarBrowserSupported?: unknown;
+  hangarWebGl2Probe?: unknown;
+  hangarLazyLoader?: () => unknown | Promise<unknown>;
+};
+
+export default function App({
+  hangarContractVersion: contractVersionProp,
+  hangarBrowserSupported,
+  hangarWebGl2Probe,
+  hangarLazyLoader,
+}: HangarEntryAppProps = {}) {
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
   const [session, setSession] = useState<SignedInSession | null>(null);
   const [data, setData] = useState<Projections | null>(null);
@@ -29,6 +41,64 @@ export default function App() {
   const [refresh, setRefresh] = useState(0);
   const [traceView, setTraceView] = useState<InvestigationTraceView | null>(null);
   const traceRequestId = useRef(0);
+  const [hangarView, setHangarView] = useState<'regular' | 'loading' | '3d' | 'fallback' | 'contract-error'>('regular');
+  const [hangarFallback, setHangarFallback] = useState<string | null>(null);
+  const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
+  const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
+  const [HangarScene, setHangarScene] = useState<ComponentType | null>(null);
+  const [hangarActionMessage, setHangarActionMessage] = useState('');
+
+  function runNon3dAction(action: 'selection' | 'status' | 'evidence' | 'journey' | 'review') {
+    const selector = {
+      selection: '#case-heading',
+      status: '.readiness-summary',
+      evidence: '#capabilities-heading',
+      journey: '#activity-heading',
+      review: '#technical-review-heading, #capabilities-heading',
+    }[action];
+    const target = action === 'review'
+      ? document.querySelector<HTMLElement>('#technical-review-heading')
+        ?? document.querySelector<HTMLElement>('#cap-technical-review')
+        ?? document.querySelector<HTMLElement>('#capabilities-heading')
+      : document.querySelector<HTMLElement>(selector);
+    if (target && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target?.focus();
+    if (typeof target?.scrollIntoView === 'function') target.scrollIntoView();
+    setHangarActionMessage({
+      selection: 'Case selected.',
+      status: 'Case status selected.',
+      evidence: 'Case evidence selected.',
+      journey: 'Case journey selected.',
+      review: 'Technical review selected.',
+    }[action]);
+  }
+
+  async function enterHangar() {
+    setHangarView('loading');
+    setHangarSceneLoaded(false);
+    setHangarScene(null);
+    const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene } = await import('./hangar/entryController');
+    const browserSupported = hangarBrowserSupported !== undefined
+      ? isHangarBrowserSupported(hangarBrowserSupported)
+      : isHangarBrowserSupported(undefined);
+    const webgl2 = hangarWebGl2Probe !== undefined
+      ? hangarWebGl2Probe as never
+      : probeWebGl2Capability();
+    const decision = await selectHangarEntry({
+      browserSupported,
+      contractVersion: hangarContractVersion,
+      webgl2,
+    }, hangarLazyLoader ?? loadHangarScene);
+    if (decision.mode === '3d') {
+      if (typeof decision.loadedScene === 'function') setHangarScene(decision.loadedScene as ComponentType);
+      setHangarSceneLoaded(true);
+      setHangarView('3d');
+    } else if (decision.fallbackReason === 'contract_invalid') setHangarView('contract-error');
+    else {
+      setHangarFallback(decision.fallbackReason);
+      setHangarView('fallback');
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -144,7 +214,7 @@ export default function App() {
       {session && (
         <section aria-labelledby="case-heading">
           {data && <ReadinessSummary summary={data.readiness} />}
-          <h2 id="case-heading">Case case-001</h2>
+          <h2 id="case-heading" tabIndex={-1}>Case case-001</h2>
           {loadingCase && <p role="status">Loading case data…</p>}
           {caseError && <p role="alert">{caseError}</p>}
           {data && (
@@ -152,6 +222,34 @@ export default function App() {
               <p>Revision: {data.caseState.revision}</p>
               <p>Evidence basis: {data.caseState.basis.length}</p>
               <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
+              <button type="button" onClick={() => { void enterHangar(); }}>Enter Hangar</button>
+              {hangarView !== 'regular' && hangarView !== 'loading' && (
+                <section aria-labelledby="hangar-heading">
+                  <h2 id="hangar-heading">Hangar</h2>
+                  {hangarView === '3d' && hangarSceneLoaded && (
+                    <div aria-label="Hangar 3D scene">
+                      {HangarScene ? <HangarScene /> : <canvas aria-label="3D hangar scene" />}
+                    </div>
+                  )}
+                  {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'
+                    ? 'Your browser is not supported. Use the current or previous major version of Chrome or Edge.'
+                    : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
+                  {hangarView === 'contract-error' && <p role="alert">Unsupported hangar contract version {String(hangarContractVersion)}. <a href="#non-3d-list">Use the supported contract version in the non-3D list.</a></p>}
+                  {(hangarView === 'fallback' || hangarView === 'contract-error') && (
+                    <section id="non-3d-list" aria-labelledby="non-3d-heading">
+                      <h3 id="non-3d-heading">Non-3D hangar</h3>
+                      <ul>
+                        <li><button type="button" onClick={() => runNon3dAction('selection')}>Select case</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('status')}>View status</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('evidence')}>View evidence</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('journey')}>Follow journey</button></li>
+                        <li><button type="button" onClick={() => runNon3dAction('review')}>Open review</button></li>
+                        <li><p role="status">{hangarActionMessage}</p></li>
+                      </ul>
+                    </section>
+                  )}
+                </section>
+              )}
               <CapabilityDashboard
                 data={data.dashboard}
                 decisionReason={reason}
