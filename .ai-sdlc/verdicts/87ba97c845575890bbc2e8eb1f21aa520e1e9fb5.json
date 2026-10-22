@@ -1,0 +1,234 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 512,
+  "branch": "ai-sdlc/issue-512",
+  "commitSha": "87ba97c845575890bbc2e8eb1f21aa520e1e9fb5",
+  "round": 1,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The initial mapping error and cross-case document-reference cases are now covered. Unusable evidence can still expose content, and the projected-object cross-case test gap remains.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/selectionPanel.tsx",
+          "line": 34,
+          "message": "Unusable evidence can still expose a content action when its processing state is not one of the render's recognized blocked words.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When usableAsEvidence is false, the resolver preserves processingState unless it is accepted, usable, or empty. The render hides content controls only when the status contains one of a fixed set of words that omits rejected.",
+            "failureScenario": "A reference has usableAsEvidence false and processingState rejected. Its status remains rejected, which the render does not treat as blocked, so it displays an Open content action for evidence marked unusable."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 26,
+          "message": "The named test still lacks the prior round's cross-case projected-object case; its lowercase identifier only tests an invalid identifier.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test's cross-case identifier case uses a lowercase identifier, which is rejected by the identifier allowlist before the projected object's caseId check is reached.",
+            "failureScenario": "If a valid projected identifier is attached to an object whose caseId differs from the envelope case, a regression that accepts it could pass the named test because no test exercises that cross-case object path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior visible mapping error is now initialized from the resolved selection, and the unusable evidence path now maps accepted or empty processing states to a blocked status. The added identifier test still does not exercise the cross-case ownership check required by the first acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 25,
+          "message": "The first acceptance criterion's cross-case rejection is still untested: this case varies identifier casing rather than creating a projected object from another case. Add a test that asserts a cross-case projected identifier opens no panel and issues no read.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The crossCaseRead test passes a lowercased identifier, which the exact identifier allowlist rejects before the resolver checks whether the projected object's caseId matches the envelope caseId.",
+            "failureScenario": "If the caseId ownership check were removed, this test would still pass. An envelope containing a valid projected identifier whose object belongs to another case could then open a panel or issue a read without the named test detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior visible mapping-error and unusable-evidence findings appear fixed. The added tests still do not exercise a valid cross-case identifier through identifier resolution.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 25,
+          "message": "The first acceptance criterion's cross-case identifier case remains untested. Add a valid identifier from another case through the identifier or projected-object activation path, and assert no panel and zero reads.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test rejects a lowercase CP-A identifier and a nonexistent identifier, while its CP-B case uses browserIdentifier, which is rejected before identifier resolution. It never passes a valid CP-B identifier through identifier or activates a cross-case projected object.",
+            "failureScenario": "A regression that accepts identifier=\"SYN-CP-B-AIR-001\" for the CP-A envelope and opens a panel or issues a read could pass the named test, despite the first acceptance criterion requiring cross-case identifiers to be rejected."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSelectionEvidence.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
