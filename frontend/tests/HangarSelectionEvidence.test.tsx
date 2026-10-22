@@ -14,14 +14,33 @@ describe('HangarSelectionEvidence',()=>{
     expect(screen.getByText(/assessment: ready; review: pending/)).toBeTruthy(); expect(screen.getByText('Owner: Technical reviewer')).toBeTruthy();
     expect(screen.getByText('Next action: Review evidence')).toBeTruthy(); expect(screen.getByText('Capability: Rules-based')).toBeTruthy();
     expect(read).not.toHaveBeenCalled();
-    cleanup(); const unknownRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} browserIdentifier="SYN-CP-B-AIR-001" reader={unknownRead}/>);
+    cleanup();
+    const unknownRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} browserIdentifier="SYN-CP-B-AIR-001" reader={unknownRead}/>);
     expect(screen.getByRole('alert').textContent).toContain('Browser-supplied'); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(unknownRead).not.toHaveBeenCalled();
+    cleanup();
+    const casesRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="SYN-CP-A-AIR-001" reader={casesRead}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Select SYN-CP-A-AIR-001'}));
+    expect(casesRead).toHaveBeenCalledTimes(1); expect(casesRead).toHaveBeenCalledWith('SYN-CP-A-AIR-001');
+    expect(screen.getByRole('region',{name:'Selection SYN-CP-A-AIR-001'})).toBeTruthy();
+    cleanup();
+    const crossCaseRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="syn-cp-a-air-001" reader={crossCaseRead}/>);
+    expect(screen.getByText('Unknown or out-of-scope identifier')).toBeTruthy(); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(crossCaseRead).not.toHaveBeenCalled();
+    cleanup();
+    const absentRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="DOES-NOT-EXIST" reader={absentRead}/>);
+    expect(screen.getByText('Unknown or out-of-scope identifier')).toBeTruthy(); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(absentRead).not.toHaveBeenCalled();
   });
   it('HangarSelectionEvidence lists exact evidence tuples',()=>{
     const read=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="SYN-CP-A-CMP-001" onContentOpen={read}/>);
     expect(screen.getByText('case-a/manual.txt v2 / basis-v2 v2')).toBeTruthy(); expect(screen.getByRole('button',{name:'Open content'})).toBeTruthy(); expect(screen.getByRole('button',{name:'Page witness 3'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'Page witness 3'})); expect(read).toHaveBeenCalledWith('case-a/manual.txt?version=2&page=3&basis=basis-v2&basisVersion=2');
-    cleanup(); const missing=resolveHangarSelection(envelope({documentRefs:[]}), 'SYN-CP-A-CMP-001', manifest); expect(missing?.error).toBe('Unresolved evidence mapping');
+    cleanup();
+    const missing=resolveHangarSelection(envelope({documentRefs:[]}), 'SYN-CP-A-CMP-001', manifest); expect(missing?.error).toBe('Unresolved evidence mapping');
+    const missingRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope({documentRefs:[]})} manifest={manifest} identifier="SYN-CP-A-CMP-001" reader={missingRead}/>);
+    expect(screen.getByRole('alert').textContent).toBe('Unresolved evidence mapping'); expect(screen.getByText('SYN-CP-A-CMP-001')).toBeTruthy(); expect(screen.queryByText(/manual\.txt v|basis-v/)).toBeNull(); expect(missingRead).not.toHaveBeenCalled();
+    cleanup();
+    const crossCaseRef=envelope({documentRefs:[{evidenceRefId:'ref-1',caseId:'cp-case-b',documentId:'case-b/manual.txt',documentVersion:99,basisId:'basis-b',basisVersion:99,displayLabel:'Wrong case manual',processingState:'accepted',retryable:false,usableAsEvidence:true}],evidence:[{witnessId:'wrong-witness',evidenceRefId:'ref-1',caseId:'cp-case-b',documentId:'case-b/manual.txt',documentVersion:99,page:99,basisId:'basis-b',basisVersion:99}]});
+    const crossRead=vi.fn(); render(<HangarSelectionEvidence envelope={crossCaseRef} manifest={manifest} identifier="SYN-CP-A-CMP-001" reader={crossRead}/>);
+    expect(screen.getByRole('alert').textContent).toBe('Cross-case document reference'); expect(screen.queryByText(/case-b\/manual\.txt/)).toBeNull(); expect(screen.queryByText(/99 v99/)).toBeNull(); expect(crossRead).not.toHaveBeenCalled();
   });
   it('HangarSelectionEvidence blocks witnesses and renders markup as text',()=>{
     const read=vi.fn(); const blocked=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,basisId:'basis-v1',basisVersion:1,displayLabel:'<img src=x onerror=alert(1)>',processingState:'rejected-retryable',retryable:true,usableAsEvidence:false}],evidence:[{witnessId:'secret',evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,page:9,basisId:'basis-v1',basisVersion:1,displayLabel:'SECRET-WITNESS'}]});
