@@ -6,9 +6,12 @@ const positive=(v:unknown):v is number=>typeof v==='number'&&Number.isInteger(v)
 
 export const CASE_A_JOURNEY_LABELS=['Finding','Review','Request','Response','New basis','Reassessment'] as const;
 export type CaseAJourneyLabel=typeof CASE_A_JOURNEY_LABELS[number];
+export type CaseBJourneyLabel='Finding'|'Internal review';
+export type CaseCJourneyLabel='Finding'|'Review'|'Response'|'New basis'|'Reassessment'|'blocked'|'retryable';
+export type CaseJourneyVariant='baseline'|'blocked';
 export type CaseAJourneyWitness={witnessId:string;documentId:string;documentVersion:number;page:number;basisId:string;basisVersion:number;displayLabel:string|null};
-export type CaseAJourneyStep={id:string;sequence:number;runId:string|null;basisId:string|null;basisVersion:number|null;actorLabel:string|null;label:CaseAJourneyLabel;summary:string|null;sourceEventId:string|null;sourceEventLink:string|null;witnessId:string|null;witnessIds:string[];evidence:CaseAJourneyWitness[];completed:boolean;available:boolean;future:boolean;invalidReason:string|null};
-export type CaseAJourney={caseId:string|null;runId:string|null;basisId:string|null;basisVersion:number|null;steps:CaseAJourneyStep[];olderHistoryAvailable:boolean;olderHistoryAccess:string|null};
+export type CaseAJourneyStep={id:string;sequence:number;runId:string|null;basisId:string|null;basisVersion:number|null;actorLabel:string|null;label:string;summary:string|null;sourceEventId:string|null;sourceEventLink:string|null;witnessId:string|null;witnessIds:string[];evidence:CaseAJourneyWitness[];completed:boolean;available:boolean;future:boolean;invalidReason:string|null};
+export type CaseAJourney={caseId:string|null;runId:string|null;basisId:string|null;basisVersion:number|null;steps:CaseAJourneyStep[];olderHistoryAvailable:boolean;olderHistoryAccess:string|null;variant?:CaseJourneyVariant};
 
 const typeToLabel=(type:string|null):CaseAJourneyLabel|null=>{
   if(!type)return null;
@@ -48,6 +51,39 @@ export function buildCaseAJourney(envelope:unknown, caseId='cp-case-a'):CaseAJou
 }
 export const buildHangarGuidedJourney=buildCaseAJourney; export const constructCaseAJourney=buildCaseAJourney;
 
+const variantLabel=(value:unknown):CaseJourneyVariant|null=>typeof value==='string'&&(value.toLowerCase()==='blocked'||value.toLowerCase()==='retryable')?'blocked':value==='baseline'? 'baseline':null;
+
+export function buildCaseBJourney(envelope:unknown):CaseAJourney {
+  const source=isObject(envelope)?envelope:{}; const base=buildCaseAJourney(source,'cp-case-b');
+  const allowed=Array.isArray(source.history)?source.history.filter(isObject):[];
+  const steps=base.steps.filter(step=>step.completed&&(step.label==='Finding'||step.label==='Review')).map(step=>{
+    const event=allowed.find(e=>text(e.eventId)==step.sourceEventId);
+    const raw=event?(text(event.eventType)??text(event.label)??text(event.summary)??''):'';
+    if(/request/i.test(raw)||!/finding|review/i.test(raw))return null;
+    return step.label==='Review'?{...step,label:'Internal review'}:step;
+  }).filter((step):step is CaseAJourneyStep=>step!==null);
+  return {...base,caseId:'cp-case-b',variant:undefined,steps};
+}
+
+export function buildCaseCJourney(envelope:unknown):CaseAJourney {
+  const source=isObject(envelope)?envelope:{}; const base=buildCaseAJourney(source,'cp-case-c');
+  const caseObject=isObject(source.case)?source.case:{};
+  const declared=variantLabel(source.variant)??variantLabel(caseObject.variant)??variantLabel(source.blockedVariant);
+  const history=Array.isArray(source.history)?source.history.filter(isObject):[];
+  const eventBlocked=history.some(event=>{const raw=((text(event.eventType)??text(event.summary)??text(event.label))??'').toLowerCase();return raw.includes('blocked')||raw.includes('retryable')||raw.includes('presenter_reset');});
+  const variant:CaseJourneyVariant=(declared??(eventBlocked?'blocked':'baseline'));
+  const allowed=base.steps.filter(step=>['Finding','Review','Response','New basis','Reassessment'].includes(step.label)&&step.completed)
+    .filter(step=>{const event=history.find(e=>text(e.eventId)==step.sourceEventId);const raw=event?(text(event.eventType)??text(event.label)??text(event.summary)??''):step.summary??'';return !/(request|accept|accepted|acceptance)/i.test(raw);});
+  if(variant==='blocked'){
+    const tail=allowed.at(-1)?.sequence??0;
+    return {...base,caseId:'cp-case-c',variant,steps:[...allowed,
+      {id:'blocked',sequence:tail+1,runId:base.runId,basisId:base.basisId,basisVersion:base.basisVersion,actorLabel:null,label:'blocked',summary:'blocked',sourceEventId:null,sourceEventLink:null,witnessId:null,witnessIds:[],evidence:[],completed:true,available:true,future:false,invalidReason:null},
+      {id:'retryable',sequence:tail+2,runId:base.runId,basisId:base.basisId,basisVersion:base.basisVersion,actorLabel:null,label:'retryable',summary:'retryable',sourceEventId:null,sourceEventLink:null,witnessId:null,witnessIds:[],evidence:[],completed:true,available:true,future:false,invalidReason:null}]};
+  }
+  return {...base,caseId:'cp-case-c',variant,steps:allowed.filter(step=>step.label!=='Request')};
+}
+export const buildCaseBGuidedJourney=buildCaseBJourney; export const buildCaseCGuidedJourney=buildCaseCJourney;
+
 export type OlderHistoryAdapter=(request:{caseId:string;runId:string;basisId:string})=>unknown|Promise<unknown>;
 export async function openCaseAOlderHistory(journey:CaseAJourney, adapter:OlderHistoryAdapter|{read?:OlderHistoryAdapter}|null|undefined, selector?:{runId?:unknown;basisId?:unknown}):Promise<{ok:boolean;history:CaseAJourney|null;error:string|null}> {
   if(!journey.olderHistoryAvailable)return {ok:false,history:null,error:'Older history access is unavailable'};
@@ -55,21 +91,25 @@ export async function openCaseAOlderHistory(journey:CaseAJourney, adapter:OlderH
   if(!journey.caseId||!runId||!basisId||typeof adapter==='undefined'||adapter===null)return {ok:false,history:null,error:'Unable to access delivered ARR older history'};
   try{const reader=typeof adapter==='function'?adapter:adapter.read;if(typeof reader!=='function')return {ok:false,history:null,error:'Unable to access delivered ARR older history'}; const response=await reader({caseId:journey.caseId,runId,basisId});
     if(!isObject(response)||response.caseId!==journey.caseId||response.runId!==runId||response.basisId!==basisId||!Array.isArray(response.events))return {ok:false,history:null,error:'Out-of-scope or invalid older history response'};
-    const history={...response,history:response.events,olderHistoryAvailable:journey.olderHistoryAvailable}; const result=buildCaseAJourney(history,journey.caseId); result.olderHistoryAccess='Older ARR history loaded'; return {ok:true,history:result,error:null};
+    const history={...response,history:response.events,olderHistoryAvailable:journey.olderHistoryAvailable}; const result=journey.caseId==='cp-case-b'?buildCaseBJourney(history):journey.caseId==='cp-case-c'?buildCaseCJourney(history):buildCaseAJourney(history,journey.caseId); result.olderHistoryAccess='Older ARR history loaded'; return {ok:true,history:result,error:null};
   }catch{return {ok:false,history:null,error:'Unable to access delivered ARR older history'};}
 }
 export const openOlderHistory=openCaseAOlderHistory;
 
 export type GuidedJourneyProps={scene?:unknown;envelope?:unknown;adapter?:OlderHistoryAdapter|{read?:OlderHistoryAdapter};onActivate?:()=>unknown};
 export function GuidedJourney({scene,envelope,adapter,onActivate}:GuidedJourneyProps){
-  const source=scene??envelope; const initial=buildCaseAJourney(source); const [journey,setJourney]=useState(initial); const [message,setMessage]=useState<string|null>(initial.olderHistoryAvailable?'ARR older history available':''); const [loading,setLoading]=useState(false);
+  const source=scene??envelope; const caseObject=isObject(source)?(isObject(source.case)?source.case:source):{};
+  const caseId=text(caseObject.caseId)??text(isObject(source)?source.caseId:null)??'cp-case-a';
+  const build=(value:unknown)=>caseId==='cp-case-b'?buildCaseBJourney(value):caseId==='cp-case-c'?buildCaseCJourney(value):buildCaseAJourney(value,caseId);
+  const initial=build(source); const [journey,setJourney]=useState(initial); const [message,setMessage]=useState<string|null>(initial.olderHistoryAvailable?'ARR older history available':'Older history unavailable'); const [loading,setLoading]=useState(false);
   async function open(){setLoading(true);const result=await openCaseAOlderHistory(journey,adapter);setLoading(false);if(result.ok&&result.history)setJourney(result.history);setMessage(result.error??result.history?.olderHistoryAccess??null);}
   const h=createElement;
-  return h('section',{ 'aria-label':'Case A guided journey'},
-    h('h2',null,'Case A guided journey'),
+  const journeyName=journey.caseId==='cp-case-b'?'Case B':journey.caseId==='cp-case-c'?'Case C':'Case A';
+  return h('section',{ 'aria-label':journeyName+' guided journey'},
+    h('h2',null,`${journeyName} guided journey`),
     message?h('p',{role:message.includes('Unable')||message.includes('scope')?'alert':'status'},message):null,
     journey.olderHistoryAvailable?h('button',{type:'button',onClick:()=>void open(),disabled:loading,'aria-label':'Open delivered ARR older history'},'Open delivered ARR older history'):null,
-    h('ol',{ 'aria-label':'Case A journey steps'},journey.steps.map((step)=>h('li',{key:step.id},
+    h('ol',{ 'aria-label':journeyName+' journey steps'},journey.steps.map((step)=>h('li',{key:step.id},
       h('button',{type:'button',disabled:!step.available,'aria-disabled':!step.available,onClick:()=>onActivate?.(),'aria-label':step.label},step.label),
       step.summary?h('span',null,` — ${step.summary}`):null,
       step.runId?h('span',null,` Run: ${step.runId}`):null,
