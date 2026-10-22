@@ -29,12 +29,20 @@ export function getHangarSemanticPermission(source: unknown): { permitted: boole
   const c=objectOf(source.case)?source.case:{};
   const capability=text(c.capabilityLabel);
   const permission=c.permission ?? c.permissions;
-  const permitted=permission===true || objectOf(permission)&&permission.canResetBlockedVariant===true;
   const permissionObject=objectOf(permission)?permission:null;
   const actionProjection=Array.isArray(c.allowedActions)?c.allowedActions:Array.isArray(source.allowedActions)?source.allowedActions:Array.isArray(permissionObject?.allowedActions)?permissionObject.allowedActions:[];
-  const allowedActions=(actionProjection as unknown[]).map((a):string|null=>typeof a==='string'?a:objectOf(a)?text(a.actionId)??text(a.id)??text(a.action):null).filter((a):a is string=>typeof a==='string');
+  const projectedActions=(actionProjection as unknown[]).map((a):string|null=>typeof a==='string'?a:objectOf(a)?text(a.actionId)??text(a.id)??text(a.action):null).filter((a):a is string=>typeof a==='string');
+  let allowedActions:string[]=[];
+  let permitted=false;
+  if (permission===true) {
+    permitted=true;
+    allowedActions=projectedActions;
+  } else if (permissionObject?.canResetBlockedVariant===true) {
+    permitted=true;
+    allowedActions=projectedActions.includes('reset')?['reset']:[];
+  }
   const knownCapability=capability && capability!=='Unknown' && (HANGAR_CAPABILITY_LABELS as readonly string[]).includes(capability);
-  return { permitted:permitted===true, allowedActions, capability:knownCapability?capability:null };
+  return { permitted, allowedActions:permitted?allowedActions:[], capability:knownCapability?capability:null };
 }
 
 export function activateHangarSemanticControl(control: HangarSemanticControl|null|undefined): unknown {
@@ -70,7 +78,7 @@ export function buildHangarSemanticControls(source: unknown, descriptor?: SceneD
     if (!objectOf(step)) return {controls:[],error:`${HANGAR_SEMANTIC_CONTROL_ERROR}: journey step missing an accessible name`};
     const label=text(step.label)??text(step.text)??text(step.name);
     if(!label) return {controls:[],error:`${HANGAR_SEMANTIC_CONTROL_ERROR}: journey step missing an accessible name`};
-    const journeyControl: HangarSemanticControl={id:`journey-${index}-${String(step.sequence??index+1)}`,role:'button',name:label,kind:'journey',activate:typeof onActivate==='function'?()=>{void onActivate(journeyControl,step);return null;}:()=>null};
+    const journeyControl: HangarSemanticControl={id:`journey-${index}-${String(step.sequence??index+1)}`,role:'button',name:label,kind:'journey',activate:typeof onActivate==='function'?()=>{void onActivate(journeyControl,step);return null;}:undefined};
     controls.push(journeyControl);
   }
   const permission=getHangarSemanticPermission(source);
@@ -80,7 +88,8 @@ export function buildHangarSemanticControls(source: unknown, descriptor?: SceneD
     controls.push({id:`action-${action}`,role:'button',name:label,kind:'action',activate:typeof onActivate==='function'?()=>{onActivate(`action-${action}`,action);return undefined;}:()=>undefined});
   }
   if (typeof c.status==='object'||text(c.status)) controls.push({id:'status',role:'status',name:'Hangar status',kind:'status'});
-  return {controls,error:controls.some((c)=>!c.name||(!c.activate&&!c.handler&&c.kind==='object'))?`${HANGAR_SEMANTIC_CONTROL_ERROR}: pointer-only or unlabelled control`:null};
+  const missingHandler = controls.some((control) => !control.name || (!control.activate && !control.handler && (control.kind === 'object' || control.kind === 'journey')));
+  return {controls,error:missingHandler ? HANGAR_SEMANTIC_CONTROL_ERROR + ': pointer-only or unlabelled control':null};
 }
 
 export function HangarSemanticControls({envelope,scene,descriptor,manifest,onActivate,onCommand,children}:HangarSemanticControlsProps){

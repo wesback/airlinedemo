@@ -12,9 +12,9 @@ afterEach(()=>cleanup());
 
 describe('HangarSemanticControls',()=>{
   it('HangarSemanticControls exposes role names and keyboard activation',async()=>{
-    const activate=vi.fn(); const descriptor=[{objectId:'SYN-CP-A-AIR-001',caseId:'cp-case-a',kind:'aircraft',activate,handler:activate}];
+    const activate=vi.fn(); const activateJourney=vi.fn(); const descriptor=[{objectId:'SYN-CP-A-AIR-001',caseId:'cp-case-a',kind:'aircraft',activate,handler:activate}];
     const command=vi.fn(); const user=userEvent.setup();
-    render(<HangarSemanticControls scene={scene()} descriptor={descriptor} onCommand={command}/>);
+    render(<HangarSemanticControls scene={scene()} descriptor={descriptor} onActivate={activateJourney} onCommand={command}/>);
     const object=screen.getByRole('button',{name:'Case A aircraft'});
     expect(screen.getByRole('button',{name:'Select case'})).toBeTruthy();
     expect(screen.getByRole('button',{name:'Open review'})).toBeTruthy();
@@ -23,6 +23,8 @@ describe('HangarSemanticControls',()=>{
     await user.click(object); expect(activate).toHaveBeenCalledTimes(1);
     object.focus(); await user.keyboard('{Enter}'); expect(activate).toHaveBeenCalledTimes(2);
     await user.keyboard(' '); expect(activate).toHaveBeenCalledTimes(3);
+    const journey=screen.getByRole('button',{name:'Finding recorded'});
+    journey.focus(); await user.keyboard('{Enter}'); expect(activateJourney).toHaveBeenCalledTimes(1);
     const action=screen.getByRole('button',{name:'Open review'});
     action.focus(); await user.keyboard('{Enter}'); expect(command).toHaveBeenCalledWith('review','review');
     expect(HANGAR_FOCUS_STYLE).toContain('outline'); expect(HANGAR_FOCUS_STYLE).not.toContain('none');
@@ -30,12 +32,16 @@ describe('HangarSemanticControls',()=>{
 
   it('HangarSemanticControls preserves focus and Tab navigation',async()=>{
     const descriptor=[{objectId:'SYN-CP-A-AIR-001',caseId:'cp-case-a',kind:'aircraft',activate:vi.fn()}];
-    const {container}=render(<><input aria-label="Evidence text"/><aside aria-label="Evidence panel"><button>Evidence</button></aside><section data-hangar-camera-region aria-label="Camera controls" tabIndex={0}><input aria-label="Camera text"/></section><HangarSemanticControls scene={scene()} descriptor={descriptor}/></>);
+    const {container}=render(<><input aria-label="Evidence text"/><aside aria-label="Evidence panel"><button>Evidence</button></aside><section data-hangar-camera-region aria-label="Camera controls" tabIndex={0}><input aria-label="Camera text"/></section><HangarSemanticControls scene={scene()} descriptor={descriptor} onActivate={vi.fn()}/></>);
     const style=container.querySelector('style')?.textContent??'';
     expect(style).toContain('outline'); expect(style).not.toContain('outline: none');
-    const user=userEvent.setup(); await user.click(screen.getByLabelText('Evidence text'));
-    fireEvent.keyDown(screen.getByLabelText('Evidence text'),{key:'Tab'});
-    expect(document.activeElement).toBe(screen.getByLabelText('Evidence text'));
+    const user=userEvent.setup(); const evidenceText=screen.getByLabelText('Evidence text');
+    evidenceText.focus(); await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button',{name:'Evidence'}));
+    const cameraRegion=screen.getByRole('region',{name:'Camera controls'});
+    cameraRegion.focus(); await user.tab();
+    expect(document.activeElement).toBe(screen.getByLabelText('Camera text'));
+    await user.tab(); expect(document.activeElement).toBe(screen.getByRole('button',{name:'Case A aircraft'}));
     const control=screen.getByRole('button',{name:'Case A aircraft'});
     control.focus(); await user.tab(); expect(document.activeElement).not.toBe(control);
     const prevented=vi.fn(); handleHangarSemanticKeydown({id:'x',role:'button',name:'X',kind:'object',activate:vi.fn()}, {key:'Tab',preventDefault:prevented});
@@ -46,6 +52,11 @@ describe('HangarSemanticControls',()=>{
     const command=vi.fn(); const falsePermission=scene({case:{caseId:'cp-case-a',capabilityLabel:'Rules-based',permission:false,allowedActions:['reset'],status:{assessment:'ready'}},allowedActions:['reset']});
     const {rerender}=render(<HangarSemanticControls scene={falsePermission} onCommand={command}/>);
     expect(screen.queryByRole('button',{name:'Reset blocked variant'})).toBeNull(); expect(command).not.toHaveBeenCalled();
+    const resetOnly=scene({case:{caseId:'cp-case-a',capabilityLabel:'Rules-based',permission:{canResetBlockedVariant:true},allowedActions:['selection','review','reset'],status:{assessment:'ready'}},allowedActions:['selection','review','reset']});
+    rerender(<HangarSemanticControls scene={resetOnly} onActivate={vi.fn()} onCommand={command}/>);
+    expect(screen.getByRole('button',{name:'Reset blocked variant'})).toBeTruthy();
+    expect(screen.queryByRole('button',{name:'Select case'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Open review'})).toBeNull();
     rerender(<HangarSemanticControls scene={scene({case:{caseId:'cp-case-a',capabilityLabel:'Unknown',permission:true,allowedActions:['reset','selection']},allowedActions:['reset','selection']})} onCommand={command}/>);
     expect(screen.queryByRole('button',{name:'Reset blocked variant'})).toBeNull();     expect(screen.queryByRole('button',{name:'Select case'})).toBeNull(); expect(command).not.toHaveBeenCalled();
     const unknown=buildHangarSemanticControls(scene({case:{caseId:'cp-case-a',capabilityLabel:'Rules-based',permission:true,allowedActions:['unknown-capability'],status:{assessment:'ready'}},allowedActions:['unknown-capability']}));
