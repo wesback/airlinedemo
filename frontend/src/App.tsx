@@ -56,7 +56,11 @@ export default function App({
       journey: '#activity-heading',
       review: '#technical-review-heading, #capabilities-heading',
     }[action];
-    const target = document.querySelector<HTMLElement>(selector);
+    const target = action === 'review'
+      ? document.querySelector<HTMLElement>('#technical-review-heading')
+        ?? document.querySelector<HTMLElement>('#cap-technical-review')
+        ?? document.querySelector<HTMLElement>('#capabilities-heading')
+      : document.querySelector<HTMLElement>(selector);
     if (target && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
     target?.focus();
     if (typeof target?.scrollIntoView === 'function') target.scrollIntoView();
