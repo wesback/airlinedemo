@@ -21,14 +21,19 @@ describe('Case A guided journey',()=>{
     expect(missing.steps[0].available).toBe(false); expect(missing.steps[0].invalidReason).toContain('witness');
     expect(buildCaseAJourney({...scene(),history:[{...event('finding-x',1,'finding-recorded',['missing']),runId:''}]}).steps[0].invalidReason).toBe('Missing run');
     const cross=buildCaseAJourney({...scene(),evidence:[witness('wit-finding','cp-case-b')]}); expect(cross.steps[0].available).toBe(false);
+
+    const historyOnly=buildCaseAJourney({...scene(),history:[event('finding-x',1,'finding-recorded',['wit-finding'])]});
+    expect(historyOnly.steps[0].completed).toBe(true);
+    historyOnly.steps.slice(1).forEach(step=>{expect(step.completed).toBe(false);expect(step.available).toBe(false);expect(step.future).toBe(true);expect(step.invalidReason).toBe('Future unrecorded step');});
   });
 
   it('Case A journey opens exact older history',async()=>{
-    const user=userEvent.setup(); const adapter=vi.fn(async()=>({caseId:'cp-case-a',runId:'run-a',basisId:'basis-a',events:[event('old-finding',1,'finding-recorded',['old-witness'])]}));
+    const user=userEvent.setup(); const adapter=vi.fn(async()=>({caseId:'cp-case-a',runId:'run-a',basisId:'basis-a',events:[event('old-finding',1,'finding-recorded',['old-witness'])],evidence:[witness('old-witness')]}));
     const journey=buildCaseAJourney({...scene(),olderHistoryAvailable:true,currentRunId:'run-a'});
     const result=await openCaseAOlderHistory(journey,{read:adapter},{runId:'run-a',basisId:'basis-a'});
-    expect(result.ok).toBe(true);expect(adapter).toHaveBeenCalledWith({caseId:'cp-case-a',runId:'run-a',basisId:'basis-a'});expect(result.history?.steps[0].evidence.length).toBeGreaterThanOrEqual(0);
-    const {container}=render(createElement(GuidedJourney,{scene:scene(),adapter})); const control=screen.getByRole('button',{name:'Open delivered ARR older history'}); control.focus(); await user.keyboard('{Enter}'); await screen.findByRole('status'); expect(control).toBeTruthy(); expect(container.querySelector('[aria-label="Open delivered ARR older history"]')).toBeTruthy();
+    expect(result.ok).toBe(true);expect(adapter).toHaveBeenCalledWith({caseId:'cp-case-a',runId:'run-a',basisId:'basis-a'});
+    expect(result.history?.steps[0].sourceEventId).toBe('old-finding');expect(result.history?.steps[0].runId).toBe('run-a');expect(result.history?.steps[0].witnessId).toBe('old-witness');expect(result.history?.steps[0].evidence).toEqual([{witnessId:'old-witness',documentId:'case-a/llp.txt',documentVersion:2,page:4,basisId:'basis-a',basisVersion:2,displayLabel:'Evidence old-witness'}]);
+    const {container}=render(createElement(GuidedJourney,{scene:scene(),adapter})); const control=screen.getByRole('button',{name:'Open delivered ARR older history'}); control.focus(); await user.keyboard('{Enter}'); await screen.findByRole('status'); expect(control).toBeTruthy(); expect(container.querySelector('[aria-label="Open delivered ARR older history"]')).toBeTruthy();expect(adapter).toHaveBeenCalled();
     expect((await openCaseAOlderHistory(journey,adapter,{runId:'run-other',basisId:'basis-a'})).error).toContain('Out-of-scope');
     expect((await openCaseAOlderHistory(journey,null)).error).toBe('Unable to access delivered ARR older history');
     expect((await openCaseAOlderHistory(journey,async()=>({caseId:'cp-case-b',runId:'run-old',basisId:'basis-a',events:[]}))).error).toContain('Out-of-scope');
