@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 516,
+  "branch": "ai-sdlc/issue-516",
+  "commitSha": "b349e16724e56f812b5d9202181896ab7611ca69",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The boundary can lose the last server snapshot when a failed refresh marks it stale, and command deduplication is not wired into any boundary or retry path. The tests exercise the helper directly and do not catch either gap.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/errorBoundary.tsx",
+          "line": 65,
+          "message": "The boundary discards stale snapshots marked current=false, so it cannot preserve the last labelled server state after a failed refresh.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The constructor accepts a snapshot only when isLabelledHangarSnapshot returns true, which requires current === true. The refresh test shows that a failed refresh returns a snapshot with current === false.",
+            "failureScenario": "After a failed refresh, mounting the boundary with that stale snapshot causes it to store null as lastSnapshot. A subsequent render or asset failure shows the fallback without the last labelled server state."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/errorBoundary.tsx",
+          "line": 38,
+          "message": "The deduper is exposed as a standalone helper but is not connected to render failure, asset failure, or fallback re-entry, so the boundary does not prevent duplicate retry commands.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The boundary and its fallback do not call dedupeHangarCommand or claimHangarCommand. The named test calls claimHangarCommand directly, without exercising a retry or re-entry command path.",
+            "failureScenario": "After a render failure, a retry path that submits the same reset or ARR/CP command twice without separately calling the exported helper is not blocked by this boundary, so duplicate commands can be sent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The command deduper is tested in isolation, but the named test does not establish that failures and re-entry use it or send zero mutations. The other named tests cover snapshot preservation and refresh recovery.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarErrorBoundary.test.tsx",
+          "line": 30,
+          "message": "The test does not exercise the criterion's failed-render and re-entry command path, and its zero-mutation assertions are disconnected mocks. Add a test that drives re-entry through the production path and observes the actual mutation and command calls.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test creates mutation and command mocks, then calls the deduper directly. Neither mock is passed to the boundary or connected to a retry or re-entry path.",
+            "failureScenario": "If a render failure followed by two re-entry attempts sends duplicate reset or ARR/CP commands, this test still passes because it only verifies repeated direct calls to the standalone deduper."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The boundary handles render failures, but duplicate retry prevention is only exposed as a standalone helper and is not connected to command execution or re-entry.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/errorBoundary.tsx",
+          "line": 40,
+          "message": "The duplicate-command requirement is not enforced by the boundary or a wired command path; the exported deduper is opt-in, so re-entry can still send duplicate retry commands.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The deduper only records an identifier when a caller explicitly invokes claimHangarCommand or createHangarCommandDeduper(). HangarErrorBoundary and its fallback do not invoke either helper or guard a retry command.",
+            "failureScenario": "After a render or asset failure, a retry flow that re-enters and sends the same reset or ARR/CP command without explicitly calling this helper can send it more than once. The test calls the helper directly, so it does not exercise that flow."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarErrorBoundary.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
