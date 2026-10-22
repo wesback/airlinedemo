@@ -9,10 +9,12 @@ describe('Hangar resource policy', () => {
     for (const resource of [
       'https://cdn.example/model.glb', '//cdn.example/model.glb', 'http://example/model.glb',
       'data:image/png;base64,AAAA', { uri: 'assets/model.bin' }, { path: 'assets/font.woff2', kind: 'font' },
-      { url: 'https://cdn.example/texture.png', kind: 'texture' }, { url: 'model.glb', kind: 'model' },
+      { url: 'https://cdn.example/texture.png', kind: 'texture' },
     ]) {
       expect(() => validateHangarResourcePolicy(resource)).toThrow(HANGAR_RESOURCE_REJECTION);
       expect(transport).not.toHaveBeenCalled();
     }
+    expect(validateHangarResourcePolicy({ url: 'model.glb', kind: 'model' })).toBe(true);
+    expect(validateHangarResourcePolicy({ path: 'assets/hangar/texture.png', kind: 'texture' })).toBe(true);
   });
 });

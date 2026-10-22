@@ -20,7 +20,7 @@ describe('Hangar asset policy', () => {
     expect(valid).toEqual({ valid: true });
     for (const record of [
       null, { ...grant(), checksum: 'bad' }, { ...grant(), actualChecksum: 'b'.repeat(64) }, { ...grant(), rightsBasis: 'licensed' }, { ...grant(), rightsBasis: 'GPL-3.0' },
-      { ...grant(), rightsDeclaration: '' }, { ...grant(), synthetic: false },
+      { ...grant(), rightsDeclaration: '' }, { ...grant(), synthetic: false }, { ...grant(), syntheticMarker: false }, { ...grant(), actualChecksum: undefined, computedChecksum: undefined },
       { ...grant(), rightsBasis: 'CC0-1.0' },
       { ...grant(), rightsBasis: 'CC0-1.0', originalGrantUrl: '', verificationReference: 'review-1' },
     ]) {
@@ -58,5 +58,12 @@ describe('Hangar asset policy', () => {
     expect(validateHangarAssetPolicyResult({ totalBytes: HANGAR_MAX_TOTAL_BYTES, largestModelBytes: HANGAR_MAX_MODEL_BYTES, jsonBytes: 1_048_576 }).valid).toBe(true);
     expect(validateHangarAssetPolicyResult({ totalBytes: HANGAR_MAX_TOTAL_BYTES + 1 }).valid).toBe(false);
     expect(validateHangarAssetPolicyResult({ totalBytes: 1, largestModelBytes: HANGAR_MAX_MODEL_BYTES, jsonBytes: 1_048_576 }).valid).toBe(true);
+    expect(validateHangarAssetPolicyResult({ totalBytes: HANGAR_MAX_TOTAL_BYTES, largestModelBytes: HANGAR_MAX_MODEL_BYTES, jsonBytes: 1_048_576 + 1 }).valid).toBe(false);
+
+    const loader = vi.fn();
+    const overBudget = validateHangarAssetPolicyResult({ assets: [{ ...grant(), bytes: HANGAR_MAX_MODEL_BYTES + 1 }] });
+    if (overBudget.valid) loader();
+    expect(overBudget).toEqual({ valid: false, reason: HANGAR_ASSET_INVALID });
+    expect(loader).not.toHaveBeenCalled();
   });
 });

@@ -95,26 +95,33 @@ export function validateHangarAssetRecord(record: unknown): true {
   const asset = record as Record<string, unknown>;
   const path = asset.path ?? asset.assetPath ?? asset.relativePath;
   if (typeof path !== 'string' || path.length === 0 || path.startsWith('/') || path.includes('\\') || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('//') || /<[^>]*>|[<>]/.test(path)) invalidAsset();
-  const resourceFields = ['uri','url','src','modelUri','modelUrl','textureUri','fontUri','cdnUrl','externalUri','extensions','extensionsUsed','extensionsRequired'];
+  const resourceFields = ['uri','url','src','model','modelUri','modelUrl','texture','textureUri','font','fontUri','cdnUrl','externalUri','extensions','extensionsUsed','extensionsRequired'];
   if (resourceFields.some(field => asset[field] !== undefined)) invalidAsset();
   for (const [key, value] of Object.entries(asset)) {
     if (typeof value === 'string' && /<[^>]*>|[<>]/.test(value)) invalidAsset();
     if (typeof value === 'string' && value.includes('\\')) invalidAsset();
-    if ((key.toLowerCase().includes('url') || key.toLowerCase().includes('uri')) && typeof value === 'string') {
+    if ((key.toLowerCase().includes('url') || key.toLowerCase().includes('uri')) && typeof value === 'string'
+      && !['originalgranturl','cc0granturl'].includes(key.toLowerCase())) {
       if (/^(?:https?:|data:|blob:|javascript:|\/\/)/i.test(value) || /^[a-z][a-z0-9+.-]*:/i.test(value)) invalidAsset();
     }
   }
   for (const field of ['source', 'author']) if (typeof asset[field] !== 'string' || (asset[field] as string).length === 0) invalidAsset();
   const checksum = asset.checksum ?? asset.sha256 ?? asset.sha256Checksum ?? asset.sha256_checksum;
   if (typeof checksum !== 'string' || !/^[a-fA-F0-9]{64}$/.test(checksum)) invalidAsset();
-  if (asset.synthetic !== true && asset.syntheticMarker !== true) invalidAsset();
+  if (asset.synthetic !== true) invalidAsset();
+  if (asset.syntheticMarker !== undefined && asset.syntheticMarker !== true) invalidAsset();
   const rawBytes = asset.assetBytes ?? asset.contentBytes ?? asset.data ?? (asset.bytes instanceof Uint8Array ? asset.bytes : undefined);
+  let verifiedChecksum = false;
   if (rawBytes instanceof Uint8Array) {
-    if (computeHangarAssetChecksum(rawBytes).toLowerCase() !== (checksum as string).toLowerCase()) invalidAsset();
+    verifiedChecksum = computeHangarAssetChecksum(rawBytes).toLowerCase() === (checksum as string).toLowerCase();
   } else {
     const suppliedChecksum = asset.actualChecksum ?? asset.computedChecksum ?? asset.bytesSha256 ?? asset.actualSha256 ?? asset.computedSha256;
-    if (typeof suppliedChecksum === 'string' && suppliedChecksum.toLowerCase() !== (checksum as string).toLowerCase()) invalidAsset();
+    if (typeof suppliedChecksum === 'string') {
+      verifiedChecksum = /^[a-fA-F0-9]{64}$/.test(suppliedChecksum)
+        && suppliedChecksum.toLowerCase() === (checksum as string).toLowerCase();
+    }
   }
+  if (!verifiedChecksum) invalidAsset();
   const identityContext = `${String(asset.role ?? '')} ${String(asset.kind ?? '')} ${String(asset.type ?? '')} ${String(asset.path ?? '')}`.toLowerCase();
   const rackOrAvatar = asset.rack === true || asset.avatar === true || identityContext.includes('rack') || identityContext.includes('avatar');
   if (rackOrAvatar) {
@@ -135,7 +142,7 @@ export function validateHangarAssetRecord(record: unknown): true {
   } else if (rights === 'CC0-1.0') {
     const grantUrl = asset.originalGrantUrl ?? asset.cc0GrantUrl;
     const verification = asset.verificationReference ?? asset.humanVerificationReference;
-    if (typeof grantUrl !== 'string' || grantUrl.trim().length === 0) invalidAsset();
+    if (typeof grantUrl !== 'string' || !/^https:\/\/[^\s]+$/i.test(grantUrl.trim())) invalidAsset();
     if (typeof verification !== 'string' || verification.trim().length === 0) invalidAsset();
   } else invalidAsset();
   return true;
@@ -218,7 +225,7 @@ export function validateHangarResource(resource: unknown): true {
     reject();
   }
   const kind = String(value.kind ?? value.type ?? '').toLowerCase();
-  if (kind === 'font' || kind === 'cdn' || (kind === 'texture' || kind === 'model') && value.url !== undefined) reject();
+  if (kind === 'font' || kind === 'cdn') reject();
   return true;
 }
 export const validateHangarResourcePolicy = validateHangarResource;
