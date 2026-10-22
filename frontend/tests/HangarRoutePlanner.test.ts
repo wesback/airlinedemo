@@ -13,11 +13,16 @@ const config={walkablePolygon:floor,aircraftFootprints:footprints,avatarRadius:0
 describe('HangarRoutePlanner',()=>{
   it('HangarRoutePlanner shortest grid route contract',()=>{
     const avatar={x:-4,z:-4},marker={x:4,z:4};
-    const route=planHangarRoute(avatar,marker,config);
+    const contractConfig={...config,aircraftFootprints:[{x:-1,z:2,width:1,depth:1}]};
+    const route=planHangarRoute(avatar,marker,contractConfig);
     expect(route.status).toBe('route');expect(route.route.length).toBeGreaterThan(1);
-    expect(route.distance).toBeGreaterThanOrEqual(distance(avatar,marker));
-    expect(route.distance).toBeLessThanOrEqual(distance(avatar,marker)+3);
-    for(const point of route.route)expect(pointInExpanded(point,footprints,0.3)).toBe(false);
+    expect(route.distance).toBeGreaterThanOrEqual(distance(avatar,marker)-1e-9);
+    expect(route.distance).toBeLessThanOrEqual(distance(avatar,marker)+HANGAR_ROUTE_GRID_SIZE);
+    for(const point of route.route)expect(pointInExpanded(point,contractConfig.aircraftFootprints,0.3)).toBe(false);
+    for(let i=1;i<route.route.length;i++){
+      const a=route.route[i-1],b=route.route[i];
+      for(let t=0;t<=1;t+=0.05)expect(pointInExpanded({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t},contractConfig.aircraftFootprints,0.3)).toBe(false);
+    }
     const unreachable=planHangarRoute({x:0,z:0},{x:4,z:4},{...config,aircraftFootprints:[{x:4,z:4,width:3,depth:3}]});
     expect(unreachable).toMatchObject({status:'unreachable',reachable:false,route:[],points:[],line:false});expect(unreachable.message).toContain('unreachable');
     expect(planHangarRoute(undefined,{x:0,z:0},config)).toMatchObject({status:'unreachable',route:[],line:false,message:'No route: marker is missing'});
@@ -33,7 +38,9 @@ describe('HangarRoutePlanner',()=>{
     const selection=vi.fn();const planner=new HangarRoutePlanner({...config,avatar:{x:-4,z:-4}},selection);
     const marker={x:4,z:4};const first=planner.confirm(marker,{x:-4,z:-4},'AIR-1');expect(first.status).toBe('route');
     const refused=planner.step(false,{x:-3.5,z:-4});expect(refused).toEqual(first);
-    const moved=planner.step(true,{x:-3.5,z:-4});expect(moved.status).not.toBe('unreachable');expect(moved.route.length).toBeGreaterThan(0);
+    const acceptedAvatar={x:-3.5,z:-4};const moved=planner.step(true,acceptedAvatar);expect(moved.status).not.toBe('unreachable');expect(moved.route.length).toBeGreaterThan(0);
+    expect(moved.route[0]).toEqual(acceptedAvatar);
+    expect(moved.route).not.toEqual(first.route);
     expect(planner.escape()).toMatchObject({status:'cleared',line:false,route:[]});expect(selection).not.toHaveBeenCalled();
     planner.confirm(marker,{x:-4,z:-4},'AIR-1');const other={x:3,z:-4};const second=planner.confirm(other,{x:-4,z:-4},'AIR-2');expect(second.status).toBe('route');
     expect(planner.confirm(other,{x:-4,z:-4},'AIR-2')).toEqual(second);
