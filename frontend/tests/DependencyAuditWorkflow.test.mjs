@@ -64,7 +64,12 @@ describe('dependency audit workflow', () => {
       expect(manifest.dependencies[packageName]).toBeTruthy();
       expect(lock.packages[`node_modules/${packageName}`]?.version).toBe(manifest.dependencies[packageName]);
     }
-    expect(workflow).toContain('npm audit --json');
+    const auditStepStart = workflow.indexOf('      - name: Audit (npm)\n');
+    expect(auditStepStart).toBeGreaterThanOrEqual(0);
+    const auditStepEnd = workflow.indexOf('\n      - name:', auditStepStart + 1);
+    const auditStep = workflow.slice(auditStepStart, auditStepEnd === -1 ? undefined : auditStepEnd);
+    expect(auditStep).toContain('working-directory: frontend');
+    expect(auditStep).toContain('npm audit --json > ../artifacts/audit/npm-audit.json');
 
     const auditInput = { vulnerabilities: { three: { severity: 'low' } } };
     expect(() => validateHangarDependencyAudit(manifest, lock, auditInput))

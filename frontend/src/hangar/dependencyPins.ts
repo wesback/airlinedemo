@@ -55,7 +55,8 @@ export function validateHangarDependencyAudit(
     ...Object.keys(auditInput?.vulnerabilities ?? {}),
   ]);
   for (const name of Object.keys(HANGAR_DEPENDENCY_PINS)) {
-    if (!auditedNames.has(name)) {
+    const lockName = lockfile?.packages?.[`node_modules/${name}`]?.version;
+    if (!lockName || !auditedNames.has(name)) {
       throw new Error(`Hangar audit contract missing package: ${name}`);
     }
   }
