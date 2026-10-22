@@ -9,8 +9,10 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@react-three/fiber": "9.8.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "three": "0.180.0"
   },
   "devDependencies": {
     "@testing-library/dom": "10.4.2",

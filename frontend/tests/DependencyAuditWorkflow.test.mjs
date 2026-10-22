@@ -54,6 +54,26 @@ describe('dependency audit workflow', () => {
     expect(result.stderr.trim()).toBe(`::error::dotnet Example.Package has a ${expectedSeverity} finding with no valid exception`);
   });
 
+  it('hangar packages are covered by the existing npm audit evidence contract', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+    const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+    const workflow = readFileSync('../.github/workflows/build.yml', 'utf8');
+
+    for (const packageName of ['three', '@react-three/fiber']) {
+      expect(manifest.dependencies[packageName]).toBeTruthy();
+      expect(lock.packages[`node_modules/${packageName}`]?.version).toBe(manifest.dependencies[packageName]);
+    }
+    expect(workflow).toContain('npm audit --json');
+
+    const auditInput = { vulnerabilities: { three: { severity: 'low' } } };
+    const auditContractValidator = audit => {
+      const missing = ['three', '@react-three/fiber'].filter(name => !audit.vulnerabilities?.[name] && !audit.installed?.[name]);
+      if (missing.length) throw new Error(`Audit contract missing package: ${missing.join(', ')}`);
+    };
+    expect(() => auditContractValidator(auditInput)).toThrow('Audit contract missing package: @react-three/fiber');
+    expect(() => auditContractValidator({ installed: { three: {}, '@react-three/fiber': {} }, vulnerabilities: {} })).not.toThrow();
+  });
+
   it('retains the strict npm and .NET high/critical severity gate', () => {
     const workflow = readFileSync('../.github/workflows/build.yml', 'utf8');
     const gateStart = workflow.indexOf('      - name: Severity gate\n');
