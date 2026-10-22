@@ -34,6 +34,57 @@
       "hardHatNode": "HardHat",
       "manifestHardHatNode": "HardHat",
       "type": "model"
+    },
+    {
+      "path": "assets/hangar/aircraft-a.glb",
+      "source": "Hangar synthetic design pack",
+      "author": "Hangar team",
+      "rightsBasis": "Project-authored",
+      "rightsDeclaration": "Approved synthetic project-authored aircraft asset; no real aircraft type or brand marks",
+      "checksum": "0e2f0955c71ebfd146c7e75538fd9e0c3cfb224b53410ab05aa475cf0bf98264",
+      "sizeBytes": 468,
+      "synthetic": true,
+      "syntheticMarker": true,
+      "syntheticMarkerDeclaration": "Synthetic fictional illustrative aircraft; no real aircraft type or brand marks",
+      "realAircraftType": false,
+      "brandMarks": false,
+      "type": "model",
+      "illustrativeCategory": "narrow-body",
+      "aircraft": true
+    },
+    {
+      "path": "assets/hangar/aircraft-b.glb",
+      "source": "Hangar synthetic design pack",
+      "author": "Hangar team",
+      "rightsBasis": "Project-authored",
+      "rightsDeclaration": "Approved synthetic project-authored aircraft asset; no real aircraft type or brand marks",
+      "checksum": "6c3fc85e44d9457f1c1302d5a7c75b82dbb23f2c63723e1f0c12fc1d4b0b0360",
+      "sizeBytes": 464,
+      "synthetic": true,
+      "syntheticMarker": true,
+      "syntheticMarkerDeclaration": "Synthetic fictional illustrative aircraft; no real aircraft type or brand marks",
+      "realAircraftType": false,
+      "brandMarks": false,
+      "type": "model",
+      "illustrativeCategory": "regional",
+      "aircraft": true
+    },
+    {
+      "path": "assets/hangar/aircraft-c.glb",
+      "source": "Hangar synthetic design pack",
+      "author": "Hangar team",
+      "rightsBasis": "Project-authored",
+      "rightsDeclaration": "Approved synthetic project-authored aircraft asset; no real aircraft type or brand marks",
+      "checksum": "c8296ea2654ac8dc022afc8df8a4dba6746da55192cc2876b7783c045e3ee2cd",
+      "sizeBytes": 468,
+      "synthetic": true,
+      "syntheticMarker": true,
+      "syntheticMarkerDeclaration": "Synthetic fictional illustrative aircraft; no real aircraft type or brand marks",
+      "realAircraftType": false,
+      "brandMarks": false,
+      "type": "model",
+      "illustrativeCategory": "wide-body",
+      "aircraft": true
     }
   ]
 }

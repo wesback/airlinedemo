@@ -1,6 +1,6 @@
 {
   "contractVersion": 1,
-  "packVersion": "hangar-rack-avatar-v1",
+  "packVersion": "hangar-aircraft-rack-avatar-v1",
   "rack": {
     "path": "assets/hangar/rack.glb",
     "type": "model",
@@ -37,5 +37,76 @@
     "synthetic": true,
     "realPerson": false,
     "brandMarks": false
-  }
+  },
+  "aircraft": {
+    "pathPrefix": "assets/hangar/aircraft-",
+    "type": "model",
+    "models": [
+      {
+        "caseId": "cp-case-a",
+        "path": "assets/hangar/aircraft-a.glb",
+        "category": "narrow-body",
+        "nodes": {
+          "aircraft": "AircraftA",
+          "engine": "EngineA",
+          "component1": "ComponentA1",
+          "component2": "ComponentA2",
+          "objectIds": [
+            "SYN-CP-A-AIR-001",
+            "SYN-CP-A-ENG-001",
+            "SYN-CP-A-CMP-001",
+            "SYN-CP-A-CMP-002"
+          ]
+        }
+      },
+      {
+        "caseId": "cp-case-b",
+        "path": "assets/hangar/aircraft-b.glb",
+        "category": "regional",
+        "nodes": {
+          "aircraft": "AircraftB",
+          "engine": "EngineB",
+          "component1": "ComponentB1",
+          "component2": "ComponentB2",
+          "objectIds": [
+            "SYN-CP-B-AIR-001",
+            "SYN-CP-B-ENG-001",
+            "SYN-CP-B-CMP-001",
+            "SYN-CP-B-CMP-002"
+          ]
+        }
+      },
+      {
+        "caseId": "cp-case-c",
+        "path": "assets/hangar/aircraft-c.glb",
+        "category": "wide-body",
+        "nodes": {
+          "aircraft": "AircraftC",
+          "engine": "EngineC",
+          "component1": "ComponentC1",
+          "component2": "ComponentC2",
+          "objectIds": [
+            "SYN-CP-C-AIR-001",
+            "SYN-CP-C-ENG-001",
+            "SYN-CP-C-CMP-001",
+            "SYN-CP-C-CMP-002"
+          ]
+        }
+      }
+    ]
+  },
+  "objectIds": [
+    "SYN-CP-A-AIR-001",
+    "SYN-CP-A-ENG-001",
+    "SYN-CP-A-CMP-001",
+    "SYN-CP-A-CMP-002",
+    "SYN-CP-B-AIR-001",
+    "SYN-CP-B-ENG-001",
+    "SYN-CP-B-CMP-001",
+    "SYN-CP-B-CMP-002",
+    "SYN-CP-C-AIR-001",
+    "SYN-CP-C-ENG-001",
+    "SYN-CP-C-CMP-001",
+    "SYN-CP-C-CMP-002"
+  ]
 }

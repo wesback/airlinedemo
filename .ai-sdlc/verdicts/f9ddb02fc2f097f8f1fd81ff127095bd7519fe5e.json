@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 528,
+  "branch": "ai-sdlc/issue-528",
+  "commitSha": "f9ddb02fc2f097f8f1fd81ff127095bd7519fe5e",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The descriptor tests exercise the 12-object mapping and rejection paths. The aircraft asset test cannot detect an adapter that rejects every asset, leaving a required behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAircraftAssets.test.ts",
+          "line": 11,
+          "message": "The asset test does not prove successful admission: it expects rejection for all three assets, and its bad-provenance cases are unused. Add assertions that valid asset bytes reach the loader and that each invalid provenance case triggers fallback without loading.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test calls loadHangarAircraftAsset with buildGlb() bytes for each aircraft and explicitly expects result.loaded to be false. The loop over bad provenance variants never passes bad to the loader.",
+            "failureScenario": "If the adapter rejects every valid aircraft asset, this test still passes. It therefore does not verify the acceptance criterion that each asset is admitted through loadValidatedHangarAsset, or that the listed bad provenance variants are rejected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation calls the shared asset validator and defines the 12-object descriptor, but the named tests do not fully prove the acceptance criteria. The asset test in particular expects valid asset attempts to fail and leaves its bad-provenance cases unchecked.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAircraftAssets.test.ts",
+          "line": 9,
+          "message": "The test does not verify the exact projected text name, category, six-axis status, or capability label required by the first acceptance criterion.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named test calls buildHangarAircraftViewModel but checks only the lengths of its results.",
+            "failureScenario": "If the projector returns incorrect names, categories, status axes, or capability labels for the three scoped cases, the test still passes as long as the result lengths stay 3, 1, and 0."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneDescriptor.test.ts",
+          "line": 7,
+          "message": "The test does not assert the matching case and node metadata for all 12 descriptor mappings.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named test asserts the ordered objectId list for all 12 entries, but checks caseId and kind only for the selected final component.",
+            "failureScenario": "If an engine or component entry for another aircraft is assigned to the wrong case while retaining the expected objectId list, the test passes despite the required per-aircraft mapping being wrong."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAircraftAssets.test.ts",
+          "line": 10,
+          "message": "The test does not exercise successful validation of each authored asset or assert rejection for malformed, external-resource, missing-provenance, and checksum-mismatched inputs.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named test passes buildGlb() bytes to the loader for each asset, expects each load to fail, and never asserts that the valid asset path invokes the loader. Its bad-provenance loop does not pass the mutated records or assert any result.",
+            "failureScenario": "If loadHangarAircraftAsset bypasses loadValidatedHangarAsset and sends every asset directly to the loader, the first three cases can still pass because they expect failure, and the bad-provenance loop has no assertions. The test therefore does not prove the required admission or rejection behavior."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete, reachable security vulnerability in the changed code. The asset paths are selected from a fixed set, and object activation requires a valid descriptor and a mapped identifier.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarAircraftAssets.test.ts",
+      "frontend/tests/HangarSceneDescriptor.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
