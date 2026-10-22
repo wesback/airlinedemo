@@ -96,4 +96,25 @@ export const getHangarReducedMotion = shouldReduceHangarMotion;
 export const resolveHangarMotionDuration = getHangarMotionDuration;
 export const scheduleHangarTransition = applyHangarTransition;
 export const createHangarReducedMotion = (matchMedia?: (query: string) => { matches: boolean }, storage?: HangarReducedMotionStorage | null) => new HangarReducedMotion(matchMedia, storage);
+export class HangarAvatarController<T extends { x?: number; z?: number }> {
+  private position: T;
+  private lastTransition: HangarTransitionTarget<T> | null = null;
+  constructor(initialPosition: T, private readonly motion: HangarReducedMotion = new HangarReducedMotion()) {
+    this.position = initialPosition;
+  }
+  getState(): T { return { ...this.position }; }
+  get reducedMotion(): boolean { return this.motion.reduced; }
+  get transitionDuration(): number { return this.lastTransition?.duration ?? 240; }
+  move(target: T, requestedDuration = 240): HangarTransitionTarget<T> {
+    const transition = this.motion.applyAvatarTransition(target, requestedDuration);
+    this.position = transition.target;
+    this.lastTransition = transition;
+    return transition;
+  }
+  setOverride(override: HangarReducedMotionOverride): HangarReducedMotionOverride { return this.motion.setOverride(override); }
+  clearOverride(): null { return this.motion.clearOverride(); }
+}
+
+export const createHangarAvatarController = <T extends { x?: number; z?: number }>(initialPosition: T, motion?: HangarReducedMotion) =>
+  new HangarAvatarController(initialPosition, motion);
 export { HangarReducedMotion as HangarReducedMotionController };

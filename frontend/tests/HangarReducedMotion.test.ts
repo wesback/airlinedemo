@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   HANGAR_REDUCED_MOTION_STORAGE_KEY,
   HangarReducedMotion,
+  createHangarAvatarController,
   applyHangarTransition,
   getHangarReducedMotionOverride,
   getHangarSystemReducedMotion,
@@ -41,6 +42,10 @@ describe('HangarReducedMotion', () => {
     expect(camera.overview().state.radius).toBe(30);
     expect(camera.transitionDuration).toBe(0);
     expect(motion.applyAvatarTransition({ x: 4, z: -2 }, 240)).toEqual({ target: { x: 4, z: -2 }, duration: 0, immediate: true });
+    const avatar = createHangarAvatarController({ x: 0, z: 0 }, motion);
+    expect(avatar.move({ x: 4, z: -2 }, 240)).toEqual({ target: { x: 4, z: -2 }, duration: 0, immediate: true });
+    expect(avatar.getState()).toEqual({ x: 4, z: -2 });
+    expect(avatar.transitionDuration).toBe(0);
   });
 
   it('HangarReducedMotion session override', () => {

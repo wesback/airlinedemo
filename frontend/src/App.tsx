@@ -47,6 +47,22 @@ export default function App({
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
   const [HangarScene, setHangarScene] = useState<ComponentType | null>(null);
   const [hangarActionMessage, setHangarActionMessage] = useState('');
+  const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
+  const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
+
+  function setHangarMotionOverride(enabled: boolean) {
+    const motion = hangarMotion.current?.motion;
+    if (!motion) return;
+    enabled ? motion.enable() : motion.disable();
+    setHangarReducedMotion(motion.reduced);
+  }
+
+  function clearHangarMotionOverride() {
+    const motion = hangarMotion.current?.motion;
+    if (!motion) return;
+    motion.clearOverride();
+    setHangarReducedMotion(motion.reduced);
+  }
 
   function runNon3dAction(action: 'selection' | 'status' | 'evidence' | 'journey' | 'review') {
     const selector = {
@@ -77,18 +93,21 @@ export default function App({
     setHangarView('loading');
     setHangarSceneLoaded(false);
     setHangarScene(null);
-    const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene } = await import('./hangar/entryController');
+    const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene, createHangarSceneMotionControllers } = await import('./hangar/entryController');
     const browserSupported = hangarBrowserSupported !== undefined
       ? isHangarBrowserSupported(hangarBrowserSupported)
       : isHangarBrowserSupported(undefined);
     const webgl2 = hangarWebGl2Probe !== undefined
       ? hangarWebGl2Probe as never
       : probeWebGl2Capability();
+    const hangarMotionControllers = createHangarSceneMotionControllers();
+    hangarMotion.current = hangarMotionControllers;
+    setHangarReducedMotion(hangarMotionControllers.motion.reduced);
     const decision = await selectHangarEntry({
       browserSupported,
       contractVersion: hangarContractVersion,
       webgl2,
-    }, hangarLazyLoader ?? loadHangarScene);
+    }, hangarLazyLoader ?? (() => loadHangarScene(hangarMotionControllers)));
     if (decision.mode === '3d') {
       if (typeof decision.loadedScene === 'function') setHangarScene(decision.loadedScene as ComponentType);
       setHangarSceneLoaded(true);
@@ -229,6 +248,11 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       {HangarScene ? <HangarScene /> : <canvas aria-label="3D hangar scene" />}
+                      <div aria-label="Reduced motion controls">
+                        <button type="button" aria-pressed={hangarReducedMotion} onClick={() => setHangarMotionOverride(true)}>Enable reduced motion</button>
+                        <button type="button" aria-pressed={!hangarReducedMotion} onClick={() => setHangarMotionOverride(false)}>Disable reduced motion</button>
+                        <button type="button" onClick={clearHangarMotionOverride}>Use system preference</button>
+                      </div>
                     </div>
                   )}
                   {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'

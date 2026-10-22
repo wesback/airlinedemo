@@ -58,6 +58,7 @@ export class HangarCameraController {
       target, duration: requestedDuration, immediate: requestedDuration === 0,
     };
     this.lastTransition = transition;
+    this.state = { ...transition.target };
     return transition;
   }
   get reducedMotion(): boolean { return this.motion?.reduced ?? false; }

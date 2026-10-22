@@ -1,4 +1,6 @@
 import { createElement, type ComponentType } from 'react';
+import { createHangarCameraController } from './cameraController';
+import { createHangarAvatarController, HangarReducedMotion } from './reducedMotion';
 
 export const SUPPORTED_HANGAR_CONTRACT_VERSION = 1;
 export const SUPPORTED_HANGAR_BROWSERS = ['Chrome', 'Edge'] as const;
@@ -93,17 +95,33 @@ export async function selectHangarEntry<T>(options: HangarEntryOptions = {}, laz
   return { ...decision, loaderCalled: true, loadedScene };
 }
 
-export async function loadHangarScene(): Promise<ComponentType> {
+export function createHangarSceneMotionControllers(targetRadius = 10) {
+  const motion = new HangarReducedMotion();
+  return {
+    motion,
+    camera: createHangarCameraController(targetRadius, motion),
+    avatar: createHangarAvatarController({ x: 0, z: 0 }, motion),
+  };
+}
+
+export async function loadHangarScene(controllers = createHangarSceneMotionControllers()): Promise<ComponentType> {
   const { Canvas } = await import('@react-three/fiber');
+  const cameraTransition = controllers.camera.overview();
+  const avatarTransition = controllers.avatar.move({ x: 0, z: 0 }, 240);
+  const reducedMotion = controllers.motion.reduced;
   const HangarScene: ComponentType = () => createElement(
-    Canvas,
-    { shadows: true, camera: { position: [4, 3, 6], fov: 45 } },
-    createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
-    createElement('ambientLight', { intensity: 1 }),
-    createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
-    createElement('mesh', { position: [0, 0, 0] },
-      createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
-      createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
+    'div',
+    { 'data-hangar-reduced-motion': reducedMotion ? 'true' : 'false', 'data-hangar-camera-duration': String(controllers.camera.transitionDuration), 'data-hangar-avatar-duration': String(avatarTransition.duration) },
+    createElement(
+      Canvas,
+      { shadows: true, camera: { position: [cameraTransition.state.radius / 10 * 4, 3, cameraTransition.state.radius / 10 * 6], fov: 45 } },
+      createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
+      createElement('ambientLight', { intensity: 1 }),
+      createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
+      createElement('mesh', { position: [0, 0, 0] },
+        createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
+        createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
+      ),
     ),
   );
   return HangarScene;
