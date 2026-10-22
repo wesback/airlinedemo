@@ -132,7 +132,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
     };
     return createElement(
       'div',
-      { 'data-hangar-reduced-motion': reduced ? 'true' : 'false', 'data-hangar-camera-duration': String(controllers.camera.transitionDuration), 'data-hangar-avatar-duration': String(reduced ? 0 : 240) },
+      { 'data-hangar-reduced-motion': reduced ? 'true' : 'false', 'data-hangar-camera-duration': String(controllers.camera.transitionDuration), 'data-hangar-avatar-duration': String(controllers.avatar.transitionDuration), 'data-hangar-avatar-position': `${avatarState.x},${avatarState.z}` },
       createElement('section', { 'data-hangar-camera-region': true, 'aria-label': 'Camera controls' },
         createElement('button', { type: 'button', onClick: () => navigateCamera('overview') }, 'Overview'),
         createElement('button', { type: 'button', onClick: () => navigateCamera('aircraft') }, 'Aircraft'),
@@ -144,7 +144,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
         createElement('ambientLight', { intensity: 1 }),
         createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
-        createElement('mesh', { position: [0, 0, 0] },
+        createElement('mesh', { position: [avatarState.x, 0, avatarState.z] },
           createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
           createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
         ),

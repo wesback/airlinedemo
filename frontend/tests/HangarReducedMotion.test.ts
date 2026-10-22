@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   HANGAR_REDUCED_MOTION_STORAGE_KEY,
   HangarReducedMotion,
@@ -9,6 +11,11 @@ import {
   shouldReduceHangarMotion,
 } from '../src/hangar/reducedMotion';
 import { createHangarCameraController } from '../src/hangar/cameraController';
+import { createHangarSceneMotionControllers, loadHangarScene } from '../src/hangar/entryController';
+
+vi.mock('@react-three/fiber', () => ({
+  Canvas: ({ children }: { children?: unknown }) => children,
+}));
 
 const memoryStorage = () => {
   const values = new Map<string, string>();
@@ -19,7 +26,7 @@ const memoryStorage = () => {
   };
 };
 
-afterEach(() => sessionStorage.clear());
+afterEach(() => { cleanup(); sessionStorage.clear(); });
 
 describe('HangarReducedMotion', () => {
   it('HangarReducedMotion applies system preference', () => {
@@ -46,6 +53,23 @@ describe('HangarReducedMotion', () => {
     expect(avatar.move({ x: 4, z: -2 }, 240)).toEqual({ target: { x: 4, z: -2 }, duration: 0, immediate: true });
     expect(avatar.getState()).toEqual({ x: 4, z: -2 });
     expect(avatar.transitionDuration).toBe(0);
+  });
+
+  it('HangarReducedMotion connects avatar and camera targets to the rendered scene', async () => {
+    const storage = memoryStorage();
+    const motion = new HangarReducedMotion(() => ({ matches: true }), storage);
+    const controllers = createHangarSceneMotionControllers();
+    controllers.motion.setOverride(true);
+    const Scene = await loadHangarScene(controllers);
+    render(createElement(Scene));
+
+    expect(screen.getByText('Move avatar').closest('[data-hangar-avatar-position]')?.getAttribute('data-hangar-avatar-position')).toBe('0,0');
+    expect(screen.getByText('Move avatar').closest('[data-hangar-avatar-duration]')?.getAttribute('data-hangar-avatar-duration')).toBe('0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move avatar' }));
+    expect(screen.getByText('Move avatar').closest('[data-hangar-avatar-position]')?.getAttribute('data-hangar-avatar-position')).toBe('4,-2');
+    expect(controllers.avatar.getState()).toEqual({ x: 4, z: -2 });
+    expect(controllers.avatar.transitionDuration).toBe(0);
   });
 
   it('HangarReducedMotion session override', () => {
