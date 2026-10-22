@@ -5,6 +5,7 @@ import {
   HANGAR_MAX_TOTAL_BYTES,
   validateHangarAssetPolicy,
   validateHangarAssetPolicyResult,
+  validateHangarResourcePolicy,
 } from '../src/hangar/assetPolicy';
 
 const grant = (overrides: Record<string, unknown> = {}) => ({
@@ -32,6 +33,21 @@ describe('Hangar asset policy', () => {
     expect(() => validateHangarAssetPolicy(null)).toThrow(HANGAR_ASSET_INVALID);
   });
 
+  it('rejects external resource URIs and embedded script content', () => {
+    for (const resource of ['https://cdn.example/texture.png', { url: 'https://cdn.example/model.glb', kind: 'model' }, { path: 'assets/font.woff2', kind: 'font' }, { markup: '<script>alert(1)</script>' }]) {
+      expect(validateHangarAssetPolicyResult(resource).valid).toBe(false);
+      expect(() => validateHangarResourcePolicy(resource)).toThrow();
+    }
+    expect(() => validateHangarResourcePolicy({ embedded: true, kind: 'image/png', path: 'assets/texture.png' })).not.toThrow();
+  });
+
+  it('rejects real identity and missing synthetic rack or avatar markers', () => {
+    expect(validateHangarAssetPolicyResult({ assets: [grant({ avatar: true, hardHatNode: 'HardHat', manifestHardHatNode: 'HardHat', syntheticMarkerDeclaration: 'Synthetic avatar; no real person', realPerson: true })] }).valid).toBe(false);
+    expect(validateHangarAssetPolicyResult({ assets: [grant({ rack: true, synthetic: false, syntheticMarkerDeclaration: 'Synthetic rack; fictional aircraft' })] }).valid).toBe(false);
+    expect(validateHangarAssetPolicyResult({ assets: [grant({ avatar: true, manifestHardHatNode: 'HardHat', syntheticMarkerDeclaration: 'Synthetic avatar', hardHatNode: 'OtherNode' })] }).valid).toBe(false);
+    expect(validateHangarAssetPolicyResult({ assets: [grant({ avatar: true, hardHatNode: 'HardHat', manifestHardHatNode: 'HardHat', syntheticMarkerDeclaration: 'Synthetic avatar' })] }).valid).toBe(true);
+  });
+
   it('enforces exact per-model, JSON, and aggregate asset budgets', () => {
     expect(validateHangarAssetPolicyResult({ assets: [{ ...grant(), bytes: HANGAR_MAX_MODEL_BYTES }] }).valid).toBe(true);
     expect(validateHangarAssetPolicyResult({ assets: [{ ...grant(), bytes: HANGAR_MAX_MODEL_BYTES + 1 }] }).valid).toBe(false);
@@ -41,5 +57,6 @@ describe('Hangar asset policy', () => {
     expect(validateHangarAssetPolicyResult({ assets: [grant({ bytes: HANGAR_MAX_MODEL_BYTES }), grant({ bytes: HANGAR_MAX_MODEL_BYTES }), grant({ path: 'assets/texture.png', type: 'texture', bytes: 5_242_881 })] }).valid).toBe(false);
     expect(validateHangarAssetPolicyResult({ totalBytes: HANGAR_MAX_TOTAL_BYTES, largestModelBytes: HANGAR_MAX_MODEL_BYTES, jsonBytes: 1_048_576 }).valid).toBe(true);
     expect(validateHangarAssetPolicyResult({ totalBytes: HANGAR_MAX_TOTAL_BYTES + 1 }).valid).toBe(false);
+    expect(validateHangarAssetPolicyResult({ totalBytes: 1, largestModelBytes: HANGAR_MAX_MODEL_BYTES, jsonBytes: 1_048_576 }).valid).toBe(true);
   });
 });

@@ -55,7 +55,7 @@ const isModel = (record: HangarAssetRecord): boolean =>
   ['model', 'glb', 'gltf', 'mesh'].includes(String(record.kind ?? record.type ?? '').toLowerCase()) || /\.(glb|gltf)$/i.test(record.path);
 
 // A small standards implementation avoids making provenance admission asynchronous.
-function sha256(bytes: Uint8Array): string {
+export function computeHangarAssetChecksum(bytes: Uint8Array): string {
   const rightRotate = (value: number, amount: number) => (value >>> amount) | (value << (32 - amount));
   const constants = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
   const bitLength = bytes.length * 8;
@@ -108,12 +108,13 @@ export function validateHangarAssetRecord(record: unknown): true {
   const checksum = asset.checksum ?? asset.sha256 ?? asset.sha256Checksum ?? asset.sha256_checksum;
   if (typeof checksum !== 'string' || !/^[a-fA-F0-9]{64}$/.test(checksum)) invalidAsset();
   if (asset.synthetic !== true && asset.syntheticMarker !== true) invalidAsset();
-  const actualChecksum = asset.actualChecksum ?? asset.computedChecksum ?? asset.bytesSha256 ?? asset.actualSha256 ?? asset.computedSha256;
   const rawBytes = asset.assetBytes ?? asset.contentBytes ?? asset.data ?? (asset.bytes instanceof Uint8Array ? asset.bytes : undefined);
-  let computedChecksum: string | undefined;
-  if (rawBytes instanceof Uint8Array) computedChecksum = sha256(rawBytes);
-  const verifiedChecksum = typeof actualChecksum === 'string' ? actualChecksum : computedChecksum;
-  if (typeof verifiedChecksum !== 'string' || verifiedChecksum.toLowerCase() !== (checksum as string).toLowerCase()) invalidAsset();
+  if (rawBytes instanceof Uint8Array) {
+    if (computeHangarAssetChecksum(rawBytes).toLowerCase() !== (checksum as string).toLowerCase()) invalidAsset();
+  } else {
+    const suppliedChecksum = asset.actualChecksum ?? asset.computedChecksum ?? asset.bytesSha256 ?? asset.actualSha256 ?? asset.computedSha256;
+    if (typeof suppliedChecksum === 'string' && suppliedChecksum.toLowerCase() !== (checksum as string).toLowerCase()) invalidAsset();
+  }
   const identityContext = `${String(asset.role ?? '')} ${String(asset.kind ?? '')} ${String(asset.type ?? '')} ${String(asset.path ?? '')}`.toLowerCase();
   const rackOrAvatar = asset.rack === true || asset.avatar === true || identityContext.includes('rack') || identityContext.includes('avatar');
   if (rackOrAvatar) {
@@ -121,8 +122,10 @@ export function validateHangarAssetRecord(record: unknown): true {
     if (!declaration || !/(synthetic|fictional|no real|no brand)/i.test(declaration)) invalidAsset();
     if (asset.realPerson === true || asset.realAircraftType === true || asset.brandDeclaration === 'real' || asset.realPersonLikeness === true || asset.realAircraftTypeDepicted === true || asset.brandMarks === true) invalidAsset();
     if (asset.avatar === true || identityContext.includes('avatar')) {
-      const hat = asset.hardHatNode ?? asset.manifestHardHatNode;
-      if (typeof hat !== 'string' || hat.trim().length === 0) invalidAsset();
+      const nodeHat = asset.hardHatNode ?? asset.hardhatNode;
+      const manifestHat = asset.manifestHardHatNode;
+      if (typeof manifestHat !== 'string' || manifestHat.trim().length === 0) invalidAsset();
+      if (typeof nodeHat !== 'string' || nodeHat.trim().length === 0 || nodeHat !== manifestHat) invalidAsset();
     }
   }
   const rights = asset.rightsBasis ?? asset.rights;
@@ -210,7 +213,8 @@ export function validateHangarResource(resource: unknown): true {
   const candidate = value.url ?? value.src ?? value.path ?? value.assetPath ?? value.relativePath ?? value.resourceUrl;
   if (candidate !== undefined) validateUri(candidate);
   else {
-    if (value.embedded === true || /^(embedded-png|embedded-jpeg|embedded-texture)$/i.test(String(value.kind ?? value.type ?? ''))) return true;
+    const kind = String(value.kind ?? value.type ?? value.mimeType ?? '').toLowerCase();
+    if (value.embedded === true && (kind === 'embedded-png' || kind === 'embedded-jpeg' || kind === 'image/png' || kind === 'image/jpeg')) return true;
     reject();
   }
   const kind = String(value.kind ?? value.type ?? '').toLowerCase();
