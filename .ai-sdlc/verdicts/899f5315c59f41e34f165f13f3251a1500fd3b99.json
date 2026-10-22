@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 525,
+  "branch": "ai-sdlc/issue-525",
+  "commitSha": "899f5315c59f41e34f165f13f3251a1500fd3b99",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The initial scope is applied, but later scope changes do not update the rendered entries or selection controller. This can expose and activate a case that the current scope excludes.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/non3dDataRoom.tsx",
+          "line": 39,
+          "message": "A01:2025 Broken Access Control: reapply the current scope when it changes. A narrowed scope currently leaves previously in-scope cases visible and activatable.",
+          "confidence": 0.93,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The component initializes entries from the initial scope, then the effect skips projection once loaded is true. With initial entries, loaded starts true; later scope changes therefore leave the old entries in state and in the selection controller.",
+            "failureScenario": "Render with scope ['cp-case-a', 'cp-case-c'], then change scope to ['cp-case-a']. cp-case-c remains visible and its button can invoke the selection handler despite being out of scope."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The tests cover unsupported and stale summaries and exercise scoped activation, but the parity test can pass when case order or some available source summaries differ from the rack menu.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarNon3dDataRoom.test.tsx",
+          "line": 20,
+          "message": "Acceptance criterion 1 is not fully tested by `HangarNon3dDataRoom parity with rack menu`: it does not assert the exact case order or all five available source mode and coverage strings. Add exact assertions for both.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The parity test checks the list length and each case's presence, but never asserts their order. For available summaries it checks exact text for only technical and maintenance; the stale-summary assertions exercise a separate reader.",
+            "failureScenario": "If the list reorders the cases or renders incorrect available mode or coverage text for one of the other three sources, the parity test still passes, despite acceptance criterion 1 requiring the same ordered aircraft and all five source summaries."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The initial scope is applied, but later scope changes leave stale entries active. This allows selection of a case that is no longer in scope.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/non3dDataRoom.tsx",
+          "line": 36,
+          "message": "A01:2025 Broken Access Control: entries are not re-filtered when scope changes, so a case removed from scope remains visible and selectable.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The component applies scope only when initializing entries state. When scope changes, the effect does not update entries because loaded is already true; the controller continues using those stale entries and its buttons remain activatable.",
+            "failureScenario": "A caller initially supplies scope ['cp-case-a'], then changes it to ['cp-case-b']. The list still renders case A, and activating it invokes the selection handler although A is now out of scope."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarNon3dDataRoom.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
