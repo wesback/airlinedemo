@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { validateHangarDependencyAudit } from '../src/hangar/dependencyPins.ts';
 
 function runSeverityGate(severity, dotnetLines = '') {
   const workflow = readFileSync('../.github/workflows/build.yml', 'utf8');
@@ -52,6 +53,65 @@ describe('dependency audit workflow', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr.trim()).toBe(`::error::dotnet Example.Package has a ${expectedSeverity} finding with no valid exception`);
+  });
+
+  it('hangar packages are covered by the existing npm audit evidence contract', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+    const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+    const workflow = readFileSync('../.github/workflows/build.yml', 'utf8');
+
+    for (const packageName of ['three', '@react-three/fiber']) {
+      expect(manifest.dependencies[packageName]).toBeTruthy();
+      expect(lock.packages[`node_modules/${packageName}`]?.version).toBe(manifest.dependencies[packageName]);
+    }
+    const auditStepStart = workflow.indexOf('      - name: Audit (npm)\n');
+    expect(auditStepStart).toBeGreaterThanOrEqual(0);
+    const auditStepEnd = workflow.indexOf('\n      - name:', auditStepStart + 1);
+    const auditStep = workflow.slice(auditStepStart, auditStepEnd === -1 ? undefined : auditStepEnd);
+    expect(auditStep).toContain('working-directory: frontend');
+    expect(auditStep).toContain('npm audit --json > ../artifacts/audit/npm-audit.json');
+
+    expect(validateHangarDependencyAudit(manifest, lock, {
+      metadata: {},
+      vulnerabilities: { three: { severity: 'low' } },
+    })).toBe(true);
+    expect(() => validateHangarDependencyAudit(manifest, lock, {
+      vulnerabilities: { three: { severity: 'low' } },
+    })).toThrow('Hangar audit evidence is missing metadata or contains an npm error');
+    expect(() => validateHangarDependencyAudit(manifest, lock, {
+      metadata: {},
+      error: { code: 'EAUDITNOENDPOINT' },
+      vulnerabilities: {},
+    })).toThrow('Hangar audit evidence is missing metadata or contains an npm error');
+
+    const auditRoot = mkdtempSync(join(tmpdir(), 'hangar-npm-audit-'));
+    try {
+      const frontendRoot = join(auditRoot, 'frontend');
+      mkdirSync(join(frontendRoot, 'node_modules/.bin'), { recursive: true });
+      mkdirSync(join(auditRoot, 'artifacts/audit'), { recursive: true });
+      const fakeNpm = join(frontendRoot, 'node_modules/.bin/npm');
+      const npmArgsLog = join(auditRoot, 'npm-args.txt');
+      writeFileSync(fakeNpm, '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HANGAR_FAKE_NPM_ARGS_LOG"\nprintf \'{"metadata":{"vulnerabilities":{"total":0}},"vulnerabilities":{}}\\n\'\n', { mode: 0o755 });
+      const auditStepRunStart = auditStep.indexOf('        run: |\n');
+      const auditRun = auditStep.slice(auditStepRunStart + '        run: |\n'.length)
+        .split('\n')
+        .map(line => line.startsWith('          ') ? line.slice(10) : line)
+        .join('\n');
+      const executed = spawnSync('/bin/bash', ['-c', auditRun], {
+        cwd: frontendRoot,
+        env: { ...process.env, PATH: `${join(frontendRoot, 'node_modules/.bin')}:${process.env.PATH}`, HANGAR_FAKE_NPM_ARGS_LOG: npmArgsLog },
+        encoding: 'utf8',
+      });
+      expect(executed.status).toBe(0);
+      expect(readFileSync(npmArgsLog, 'utf8')).toBe('audit\n--json\n');
+      const evidencePath = join(auditRoot, 'artifacts/audit/npm-audit.json');
+      const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'));
+      expect(evidence.metadata).toEqual({ vulnerabilities: { total: 0 } });
+      expect(evidence.vulnerabilities).toEqual({});
+      expect(validateHangarDependencyAudit(manifest, lock, evidence)).toBe(true);
+    } finally {
+      rmSync(auditRoot, { recursive: true, force: true });
+    }
   });
 
   it('retains the strict npm and .NET high/critical severity gate', () => {
