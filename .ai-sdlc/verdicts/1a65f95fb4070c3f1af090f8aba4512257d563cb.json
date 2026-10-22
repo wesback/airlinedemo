@@ -1,0 +1,252 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 517,
+  "branch": "ai-sdlc/issue-517",
+  "commitSha": "1a65f95fb4070c3f1af090f8aba4512257d563cb",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation has a criterion-mapped test for each behavior, but the tests do not exercise the future-step boundary or prove that keyboard activation loads exact historical evidence.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 13,
+          "message": "The test does not cover the acceptance criterion's future-step boundary. Add an input with an unrecorded step and assert it is unavailable or visibly invalid, never completed.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named journey test builds history containing all six labels, so it never exercises a step with no matching server event.",
+            "failureScenario": "If buildCaseAJourney marks an unrecorded future step completed and available, the test still passes because it only checks the six labels and the recorded steps."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 23,
+          "message": "The test does not prove the acceptance criterion's keyboard-operable control or exact historical evidence. Assert the adapter is called after keyboard activation and assert the returned history contains the expected witness details.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The older-history test supplies an event referencing old-witness but no evidence array, then only asserts the resulting evidence length is greater than or equal to zero. Its keyboard interaction also passes if the initial status remains unchanged.",
+            "failureScenario": "If older-history loading drops all historical evidence, or Enter does not open the history, the test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The journey tests cover several recorded-step and access-failure cases, but they do not prove the future-step boundary or retention of older-history evidence required by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 22,
+          "message": "The first acceptance criterion requires an unrecorded future step to remain unavailable and visibly invalid, but the named test never asserts that behavior.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The first test builds a journey with only finding, review, and request events, but does not assert the state of the unrecorded future steps. The later Review button assertion uses a recorded review step.",
+            "failureScenario": "If buildCaseAJourney marks an unrecorded future step available or completed, these assertions still pass; the negative case for the future-step boundary is untested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 29,
+          "message": "The older-history test does not prove that exact historical evidence is retained; its evidence assertion is vacuous.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The older-history test's adapter response contains an event with a witness ID but no evidence collection. The assertion only checks that the resulting evidence length is greater than or equal to zero.",
+            "failureScenario": "If openCaseAOlderHistory drops historical evidence, this assertion still passes, so the test does not verify the criterion's exact historical evidence requirement."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The older-history path can render content from an event belonging to another case, and the named history test does not verify that the exact historical event and evidence are returned.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/guidedJourney.ts",
+          "line": 43,
+          "message": "Out-of-case events are marked invalid but their content is still rendered. Reject or omit the event content when its caseId does not match. OWASP A01:2025.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "An older-history response can contain an event whose caseId differs from the requested case. The code marks that step invalid but still retains and renders its summary and actor label.",
+            "failureScenario": "A response with the requested caseId, runId, and basisId but an event for another case can expose that event's summary and actor label in the journey."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 25,
+          "message": "The older-history test does not assert the exact returned event or witness; its evidence-count assertion is tautological. Add assertions for the expected historical event and evidence.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test named by the older-history criterion checks that the adapter is called, but its historical evidence assertion only checks that the evidence count is at least zero.",
+            "failureScenario": "If older-history loading returns no historical evidence or the wrong event and witness, this test still passes, so it does not verify the criterion's exact historical evidence requirement."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarGuidedJourney.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
