@@ -1,4 +1,4 @@
-import { createElement, useState, type KeyboardEvent } from 'react';
+import { createElement, useState } from 'react';
 
 const isObject=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
 const text=(v:unknown):string|null=>typeof v==='string'&&v.trim().length>0?v.trim():null;
@@ -64,12 +64,11 @@ export type GuidedJourneyProps={scene?:unknown;envelope?:unknown;adapter?:OlderH
 export function GuidedJourney({scene,envelope,adapter,onActivate}:GuidedJourneyProps){
   const source=scene??envelope; const initial=buildCaseAJourney(source); const [journey,setJourney]=useState(initial); const [message,setMessage]=useState<string|null>(initial.olderHistoryAvailable?'ARR older history available':''); const [loading,setLoading]=useState(false);
   async function open(){setLoading(true);const result=await openCaseAOlderHistory(journey,adapter);setLoading(false);if(result.ok&&result.history)setJourney(result.history);setMessage(result.error??result.history?.olderHistoryAccess??null);}
-  function key(event:KeyboardEvent<HTMLButtonElement>,activate:()=>unknown){if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}}
   const h=createElement;
   return h('section',{ 'aria-label':'Case A guided journey'},
     h('h2',null,'Case A guided journey'),
     message?h('p',{role:message.includes('Unable')||message.includes('scope')?'alert':'status'},message):null,
-    journey.olderHistoryAvailable?h('button',{type:'button',onClick:()=>void open(),onKeyDown:(event:KeyboardEvent<HTMLButtonElement>)=>key(event,()=>void open()),disabled:loading,'aria-label':'Open delivered ARR older history'},'Open delivered ARR older history'):null,
+    journey.olderHistoryAvailable?h('button',{type:'button',onClick:()=>void open(),disabled:loading,'aria-label':'Open delivered ARR older history'},'Open delivered ARR older history'):null,
     h('ol',{ 'aria-label':'Case A journey steps'},journey.steps.map((step)=>h('li',{key:step.id},
       h('button',{type:'button',disabled:!step.available,'aria-disabled':!step.available,onClick:()=>onActivate?.(),'aria-label':step.label},step.label),
       step.summary?h('span',null,` — ${step.summary}`):null,
