@@ -17,7 +17,6 @@ export function FollowCameraControl({ controller, onFollowChange, onOverview, on
   const keyDown = (event: { key?: unknown; target?: EventTarget | null; currentTarget?: EventTarget | null; preventDefault?: () => void }) => {
     const key = typeof event.key === 'string' ? event.key : '';
     if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','=','-','_','Tab'].includes(key) || key === 'Tab') return;
-    if (event.target !== event.currentTarget && event.target instanceof HTMLButtonElement) return;
     change(controller.key(key));
     event.preventDefault?.();
   };
@@ -25,7 +24,7 @@ export function FollowCameraControl({ controller, onFollowChange, onOverview, on
     createElement('button', { type: 'button', 'aria-pressed': state.follow, onClick: toggle }, state.follow ? 'Follow avatar: on' : 'Follow avatar: off'),
     createElement('button', { type: 'button', onClick: overview }, 'Overview'),
     createElement('button', { type: 'button', onClick: aircraft }, 'Aircraft'),
-    createElement('button', { type: 'button', onKeyDown: keyDown }, 'Orbit camera'),
+    createElement('button', { type: 'button' }, 'Orbit camera'),
   );
 }
 

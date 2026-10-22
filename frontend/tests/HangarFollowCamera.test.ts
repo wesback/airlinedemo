@@ -37,14 +37,31 @@ describe('HangarFollowCamera', () => {
     expect(camera.getState().azimuthDegrees).toBe(350);
     const before = camera.getState();
     expect(camera.applyAvatarStep(null, false).target).toEqual(before);
-    expect(camera.applyPreset('overview').follow).toBe(false);
-    expect(camera.applyPreset('aircraft').follow).toBe(false);
+    const overview = camera.applyPreset('overview');
+    expect(overview.follow).toBe(false);
+    expect(overview.radius).toBe(30);
+    expect(overview.polarDegrees).toBe(45);
+    expect(overview.position.x).toBeCloseTo(30 * Math.sin(45 * Math.PI / 180) * Math.sin(350 * Math.PI / 180), 10);
+    expect(overview.position.y).toBeCloseTo(1 + 30 * Math.cos(45 * Math.PI / 180), 10);
+    expect(overview.position.z).toBeCloseTo(30 * Math.sin(45 * Math.PI / 180) * Math.cos(350 * Math.PI / 180), 10);
+    const aircraft = camera.applyPreset('aircraft');
+    expect(aircraft.follow).toBe(false);
+    expect(aircraft.radius).toBe(20);
+    expect(aircraft.polarDegrees).toBe(35);
+    expect(aircraft.position.x).toBeCloseTo(20 * Math.sin(35 * Math.PI / 180) * Math.sin(350 * Math.PI / 180), 10);
+    expect(aircraft.position.y).toBeCloseTo(1 + 20 * Math.cos(35 * Math.PI / 180), 10);
+    expect(aircraft.position.z).toBeCloseTo(20 * Math.sin(35 * Math.PI / 180) * Math.cos(350 * Math.PI / 180), 10);
     camera.turnOn();
     expect(camera.getState()).toMatchObject({azimuthDegrees:350,radius:6,polarDegrees:55,follow:true});
     for(let i=0;i<10;i++) camera.orbit(370,90);
     expect(camera.getState().polarDegrees).toBeLessThanOrEqual(85);
 
     render(React.createElement(FollowCameraControl,{controller:camera,onFollowChange:vi.fn()}));
+    const orbitButton = screen.getByRole('button',{name:'Orbit camera'});
+    const azimuthBeforeKey = camera.getState().azimuthDegrees;
+    fireEvent.keyDown(orbitButton,{key:'ArrowLeft'});
+    expect(camera.getState().azimuthDegrees).toBe((azimuthBeforeKey - 10 + 360) % 360);
+    expect(camera.getState().polarDegrees).toBe(85);
     fireEvent.click(screen.getByRole('button',{name:'Follow avatar: on'}));
     expect(camera.getState().follow).toBe(false);
     cleanup();
@@ -56,8 +73,14 @@ describe('HangarFollowCamera', () => {
     camera.applyAvatarStep({x:10,y:0,z:10});
     now += 400;
     camera.update(now);
-    expect(hangarAvatarTarget({x:10,y:0,z:10}).x-camera.getState().target.x).toBeLessThanOrEqual(0.05);
-    expect(hangarAvatarTarget({x:10,y:0,z:10}).y-camera.getState().target.y).toBeLessThanOrEqual(0.05);
+    const easedTarget = hangarAvatarTarget({x:10,y:0,z:10});
+    const easedState = camera.getState().target;
+    const targetDistance = Math.hypot(
+      easedTarget.x - easedState.x,
+      easedTarget.y - easedState.y,
+      easedTarget.z - easedState.z,
+    );
+    expect(targetDistance).toBeLessThanOrEqual(0.05);
     now = 1400;
     camera.applyAvatarStep({x:20,y:0,z:20});
     now += 401;
