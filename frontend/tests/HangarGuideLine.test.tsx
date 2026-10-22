@@ -51,14 +51,29 @@ describe('Hangar guide line',()=>{
     expect(guide.escape()).toMatchObject({status:'cleared',line:false,liveText:null});
   });
 
+  it('Hangar guide line connects Data Room confirmation to the shared route',()=>{
+    const selection=vi.fn(); const closeMenu=vi.fn();
+    const entries=[{caseId:'AIR-1',name:'Air One',category:'narrow-body',unavailable:false,sources:null}];
+    const rendered=render(<HangarGuideLineAdapter config={config} entries={entries} markers={{'AIR-1':{x:4,z:-4}}} avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Open data rack'}));
+    fireEvent.click(screen.getByRole('menuitem',{name:'Air One'}));
+    expect(closeMenu).toHaveBeenCalledTimes(1);
+    expect(rendered.container.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+    expect(selection).toHaveBeenCalledTimes(0);
+  });
+
   it('Hangar guide line reduced motion and transport isolation',()=>{
     const transport=vi.fn(); const selection=vi.fn();
     const {container}=render(<HangarGuideLineAdapter config={config} marker={{x:4,z:4}} avatar={{x:-4,z:-4}} aircraftId="AIR-1" onSelect={selection} reducedMotion transport={transport}/>);
     expect(container.querySelector('[data-static-line="true"]')).toBeTruthy();
     expect(container.querySelector('[aria-hidden="true"]')).not.toBeNull();
     const walk=screen.getByRole('region',{name:'Walk region'}); fireEvent.keyDown(walk,{key:'ArrowRight'});
+    expect(container.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-hangar-static-guide]')).not.toBeNull();
+    expect(container.querySelector('polyline')).not.toBeNull();
     fireEvent.keyDown(walk,{key:'Escape'});
     expect(screen.queryByRole('alert')).toBeNull(); expect(container.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    expect(container.querySelector('[data-hangar-static-guide]')).toBeNull();
     expect(container.querySelector('polyline')).toBeNull();
     expect(transport).not.toHaveBeenCalled(); expect(selection).not.toHaveBeenCalled();
     expect(container.querySelector('[role="status"],[role="button"],[aria-current],[aria-readonly],[aria-disabled]')).toBeNull();
