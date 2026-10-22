@@ -29,6 +29,21 @@ export default function App() {
   const [refresh, setRefresh] = useState(0);
   const [traceView, setTraceView] = useState<InvestigationTraceView | null>(null);
   const traceRequestId = useRef(0);
+  const [hangarView, setHangarView] = useState<'regular' | 'loading' | '3d' | 'fallback' | 'contract-error'>('regular');
+  const [hangarFallback, setHangarFallback] = useState<string | null>(null);
+  const [hangarContractVersion, setHangarContractVersion] = useState<number>(1);
+
+  async function enterHangar() {
+    setHangarView('loading');
+    const { getHangarEntryDecision } = await import('./hangar/entryController');
+    const decision = getHangarEntryDecision({ contractVersion: hangarContractVersion });
+    if (decision.mode === '3d') setHangarView('3d');
+    else if (decision.fallbackReason === 'contract_invalid') setHangarView('contract-error');
+    else {
+      setHangarFallback(decision.fallbackReason);
+      setHangarView('fallback');
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -152,6 +167,29 @@ export default function App() {
               <p>Revision: {data.caseState.revision}</p>
               <p>Evidence basis: {data.caseState.basis.length}</p>
               <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
+              <button type="button" onClick={() => { void enterHangar(); }}>Enter Hangar</button>
+              {hangarView !== 'regular' && hangarView !== 'loading' && (
+                <section aria-labelledby="hangar-heading">
+                  <h2 id="hangar-heading">Hangar</h2>
+                  {hangarView === '3d' && <div aria-label="Hangar 3D scene"><canvas aria-label="3D hangar scene" /></div>}
+                  {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'
+                    ? 'Your browser is not supported. Use the current or previous major version of Chrome or Edge.'
+                    : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
+                  {hangarView === 'contract-error' && <p role="alert">Unsupported hangar contract version {hangarContractVersion}. Use the supported contract version.</p>}
+                  {(hangarView === 'fallback' || hangarView === 'contract-error') && (
+                    <section id="non-3d-list" aria-labelledby="non-3d-heading">
+                      <h3 id="non-3d-heading">Non-3D hangar</h3>
+                      <ul>
+                        <li><button type="button">Select case</button></li>
+                        <li><button type="button">View status</button></li>
+                        <li><button type="button">View evidence</button></li>
+                        <li><button type="button">Follow journey</button></li>
+                        <li><button type="button">Open review</button></li>
+                      </ul>
+                    </section>
+                  )}
+                </section>
+              )}
               <CapabilityDashboard
                 data={data.dashboard}
                 decisionReason={reason}
