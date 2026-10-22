@@ -1,0 +1,240 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 512,
+  "branch": "ai-sdlc/issue-512",
+  "commitSha": "4ffc3e99f938ff837f4c17786727edcff099d6aa",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The component misses the visible mapping error for an initially selected object and can expose actions for evidence explicitly marked unusable.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/selectionPanel.tsx",
+          "line": 38,
+          "message": "A preselected component with an unresolved evidence mapping does not show the required visible mapping error.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The component initializes selectedId from identifier/objectId and resolves the selection, but initializes evidenceError to null. The render displays evidenceError rather than selection.error.",
+            "failureScenario": "Render a projected component with a preselected identifier and a missing documentRefs mapping. resolveHangarSelection returns an error, but no activation handler runs to copy it into evidenceError, so the panel shows no unresolved-mapping error."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/selectionPanel.tsx",
+          "line": 28,
+          "message": "Evidence marked unusable can still expose content and witness actions when its processing state is accepted.",
+          "confidence": 0.92,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The resolver treats usableAsEvidence !== true as blocked but stores the processingState as evidence.status. The render determines whether to hide content and witness controls from status text alone.",
+            "failureScenario": "A reference has usableAsEvidence false and processingState accepted, with a matching witness. The resolver stores status accepted, the UI does not classify it as blocked, and it renders the content and page-witness controls."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named test checks the resolver’s error field for a missing mapping, but does not check that the panel visibly reports it. With an initially selected component, the error is not rendered.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/selectionPanel.tsx",
+          "line": 46,
+          "message": "The initial-selection path drops the unresolved evidence error. Display selection.error on initial render so missing or cross-case mappings produce the required visible error.",
+          "confidence": 0.92,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "resolveHangarSelection records an unresolved mapping in selection.error, but the initial render sets evidenceError to null; the JSX displays evidenceError rather than selection.error.",
+            "failureScenario": "Render the panel with a valid component identifier prop and an evidenceIds entry whose documentRefs mapping is missing. The panel opens without a visible unresolved-mapping error, contrary to the second acceptance criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff includes React-rendered evidence data and does not show an injection path. The named tests leave cross-case identifier and evidence rejection behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 11,
+          "message": "The test named for the first acceptance criterion does not cover its cross-case and absent-identifier cases, or assert zero reads when activating a projected object. Add a case that exercises those paths and checks the panel and read count.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test initializes the component with a browser-supplied unknown identifier, but does not exercise activating a projected identifier or a cross-case or absent identifier.",
+            "failureScenario": "A regression that opens a panel or issues a read for a cross-case or absent identifier could pass this test, despite the first acceptance criterion requiring those cases to be rejected."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 17,
+          "message": "The test named for the second acceptance criterion covers only a missing mapping. It does not verify the criterion’s cross-case rejection, visible unresolved-mapping error, or no-fallback behavior.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The evidence test checks a missing mapping by calling resolveHangarSelection directly; it does not exercise a cross-case document reference or assert the rendered error and absence of a content read.",
+            "failureScenario": "A regression that accepts a cross-case document reference or falls back to a latest version could pass the named test, although the second acceptance criterion requires rejection with a visible error and no fallback."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSelectionEvidence.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
