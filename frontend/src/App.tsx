@@ -18,7 +18,19 @@ function loadError(error: unknown): string {
       : 'Unable to load case data. Try again later.';
 }
 
-export default function App() {
+export type HangarEntryAppProps = {
+  hangarContractVersion?: unknown;
+  hangarBrowserSupported?: unknown;
+  hangarWebGl2Probe?: unknown;
+  hangarLazyLoader?: () => unknown | Promise<unknown>;
+};
+
+export default function App({
+  hangarContractVersion: contractVersionProp,
+  hangarBrowserSupported,
+  hangarWebGl2Probe,
+  hangarLazyLoader,
+}: HangarEntryAppProps = {}) {
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
   const [session, setSession] = useState<SignedInSession | null>(null);
   const [data, setData] = useState<Projections | null>(null);
@@ -31,14 +43,28 @@ export default function App() {
   const traceRequestId = useRef(0);
   const [hangarView, setHangarView] = useState<'regular' | 'loading' | '3d' | 'fallback' | 'contract-error'>('regular');
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
-  const [hangarContractVersion, setHangarContractVersion] = useState<number>(1);
+  const [hangarContractVersion] = useState<unknown>(contractVersionProp ?? 1);
+  const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
 
   async function enterHangar() {
     setHangarView('loading');
-    const { getHangarEntryDecision } = await import('./hangar/entryController');
-    const decision = getHangarEntryDecision({ contractVersion: hangarContractVersion });
-    if (decision.mode === '3d') setHangarView('3d');
-    else if (decision.fallbackReason === 'contract_invalid') setHangarView('contract-error');
+    setHangarSceneLoaded(false);
+    const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry } = await import('./hangar/entryController');
+    const browserSupported = hangarBrowserSupported !== undefined
+      ? isHangarBrowserSupported(hangarBrowserSupported)
+      : isHangarBrowserSupported(undefined);
+    const webgl2 = hangarWebGl2Probe !== undefined
+      ? hangarWebGl2Probe as never
+      : probeWebGl2Capability();
+    const decision = await selectHangarEntry({
+      browserSupported,
+      contractVersion: hangarContractVersion,
+      webgl2,
+    }, hangarLazyLoader ?? (() => ({ scene: true })));
+    if (decision.mode === '3d') {
+      setHangarSceneLoaded(true);
+      setHangarView('3d');
+    } else if (decision.fallbackReason === 'contract_invalid') setHangarView('contract-error');
     else {
       setHangarFallback(decision.fallbackReason);
       setHangarView('fallback');
@@ -171,11 +197,11 @@ export default function App() {
               {hangarView !== 'regular' && hangarView !== 'loading' && (
                 <section aria-labelledby="hangar-heading">
                   <h2 id="hangar-heading">Hangar</h2>
-                  {hangarView === '3d' && <div aria-label="Hangar 3D scene"><canvas aria-label="3D hangar scene" /></div>}
+                  {hangarView === '3d' && hangarSceneLoaded && <div aria-label="Hangar 3D scene"><canvas aria-label="3D hangar scene" /></div>}
                   {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'
                     ? 'Your browser is not supported. Use the current or previous major version of Chrome or Edge.'
                     : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
-                  {hangarView === 'contract-error' && <p role="alert">Unsupported hangar contract version {hangarContractVersion}. Use the supported contract version.</p>}
+                  {hangarView === 'contract-error' && <p role="alert">Unsupported hangar contract version {String(hangarContractVersion)}. <a href="#non-3d-list">Use the supported contract version in the non-3D list.</a></p>}
                   {(hangarView === 'fallback' || hangarView === 'contract-error') && (
                     <section id="non-3d-list" aria-labelledby="non-3d-heading">
                       <h3 id="non-3d-heading">Non-3D hangar</h3>
