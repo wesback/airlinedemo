@@ -37,8 +37,6 @@ export type HangarAssetRecord = {
   avatar?: boolean;
   assetBytes?: Uint8Array;
   data?: unknown;
-  actualChecksum?: string;
-  computedChecksum?: string;
   bytes?: number;
   size?: number;
   byteLength?: number;
@@ -47,9 +45,9 @@ export type HangarAssetRecord = {
 };
 
 const invalidAsset = (): never => { throw new Error(HANGAR_ASSET_INVALID); };
-const safeSize = (record: HangarAssetRecord): number => {
-  const value = record.bytes ?? record.byteLength ?? record.sizeBytes ?? record.size;
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+const recordBytes = (record: Record<string, unknown>): Uint8Array | undefined => {
+  const value = record.assetBytes ?? record.contentBytes ?? record.data;
+  return value instanceof Uint8Array ? value : undefined;
 };
 const isModel = (record: HangarAssetRecord): boolean =>
   ['model', 'glb', 'gltf', 'mesh'].includes(String(record.kind ?? record.type ?? '').toLowerCase()) || /\.(glb|gltf)$/i.test(record.path);
@@ -110,18 +108,11 @@ export function validateHangarAssetRecord(record: unknown): true {
   if (typeof checksum !== 'string' || !/^[a-fA-F0-9]{64}$/.test(checksum)) invalidAsset();
   if (asset.synthetic !== true) invalidAsset();
   if (asset.syntheticMarker !== undefined && asset.syntheticMarker !== true) invalidAsset();
-  const rawBytes = asset.assetBytes ?? asset.contentBytes ?? asset.data ?? (asset.bytes instanceof Uint8Array ? asset.bytes : undefined);
-  let verifiedChecksum = false;
-  if (rawBytes instanceof Uint8Array) {
-    verifiedChecksum = computeHangarAssetChecksum(rawBytes).toLowerCase() === (checksum as string).toLowerCase();
-  } else {
-    const suppliedChecksum = asset.actualChecksum ?? asset.computedChecksum ?? asset.bytesSha256 ?? asset.actualSha256 ?? asset.computedSha256;
-    if (typeof suppliedChecksum === 'string') {
-      verifiedChecksum = /^[a-fA-F0-9]{64}$/.test(suppliedChecksum)
-        && suppliedChecksum.toLowerCase() === (checksum as string).toLowerCase();
-    }
-  }
-  if (!verifiedChecksum) invalidAsset();
+  // The checksum is always computed from the bytes being admitted; a caller-supplied digest is never trusted.
+  const rawBytes = recordBytes(asset);
+  if (!rawBytes || computeHangarAssetChecksum(rawBytes) !== (checksum as string).toLowerCase()) invalidAsset();
+  const declaredSize = asset.bytes ?? asset.byteLength ?? asset.sizeBytes ?? asset.size;
+  if (declaredSize !== undefined && declaredSize !== rawBytes!.length) invalidAsset();
   const identityContext = `${String(asset.role ?? '')} ${String(asset.kind ?? '')} ${String(asset.type ?? '')} ${String(asset.path ?? '')}`.toLowerCase();
   const rackOrAvatar = asset.rack === true || asset.avatar === true || identityContext.includes('rack') || identityContext.includes('avatar');
   if (rackOrAvatar) {
@@ -166,9 +157,7 @@ export function validateHangarAssetBudgets(records: unknown): true {
   for (const record of records) {
     validateHangarAssetRecord(record);
     const asset = record as HangarAssetRecord;
-    const rawSize = asset.bytes ?? asset.byteLength ?? asset.sizeBytes ?? asset.size;
-    if (typeof rawSize !== 'number' || !Number.isSafeInteger(rawSize) || rawSize < 0) invalidAsset();
-    const size = Number(rawSize);
+    const size = recordBytes(asset as Record<string, unknown>)?.length ?? invalidAsset();
     if (isModel(asset) && size > HANGAR_MODEL_LIMIT) invalidAsset();
     total += size;
     if (!Number.isSafeInteger(total) || total > HANGAR_TOTAL_ASSET_LIMIT) invalidAsset();
