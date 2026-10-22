@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent } from '@testing-library/dom';
+import userEvent from '@testing-library/user-event';
 import {
   HangarCameraController,
   HANGAR_TARGET_RADIUS_ERROR,
@@ -28,6 +29,11 @@ describe('HangarCameraController', () => {
       expect(camera.visibleError).toBe(HANGAR_TARGET_RADIUS_ERROR);
     }
     expect(camera.pointerOrbit({ azimuthDelta: 1000, polarDelta: 1000 }).state).toMatchObject({ radius: 20, polarDegrees: 85 });
+
+    for (let index = 0; index < 20; index += 1) camera.key('-');
+    expect(camera.getState().radius).toBe(60);
+    for (let index = 0; index < 20; index += 1) camera.key('+');
+    expect(camera.getState().radius).toBe(12);
   });
 
   it('HangarCameraController keyboard deltas', () => {
@@ -51,7 +57,7 @@ describe('HangarCameraController', () => {
     expect(camera.getState().azimuthDegrees).toBe(0);
   });
 
-  it('HangarCameraController never traps Tab or captures outside controls', () => {
+  it('HangarCameraController never traps Tab or captures outside controls', async () => {
     document.body.innerHTML = `
       <button id="outside">Outside</button>
       <input id="text" aria-label="Search">
@@ -62,6 +68,11 @@ describe('HangarCameraController', () => {
     const region = document.getElementById('camera')!;
     region.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
     expect(shouldCaptureHangarCameraKey({ key: 'Tab', target: region, currentTarget: region })).toBe(false);
+
+    const user = userEvent.setup();
+    region.focus();
+    await user.tab();
+    expect(document.activeElement?.id).toBe('camera-control');
 
     for (const id of ['outside', 'text', 'evidence', 'evidence-control', 'camera-control']) {
       const target = document.getElementById(id)!;
