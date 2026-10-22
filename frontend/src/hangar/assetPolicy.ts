@@ -206,12 +206,31 @@ export function validateHangarResource(resource: unknown): true {
     for (const [key, child] of Object.entries(value)) {
       if (/^(uri|modelUri|modelURL|modelUrl|textureUri|fontUri|cdnUrl|externalUri|extensions|extensionsUsed|extensionsRequired)$/i.test(key)) reject();
       if (typeof child === 'string') {
+        if (child.includes('\\')) reject();
         if (/^[a-z][a-z0-9+.-]*:/i.test(child.trim()) || /^(?:https?:|data:|blob:|javascript:|file:|\/\/)/i.test(child.trim())) reject();
         if (/<[^>]*>|[<>]/u.test(child)) reject();
-        if (locationKeys.includes(key)) suppliedLocations += 1;
+        if (locationKeys.includes(key)) {
+          validateUri(child);
+          suppliedLocations += 1;
+        }
       }
       if (child && typeof child === 'object' && !Array.isArray(child)) visit(child as Record<string, unknown>);
-      if (Array.isArray(child) && child.some(item => !/string|number|boolean/.test(typeof item))) reject();
+      if (Array.isArray(child)) {
+        if (child.some(item => !/string|number|boolean/.test(typeof item))) reject();
+        for (const item of child) {
+          if (typeof item === 'string') {
+            if (item.includes('\\')) reject();
+            if (/^[a-z][a-z0-9+.-]*:/i.test(item.trim()) || /^(?:https?:|data:|blob:|javascript:|file:|\/\/)/i.test(item.trim())) reject();
+            if (/<[^>]*>|[<>]/u.test(item)) reject();
+          }
+        }
+        if (locationKeys.includes(key)) {
+          for (const item of child) {
+            if (typeof item === 'string') validateUri(item);
+            else reject();
+          }
+        }
+      }
     }
     if (suppliedLocations > 1) reject();
   };

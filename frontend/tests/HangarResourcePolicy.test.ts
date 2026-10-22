@@ -10,6 +10,8 @@ describe('Hangar resource policy', () => {
       'https://cdn.example/model.glb', '//cdn.example/model.glb', 'http://example/model.glb',
       'data:image/png;base64,AAAA', { uri: 'assets/model.bin' }, { path: 'assets/font.woff2', kind: 'font' },
       { url: 'https://cdn.example/texture.png', kind: 'texture' },
+      { path: 'assets/hangar/model.glb', nested: { location: 'assets\\external\\model.glb' } },
+      { path: 'assets/hangar/model.glb', resourceUrl: ['assets\\external\\model.glb'] },
     ]) {
       expect(() => validateHangarResourcePolicy(resource)).toThrow(HANGAR_RESOURCE_REJECTION);
       expect(transport).not.toHaveBeenCalled();
