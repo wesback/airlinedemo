@@ -1,0 +1,240 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 529,
+  "branch": "ai-sdlc/issue-529",
+  "commitSha": "beac04d87f672168fbef816090b5860b11b25b73",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adapter updates route state, but it does not close the rack menu on confirmation and does not draw a connecting guide line for the computed route.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/GuideLineAdapter.tsx",
+          "line": 20,
+          "message": "Rack-entry confirmation does not close the menu. Add the menu-close behavior to the confirmation path and cover it in the named test.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When marker changes, the effect calls controller.confirm and updates route state. The adapter exposes no menu-close callback or other menu operation.",
+            "failureScenario": "With the rack menu open, confirming an entry updates the route but leaves the menu open, contrary to the first acceptance criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/GuideLineAdapter.tsx",
+          "line": 33,
+          "message": "The computed route is not rendered as a guide line; `points` on the SVG element does not draw one. Render a line or path from the route points.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "For a nonempty route, the adapter renders an SVG with a points attribute and one circle per route point. The SVG has no polyline, path, or line element connecting those points.",
+            "failureScenario": "After confirming a reachable marker, the SVG renders isolated circles rather than the computed guide line, so users do not see the route line."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The route points are not connected into a visible guide line, and the adapter’s keyboard path is not verified to update the accessible live region.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/GuideLineAdapter.tsx",
+          "line": 32,
+          "message": "The computed route is not rendered as a connected guide line. Render a line element using the route points.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The adapter renders route points as circles inside an SVG and puts a points attribute on the SVG element; it renders no polyline or path connecting those points.",
+            "failureScenario": "When a rack entry is confirmed and the computed route has multiple points, users see isolated dots rather than the required guide line."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 39,
+          "message": "The live-directions criterion is not tested through the adapter’s keyboard path. Assert the exact rendered live-region text after an accepted step.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named live-directions test exercises acceptedStep on the controller, while its adapter test fires ArrowRight without asserting the rendered live region after the step.",
+            "failureScenario": "If the adapter stops calling setState(controller.acceptedStep(next)), the controller test still passes and the adapter test never checks the live region; an accepted walk step could leave the announcement stale."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The route state is computed, but the adapter does not draw the required connecting guide line.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/GuideLineAdapter.tsx",
+          "line": 33,
+          "message": "The confirmed route is not rendered as a guide line. Render the route with a drawable SVG element, such as `<polyline points=\"…\">`, so users can follow it.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "When the route has points, the adapter creates an `<svg>` with a `points` attribute and renders only `<circle>` elements.",
+            "failureScenario": "After confirming a reachable rack entry, the SVG does not render a connecting guide line because `points` is not a drawable SVG element or attribute on `<svg>`. The user sees route dots instead of the required guide line."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarGuideLine.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
