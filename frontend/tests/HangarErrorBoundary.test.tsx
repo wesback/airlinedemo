@@ -12,7 +12,7 @@ describe('HangarErrorBoundary', () => {
   it('HangarErrorBoundary preserves state on render and asset failure', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const mutation = vi.fn(); const exact = { ...snapshot, status: { ...snapshot.status as object, assessment: 'ready' } };
-    const { rerender } = render(<HangarErrorBoundary snapshot={exact} fallback={<HangarFallbackPanel snapshot={exact} />}><Throws /></HangarErrorBoundary>);
+    const initialBoundary = render(<HangarErrorBoundary snapshot={exact} fallback={<HangarFallbackPanel snapshot={exact} />}><Throws /></HangarErrorBoundary>);
     expect(screen.getByRole('alert', { name: 'Hangar fallback' })).toBeTruthy();
     expect(screen.getByText(/Last labelled server state: Rules-based, revision 7/)).toBeTruthy();
     expect(exact.revision).toBe(7); expect(mutation).not.toHaveBeenCalled(); expect(screen.queryByLabelText(/3D/i)).toBeNull();
@@ -20,14 +20,16 @@ describe('HangarErrorBoundary', () => {
     const failedRefresh = await refreshHangarScene(() => { throw new Error('network'); }, exact);
     expect(failedRefresh.valid).toBe(false);
     expect(failedRefresh.snapshot).toMatchObject({ caseId: 'cp-case-a', revision: 7, capabilityLabel: 'Rules-based', current: false, fallbackReason: 'refresh_failed' });
+    initialBoundary.unmount();
 
-    rerender(<HangarErrorBoundary snapshot={failedRefresh.snapshot} lastSnapshot={exact} assetFailure="asset_failed"><div aria-label="Hangar 3D scene" /></HangarErrorBoundary>);
-    const failedFallback = screen.getByRole('alert', { name: 'Hangar fallback' });
+    const boundary = render(<HangarErrorBoundary snapshot={failedRefresh.snapshot} assetFailure="asset_failed"><div aria-label="Hangar 3D scene" /></HangarErrorBoundary>);
+    const failedFallback = boundary.getByRole('alert', { name: 'Hangar fallback' });
     expect(failedFallback.textContent).toBe('Hangar unavailableThe 3D scene could not be displayed. Use the non-3D controls below.Last labelled server state: Rules-based, revision 7.');
     expect(failedFallback.getAttribute('data-hangar-snapshot-revision')).toBe('7');
     expect(failedFallback.getAttribute('data-hangar-capability-label')).toBe('Rules-based');
+    boundary.unmount();
 
-    rerender(<HangarErrorBoundary snapshot={{ ...snapshot, revision: 6, current: true, capabilityLabel: 'Rules-based' }} lastSnapshot={exact} assetFailure="asset_failed"><div aria-label="Hangar 3D scene" /></HangarErrorBoundary>);
+    const staleBoundary = render(<HangarErrorBoundary snapshot={{ ...snapshot, revision: 6, current: true, capabilityLabel: 'Rules-based' }} lastSnapshot={exact} assetFailure="asset_failed"><div aria-label="Hangar 3D scene" /></HangarErrorBoundary>);
     expect(screen.getByRole('alert', { name: 'Hangar fallback' }).textContent).toBe('Hangar unavailableThe 3D scene could not be displayed. Use the non-3D controls below.Last labelled server state: Rules-based, revision 7.');
     expect(preserveHangarServerSnapshot(exact, { revision: 99, current: true })).toBe(exact);
     expect(isLabelledHangarSnapshot(exact)).toBe(true); expect(mutation).not.toHaveBeenCalled(); expect(screen.queryByLabelText('Hangar 3D scene')).toBeNull();

@@ -77,7 +77,7 @@ export class HangarErrorBoundary extends Component<HangarErrorBoundaryProps, Sta
   constructor(props: HangarErrorBoundaryProps) {
     super(props);
     const labelledCandidate = (value: unknown): ServerSceneSnapshot | null => {
-      if (!isObject(value) || typeof value.caseId !== 'string' || typeof value.revision !== 'number' || !Number.isInteger(value.revision) ||
+      if (!isObject(value) || typeof value.caseId !== 'string' || typeof value.revision !== 'number' || !Number.isInteger(value.revision) || value.revision < 0 ||
           typeof value.status === 'undefined' || !['AI agent','Rules-based','Simulated','Design-only','Unknown'].includes(String(value.capabilityLabel))) return null;
       return value as ServerSceneSnapshot;
     };
@@ -117,9 +117,10 @@ export class HangarErrorBoundary extends Component<HangarErrorBoundaryProps, Sta
     if (next !== this.state.lastSnapshot) this.setState({ lastSnapshot: next });
   }
   render() {
-    if (this.props.assetFailure && !this.state.failed) return this.state.failure ? null : <><HangarFallbackPanel snapshot={this.state.lastSnapshot} reason={this.props.assetFailure} /></>;
-    if (!this.state.failed) return this.props.children;
-    return this.props.fallback ?? <HangarFallbackPanel snapshot={this.state.lastSnapshot} reason={this.state.failure} />;
+    if (this.props.assetFailure || this.state.failed) {
+      return this.props.fallback ?? <HangarFallbackPanel snapshot={this.state.lastSnapshot} reason={this.props.assetFailure ?? this.state.failure} />;
+    }
+    return this.props.children;
   }
 }
 export default HangarErrorBoundary;
