@@ -22,6 +22,20 @@ describe('Hangar guide line',()=>{
   });
 
   it('Hangar guide line live directions and replacement',()=>{
+    const selection=vi.fn(); const closeMenu=vi.fn();
+    const rendered=render(<HangarGuideLineAdapter config={config} marker={{x:4,z:-4}} aircraftId="AIR-1" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
+    expect(closeMenu).toHaveBeenCalledTimes(1);
+    expect(rendered.container.querySelector('polyline')).not.toBeNull();
+    const walk=screen.getByRole('region',{name:'Walk region'});
+    fireEvent.keyDown(walk,{key:'ArrowRight'});
+    expect(rendered.container.querySelector('[data-hangar-guide-live]')?.textContent).toBe('right, 7.50 metres');
+    fireEvent.keyDown(walk,{key:'Escape'});
+    expect(rendered.container.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-hangar-guide-live]')?.textContent).toBe('');
+    rendered.rerender(<HangarGuideLineAdapter config={config} marker={{x:-4,z:4}} aircraftId="AIR-2" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
+    expect(closeMenu).toHaveBeenCalledTimes(2);
+    expect(rendered.container.querySelector('polyline')).not.toBeNull();
+
     const guide=new HangarGuideLineController(config);
     const first=guide.confirm({x:4,z:-4},'AIR-1',{x:-4,z:-4});
     expect(first.liveText).toBe('right, 8.00 metres');
@@ -41,6 +55,7 @@ describe('Hangar guide line',()=>{
     const walk=screen.getByRole('region',{name:'Walk region'}); fireEvent.keyDown(walk,{key:'ArrowRight'});
     fireEvent.keyDown(walk,{key:'Escape'});
     expect(screen.queryByRole('alert')).toBeNull(); expect(container.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    expect(container.querySelector('polyline')).toBeNull();
     expect(transport).not.toHaveBeenCalled(); expect(selection).not.toHaveBeenCalled();
     expect(container.querySelector('[role="status"],[role="button"],[aria-current],[aria-readonly],[aria-disabled]')).toBeNull();
   });

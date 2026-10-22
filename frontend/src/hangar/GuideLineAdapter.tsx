@@ -8,9 +8,10 @@ export type HangarGuideLineAdapterProps = {
   config?: HangarRouteConfig; marker?: HangarGuideMarker | null; aircraftId?: string;
   avatar?: HangarGuideMarker; onSelect?: HangarGuideSelectionHandler; reducedMotion?: boolean;
   transport?: (request: unknown) => unknown; walkRegionLabel?: string;
+  onMenuClose?: () => unknown; onCloseMenu?: () => unknown; closeMenu?: () => unknown;
 };
 
-export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'selected-aircraft', avatar, onSelect, reducedMotion, transport, walkRegionLabel = 'Walk region' }: HangarGuideLineAdapterProps) {
+export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'selected-aircraft', avatar, onSelect, reducedMotion, transport, walkRegionLabel = 'Walk region', onMenuClose, onCloseMenu, closeMenu }: HangarGuideLineAdapterProps) {
   const stableConfig = { ...config, avatar: avatar ?? config.avatar, transport };
   const controllerRef = useRef<HangarGuideLineController | null>(null);
   if (!controllerRef.current) controllerRef.current = new HangarGuideLineController(stableConfig, onSelect ?? config.onSelect);
@@ -18,7 +19,18 @@ export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'sele
   const initialAvatar = avatar ?? config.avatar ?? { x: 0, z: 0 };
   const [position, setPosition] = useState<HangarGuideMarker>(initialAvatar);
   const [state, setState] = useState(() => marker ? controller.confirm(marker, aircraftId, initialAvatar) : controller.getState());
-  useEffect(() => { if (marker) setState(controller.confirm(marker, aircraftId, avatar ?? config.avatar ?? { x: 0, z: 0 })); }, [marker?.x, marker?.z, aircraftId]); // route replacement is local state only
+  const confirmedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (marker) {
+      const key = `${marker.x},${marker.z},${aircraftId}`;
+      setState(controller.confirm(marker, aircraftId, avatar ?? config.avatar ?? { x: 0, z: 0 }));
+      if (confirmedKeyRef.current !== key) {
+        confirmedKeyRef.current = key;
+        const close = closeMenu ?? onMenuClose ?? onCloseMenu;
+        close?.();
+      }
+    }
+  }, [marker?.x, marker?.z, aircraftId]); // route replacement closes the rack menu locally
   const staticLine = reducedMotion ?? shouldReduceHangarMotion();
   const key = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') { setState(controller.escape()); event.preventDefault(); return; }
@@ -31,7 +43,8 @@ export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'sele
   };
   return createElement('section', { 'data-hangar-guide-line': 'true', 'data-static-line': staticLine ? 'true' : 'false' },
     createElement('section', { 'data-hangar-walk-region': true, tabIndex: 0, 'aria-label': walkRegionLabel, onKeyDown: key }, 'Hangar walk region'),
-    state.route.length ? createElement('svg', { 'aria-hidden': true, 'data-hangar-guide-line-visible': 'true', focusable: 'false', points: state.route.map(p => `${p.x},${p.z}`).join(' ') }, state.route.map((point, index) => createElement('circle', { key: index, cx: point.x, cy: point.z, r: 0.04 }))) : null,
+    state.route.length ? createElement('svg', { 'aria-hidden': true, 'data-hangar-guide-line-visible': 'true', focusable: 'false' },
+      createElement('polyline', { points: state.route.map(p => `${p.x},${p.z}`).join(' '), fill: 'none', stroke: 'currentColor' })) : null,
     createElement('p', { 'aria-live': 'polite', 'aria-atomic': true, 'data-hangar-guide-live': true }, state.liveText ?? ''),
     state.status === 'unreachable' ? createElement('p', { role: 'alert' }, state.message) : null,
   );
