@@ -28,6 +28,13 @@ describe('HangarSelectionEvidence',()=>{
     const crossCaseRead=vi.fn(); render(<HangarSelectionEvidence envelope={crossCaseEnvelope} manifest={crossCaseManifest} identifier="SYN-CP-B-AIR-001" reader={crossCaseRead}/>);
     expect(screen.getByText('Unknown or out-of-scope identifier')).toBeTruthy(); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(crossCaseRead).not.toHaveBeenCalled();
     cleanup();
+    // A CP-A identifier passes the case prefix check; only the projected object's caseId (CP-B) rejects it.
+    const foreignOwnerEnvelope=envelope({objects:[{objectId:'SYN-CP-A-AIR-001',kind:'aircraft',caseId:'cp-case-b',evidenceIds:[],status:{assessment:'ready'},owner:'Cross-case owner',nextAction:{text:'Cross-case action'},capabilityLabel:'Rules-based'}]});
+    expect(resolveHangarSelection(foreignOwnerEnvelope,'SYN-CP-A-AIR-001',manifest)).toBeNull();
+    const foreignOwnerRead=vi.fn(); render(<HangarSelectionEvidence envelope={foreignOwnerEnvelope} manifest={manifest} reader={foreignOwnerRead}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Select SYN-CP-A-AIR-001'}));
+    expect(screen.getByText('Unknown or out-of-scope identifier')).toBeTruthy(); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(screen.queryByText(/Cross-case/)).toBeNull(); expect(foreignOwnerRead).not.toHaveBeenCalled();
+    cleanup();
     const absentRead=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="DOES-NOT-EXIST" reader={absentRead}/>);
     expect(screen.getByText('Unknown or out-of-scope identifier')).toBeTruthy(); expect(screen.queryByRole('region',{name:/Selection/})).toBeNull(); expect(absentRead).not.toHaveBeenCalled();
   });
