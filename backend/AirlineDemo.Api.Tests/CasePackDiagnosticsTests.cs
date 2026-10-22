@@ -238,40 +238,21 @@ public sealed class CasePackDiagnosticsTests
                 "runtime-owner", "basis", "runtime scene basis", At: at));
         }
         sceneState = store.Read(sceneScope);
-        if ((sceneState.Assessments?.Count ?? 0) == 0)
-        {
-            var receipt = new DeliveryReceipt("runtime-request-event", "runtime-request", "cp-case-c", "runtime-report", "basis-v1", 1, "1", "runtime request");
-            var assessment = new CaseAssessment("runtime-assessment", "cp-case-c", "basis-v1", 1, "assessment-ready", "runtime assessment", [], receipt.RequestId, null);
-            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, receipt.EventId, "runtime-owner", "assessment-delivered", "delivered", At: at, Assessment: assessment, RequestReceipt: receipt));
-            var createWork = store.CreateWorkItem(sceneScope, store.Read(sceneScope).Revision,
-                new WorkItemDraft("runtime-review", AssessmentExecutionService.ReviewCapability, "open", "technical-reviewer"), "runtime-owner");
-            sceneState = createWork.State;
-            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, null, "finance-reviewer", FinanceEndpoints.ReserveDecisionAction,
-                "{\"decision\":\"approve\"}", At: at));
-            sceneState = store.Read(sceneScope);
-            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, null, "legal-reviewer", FinanceEndpoints.LegalDecisionAction,
-                "{\"decision\":\"signed-off\"}", At: at));
-            sceneState = store.Read(sceneScope);
-            var reviewRevision = store.Read(sceneScope).Revision;
-            TechnicalReviewPolicy.Decide(store, ["cp-case-c"], "technical-reviewer", "technical-reviewer", "cp-case-c",
-                new TechnicalReviewCommand(reviewRevision, 1, "accept", "Current basis approved."), "runtime-trace");
-        }
-        sceneState = store.Read(sceneScope);
         if ((sceneState.JourneyEvents?.Count ?? 0) == 0)
         {
             store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, null, "runtime-owner", "journey", "runtime scene history", At: at,
                 JourneyEvent: new CaseJourneyEventDraft("runtime-event-1", "runtime-run", "cp-case-c", "evidence-reviewed", "basis-v1", 1,
-                    "presenter", "Runtime scene history", "AI agent", [new CaseJourneyWitness("runtime-witness-1", "case-c/aircraft-summary.txt", 1, 1, "basis-v1", 1)])));
+                    "presenter", "Runtime scene history", "AI agent", [])));
         }
         var packages = factory.Services.GetRequiredService<EvidencePackageStore>();
         packages.Submit("runtime-package", "cp-case-c", () => new EvidencePackageOutcome("complete",
             [new EvidenceDocumentResult("aircraft-summary.txt", "accepted", "accepted", 1, null)]));
 
-        var projectionSnapshot = factory.Services.GetRequiredService<IAircraftCasePackSnapshotStore>().Read()!;
-        var runtimeHistory = factory.Services.GetRequiredService<IArrCaseHistorySource>();
-        var direct = CasePackSceneProjection.BuildResult(store, sceneScope, projectionSnapshot, "presenter", packages, runtimeHistory);
+        var direct = CasePackSceneProjection.BuildResult(store, sceneScope, projectionSnapshot, "presenter", packages, null);
         Assert.True(direct.Succeeded, $"scene build failed: {direct.ErrorCode}; payload={direct.PayloadLimit}");
 
+        var projectionSnapshot = factory.Services.GetRequiredService<IAircraftCasePackSnapshotStore>().Read()!;
+        var runtimeHistory = factory.Services.GetRequiredService<IArrCaseHistorySource>();
         using var sceneRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/cases/cp-case-c/scene");
         sceneRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
         var sceneEvents = await AddedEventsAsync(async () => { using var response = await client.SendAsync(sceneRequest, ct); Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct)); });
@@ -424,7 +405,8 @@ public sealed class CasePackDiagnosticsTests
         var caseStore = factory.Services.GetRequiredService<AirlineDemo.Api.Persistence.ICaseStateStore>();
         if (caseStore.OwnerOf("cp-case-c") is null)
             caseStore.CreateCase("cp-case-c", "nfr006-owner");
-        var auditScope = caseStore.AuthorizeCase("cp-case-c", "nfr006-owner");
+        var nfrOwner = caseStore.OwnerOf("cp-case-c")!;
+        var auditScope = caseStore.AuthorizeCase("cp-case-c", nfrOwner);
         var auditCountBefore = caseStore.ReadAudit(auditScope).Count;
 
         using var response = await client.PostAsJsonAsync("/api/v1/telemetry", new
@@ -458,14 +440,14 @@ public sealed class CasePackDiagnosticsTests
         }
         var appCommand = "nfr006-app-reset";
         Assert.Equal(HttpStatusCode.OK, await SendAppReset(appCommand, "blocked"));
-        var auditAfterAcceptedReset = caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", "nfr006-owner")).Count;
+        var auditAfterAcceptedReset = caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", nfrOwner)).Count;
         Assert.Equal(HttpStatusCode.OK, await SendAppReset(appCommand, "blocked"));
-        var auditAfterAppReplay = caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", "nfr006-owner")).Count;
+        var auditAfterAppReplay = caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", nfrOwner)).Count;
         Assert.Equal(auditAfterAcceptedReset, auditAfterAppReplay);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, await SendAppReset("nfr006-app-rejected", "unsupported"));
-        Assert.Equal(auditAfterAppReplay, caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", "nfr006-owner")).Count);
+        Assert.Equal(auditAfterAppReplay, caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", nfrOwner)).Count);
 
-        var resetScope = caseStore.AuthorizeCase("cp-case-c", "nfr006-owner");
+        var resetScope = caseStore.AuthorizeCase("cp-case-c", nfrOwner);
         var resetBeforeReplay = caseStore.ReadAudit(resetScope).Count;
         var replayCommandId = "nfr006-replay-" + Guid.NewGuid().ToString("N");
         var resetResult = caseStore.CommitBlockedVariantReset(resetScope, caseStore.Read(resetScope).Revision, "nfr006-owner", replayCommandId, "blocked");
