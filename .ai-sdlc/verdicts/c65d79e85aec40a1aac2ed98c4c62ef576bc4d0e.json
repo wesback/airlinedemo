@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 527,
+  "branch": "ai-sdlc/issue-527",
+  "commitSha": "c65d79e85aec40a1aac2ed98c4c62ef576bc4d0e",
+  "round": 0,
+  "pipelineVersion": "9a3f750",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The controller covers the tested follow, easing, and clamp behavior, but keyboard orbit is disabled for events originating on the region’s buttons.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/FollowCameraControl.tsx",
+          "line": 19,
+          "message": "Keyboard orbit does not work while focus is on a button in the camera region, despite the acceptance criterion requiring keys in that region to orbit.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The camera region handles keydown events, but returns when the event target is a button inside that region.",
+            "failureScenario": "When a user focuses any camera control button and presses ArrowLeft, ArrowRight, an orbit key, or a zoom key, the handler returns without calling controller.key, so the camera does not orbit."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named CI job exists. The camera control drops keyboard orbit input when a child button is focused, and the easing test can pass when the target is far from its required position.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/FollowCameraControl.tsx",
+          "line": 19,
+          "message": "Arrow and zoom keys are ignored when focus is on a camera-control button, so the region’s keyboard orbit behavior does not work from those controls.",
+          "confidence": 0.92,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "A keydown from a child button bubbles to the section handler. Since the target is an HTMLButtonElement and differs from currentTarget, the handler returns before calling controller.key.",
+            "failureScenario": "When the Orbit camera button has focus and the user presses ArrowLeft, the event is ignored and the camera does not orbit, despite the button being inside the camera-control region."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarFollowCamera.test.ts",
+          "line": 58,
+          "message": "The easing test does not prove the target is within 0.05 of the avatar target; assert the absolute error across all three coordinates or the 3D distance.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The easing test checks only signed x and y differences with toBeLessThanOrEqual(0.05); it does not check absolute distance or the z coordinate.",
+            "failureScenario": "If update(400) places the target at x=100, y=100, z=100 instead of the avatar target, both checked differences are negative and the assertions pass, so the test does not fail on a broken easing implementation."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability is evident in the changed code. The preset behavior test does not verify that activating a preset actually applies its camera settings.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarFollowCamera.test.ts",
+          "line": 41,
+          "message": "The test does not assert the camera state for either preset. Assert the expected preset radius, polar angle, and position so a regression that only disables follow fails.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The preset behavior test calls applyPreset for overview and aircraft, then checks only that follow is false.",
+            "failureScenario": "If either preset stops applying its required camera settings but still turns follow off, this test passes, leaving the acceptance criterion that the exact preset is applied unverified."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarFollowCamera.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
