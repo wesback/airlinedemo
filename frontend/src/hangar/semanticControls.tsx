@@ -59,7 +59,7 @@ export function handleHangarSemanticKeydown(control: HangarSemanticControl, even
 
 export function shouldCaptureHangarSemanticKey(event: {key?:unknown;target?:EventTarget|null}): boolean { return event.key==='Enter'||event.key===' '; }
 
-export function buildHangarSemanticControls(source: unknown, descriptor?: SceneDescriptorEntry[]|null, onActivate?: HangarSemanticControlsProps['onActivate']): {controls:HangarSemanticControl[];error:string|null} {
+export function buildHangarSemanticControls(source: unknown, descriptor?: SceneDescriptorEntry[]|null, onActivate?: HangarSemanticControlsProps['onActivate'], onCommand?: HangarSemanticControlsProps['onCommand']): {controls:HangarSemanticControl[];error:string|null} {
   if (!objectOf(source)||!Array.isArray(source.objects)) return {controls:[],error:`${HANGAR_SEMANTIC_CONTROL_ERROR}: malformed scene controls`};
   const c=objectOf(source.case)?source.case:{};
   const objectDescriptors=new Map((descriptor??[]).map((d)=>[d.objectId,d]));
@@ -85,15 +85,20 @@ export function buildHangarSemanticControls(source: unknown, descriptor?: SceneD
   for (const action of permission.allowedActions) {
     if (!(HANGAR_SEMANTIC_ACTIONS as readonly string[]).includes(action)||!permission.permitted||!permission.capability) continue;
     const label=HANGAR_SEMANTIC_ACTION_LABELS[action]; if(!label) continue;
-    controls.push({id:`action-${action}`,role:'button',name:label,kind:'action',activate:typeof onActivate==='function'?()=>{onActivate(`action-${action}`,action);return undefined;}:()=>undefined});
+    controls.push({id:`action-${action}`,role:'button',name:label,kind:'action',activate:()=>{
+      if(typeof onActivate==='function') onActivate(`action-${action}`,action);
+      if(typeof onCommand==='function') onCommand(action,action);
+    }});
   }
   if (typeof c.status==='object'||text(c.status)) controls.push({id:'status',role:'status',name:'Hangar status',kind:'status'});
   const missingHandler = controls.some((control) => !control.name || (!control.activate && !control.handler && (control.kind === 'object' || control.kind === 'journey')));
-  return {controls,error:missingHandler ? HANGAR_SEMANTIC_CONTROL_ERROR + ': pointer-only or unlabelled control':null};
+  return missingHandler
+    ? {controls:[],error:HANGAR_SEMANTIC_CONTROL_ERROR + ': pointer-only or unlabelled control'}
+    : {controls,error:null};
 }
 
 export function HangarSemanticControls({envelope,scene,descriptor,manifest,onActivate,onCommand,children}:HangarSemanticControlsProps){
-  const source=scene??envelope; const built=buildHangarSemanticControls(source,descriptor,onActivate); const statusControls=built.controls.filter((c)=>c.kind==='status');
+  const source=scene??envelope; const built=buildHangarSemanticControls(source,descriptor,onActivate,onCommand); const statusControls=built.controls.filter((c)=>c.kind==='status');
   const interactive=built.controls.filter((c)=>c.kind!=='status');
   if (built.error) return <><style>{`.hangar-semantic-control{${HANGAR_FOCUS_STYLE}}`}</style><section aria-label="Hangar semantic controls"><p role="alert">{built.error}</p></section></>;
   return <><style>{`.hangar-semantic-control{${HANGAR_FOCUS_STYLE}}`}</style><section aria-label="Hangar semantic controls">
@@ -101,7 +106,7 @@ export function HangarSemanticControls({envelope,scene,descriptor,manifest,onAct
     {statusControls.map((status)=><p key={status.id} role="status">{status.name}: {objectOf(source)&&objectOf(source.case)&&objectOf(source.case.status)?Object.entries(source.case.status).map(([key,value])=>`${key}: ${value??'none'}`).join('; '):'text status'}</p>)}
     <div aria-label="Hangar scene objects">{interactive.filter((c)=>c.kind==='object').map((control)=><button className="hangar-semantic-control" type="button" key={control.id} onClick={()=>activateHangarSemanticControl(control)} aria-label={control.name}>{control.name}</button>)}</div>
     <div aria-label="Journey steps">{interactive.filter((c)=>c.kind==='journey').map((control)=><button className="hangar-semantic-control" type="button" key={control.id} onClick={()=>activateHangarSemanticControl(control)} aria-label={control.name}>{control.name}</button>)}</div>
-    <div aria-label="Permitted actions">{interactive.filter((c)=>c.kind==='action').map((control)=><button className="hangar-semantic-control" type="button" key={control.id} onClick={()=>{activateHangarSemanticControl(control); if(typeof onCommand==='function')onCommand(control.id.replace('action-',''),control.id.replace('action-',''));}} aria-label={control.name}>{control.name}</button>)}</div>
+    <div aria-label="Permitted actions">{interactive.filter((c)=>c.kind==='action').map((control)=><button className="hangar-semantic-control" type="button" key={control.id} onClick={()=>activateHangarSemanticControl(control)} aria-label={control.name}>{control.name}</button>)}</div>
     {children}
   </section></>;
 }

@@ -24,10 +24,21 @@ describe('HangarSemanticControls',()=>{
     object.focus(); await user.keyboard('{Enter}'); expect(activate).toHaveBeenCalledTimes(2);
     await user.keyboard(' '); expect(activate).toHaveBeenCalledTimes(3);
     const journey=screen.getByRole('button',{name:'Finding recorded'});
-    journey.focus(); await user.keyboard('{Enter}'); expect(activateJourney).toHaveBeenCalledTimes(1);
+    await user.click(journey); expect(activateJourney).toHaveBeenCalledTimes(1);
+    journey.focus(); await user.keyboard('{Enter}'); expect(activateJourney).toHaveBeenCalledTimes(2);
     const action=screen.getByRole('button',{name:'Open review'});
-    action.focus(); await user.keyboard('{Enter}'); expect(command).toHaveBeenCalledWith('review','review');
+    await user.click(action); expect(command).toHaveBeenCalledTimes(1); expect(command).toHaveBeenLastCalledWith('review','review');
+    action.focus(); await user.keyboard('{Enter}'); expect(command).toHaveBeenCalledTimes(2); expect(command).toHaveBeenLastCalledWith('review','review');
     expect(HANGAR_FOCUS_STYLE).toContain('outline'); expect(HANGAR_FOCUS_STYLE).not.toContain('none');
+  });
+
+  it('HangarSemanticControls rejects a journey step without activation',()=>{
+    const objectActivate=vi.fn();
+    const descriptor=[{objectId:'SYN-CP-A-AIR-001',caseId:'cp-case-a',kind:'aircraft',activate:objectActivate}];
+    const withoutJourneyHandler=buildHangarSemanticControls(scene(), descriptor);
+    expect(withoutJourneyHandler.error).toBe(`${HANGAR_CONTROL_DEFICIENCY_ERROR}: pointer-only or unlabelled control`);
+    expect(withoutJourneyHandler.controls).toEqual([]);
+    expect(objectActivate).not.toHaveBeenCalled();
   });
 
   it('HangarSemanticControls preserves focus and Tab navigation',async()=>{
