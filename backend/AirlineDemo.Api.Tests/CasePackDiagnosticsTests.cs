@@ -83,8 +83,42 @@ public sealed class CasePackDiagnosticsTests
         var operationStore = factory.Services.GetRequiredService<ICaseStateStore>();
         if (operationStore.OwnerOf("cp-case-c") is null)
             operationStore.CreateCase("cp-case-c", "operation-owner");
+        Assert.Contains(logger.Events, fields => fields.TryGetValue("eventType", out var eventType)
+            && Equals(eventType, "pack_load")
+            && fields.Keys.Order().SequenceEqual(new[] { "contractVersion", "durationMs", "eventType", "outcome", "packVersion" }.Order()));
         var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
         var presenter = sessions.Create(new DemoUser("operation-presenter", "Operation Presenter", "presenter", ["cp-case-c"]));
+        var resetPresenter = sessions.Create(new DemoUser("operation-reset-presenter", "Operation Reset Presenter", "presenter", ["cp-case-c"]));
+        var resetBase = new { contractVersion = 1, variant = "blocked" };
+        async Task<(HttpStatusCode Status, string Body)> SendReset(string commandId, long? expectedRevision = null)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant");
+            request.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={resetPresenter.Id}");
+            request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, resetPresenter.CsrfToken);
+            var revision = expectedRevision ?? 0L;
+            request.Content = JsonContent.Create(new { resetBase.contractVersion, commandId, expectedRevision = revision, resetBase.variant });
+            using var response = await client.SendAsync(request, ct);
+            return (response.StatusCode, await response.Content.ReadAsStringAsync(ct));
+        }
+        var acceptedCommand = "operation-reset-accepted-" + Guid.NewGuid().ToString("N");
+        var actualOwner = operationStore.OwnerOf("cp-case-c")!;
+        var acceptedPrior = operationStore.Read(operationStore.AuthorizeCase("cp-case-c", actualOwner)).Revision;
+        var accepted = await SendReset(acceptedCommand, acceptedPrior);
+        Assert.True(accepted.Status == HttpStatusCode.OK, $"accepted={accepted.Status}; body={accepted.Body}");
+        var replayed = await SendReset(acceptedCommand, acceptedPrior);
+        Assert.True(replayed.Status == HttpStatusCode.OK, $"replayed={replayed.Status}; body={replayed.Body}");
+        var currentOwner = operationStore.OwnerOf("cp-case-c")!;
+        var currentScope = operationStore.AuthorizeCase("cp-case-c", currentOwner);
+        var currentRevision = operationStore.Read(currentScope).Revision;
+        var allowedBeforeLimit = await SendReset("operation-reset-before-limit-" + Guid.NewGuid().ToString("N"), currentRevision);
+        Assert.True(allowedBeforeLimit.Status == HttpStatusCode.OK, $"before-limit={allowedBeforeLimit.Status}; body={allowedBeforeLimit.Body}");
+        var limitedRevision = operationStore.Read(currentScope).Revision;
+        var limited = await SendReset("operation-reset-rate-limited-" + Guid.NewGuid().ToString("N"), limitedRevision);
+        Assert.True(limited.Status == HttpStatusCode.TooManyRequests, $"limited={limited.Status}; body={limited.Body}");
+        Assert.Contains(logger.Events, fields => Equals(fields.GetValueOrDefault("eventType"), "reset") && Equals(fields.GetValueOrDefault("outcome"), "success"));
+        Assert.Contains(logger.Events, fields => Equals(fields.GetValueOrDefault("eventType"), "reset") && Equals(fields.GetValueOrDefault("outcome"), "replayed"));
+        Assert.Contains(logger.Events, fields => Equals(fields.GetValueOrDefault("eventType"), "reset") && Equals(fields.GetValueOrDefault("outcome"), "rate_limited"));
+
         using var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/cases");
         listRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
         using var listResponse = await client.SendAsync(listRequest, ct);
@@ -120,6 +154,15 @@ public sealed class CasePackDiagnosticsTests
         }
         Assert.Empty(TelemetryRedaction.Redact(injected));
 
+        var activityTags = new List<KeyValuePair<string, string?>>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == TelemetryRedaction.ServiceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = activity => activityTags.AddRange(activity.Tags.Select(tag => new KeyValuePair<string, string?>(tag.Key, tag.Value))),
+        };
+        ActivitySource.AddActivityListener(listener);
+
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -149,16 +192,6 @@ public sealed class CasePackDiagnosticsTests
         });
         using var resetResponse = await client.SendAsync(resetRequest, ct);
         Assert.Equal(HttpStatusCode.BadRequest, resetResponse.StatusCode);
-
-        var activityTags = new List<KeyValuePair<string, string?>>();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == TelemetryRedaction.ServiceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStopped = activity => activityTags.AddRange(activity.Tags.Select(tag => new KeyValuePair<string, string?>(tag.Key, tag.Value))),
-        };
-        ActivitySource.AddActivityListener(listener);
-        CasePackDiagnostics.Reset(logger, "success", 1, "cp-case-c", "command-1");
 
         Assert.DoesNotContain(activityTags, tag => propertyNames.Contains(tag.Key, StringComparer.OrdinalIgnoreCase));
         Assert.DoesNotContain(activityTags.Select(tag => tag.Value), value => canaries.Contains(value));
@@ -205,6 +238,26 @@ public sealed class CasePackDiagnosticsTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var auditCountAfter = caseStore.ReadAudit(auditScope).Count;
         Assert.Equal(auditCountBefore, auditCountAfter);
+
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var presenter = sessions.Create(new DemoUser("nfr006-presenter", "NFR Presenter", "presenter", ["cp-case-c"]));
+        async Task<HttpStatusCode> SendAppReset(string commandId, string variant)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant");
+            request.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+            request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, presenter.CsrfToken);
+            request.Content = JsonContent.Create(new { contractVersion = 1, commandId, expectedRevision = 0L, variant });
+            using var response = await client.SendAsync(request, ct);
+            return response.StatusCode;
+        }
+        var appCommand = "nfr006-app-reset";
+        Assert.Equal(HttpStatusCode.OK, await SendAppReset(appCommand, "blocked"));
+        var auditAfterAcceptedReset = caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", "nfr006-owner")).Count;
+        Assert.Equal(HttpStatusCode.OK, await SendAppReset(appCommand, "blocked"));
+        var auditAfterAppReplay = caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", "nfr006-owner")).Count;
+        Assert.Equal(auditAfterAcceptedReset, auditAfterAppReplay);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, await SendAppReset("nfr006-app-rejected", "unsupported"));
+        Assert.Equal(auditAfterAppReplay, caseStore.ReadAudit(caseStore.AuthorizeCase("cp-case-c", "nfr006-owner")).Count);
 
         var resetScope = caseStore.AuthorizeCase("cp-case-c", "nfr006-owner");
         var resetBeforeReplay = caseStore.ReadAudit(resetScope).Count;
