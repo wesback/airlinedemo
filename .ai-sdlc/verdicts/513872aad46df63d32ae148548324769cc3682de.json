@@ -1,0 +1,222 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 517,
+  "branch": "ai-sdlc/issue-517",
+  "commitSha": "513872aad46df63d32ae148548324769cc3682de",
+  "round": 1,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The future-step boundary and exact historical evidence assertions were added. The keyboard activation finding remains: the adapter is called directly before the keyboard interaction, making the later call assertion inconclusive.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 36,
+          "message": "The test still does not prove keyboard activation opens older history. Assert an adapter call or loaded historical content that occurs after the Enter action, independently of the direct call above.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test calls openCaseAOlderHistory directly on line 33, invoking the adapter before rendering or pressing Enter. After the keyboard action, it only checks that the adapter was called at least once.",
+            "failureScenario": "If Enter fails to open older history, the earlier direct call still satisfies the adapter assertion, so the test passes without proving keyboard activation loads history."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The future-step boundary and cross-case event content findings are addressed. The keyboard history test still passes if keyboard activation fails to load and display the historical evidence.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 36,
+          "message": "The keyboard path still does not prove it loads exact historical evidence. Assert that keyboard activation triggers a new adapter call and that the rendered journey then shows the expected historical event and witness.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test calls openCaseAOlderHistory directly and checks its evidence before rendering the component. After pressing Enter, it only checks that the adapter has been called, although it was already called by the direct invocation.",
+            "failureScenario": "If Enter does not load older history into the component, the test still passes: the earlier direct call satisfies the adapter call assertion, and the rendered journey is never checked for the historical event or witness."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The future-step boundary and cross-case event content findings appear fixed. The older-history test still does not verify that keyboard activation triggers the history load.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuidedJourney.test.ts",
+          "line": 36,
+          "message": "The test still does not prove that keyboard activation loads older history: the adapter has already been called directly before the keyboard interaction. Assert the call count or loaded historical content after pressing Enter.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test calls openCaseAOlderHistory directly at line 33 before rendering the control. Its later adapter.toHaveBeenCalled() assertion can therefore pass without the keyboard activation calling the adapter.",
+            "failureScenario": "If Enter stops opening older history, the direct function call still invokes the adapter and the test can pass without verifying keyboard activation."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarGuidedJourney.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
