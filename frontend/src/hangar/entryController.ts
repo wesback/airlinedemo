@@ -95,11 +95,13 @@ export async function selectHangarEntry<T>(options: HangarEntryOptions = {}, laz
   return { ...decision, loaderCalled: true, loadedScene };
 }
 
-export function createHangarSceneMotionControllers(targetRadius = 10, motion = new HangarReducedMotion()) {
+export function createHangarSceneMotionControllers(targetRadius: number | HangarReducedMotion = 10, motion = new HangarReducedMotion()) {
+  const resolvedMotion = targetRadius instanceof HangarReducedMotion ? targetRadius : motion;
+  const resolvedTargetRadius = typeof targetRadius === 'number' ? targetRadius : 10;
   return {
-    motion,
-    camera: createHangarCameraController(targetRadius, motion),
-    avatar: createHangarAvatarController({ x: 0, z: 0 }, motion),
+    motion: resolvedMotion,
+    camera: createHangarCameraController(resolvedTargetRadius, resolvedMotion),
+    avatar: createHangarAvatarController({ x: 0, z: 0 }, resolvedMotion),
   };
 }
 
@@ -123,6 +125,14 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
       setCameraState(transition.state);
       setReduced(controllers.motion.reduced);
     };
+    const setMotionOverride = (override: true | false) => {
+      controllers.motion.setOverride(override);
+      const camera = controllers.camera.applyCameraTransition(controllers.camera.getState(), 480);
+      const avatar = controllers.avatar.move(controllers.avatar.getState(), 240);
+      setCameraState(camera.target);
+      setAvatarState(avatar.target);
+      setReduced(controllers.motion.reduced);
+    };
     const moveAvatar = () => {
       const next = { x: avatarState.x === 0 ? 4 : 0, z: avatarState.z === 0 ? -2 : 0 };
       const transition = controllers.avatar.move(next, 240);
@@ -136,6 +146,10 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         createElement('button', { type: 'button', onClick: () => navigateCamera('overview') }, 'Overview'),
         createElement('button', { type: 'button', onClick: () => navigateCamera('aircraft') }, 'Aircraft'),
         createElement('button', { type: 'button', onClick: moveAvatar }, 'Move avatar'),
+      ),
+      createElement('section', { 'aria-label': 'Motion controls' },
+        createElement('button', { type: 'button', onClick: () => setMotionOverride(true) }, 'Reduce motion'),
+        createElement('button', { type: 'button', onClick: () => setMotionOverride(false) }, 'Allow motion'),
       ),
       createElement(
         Canvas,

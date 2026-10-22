@@ -62,6 +62,48 @@ describe('HangarReducedMotion', () => {
     expect(avatar.transitionDuration).toBe(0);
   });
 
+  it('HangarReducedMotion renders camera and avatar targets immediately for system preference', async () => {
+    const storage = memoryStorage();
+    const motion = new HangarReducedMotion(() => ({ matches: true }), storage);
+    const controllers = createHangarSceneMotionControllers(motion);
+    const Scene = await loadHangarScene(controllers);
+    render(createElement(Scene));
+
+    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('12,3,18');
+    expect(document.querySelector('[data-hangar-avatar-mesh-position]')?.getAttribute('data-hangar-avatar-mesh-position')).toBe('0,0');
+    expect(controllers.camera.transitionDuration).toBe(0);
+    expect(controllers.avatar.transitionDuration).toBe(0);
+
+    const normalMotion = new HangarReducedMotion(() => ({ matches: false }), memoryStorage());
+    const normalControllers = createHangarSceneMotionControllers(normalMotion);
+    const NormalScene = await loadHangarScene(normalControllers);
+    render(createElement(NormalScene));
+    expect(normalControllers.camera.transitionDuration).toBe(480);
+    expect(normalControllers.avatar.transitionDuration).toBe(240);
+  });
+
+  it('HangarReducedMotion session override controls rendered transitions in both directions', async () => {
+    const storage = memoryStorage();
+    let systemReduce = false;
+    const motion = new HangarReducedMotion(() => ({ matches: systemReduce }), storage);
+    const controllers = createHangarSceneMotionControllers(motion);
+    const Scene = await loadHangarScene(controllers);
+    render(createElement(Scene));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reduce motion' }));
+    expect(storage.getItem(HANGAR_REDUCED_MOTION_STORAGE_KEY)).toBe('reduce');
+    expect(controllers.camera.transitionDuration).toBe(0);
+    expect(controllers.avatar.transitionDuration).toBe(0);
+
+    storage.removeItem(HANGAR_REDUCED_MOTION_STORAGE_KEY);
+    systemReduce = true;
+    motion.setOverride(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Allow motion' }));
+    expect(storage.getItem(HANGAR_REDUCED_MOTION_STORAGE_KEY)).toBe('no-preference');
+    expect(controllers.camera.transitionDuration).toBe(480);
+    expect(controllers.avatar.transitionDuration).toBe(240);
+  });
+
   it('HangarReducedMotion connects avatar and camera targets to the rendered scene', async () => {
     const storage = memoryStorage();
     const motion = new HangarReducedMotion(() => ({ matches: true }), storage);
