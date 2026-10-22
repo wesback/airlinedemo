@@ -19,10 +19,12 @@ describe('HangarNon3dDataRoom', () => {
     render(<HangarNon3dDataRoom caseList={[{caseId:'cp-case-a',name:'Case A',category:'narrow-body'},{caseId:'cp-case-b',name:'Case B',category:'regional'},{caseId:'cp-case-c',name:'Case C',category:'wide-body'}]} scope={['cp-case-a','cp-case-b','cp-case-c']} summaryReader={reader}/>);
     expect(await screen.findAllByRole('listitem')).toHaveLength(3);
     expect(screen.getAllByRole('group')).toHaveLength(15);
-    expect(screen.getByText('Case A — narrow-body')).toBeTruthy();
-    expect(screen.getByText('Case B — regional')).toBeTruthy();
-    expect(screen.getByText('Case C — wide-body')).toBeTruthy();
-    for (const text of ['technical: mode: available; coverage: true','maintenance: mode: available; coverage: true']) expect(screen.getAllByText(text).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('listitem').map(item => item.getAttribute('data-case-id'))).toEqual(['cp-case-a','cp-case-b','cp-case-c']);
+    expect(screen.getAllByRole('button').map(button => button.textContent)).toEqual([
+      'Case A — narrow-body', 'Case B — regional', 'Case C — wide-body'
+    ]);
+    const expectedSummaries = Array.from({ length: 3 }, () => HANGAR_SOURCE_IDS.map(sourceId => `${sourceId}: mode: available; coverage: true`)).flat();
+    expect(screen.getAllByRole('group').map(group => group.querySelector('dd')?.textContent ?? '')).toEqual(expectedSummaries);
     expect(reader).toHaveBeenCalledTimes(3);
 
     cleanup();
@@ -75,6 +77,16 @@ describe('HangarNon3dDataRoom', () => {
     expect(scopedSelection).not.toHaveBeenCalled();
     expect(scopedController.activate('cp-case-a')).toBe(true);
     expect(scopedSelection).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    const scopeSelection = vi.fn();
+    const rerendered = render(<HangarNon3dDataRoom entries={entries} scope={['cp-case-a','cp-case-b']} onConfirm={scopeSelection}/>);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    rerendered.rerender(<HangarNon3dDataRoom entries={entries} scope={['cp-case-a']} onConfirm={scopeSelection}/>);
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Case A, narrow-body' }));
+    expect(screen.queryByRole('button', { name: /Case B/ })).toBeNull();
+    expect(scopeSelection.mock.calls.map(([caseId]) => caseId)).toEqual(['cp-case-a']);
 
     cleanup();
     const emptyScopeSelection=vi.fn();

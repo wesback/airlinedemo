@@ -39,8 +39,10 @@ export function scopedInitialEntries(entries: HangarSourceSummaryEntry[] | null 
 }
 
 export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, summaryReader, onSelect, onConfirm, onActivate, browserIdentifier }: HangarNon3dDataRoomProps) {
-  const [entries, setEntries] = useState<HangarSourceSummaryEntry[]>(scopedInitialEntries(initialEntries, scope));
-  const [loaded, setLoaded] = useState(initialEntries !== undefined);
+  const [projectedEntries, setProjectedEntries] = useState<HangarSourceSummaryEntry[]>([]);
+  const entries = initialEntries !== undefined
+    ? scopedInitialEntries(initialEntries, scope)
+    : scopedInitialEntries(projectedEntries, scope);
   const selectionHandler = onConfirm ?? onActivate ?? onSelect;
   const controllerRef = useRef<HangarNon3dDataRoomController | null>(null);
   if (!controllerRef.current) controllerRef.current = new HangarNon3dDataRoomController(entries, selectionHandler);
@@ -49,10 +51,18 @@ export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, 
   controller.setSelectionHandler(selectionHandler);
 
   useEffect(() => {
-    if (!loaded && (Array.isArray(caseList) || (caseList !== null && typeof caseList === 'object'))) {
-      void projectHangarSourceSummary(caseList, scope, summaryReader).then(projected => { setEntries(projected); setLoaded(true); });
-    } else if (!loaded) setLoaded(true);
-  }, [caseList, scope, summaryReader, loaded]);
+    let active = true;
+    if (initialEntries !== undefined) {
+      setProjectedEntries(scopedInitialEntries(initialEntries, scope));
+    } else if (Array.isArray(caseList) || (caseList !== null && typeof caseList === 'object')) {
+      void projectHangarSourceSummary(caseList, scope, summaryReader).then(projected => {
+        if (active) setProjectedEntries(projected);
+      });
+    } else {
+      setProjectedEntries([]);
+    }
+    return () => { active = false; };
+  }, [initialEntries, caseList, scope, summaryReader]);
 
   const invalidBrowserIdentifier = typeof browserIdentifier === 'string' && !entries.some(entry => !entry.unavailable && entry.caseId === browserIdentifier);
   return createElement('section', { id: 'non-3d-data-room', 'aria-labelledby': 'non-3d-data-room-heading', 'data-hangar-data-room-non3d': 'true' },
