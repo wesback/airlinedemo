@@ -57,11 +57,27 @@ afterEach(() => {
     expect(typeof Scene).toBe('function');
   });
 
-  it('HangarEntry non-3D parity', () => {
-    expect(HANGAR_NON_3D_ACTIONS).toEqual(['selection', 'status', 'evidence', 'journey', 'review']);
-    expect(HANGAR_3D_ACTIONS).toEqual(HANGAR_NON_3D_ACTIONS);
-    expect(getHangarNon3dActions()).toEqual(HANGAR_3D_ACTIONS);
+  it('HangarEntry non-3D parity', async () => {
+    const requiredActions = ['selection', 'status', 'evidence', 'journey', 'review'];
+    expect(HANGAR_NON_3D_ACTIONS).toEqual(requiredActions);
+    expect(HANGAR_3D_ACTIONS).toEqual(requiredActions);
+    expect(getHangarNon3dActions()).toEqual(requiredActions);
     expect(getHangarFallbackReason({ browserSupported: false, webgl2: { webgl2: true } })).toBe('unsupported_browser');
+
+    stubCaseApi();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: false,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: vi.fn(),
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByText('Your browser is not supported. Use the current or previous major version of Chrome or Edge.');
+
+    const renderedLabels = ['Select case', 'View status', 'View evidence', 'Follow journey', 'Open review'];
+    expect(renderedLabels).toEqual(['Select case', 'View status', 'View evidence', 'Follow journey', 'Open review']);
+    for (const label of renderedLabels) expect(screen.getByRole('button', { name: label })).toBeTruthy();
+    expect(screen.getAllByRole('button').filter((button) => renderedLabels.includes(button.textContent?.trim() ?? ''))).toHaveLength(5);
   });
 
   it('hangar UI rejects fallback entry before mounting a canvas', async () => {

@@ -37,6 +37,7 @@ export function isHangarBrowserSupported(browser: unknown, userAgent?: string): 
     if (typeof candidate.version === 'string' || typeof candidate.version === 'number') return Number(String(candidate.version).split('.')[0]) >= 120;
     if (typeof candidate.eligible === 'boolean') return candidate.eligible;
     if (typeof candidate.browserSupported === 'boolean') return candidate.browserSupported;
+    return false;
   }
   const ua = typeof browser === 'string' ? browser : userAgent ?? (typeof navigator !== 'undefined' ? navigator.userAgent : '');
   if (/Firefox|Safari|FxiOS|CriOS|EdgiOS/i.test(ua) && !/EdgA?|Chrome|Chromium/i.test(ua)) return false;
@@ -114,9 +115,9 @@ export const evaluateHangarEntry = getHangarEntryDecision;
 export const canEnterHangar3d = (options: HangarEntryOptions = {}) => getHangarEntryDecision(options).mode === '3d';
 
 export const HANGAR_NON_3D_ACTIONS = ['selection', 'status', 'evidence', 'journey', 'review'] as const;
-export function getHangarNon3dActions(): readonly string[] { return HANGAR_NON_3D_ACTIONS; }
+export function getHangarNon3dActions(): readonly string[] { return [...HANGAR_NON_3D_ACTIONS]; }
 export const isSupportedBrowser = isHangarBrowserSupported;
 export const probeWebGl2Capability = probeWebGl2;
 export function checkHangarContractEligibility(contractVersion: unknown): boolean { return contractVersion === undefined || contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION; }
 export function getHangarFallbackReason(options: HangarEntryOptions = {}): HangarFallbackReason | null { return getHangarEntryDecision(options).fallbackReason; }
-export const HANGAR_3D_ACTIONS = HANGAR_NON_3D_ACTIONS;
+export const HANGAR_3D_ACTIONS = ['selection', 'status', 'evidence', 'journey', 'review'] as const;
