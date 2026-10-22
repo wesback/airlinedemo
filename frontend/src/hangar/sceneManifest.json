@@ -1,0 +1,41 @@
+{
+  "contractVersion": 1,
+  "packVersion": "hangar-rack-avatar-v1",
+  "rack": {
+    "path": "assets/hangar/rack.glb",
+    "type": "model",
+    "units": [
+      {
+        "node": "RackUnitTechnical",
+        "source": "technical"
+      },
+      {
+        "node": "RackUnitMaintenance",
+        "source": "maintenance"
+      },
+      {
+        "node": "RackUnitFinance",
+        "source": "finance"
+      },
+      {
+        "node": "RackUnitRecords",
+        "source": "records"
+      },
+      {
+        "node": "RackUnitContracts",
+        "source": "contracts"
+      }
+    ]
+  },
+  "avatar": {
+    "path": "assets/hangar/avatar.glb",
+    "type": "model",
+    "hardHat": {
+      "node": "HardHat",
+      "color": "#FFD400"
+    },
+    "synthetic": true,
+    "realPerson": false,
+    "brandMarks": false
+  }
+}

@@ -1,10 +1,11 @@
 import { createElement, useEffect, useState, type ComponentType } from 'react';
 import { createHangarCameraController } from './cameraController';
 import { createHangarAvatarController, HangarReducedMotion } from './reducedMotion';
+import { validateHangarRackAvatarManifest } from './dataRoomAdapter';
 
 export const SUPPORTED_HANGAR_CONTRACT_VERSION = 1;
 export const SUPPORTED_HANGAR_BROWSERS = ['Chrome', 'Edge'] as const;
-export type HangarFallbackReason = 'unsupported_browser' | 'webgl_unavailable' | 'contract_invalid';
+export type HangarFallbackReason = 'unsupported_browser' | 'webgl_unavailable' | 'contract_invalid' | 'asset_invalid';
 export type WebGl2Probe = { webgl2?: boolean; supported?: boolean } | object | null;
 export type HangarEntryOptions = {
   browserSupported?: unknown;
@@ -19,7 +20,7 @@ export type HangarEntryOptions = {
 };
 export type HangarEntryDecision = {
   mode: '3d' | 'fallback';
-  fallbackReason: HangarFallbackReason | null;
+  fallbackReason: HangarFallbackReason | 'asset_invalid' | null;
   browserSupported: boolean;
   contractValid: boolean;
   loaderCalled: boolean;
@@ -83,6 +84,7 @@ export function getHangarEntryDecision(options: HangarEntryOptions = {}): Hangar
   const contractValid = options.contractVersion === undefined || options.contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION;
   let fallbackReason: HangarFallbackReason | null = null;
   if (!contractValid) fallbackReason = 'contract_invalid';
+  else if (!validateHangarRackAvatarManifest().valid) fallbackReason = 'asset_invalid';
   else if (!browserSupported) fallbackReason = 'unsupported_browser';
   else if (probe === null) fallbackReason = 'webgl_unavailable';
   return { mode: fallbackReason ? 'fallback' : '3d', fallbackReason, browserSupported, contractValid, loaderCalled: false };
