@@ -25,7 +25,8 @@ describe('Hangar guide line',()=>{
     const selection=vi.fn(); const closeMenu=vi.fn();
     const rendered=render(<HangarGuideLineAdapter config={config} marker={{x:4,z:-4}} aircraftId="AIR-1" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
     expect(closeMenu).toHaveBeenCalledTimes(1);
-    expect(rendered.container.querySelector('polyline')).not.toBeNull();
+    const initialLine=rendered.container.querySelector('polyline'); expect(initialLine).not.toBeNull();
+    const svg=rendered.container.querySelector('svg'); expect(svg?.getAttribute('viewBox')).toBe('-4.8 -4.8 9.6 2.6');
     const walk=screen.getByRole('region',{name:'Walk region'});
     fireEvent.keyDown(walk,{key:'ArrowRight'});
     expect(rendered.container.querySelector('[data-hangar-guide-live]')?.textContent).toBe('right, 7.50 metres');
@@ -35,6 +36,9 @@ describe('Hangar guide line',()=>{
     rendered.rerender(<HangarGuideLineAdapter config={config} marker={{x:-4,z:4}} aircraftId="AIR-2" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
     expect(closeMenu).toHaveBeenCalledTimes(2);
     expect(rendered.container.querySelector('polyline')).not.toBeNull();
+    rendered.rerender(<HangarGuideLineAdapter config={config} marker={null} aircraftId="AIR-2" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
+    rendered.rerender(<HangarGuideLineAdapter config={config} marker={{x:-4,z:4}} aircraftId="AIR-2" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
+    expect(closeMenu).toHaveBeenCalledTimes(3);
 
     const guide=new HangarGuideLineController(config);
     const first=guide.confirm({x:4,z:-4},'AIR-1',{x:-4,z:-4});

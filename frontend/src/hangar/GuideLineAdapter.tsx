@@ -18,22 +18,33 @@ export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'sele
   const controller = controllerRef.current;
   const initialAvatar = avatar ?? config.avatar ?? { x: 0, z: 0 };
   const [position, setPosition] = useState<HangarGuideMarker>(initialAvatar);
-  const [state, setState] = useState(() => marker ? controller.confirm(marker, aircraftId, initialAvatar) : controller.getState());
+  const staticLine = reducedMotion ?? shouldReduceHangarMotion();
+  const [state, setState] = useState(() => {
+    if (!marker) return controller.getState();
+    const confirmed = controller.confirm(marker, aircraftId, initialAvatar);
+    return staticLine ? controller.escape() : confirmed;
+  });
   const confirmedKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (marker) {
-      const key = `${marker.x},${marker.z},${aircraftId}`;
-      setState(controller.confirm(marker, aircraftId, avatar ?? config.avatar ?? { x: 0, z: 0 }));
-      if (confirmedKeyRef.current !== key) {
-        confirmedKeyRef.current = key;
-        const close = closeMenu ?? onMenuClose ?? onCloseMenu;
-        close?.();
-      }
+    if (!marker) {
+      confirmedKeyRef.current = null;
+      setState(controller.escape());
+      return;
+    }
+    const key = `${marker.x},${marker.z},${aircraftId}`;
+    const confirmed = staticLine
+      ? controller.escape()
+      : controller.confirm(marker, aircraftId, avatar ?? config.avatar ?? { x: 0, z: 0 });
+    setState(confirmed);
+    if (confirmedKeyRef.current !== key) {
+      confirmedKeyRef.current = key;
+      const close = closeMenu ?? onMenuClose ?? onCloseMenu;
+      close?.();
     }
   }, [marker?.x, marker?.z, aircraftId]); // route replacement closes the rack menu locally
-  const staticLine = reducedMotion ?? shouldReduceHangarMotion();
   const key = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') { setState(controller.escape()); event.preventDefault(); return; }
+    if (staticLine) { event.preventDefault(); return; }
+    if (event.key === 'Escape') { confirmedKeyRef.current = null; setState(controller.escape()); event.preventDefault(); return; }
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     const current = position;
     const delta: Record<string, HangarGuideMarker> = { ArrowUp: { x: 0, z: -HANGAR_WALK_STEP }, ArrowDown: { x: 0, z: HANGAR_WALK_STEP }, ArrowLeft: { x: -HANGAR_WALK_STEP, z: 0 }, ArrowRight: { x: HANGAR_WALK_STEP, z: 0 } };
@@ -42,9 +53,18 @@ export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'sele
     setPosition(next); setState(controller.acceptedStep(next)); event.preventDefault();
   };
   return createElement('section', { 'data-hangar-guide-line': 'true', 'data-static-line': staticLine ? 'true' : 'false' },
+    staticLine ? createElement('span', { 'aria-hidden': true, 'data-hangar-static-guide': true }) : null,
     createElement('section', { 'data-hangar-walk-region': true, tabIndex: 0, 'aria-label': walkRegionLabel, onKeyDown: key }, 'Hangar walk region'),
-    state.route.length ? createElement('svg', { 'aria-hidden': true, 'data-hangar-guide-line-visible': 'true', focusable: 'false' },
-      createElement('polyline', { points: state.route.map(p => `${p.x},${p.z}`).join(' '), fill: 'none', stroke: 'currentColor' })) : null,
+    !staticLine && state.route.length ? (() => {
+      const xs = state.route.map(point => point.x);
+      const zs = state.route.map(point => point.z);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+      const width = Math.max(maxX - minX, 1);
+      const height = Math.max(maxZ - minZ, 1);
+      const padding = Math.max(width, height) * 0.1;
+      return createElement('svg', { 'aria-hidden': true, 'data-hangar-guide-line-visible': 'true', focusable: 'false', viewBox: `${minX - padding} ${minZ - padding} ${width + padding * 2} ${height + padding * 2}` },
+        createElement('polyline', { points: state.route.map(p => `${p.x},${p.z}`).join(' '), fill: 'none', stroke: 'currentColor' }));
+    })() : null,
     createElement('p', { 'aria-live': 'polite', 'aria-atomic': true, 'data-hangar-guide-live': true }, state.liveText ?? ''),
     state.status === 'unreachable' ? createElement('p', { role: 'alert' }, state.message) : null,
   );
