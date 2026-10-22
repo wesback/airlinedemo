@@ -1,0 +1,216 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 519,
+  "branch": "ai-sdlc/issue-519",
+  "commitSha": "6301bf114c3e13c60f5cdf5ba0c401dcef666f87",
+  "round": 0,
+  "pipelineVersion": "9d099a4-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset control can change the expected revision on a retry after an uncertain result, despite reusing the original command identifier.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/caseReset.ts",
+          "line": 74,
+          "message": "Reuse the retained payload for an uncertain retry instead of rebuilding it from the latest envelope.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After a reset result is uncertain, reset retains the commandId and payload, but on the next click it rebuilds the payload from the current scene envelope.",
+            "failureScenario": "The first request uses expectedRevision 7 and has an uncertain result. If the scene updates to revision 8 before retry, the next request reuses the commandId but sends expectedRevision 8, so the retry does not preserve the exact original payload as required by the third acceptance criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset control and command assertions are covered, but the component retry path does not preserve the original payload after an uncertain result.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/caseReset.ts",
+          "line": 76,
+          "message": "An uncertain retry can change expectedRevision while reusing the commandId, violating the acceptance criterion that retries reuse the exact original payload.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After a transport error, reset() retains only the commandId. On the next click it rebuilds the payload from the current scene and passes that payload to submitHangarCaseReset; retryUncertainHangarCaseReset is not used on this path.",
+            "failureScenario": "A reset for revision 7 has an uncertain result, then the scene updates to revision 8 before retry. The retry sends the same commandId with expectedRevision 8 instead of reusing the original payload with expectedRevision 7."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The uncertain retry can change the command payload while keeping its identifier, contrary to the acceptance criterion. The named test covers retries only with an unchanged revision.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/caseReset.ts",
+          "line": 78,
+          "message": "The uncertain retry does not preserve the original payload when the scene revision changes. Reuse retained.current.payload for the retry and add a test that refreshes the revision between attempts.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "After a request returns an uncertain result, the component retains the command ID and payload, but the next click rebuilds the payload from the current scene revision and passes only the retained ID to submitHangarCaseReset.",
+            "failureScenario": "A reset for revision 7 times out, then the scene refreshes to revision 8. Retrying sends the same commandId with expectedRevision 8 instead of retrying the original revision 7 payload, potentially applying a new reset rather than retrying the uncertain command."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarCaseReset.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
