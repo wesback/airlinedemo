@@ -4,7 +4,17 @@ import manifest from '../src/hangar/sceneManifest.json';
 import { loadHangarAircraftAsset } from '../src/hangar/HangarCanvasAdapter';
 import { computeHangarAssetChecksum } from '../src/hangar/assetPolicy';
 import { buildHangarAircraftViewModel } from '../src/hangar/sceneDescriptor';
-import { buildGlb } from './hangarGlbBuilder';
+const aircraftFixtureBase64 = {
+  'aircraft-a': 'Z2xURgIAAADUAQAAoAEAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAiLCJleHRyYXMiOnsic3ludGhldGljIjp0cnVlLCJpbGx1c3RyYXRpdmVDYXRlZ29yeSI6Im5hcnJvdy1ib2R5IiwiaWxsdXN0cmF0aXZlIjp0cnVlfX0sInNjZW5lIjowLCJzY2VuZXMiOlt7Im5vZGVzIjpbMCwxLDIsM119XSwibm9kZXMiOlt7Im5hbWUiOiJBaXJjcmFmdEEifSx7Im5hbWUiOiJFbmdpbmVBIn0seyJuYW1lIjoiQ29tcG9uZW50QTEifSx7Im5hbWUiOiJDb21wb25lbnRBMiJ9XSwiYnVmZmVycyI6W3siYnl0ZUxlbmd0aCI6MjR9XSwiYnVmZmVyVmlld3MiOlt7ImJ1ZmZlciI6MCwiYnl0ZU9mZnNldCI6MCwiYnl0ZUxlbmd0aCI6MjR9XSwiYWNjZXNzb3JzIjpbeyJidWZmZXJWaWV3IjowLCJjb21wb25lbnRUeXBlIjo1MTI2LCJjb3VudCI6MiwidHlwZSI6IlZFQzMifV19IBgAAABCSU4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  'aircraft-b': 'Z2xURgIAAADQAQAAnAEAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAiLCJleHRyYXMiOnsic3ludGhldGljIjp0cnVlLCJpbGx1c3RyYXRpdmVDYXRlZ29yeSI6InJlZ2lvbmFsIiwiaWxsdXN0cmF0aXZlIjp0cnVlfX0sInNjZW5lIjowLCJzY2VuZXMiOlt7Im5vZGVzIjpbMCwxLDIsM119XSwibm9kZXMiOlt7Im5hbWUiOiJBaXJjcmFmdEIifSx7Im5hbWUiOiJFbmdpbmVCIn0seyJuYW1lIjoiQ29tcG9uZW50QjEifSx7Im5hbWUiOiJDb21wb25lbnRCMiJ9XSwiYnVmZmVycyI6W3siYnl0ZUxlbmd0aCI6MjR9XSwiYnVmZmVyVmlld3MiOlt7ImJ1ZmZlciI6MCwiYnl0ZU9mZnNldCI6MCwiYnl0ZUxlbmd0aCI6MjR9XSwiYWNjZXNzb3JzIjpbeyJidWZmZXJWaWV3IjowLCJjb21wb25lbnRUeXBlIjo1MTI2LCJjb3VudCI6MiwidHlwZSI6IlZFQzMifV19GAAAAEJJTgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  'aircraft-c': 'Z2xURgIAAADUAQAAoAEAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAiLCJleHRyYXMiOnsic3ludGhldGljIjp0cnVlLCJpbGx1c3RyYXRpdmVDYXRlZ29yeSI6IndpZGUtYm9keSIsImlsbHVzdHJhdGl2ZSI6dHJ1ZX19LCJzY2VuZSI6MCwic2NlbmVzIjpbeyJub2RlcyI6WzAsMSwyLDNdfV0sIm5vZGVzIjpbeyJuYW1lIjoiQWlyY3JhZnRDIn0seyJuYW1lIjoiRW5naW5lQyJ9LHsibmFtZSI6IkNvbXBvbmVudEMxIn0seyJuYW1lIjoiQ29tcG9uZW50QzIifV0sImJ1ZmZlcnMiOlt7ImJ5dGVMZW5ndGgiOjI0fV0sImJ1ZmZlclZpZXdzIjpbeyJidWZmZXIiOjAsImJ5dGVPZmZzZXQiOjAsImJ5dGVMZW5ndGgiOjI0fV0sImFjY2Vzc29ycyI6W3siYnVmZmVyVmlldyI6MCwiY29tcG9uZW50VHlwZSI6NTEyNiwiY291bnQiOjIsInR5cGUiOiJWRUMzIn1dfSAgIBgAAABCSU4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+} as const;
+
+const readAircraft = (asset: keyof typeof aircraftFixtureBase64) => {
+  const encoded = aircraftFixtureBase64[asset];
+  const decoded = atob(encoded);
+  return Uint8Array.from(decoded, character => character.charCodeAt(0));
+};
 
 const cases = [
   { caseId: 'cp-case-a', name: 'Case A', aircraftCategory: 'narrow-body', status: { assessment: 'ready', review: null, request: null, finance: null, legal: null, acceptance: null }, capabilityLabel: 'Rules-based' },
@@ -30,10 +40,11 @@ describe('Hangar aircraft assets', () => {
   it('Hangar aircraft assets validate before loader', () => {
     const records = provenance.assets as any[];
     for (const [asset, category] of [['aircraft-a', 'narrow-body'], ['aircraft-b', 'regional'], ['aircraft-c', 'wide-body']] as const) {
-      const bytes = buildGlb();
+      const bytes = readAircraft(asset);
       const path = `assets/hangar/${asset}.glb`;
       const record = records.find(r => r.path === path)!;
-      const testRecord = { ...record, checksum: computeHangarAssetChecksum(bytes), sizeBytes: bytes.length };
+      expect(computeHangarAssetChecksum(bytes)).toBe(record.checksum);
+      const testRecord = { ...record };
       const loader = vi.fn(() => `${asset}-scene`);
       const fallback = vi.fn();
       const result = loadHangarAircraftAsset(asset, bytes, { loader, onFallback: fallback, aggregateBytes: bytes.length, resource: { path, type: 'model' }, provenance: testRecord });
@@ -44,9 +55,9 @@ describe('Hangar aircraft assets', () => {
       expect(record.illustrativeCategory).toBe(category);
     }
 
-    const bytes = buildGlb();
+    const bytes = readAircraft('aircraft-a');
     const record = records.find(r => r.path === 'assets/hangar/aircraft-a.glb')!;
-    const validRecord = { ...record, checksum: computeHangarAssetChecksum(bytes), sizeBytes: bytes.length };
+    const validRecord = { ...record };
     const malformedProvenance = [
       { ...validRecord, synthetic: false }, { ...validRecord, realAircraftType: true },
       { ...validRecord, brandMarks: true }, { ...validRecord, rightsBasis: 'licensed' },
@@ -69,6 +80,13 @@ describe('Hangar aircraft assets', () => {
       expect(result).toEqual({ loaded: false, reason: 'asset_invalid' });
       expect(badLoader).not.toHaveBeenCalled(); expect(badFallback).toHaveBeenCalledExactlyOnceWith('asset_invalid');
     }
+
+    const altered = bytes.slice(); altered[12] ^= 1;
+    const injectedProvenance = { ...validRecord, checksum: computeHangarAssetChecksum(altered), sizeBytes: altered.length };
+    const injectedLoader = vi.fn(); const injectedFallback = vi.fn();
+    const injected = loadHangarAircraftAsset('aircraft-a', altered, { loader: injectedLoader, onFallback: injectedFallback, aggregateBytes: altered.length, resource: { path: 'assets/hangar/aircraft-a.glb', type: 'model' }, provenance: injectedProvenance });
+    expect(injected).toEqual({ loaded: false, reason: 'asset_invalid' });
+    expect(injectedLoader).not.toHaveBeenCalled(); expect(injectedFallback).toHaveBeenCalledExactlyOnceWith('asset_invalid');
 
     const externalLoader = vi.fn(); const externalFallback = vi.fn();
     loadHangarAircraftAsset('aircraft-a', bytes, { loader: externalLoader, onFallback: externalFallback, aggregateBytes: bytes.length, resource: { url: 'https://cdn.example/aircraft-a.glb' }, provenance: validRecord });
