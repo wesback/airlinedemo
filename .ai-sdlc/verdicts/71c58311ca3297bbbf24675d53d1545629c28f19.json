@@ -1,0 +1,264 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 521,
+  "branch": "ai-sdlc/issue-521",
+  "commitSha": "71c58311ca3297bbbf24675d53d1545629c28f19",
+  "round": 0,
+  "pipelineVersion": "9d099a4",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The controller has a reachable camera-relative direction bug in `walkHangarAvatar` and can permit steps through circular footprints. The named contract test also leaves several explicitly required key cases unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/walkController.ts",
+          "line": 151,
+          "message": "`walkHangarAvatar` ignores its azimuth argument, so this exported walking helper can produce the wrong camera-relative direction.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "`walkHangarAvatar` accepts `azimuthDegrees` but constructs the controller with `config` only, so the controller uses its default azimuth unless the caller separately sets one in `config`.",
+            "failureScenario": "Calling `walkHangarAvatar({x:0,z:0}, 'ArrowUp', 90, {walkablePolygon: floor})` moves along negative z instead of 0.5 units along positive x."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/walkController.ts",
+          "line": 86,
+          "message": "Circular aircraft or rack footprints can be crossed by a step when both endpoints are outside the footprint.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "`isHangarWalkStepAllowed` checks circular footprints only with `pointInHangarFootprint(target, ...)`; the swept segment is not checked for those footprints.",
+            "failureScenario": "With a circular footprint of radius 0.01 at (0,0), avatar radius 0.3, and a 0.5-unit step from (-0.25,0.3) to (0.25,0.3), both endpoints are outside the expanded footprint but the path crosses it, so the step is accepted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarWalkController.test.ts",
+          "line": 12,
+          "message": "The named test does not prove the full first acceptance criterion: it omits ArrowLeft, ArrowDown, text-field rejection, and pointer-lock rejection.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named camera-relative contract test checks ArrowUp at azimuths 0 and 90, and ArrowRight at 200, but does not exercise all four arrow keys or rejection in text fields and pointer-lock.",
+            "failureScenario": "If ArrowLeft or ArrowDown is mapped incorrectly, or text-field and pointer-lock events are captured, the named test still passes despite violating the first acceptance criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new controller has a reachable pointer-lock bypass and an exported helper that ignores its azimuth argument. The named test also omits several required direction and collision cases, so it would pass if those behaviors were broken.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/walkController.ts",
+          "line": 141,
+          "message": "The pointer-lock guard does not detect browser pointer lock, so arrow keys can move the avatar while pointer-locked.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "shouldCaptureHangarWalkKey checks event.pointerLockElement and a nonstandard pointerLocked property, but a browser KeyboardEvent does not provide either property. It never checks document.pointerLockElement.",
+            "failureScenario": "When pointer lock is active on an element inside the walk region, an arrow key event can still pass the region checks and move the avatar."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarWalkController.test.ts",
+          "line": 20,
+          "message": "The camera-relative key contract test does not cover the required direction and collision cases, including aircraft and rack footprints and leaving the polygon.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named camera-relative key contract test checks ArrowUp at azimuths 0 and 90 and ArrowRight at 200, but it does not exercise ArrowDown or ArrowLeft, aircraft or rack footprint rejection, or a step leaving the polygon. Its only collision assertion checks a floor boundary.",
+            "failureScenario": "If aircraft and rack collision checks are removed, or a step outside the polygon is accepted, the named test still passes despite the acceptance table requiring those cases to be refused atomically."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/walkController.ts",
+          "line": 139,
+          "message": "walkHangarAvatar ignores its azimuthDegrees argument, producing the wrong direction when callers pass a camera azimuth.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "walkHangarAvatar accepts azimuthDegrees but constructs HangarWalkController using config without applying that azimuth. The controller therefore uses config.azimuthDegrees, config.cameraAzimuthDegrees, or zero.",
+            "failureScenario": "Calling walkHangarAvatar(position, 'ArrowUp', 90, config) moves along the zero-degree direction instead of moving 0.5 units in the 90-degree camera-relative direction."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The pointer-lock guard checks a property that native keyboard events do not provide. Arrow-key input can therefore move the avatar while the pointer is locked, contrary to the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/walkController.ts",
+          "line": 153,
+          "message": "Pointer-lock input is not detected from the native keyboard event, so arrow keys still move the avatar while pointer lock is active.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "handleHangarWalkKeydown passes the native keyboard event to shouldCaptureHangarWalkKey, which checks event.pointerLockElement.",
+            "failureScenario": "When the pointer is locked and the user presses an arrow key in the walk region, the native KeyboardEvent has no pointerLockElement property. The check is false, so the controller moves the avatar and prevents the key's default behavior."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarWalkController.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
