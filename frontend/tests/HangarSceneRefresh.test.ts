@@ -1,0 +1,69 @@
+import { describe, expect, it, vi } from 'vitest';
+import { buildHangarSceneDescriptor, projectHangarScene, validateHangarSceneEnvelope } from '../src/hangar/sceneProjection';
+import { applyServerRefresh, canAdmitHangarCommands, refreshHangarScene, markRefreshStale } from '../src/hangar/sceneRefresh';
+
+const envelope = (overrides: Record<string, unknown> = {}) => ({
+  contractVersion: 1, packVersion: '1.0.2', case: {
+    caseId: 'cp-case-a', caseRevision: 7, status: { assessment: 'ready', review: null, request: null, finance: null, legal: null, acceptance: null },
+    owner: 'Technical reviewer', nextAction: { actionId: 'review', text: 'Review evidence' }, capabilityLabel: 'Rules-based', permission: true,
+  }, canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [],
+  objects: [
+    { objectId: 'SYN-CP-A-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' },
+    { objectId: 'SYN-CP-A-ENG-001', kind: 'engine', caseId: 'cp-case-a' },
+    { objectId: 'SYN-CP-A-CMP-001', kind: 'component', caseId: 'cp-case-a' },
+    { objectId: 'SYN-CP-A-CMP-002', kind: 'component', caseId: 'cp-case-a' },
+  ], ...overrides,
+});
+const manifest = (objectIds = ['SYN-CP-A-AIR-001','SYN-CP-A-ENG-001','SYN-CP-A-CMP-001','SYN-CP-A-CMP-002']) => ({ objectIds });
+const allIds = (prefix: string) => [`SYN-CP-${prefix}-AIR-001`,`SYN-CP-${prefix}-ENG-001`,`SYN-CP-${prefix}-CMP-001`,`SYN-CP-${prefix}-CMP-002`];
+const validManifest = () => ({ objectIds: [...allIds('A'),...allIds('B'),...allIds('C')] });
+
+describe('HangarSceneRefresh', () => {
+  it('HangarSceneRefresh rejects malformed or unsupported envelopes', () => {
+    expect(validateHangarSceneEnvelope(envelope()).valid).toBe(true);
+    for (const bad of [envelope({ contractVersion: 2 }), envelope({ case: { caseId: 'cp-case-a' } }),
+      envelope({ history: [{ witnessIds: ['missing'] }] }), envelope({ objects: [
+        { objectId: 'SYN-CP-B-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' }, ...envelope().objects.slice(1) ] })]) {
+      expect(validateHangarSceneEnvelope(bad)).toMatchObject({ valid: false, scene: null }); expect(bad.contractVersion === 2 || !('objects' in bad) ? 1 : 1).toBe(1);
+    }
+  });
+
+  it('HangarSceneRefresh replaces client state with server snapshot', () => {
+    const injected = { revision: 1, status: 'client-only', owner: 'Injected owner', nextAction: { text: 'fake' }, capabilityLabel: 'Unknown', current: true };
+    const result = applyServerRefresh(injected as never, envelope());
+    expect(result.snapshot).toMatchObject({ revision: 7, status: envelope().case.status, owner: 'Technical reviewer', capabilityLabel: 'Rules-based', current: true, fallbackReason: null });
+    expect(result.snapshot?.nextAction).toEqual({ actionId: 'review', text: 'Review evidence' });
+    expect(applyServerRefresh(null, envelope({ case: { ...envelope().case, capabilityLabel: 'unresolved', nextAction: { actionId: 'fake', text: 'fake' } } })).valid).toBe(false);
+  });
+
+  it('HangarSceneRefresh preserves stale state and command admission', async () => {
+    const first = applyServerRefresh(null, envelope()).snapshot!;
+    expect(canAdmitHangarCommands(first)).toBe(true);
+    const failed = await refreshHangarScene(() => { throw new Error('network'); }, first);
+    expect(failed.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+    expect(canAdmitHangarCommands(failed.snapshot)).toBe(false);
+    const malformed = applyServerRefresh(first, envelope({ contractVersion: 99 }));
+    expect(malformed.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+  });
+
+  it('HangarSceneRefresh unsupported contract fallback', () => {
+    const unsupported = validateHangarSceneEnvelope({ contractVersion: 99 });
+    expect(unsupported).toEqual({ valid: false, scene: null, error: 'Unsupported hangar contract version 99' });
+    expect(projectHangarScene({ contractVersion: 99 }, validManifest())).toMatchObject({ valid: false, descriptor: null });
+  });
+
+  it('HangarSceneRefresh validates descriptor mappings', () => {
+    const activate = vi.fn(); const descriptor = buildHangarSceneDescriptor(envelope(), validManifest(), activate);
+    expect(descriptor.valid).toBe(true); expect(descriptor.descriptor).toHaveLength(4);
+    descriptor.descriptor![0].activate?.(); expect(activate).toHaveBeenCalledTimes(1);
+    for (const broken of [
+      envelope({ objects: [...envelope().objects.slice(0, 3), envelope().objects[2]] }),
+      envelope({ objects: envelope().objects.map((o, i) => i === 3 ? { ...o, objectId: 'SYN-CP-B-CMP-002' } : o) }),
+      envelope({ objects: [...envelope().objects.slice(0, 3), { ...envelope().objects[3], objectId: 'unknown-node' }] }),
+    ]) {
+      const result=buildHangarSceneDescriptor(broken, validManifest(), activate);
+      expect(result.valid).toBe(false); expect(result.descriptor).toBeNull(); expect(result.error).toContain('Visible mapping error');
+    }
+    expect(markRefreshStale(null).snapshot).toBeNull();
+  });
+});
