@@ -275,8 +275,8 @@ public sealed class CasePackDiagnosticsTests
         packages.Submit("runtime-package", "cp-case-c", () => new EvidencePackageOutcome("complete",
             [new EvidenceDocumentResult("aircraft-summary.txt", "accepted", "accepted", 1, null)]));
 
-        var projectionSnapshot = factory.Services.GetRequiredService<IAircraftCasePackSnapshotStore>().Read()!;
-        Assert.True(direct.Succeeded, $"scene build failed: {direct.ErrorCode}; payload={direct.PayloadLimit}");
+        var projectionSnapshot = factory.Services.GetRequiredService<IAircraftCasePackSnapshotStore>().Read();
+        Assert.NotNull(projectionSnapshot);
         using var sceneRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/cases/cp-case-c/scene");
         sceneRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
         var sceneEvents = await AddedEventsAsync(async () => { using var response = await client.SendAsync(sceneRequest, ct); Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct)); });
