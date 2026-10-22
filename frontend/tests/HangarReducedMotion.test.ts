@@ -69,17 +69,25 @@ describe('HangarReducedMotion', () => {
     const Scene = await loadHangarScene(controllers);
     render(createElement(Scene));
 
-    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('12,3,18');
-    expect(document.querySelector('[data-hangar-avatar-mesh-position]')?.getAttribute('data-hangar-avatar-mesh-position')).toBe('0,0');
+    fireEvent.click(screen.getByRole('button', { name: 'Aircraft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move avatar' }));
+    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('8,3,12');
+    expect(document.querySelector('[data-hangar-avatar-mesh-position]')?.getAttribute('data-hangar-avatar-mesh-position')).toBe('4,-2');
     expect(controllers.camera.transitionDuration).toBe(0);
     expect(controllers.avatar.transitionDuration).toBe(0);
+    expect(controllers.camera.getState().radius).toBe(20);
+    expect(controllers.avatar.getState()).toEqual({ x: 4, z: -2 });
 
     const normalMotion = new HangarReducedMotion(() => ({ matches: false }), memoryStorage());
     const normalControllers = createHangarSceneMotionControllers(normalMotion);
     const NormalScene = await loadHangarScene(normalControllers);
     render(createElement(NormalScene));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Aircraft' }).at(-1)!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move avatar' }).at(-1)!);
     expect(normalControllers.camera.transitionDuration).toBe(480);
     expect(normalControllers.avatar.transitionDuration).toBe(240);
+    expect(normalControllers.camera.getState().radius).toBe(20);
+    expect(normalControllers.avatar.getState()).toEqual({ x: 4, z: -2 });
   });
 
   it('HangarReducedMotion session override controls rendered transitions in both directions', async () => {
@@ -95,9 +103,7 @@ describe('HangarReducedMotion', () => {
     expect(controllers.camera.transitionDuration).toBe(0);
     expect(controllers.avatar.transitionDuration).toBe(0);
 
-    storage.removeItem(HANGAR_REDUCED_MOTION_STORAGE_KEY);
     systemReduce = true;
-    motion.setOverride(false);
     fireEvent.click(screen.getByRole('button', { name: 'Allow motion' }));
     expect(storage.getItem(HANGAR_REDUCED_MOTION_STORAGE_KEY)).toBe('no-preference');
     expect(controllers.camera.transitionDuration).toBe(480);
