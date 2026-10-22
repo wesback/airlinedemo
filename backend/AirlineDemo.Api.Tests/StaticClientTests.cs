@@ -100,7 +100,7 @@ public sealed class StaticClientTests : IDisposable
     }
 
     [Fact]
-    public async Task Page_assets_fallback_and_preflight_carry_dd028_csp_and_hsts_headers()
+    public async Task Static_client_sends_exact_security_headers()
     {
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
@@ -142,9 +142,9 @@ public sealed class StaticClientTests : IDisposable
 
     private static void AssertSecurityHeaders(HttpResponseMessage response)
     {
-        // Literal DD-028 policy, so the test fails if the constant drifts from the PRD.
+        // Literal Hangar policy, so the test fails if the constant drifts from the PRD.
         Assert.Equal(
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             response.Headers.GetValues("Content-Security-Policy").Single());
         Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
         // DD-028: exactly two security headers (CSP and HSTS). Any response header that is neither framework-produced

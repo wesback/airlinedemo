@@ -44,7 +44,15 @@ public sealed class TransportSecurityTests
     public void Csp_matches_dd_028()
     {
         Assert.Equal(
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            TransportSecurity.ContentSecurityPolicy);
+    }
+
+    [Fact]
+    public void Csp_matches_hangar_baseline()
+    {
+        Assert.Equal(
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             TransportSecurity.ContentSecurityPolicy);
     }
 
