@@ -5,6 +5,7 @@ import {
   isHangarWalkStepAllowed,
   handleHangarWalkKeydown,
   shouldCaptureHangarWalkKey,
+  walkHangarAvatar,
 } from '../src/hangar/walkController';
 import { HangarReducedMotion } from '../src/hangar/reducedMotion';
 
@@ -15,6 +16,9 @@ describe('HangarWalkController', () => {
   it('HangarWalkController camera-relative key contract', () => {
     expect(getHangarCameraRelativeStep('ArrowUp', 0)).toEqual({x:0,z:-0.5});
     expect(getHangarCameraRelativeStep('ArrowUp', 90)).toEqual({x:0.5,z:0});
+    expect(getHangarCameraRelativeStep('ArrowDown', 0)).toEqual({x:0,z:0.5});
+    expect(getHangarCameraRelativeStep('ArrowLeft', 0)).toEqual({x:-0.5,z:0});
+    expect(getHangarCameraRelativeStep('ArrowRight', 0)).toEqual({x:0.5,z:0});
     const azimuth200 = getHangarCameraRelativeStep('ArrowRight', 200)!;
     expect(azimuth200.x).toBeCloseTo(-0.469846310393, 10);
     expect(azimuth200.z).toBeCloseTo(-0.171010071663, 10);
@@ -25,6 +29,21 @@ describe('HangarWalkController', () => {
     const outside = document.createElement('div');
     document.body.append(outside);
     expect(shouldCaptureHangarWalkKey({key:'ArrowUp',target:outside, currentTarget:outside})).toBe(false);
+    const region = document.createElement('section'); region.setAttribute('data-hangar-walk-region','true'); document.body.append(region);
+    const input = document.createElement('input'); region.append(input);
+    expect(shouldCaptureHangarWalkKey({key:'ArrowUp',target:input,currentTarget:region})).toBe(false);
+    expect(shouldCaptureHangarWalkKey({key:'ArrowUp',target:outside,currentTarget:region})).toBe(false);
+    expect(shouldCaptureHangarWalkKey({key:'w',target:region,currentTarget:region})).toBe(false);
+    Object.defineProperty(document,'pointerLockElement',{configurable:true,value:region});
+    expect(shouldCaptureHangarWalkKey({key:'ArrowUp',target:region,currentTarget:region})).toBe(false);
+    Object.defineProperty(document,'pointerLockElement',{configurable:true,value:null});
+    expect(walkHangarAvatar({x:0,z:0},'ArrowUp',90,config())).toMatchObject({position:{x:0.5,z:0}});
+
+    expect(isHangarWalkStepAllowed({x:0,z:-4},{x:0,z:-4.5},config())).toBe(true);
+    expect(isHangarWalkStepAllowed({x:0,z:-4},{x:0,z:-5},config())).toBe(false);
+    expect(isHangarWalkStepAllowed({x:0.8,z:0.8},{x:0.8,z:0.5},config())).toBe(false);
+    expect(isHangarWalkStepAllowed({x:-3,z:2.2},{x:-3,z:2.8},config())).toBe(false);
+    expect(isHangarWalkStepAllowed({x:-2,z:0},{x:0.5,z:0},{walkablePolygon:floor, aircraftFootprints:[{x:0,z:0,radius:0.7}]})).toBe(false);
     const wallStart = {x:0,z:-5};
     expect(isHangarWalkStepAllowed(wallStart,{x:0,z:-5.5},config())).toBe(false);
   });

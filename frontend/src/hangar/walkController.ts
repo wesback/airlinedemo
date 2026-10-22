@@ -95,6 +95,9 @@ export function isHangarWalkStepAllowed(position: HangarWalkPosition, target: Ha
       for (let i = 0; i < corners.length; i++) {
         if (distanceSegments(position, target, corners[i], corners[(i + 1) % corners.length]) <= 1e-12) return false;
       }
+    } else {
+      const footprintRadius = typeof footprint.radius === 'number' ? footprint.radius : 0;
+      if (distancePointToSegment(footprint, position, target) <= footprintRadius + radius) return false;
     }
   }
   for (const wall of config.walls ?? []) {
@@ -127,10 +130,10 @@ export class HangarWalkController {
     if (this.config.followCamera !== false) {
       if (this.config.onFollowCamera) this.config.onFollowCamera({ ...target });
       if (this.config.camera?.orbit && typeof this.config.camera.orbit === 'function') this.config.camera.orbit({ azimuthDelta: 0, polarDelta: 0 });
-      if (this.config.camera?.applyCameraTransition && typeof this.config.camera.applyCameraTransition === 'function') this.config.camera.applyCameraTransition(this.config.camera.getState?.() ?? {}, 160);
+      if (this.config.camera?.applyCameraTransition && typeof this.config.camera.applyCameraTransition === 'function') this.config.camera.applyCameraTransition(this.config.camera.getState?.() ?? {}, this.motion.getDuration(160));
       followCameraUpdated = true;
     }
-    return this.result(target, true, false, this.motion.getDuration(240));
+    return this.result(target, true, false, 240);
   }
   key(key: string, repeat = false): HangarWalkResult { return this.step(key, repeat); }
   handleKey(key: string, repeat = false): HangarWalkResult { return this.step(key, repeat); }
@@ -141,11 +144,15 @@ export class HangarWalkController {
 }
 
 export function createHangarWalkController(initialPositionOrConfig: HangarWalkPosition | HangarWalkConfig = { x: 0, z: 0 }, config: HangarWalkConfig = {}, motion?: HangarReducedMotion): HangarWalkController { return new HangarWalkController(initialPositionOrConfig, config, motion); }
-export function walkHangarAvatar(position: HangarWalkPosition, key: string, azimuthDegrees = 0, config: HangarWalkConfig = {}): HangarWalkResult { const controller = new HangarWalkController(position, config); return controller.step(key); }
+export function walkHangarAvatar(position: HangarWalkPosition, key: string, azimuthDegrees = 0, config: HangarWalkConfig = {}): HangarWalkResult {
+  const controller = new HangarWalkController(position, { ...config, azimuthDegrees });
+  return controller.step(key);
+}
 export function shouldCaptureHangarWalkKey(event: { key?: unknown; repeat?: unknown; target?: EventTarget|null; currentTarget?: EventTarget|null; pointerLockElement?: unknown }, region?: EventTarget|null): boolean {
   const key = typeof event.key === 'string' ? event.key : '';
   if (key === 'Tab' || !['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(key)) return false;
   if (event.pointerLockElement || ('pointerLocked' in event && (event as {pointerLocked?:unknown}).pointerLocked === true)) return false;
+  if (typeof document !== 'undefined' && document.pointerLockElement) return false;
   if (!event.target || typeof Element === 'undefined') return false;
   const element = event.target instanceof Element ? event.target : null;
   if (!element || element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT' || (element instanceof HTMLElement && element.isContentEditable)) return false;
