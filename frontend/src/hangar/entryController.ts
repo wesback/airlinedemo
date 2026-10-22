@@ -63,10 +63,13 @@ export function probeWebGl2(input?: WebGl2Probe | true | false | unknown): WebGl
 }
 
 export function getHangarEntryDecision(options: HangarEntryOptions = {}): HangarEntryDecision {
-  const browserValue = options.browserSupported ?? options.browserEligibility ?? options.browser ?? options.userAgent;
   const browserSupported = options.browserSupported !== undefined
     ? isHangarBrowserSupported(options.browserSupported)
-    : isHangarBrowserSupported(browserValue);
+    : options.browserEligibility !== undefined
+      ? isHangarBrowserSupported(options.browserEligibility)
+      : options.browser !== undefined
+        ? isHangarBrowserSupported(options.browser)
+        : isHangarBrowserSupported(options.userAgent);
   const probeInput = options.webgl2Probe !== undefined
     ? options.webgl2Probe
     : options.webgl2 !== undefined

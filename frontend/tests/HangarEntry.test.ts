@@ -1,4 +1,10 @@
 import { createElement, type ComponentType } from 'react';
+
+const hangarModuleLoads = vi.hoisted(() => ({ threeFiber: 0 }));
+vi.mock('@react-three/fiber', () => {
+  hangarModuleLoads.threeFiber += 1;
+  return { Canvas: () => null };
+});
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { type HangarEntryAppProps } from '../src/App';
@@ -50,9 +56,12 @@ afterEach(() => {
 });
 
   it('HangarEntry lazy loads only after selection', async () => {
+    const modelRequest = vi.fn();
+    hangarModuleLoads.threeFiber = 0;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? 'GET';
+      if (/\.(?:glb|gltf)(?:\?|$)/i.test(url)) modelRequest();
       const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
       if (url === '/api/health') return json({ status: 'ok' });
       if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
@@ -67,7 +76,6 @@ afterEach(() => {
 
     function LoadedScene() { return null; }
     const loader = vi.fn(async () => LoadedScene);
-    const modelRequest = vi.fn();
     render(createElement(HangarApp, {
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
@@ -75,6 +83,7 @@ afterEach(() => {
     } as HangarEntryAppProps));
     expect(loader).not.toHaveBeenCalled();
     expect(modelRequest).not.toHaveBeenCalled();
+    expect(hangarModuleLoads.threeFiber).toBe(0);
 
     fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -84,6 +93,7 @@ afterEach(() => {
     await screen.findByText('Revision: 7');
     expect(loader).not.toHaveBeenCalled();
     expect(modelRequest).not.toHaveBeenCalled();
+    expect(hangarModuleLoads.threeFiber).toBe(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await waitFor(() => expect(loader).toHaveBeenCalledTimes(1));
@@ -105,6 +115,8 @@ afterEach(() => {
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByText('Your browser is not supported. Use the current or previous major version of Chrome or Edge.');
     expect(fallbackLoader).not.toHaveBeenCalled();
+    expect(modelRequest).not.toHaveBeenCalled();
+    expect(hangarModuleLoads.threeFiber).toBe(0);
   });
 
   it('HangarEntry default loader returns a renderable scene component', async () => {
