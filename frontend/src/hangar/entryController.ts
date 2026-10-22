@@ -25,6 +25,7 @@ export function isHangarBrowserSupported(browser: unknown, userAgent?: string): 
   if (typeof browser === 'boolean') return browser;
   if (browser && typeof browser === 'object') {
     const candidate = browser as { supported?: unknown; eligible?: unknown; browserSupported?: unknown; eligibleBrowser?: unknown; major?: unknown; version?: unknown; name?: unknown };
+    if (Object.keys(candidate).length === 0) return false;
     if ((candidate.name === 'Chrome' || candidate.name === 'Edge') && typeof candidate.version === 'number') return candidate.version >= 120;
     if (typeof candidate.supported === 'boolean') return candidate.supported;
     if (typeof candidate.eligibleBrowser === 'boolean') return candidate.eligibleBrowser;
@@ -66,7 +67,7 @@ export function getHangarEntryDecision(options: HangarEntryOptions = {}): Hangar
   const probeInput = options.webgl2Probe ?? options.webgl2 ?? options.probe;
   const hasProbeInput = probeInput !== undefined;
   const probe = hasProbeInput ? probeWebGl2(probeInput) : probeWebGl2();
-  const contractValid = options.contractVersion === undefined || options.contractVersion === 1;
+  const contractValid = options.contractVersion === undefined || options.contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION;
   let fallbackReason: HangarFallbackReason | null = null;
   if (!contractValid) fallbackReason = 'contract_invalid';
   else if (!browserSupported) fallbackReason = 'unsupported_browser';
@@ -79,6 +80,11 @@ export async function selectHangarEntry<T>(options: HangarEntryOptions = {}, laz
   if (decision.mode !== '3d' || !lazyLoader) return decision;
   await lazyLoader();
   return { ...decision, loaderCalled: true };
+}
+
+export async function loadHangarScene(): Promise<{ fiber: unknown }> {
+  const fiber = await import('@react-three/fiber');
+  return { fiber };
 }
 
 export function isNon3dFallbackDecision(decision: HangarEntryDecision): boolean { return decision.mode === 'fallback'; }

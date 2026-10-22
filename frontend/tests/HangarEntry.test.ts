@@ -29,6 +29,7 @@ describe('HangarEntry', () => {
     expect(unsupported).toMatchObject({ fallbackReason: 'unsupported_browser', mode: 'fallback' });
 
     const contractCases: Array<{ contractVersion: unknown; browserEligibility: unknown; probe: unknown }> = [
+      { contractVersion: null, browserEligibility: true, probe: { webgl2: true } },
       { contractVersion: 2, browserEligibility: true, probe: { webgl2: true } },
       { contractVersion: 1, browserEligibility: false, probe: { webgl2: true } },
       { contractVersion: 1, browserEligibility: true, probe: null },

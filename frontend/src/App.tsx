@@ -43,13 +43,13 @@ export default function App({
   const traceRequestId = useRef(0);
   const [hangarView, setHangarView] = useState<'regular' | 'loading' | '3d' | 'fallback' | 'contract-error'>('regular');
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
-  const [hangarContractVersion] = useState<unknown>(contractVersionProp ?? 1);
+  const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
 
   async function enterHangar() {
     setHangarView('loading');
     setHangarSceneLoaded(false);
-    const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry } = await import('./hangar/entryController');
+    const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene } = await import('./hangar/entryController');
     const browserSupported = hangarBrowserSupported !== undefined
       ? isHangarBrowserSupported(hangarBrowserSupported)
       : isHangarBrowserSupported(undefined);
@@ -60,7 +60,7 @@ export default function App({
       browserSupported,
       contractVersion: hangarContractVersion,
       webgl2,
-    }, hangarLazyLoader ?? (() => ({ scene: true })));
+    }, hangarLazyLoader ?? loadHangarScene);
     if (decision.mode === '3d') {
       setHangarSceneLoaded(true);
       setHangarView('3d');
