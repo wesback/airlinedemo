@@ -51,17 +51,17 @@ export default function App({
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
 
   function setHangarMotionOverride(enabled: boolean) {
-    const motion = hangarMotion.current?.motion;
-    if (!motion) return;
-    enabled ? motion.enable() : motion.disable();
-    setHangarReducedMotion(motion.reduced);
+    const controllers = hangarMotion.current;
+    if (!controllers) return;
+    enabled ? controllers.motion.enable() : controllers.motion.disable();
+    setHangarReducedMotion(controllers.motion.reduced);
   }
 
   function clearHangarMotionOverride() {
-    const motion = hangarMotion.current?.motion;
-    if (!motion) return;
-    motion.clearOverride();
-    setHangarReducedMotion(motion.reduced);
+    const controllers = hangarMotion.current;
+    if (!controllers) return;
+    controllers.motion.clearOverride();
+    setHangarReducedMotion(controllers.motion.reduced);
   }
 
   function runNon3dAction(action: 'selection' | 'status' | 'evidence' | 'journey' | 'review') {

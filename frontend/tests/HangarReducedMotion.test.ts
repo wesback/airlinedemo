@@ -54,7 +54,10 @@ describe('HangarReducedMotion', () => {
     const motion = new HangarReducedMotion(() => ({ matches: systemReduce }), storage);
 
     expect(motion.reduced).toBe(false);
+    const updates: boolean[] = [];
+    const unsubscribe = motion.subscribe((active) => updates.push(active));
     expect(motion.setOverride(true)).toBe(true);
+    expect(updates).toEqual([true]);
     expect(getHangarReducedMotionOverride(storage)).toBe(true);
     expect(motion.reduced).toBe(true);
     expect(motion.applyTransition('camera-final', 600).duration).toBe(0);
@@ -62,6 +65,7 @@ describe('HangarReducedMotion', () => {
 
     systemReduce = true;
     expect(motion.setOverride(false)).toBe(false);
+    expect(updates).toEqual([true, false]);
     expect(motion.reduced).toBe(false);
     expect(motion.getDuration(600)).toBe(600);
     expect(motion.getDuration(300)).toBe(300);
@@ -82,5 +86,6 @@ describe('HangarReducedMotion', () => {
     const controllerWithOverride = createHangarCameraController(10, motion);
     expect(controllerWithOverride.applyCameraTransition(controllerWithOverride.overview().state, 600).duration).toBe(0);
     expect(controllerWithOverride.applyCameraTransition(controllerWithOverride.aircraft().state, 300)).toEqual({ target: controllerWithOverride.getState(), duration: 0, immediate: true });
+    unsubscribe();
   });
 });

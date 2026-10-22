@@ -65,11 +65,26 @@ export function applyHangarTransition<T>(target: T, requestedDuration: unknown, 
   return { target, duration, immediate: duration === 0 };
 }
 
+export type HangarReducedMotionMediaQuery = { matches: boolean; addEventListener?: (type: 'change', listener: () => void) => void; removeEventListener?: (type: 'change', listener: () => void) => void };
+export type HangarReducedMotionListener = (reduced: boolean) => void;
+
 export class HangarReducedMotion {
   private override: HangarReducedMotionOverride = null;
-  constructor(private readonly matchMedia?: (query: string) => { matches: boolean }, private readonly storage?: HangarReducedMotionStorage | null) {
+  private readonly listeners = new Set<HangarReducedMotionListener>();
+  private readonly mediaQuery: HangarReducedMotionMediaQuery | null;
+  private readonly mediaChangeListener: (() => void) | null;
+  constructor(private readonly matchMedia?: (query: string) => HangarReducedMotionMediaQuery, private readonly storage?: HangarReducedMotionStorage | null) {
     this.override = this.storage === null ? null : getHangarReducedMotionOverride(storage);
+    const queryMedia = this.matchMedia ?? (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : null);
+    this.mediaQuery = queryMedia ? queryMedia('(prefers-reduced-motion: reduce)') : null;
+    this.mediaChangeListener = this.mediaQuery?.addEventListener ? () => this.notify() : null;
+    if (this.mediaQuery?.addEventListener && this.mediaChangeListener) this.mediaQuery.addEventListener('change', this.mediaChangeListener);
   }
+  subscribe(listener: HangarReducedMotionListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  private notify(): void { const reduced = this.reduced; for (const listener of this.listeners) listener(reduced); }
   get systemPreference(): boolean { return getHangarSystemReducedMotion(this.matchMedia); }
   get overrideValue(): HangarReducedMotionOverride { return this.storage === null ? this.override : getHangarReducedMotionOverride(this.storage); }
   get reduced(): boolean {
@@ -80,9 +95,10 @@ export class HangarReducedMotion {
   }
   setOverride(override: HangarReducedMotionOverride): HangarReducedMotionOverride {
     this.override = setHangarReducedMotionOverride(override, this.storage);
+    this.notify();
     return this.override;
   }
-  clearOverride(): null { this.override = clearHangarReducedMotionOverride(this.storage); return null; }
+  clearOverride(): null { this.override = clearHangarReducedMotionOverride(this.storage); this.notify(); return null; }
   enable(): boolean { return this.setOverride(true) === true; }
   disable(): boolean { return this.setOverride(false) === false; }
   getDuration(requestedDuration: unknown): number { return getHangarMotionDuration(requestedDuration, this.reduced); }

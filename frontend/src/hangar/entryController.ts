@@ -1,4 +1,4 @@
-import { createElement, type ComponentType } from 'react';
+import { createElement, useEffect, useState, type ComponentType } from 'react';
 import { createHangarCameraController } from './cameraController';
 import { createHangarAvatarController, HangarReducedMotion } from './reducedMotion';
 
@@ -108,22 +108,49 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
   const { Canvas } = await import('@react-three/fiber');
   const cameraTransition = controllers.camera.overview();
   const avatarTransition = controllers.avatar.move({ x: 0, z: 0 }, 240);
-  const reducedMotion = controllers.motion.reduced;
-  const HangarScene: ComponentType = () => createElement(
-    'div',
-    { 'data-hangar-reduced-motion': reducedMotion ? 'true' : 'false', 'data-hangar-camera-duration': String(controllers.camera.transitionDuration), 'data-hangar-avatar-duration': String(avatarTransition.duration) },
-    createElement(
-      Canvas,
-      { shadows: true, camera: { position: [cameraTransition.state.radius / 10 * 4, 3, cameraTransition.state.radius / 10 * 6], fov: 45 } },
-      createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
-      createElement('ambientLight', { intensity: 1 }),
-      createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
-      createElement('mesh', { position: [0, 0, 0] },
-        createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
-        createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
+  const HangarScene: ComponentType = () => {
+    const [reduced, setReduced] = useState(controllers.motion.reduced);
+    const [cameraState, setCameraState] = useState(cameraTransition.state);
+    const [avatarState, setAvatarState] = useState(controllers.avatar.getState());
+    useEffect(() => controllers.motion.subscribe((active) => {
+      setReduced(active);
+      const camera = controllers.camera.applyCameraTransition(controllers.camera.getState(), 480);
+      setCameraState(camera.target);
+      const avatar = controllers.avatar.move(controllers.avatar.getState(), 240);
+      setAvatarState(avatar.target);
+    }), []);
+    const navigateCamera = (preset: 'overview' | 'aircraft') => {
+      const transition = preset === 'overview' ? controllers.camera.overview() : controllers.camera.aircraft();
+      setCameraState(transition.state);
+      setReduced(controllers.motion.reduced);
+    };
+    const moveAvatar = () => {
+      const next = { x: avatarState.x === 0 ? 4 : 0, z: avatarState.z === 0 ? -2 : 0 };
+      const transition = controllers.avatar.move(next, 240);
+      setAvatarState(transition.target);
+      setReduced(controllers.motion.reduced);
+    };
+    return createElement(
+      'div',
+      { 'data-hangar-reduced-motion': reduced ? 'true' : 'false', 'data-hangar-camera-duration': String(controllers.camera.transitionDuration), 'data-hangar-avatar-duration': String(reduced ? 0 : 240) },
+      createElement('section', { 'data-hangar-camera-region': true, 'aria-label': 'Camera controls' },
+        createElement('button', { type: 'button', onClick: () => navigateCamera('overview') }, 'Overview'),
+        createElement('button', { type: 'button', onClick: () => navigateCamera('aircraft') }, 'Aircraft'),
+        createElement('button', { type: 'button', onClick: moveAvatar }, 'Move avatar'),
       ),
-    ),
-  );
+      createElement(
+        Canvas,
+        { shadows: true, camera: { position: [cameraState.radius / 10 * 4, 3, cameraState.radius / 10 * 6], fov: 45 } },
+        createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
+        createElement('ambientLight', { intensity: 1 }),
+        createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
+        createElement('mesh', { position: [0, 0, 0] },
+          createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
+          createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
+        ),
+      ),
+    );
+  };
   return HangarScene;
 }
 
