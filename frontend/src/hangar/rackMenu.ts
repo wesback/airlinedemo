@@ -41,7 +41,7 @@ export class HangarRackMenuController {
 }
 export const createHangarRackMenuController=(entries:HangarRackMenuEntry[]=[],options?:HangarRackMenuOptions)=>new HangarRackMenuController(entries,options);
 export const buildHangarRackMenu=(entries:HangarRackMenuEntry[]=[],options?:HangarRackMenuOptions)=>createHangarRackMenuController(entries,options);
-export function isHangarRackMenuEntry(entries:HangarRackMenuEntry[],identifier:unknown):HangarRackMenuEntry|null {return typeof identifier==='string'?entries.find(e=>!e.unavailable&&(e.caseId===identifier||((e as any).aircraftId===identifier)||((e as any).objectId===identifier)))??null:null;}
+export function isHangarRackMenuEntry(entries:HangarRackMenuEntry[],identifier:unknown):HangarRackMenuEntry|null {return typeof identifier==='string'?entries.find(e=>!e.unavailable&&e.caseId===identifier)??null:null;}
 export function confirmHangarRackMenuEntry(entries: HangarRackMenuEntry[],identifier:unknown,handler?:HangarRackSelectionHandler):boolean {const entry=isHangarRackMenuEntry(entries,identifier);if(!entry)return false;if(typeof handler==='function')handler(entry.caseId);return true;}
 export { SOURCE_UNAVAILABLE_TEXT };
 
@@ -55,7 +55,7 @@ export function HangarRackMenu({entries:initialEntries,caseList,scope=[],summary
   useEffect(()=>{const state=controller.getState();if(state.open)menuRef.current?.focus?.();else if(document.activeElement===menuRef.current||document.activeElement?.closest('[data-hangar-rack-menu]'))walkRef.current?.focus?.();},[controller.getState().open]);
   const state=controller.getState();const open=()=>{controller.open();render(v=>v+1)};  const key=(event:ReactKeyboardEvent)=>{controller.handleKeydown(event);render(v=>v+1);};
   return createElement('div',null,
-    createElement('section',{ref:(node:HTMLElement|null)=>{walkRef.current=node},'data-hangar-walk-region':true,tabIndex:0,'aria-label':walkRegionLabel},'Hangar walk region'),
+    createElement('section',{ref:(node:HTMLElement|null)=>{walkRef.current=node},'data-hangar-walk-region':true,tabIndex:0,'aria-label':walkRegionLabel,onMouseEnter:()=>{controller.enterZone();render(v=>v+1)},onMouseLeave:()=>{controller.leaveZone()},onFocus:()=>{controller.enterZone();render(v=>v+1)}},'Hangar walk region'),
     createElement('button',{type:'button','aria-label':HANGAR_RACK_MENU_OPEN_LABEL,onClick:open},HANGAR_RACK_MENU_OPEN_LABEL),
     state.open?createElement('section',{ref:(node:HTMLElement|null)=>{menuRef.current=node},tabIndex:-1,'aria-label':'Data rack menu','data-hangar-rack-menu':true,role:'menu',onKeyDown:key},
       createElement('h2',null,'Data rack'),entries.map((entry,index)=>createElement('button',{type:'button',role:'menuitem',key:entry.caseId,'aria-label':entry.name,tabIndex:state.highlightedIndex===index?0:-1,'aria-current':state.highlightedIndex===index?'true':undefined,'data-highlighted':state.highlightedIndex===index?'true':'false',onClick:()=>{controller.confirm(entry.caseId);render(v=>v+1)}} ,

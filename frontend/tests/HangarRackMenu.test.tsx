@@ -14,6 +14,24 @@ afterEach(cleanup);
 
 describe('HangarRackMenu',()=>{
  it('HangarRackMenu zone entry and focus lifecycle',async()=>{
+   const selection=vi.fn(); render(<HangarRackMenu entries={entries} onConfirm={selection}/>);
+   const walk=screen.getByRole('region',{name:'Walk region'});
+   fireEvent.focus(walk);
+   expect(screen.getByRole('menu',{name:'Data rack menu'})).toBeTruthy();
+   expect(document.activeElement).toBe(screen.getByRole('menu',{name:'Data rack menu'}));
+   fireEvent.focus(walk);
+   expect(screen.getAllByRole('menuitem')).toHaveLength(3);
+   fireEvent.keyDown(screen.getByRole('menu',{name:'Data rack menu'}),{key:'Escape'});
+   expect(screen.queryByRole('menu')).toBeNull();
+   expect(document.activeElement).toBe(walk);
+   fireEvent.mouseLeave(walk);
+   fireEvent.mouseEnter(walk);
+   expect(screen.getByRole('menu',{name:'Data rack menu'})).toBeTruthy();
+   fireEvent.keyDown(screen.getByRole('menu',{name:'Data rack menu'}),{key:'Escape'});
+   const open=screen.getByRole('button',{name:HANGAR_RACK_MENU_OPEN_LABEL});
+   fireEvent.click(open);
+   expect(screen.getByRole('menu',{name:'Data rack menu'})).toBeTruthy();
+
    const focusWalk=vi.fn(); const controller=new HangarRackMenuController(entries,{onFocusWalk:focusWalk});
    controller.enterZone(); expect(controller.getState().open).toBe(true); controller.stepInside(true); controller.stepInside(true);
    expect(controller.getState().open).toBe(true); controller.escape(); expect(controller.getState().open).toBe(false); expect(focusWalk).toHaveBeenCalledTimes(1);
