@@ -70,7 +70,10 @@ export function buildCaseCJourney(envelope:unknown):CaseAJourney {
   const caseObject=isObject(source.case)?source.case:{};
   const declared=variantLabel(source.variant)??variantLabel(caseObject.variant)??variantLabel(source.blockedVariant)??(source.canResetBlockedVariant===true?'blocked':null);
   const history=Array.isArray(source.history)?source.history.filter(isObject):[];
-  const eventBlocked=history.some(event=>text(event.eventType)==='presenter_reset_blocked_variant'||text(event.action)==='presenter_reset_blocked_variant'||text(event.variant)==='blocked'||text(event.reasonCode)==='presenter_reset_blocked_variant');
+  const eventBlocked=history.some(event=>{
+    const eventType=text(event.eventType)?.toLowerCase(); const action=text(event.action)?.toLowerCase(); const variant=text(event.variant)?.toLowerCase(); const status=text(event.status)?.toLowerCase(); const reasonCode=text(event.reasonCode)?.toLowerCase();
+    return eventType==='presenter_reset_blocked_variant'||action==='presenter_reset_blocked_variant'||variant==='blocked'||variant==='retryable'||status==='blocked'||status==='retryable'||eventType==='blocked'||eventType==='retryable'||reasonCode==='presenter_reset_blocked_variant'||reasonCode==='retryable';
+  });
   const variant:CaseJourneyVariant=(declared??(eventBlocked?'blocked':'baseline'));
   const allowed=base.steps.filter(step=>['Finding','Review','Response','New basis','Reassessment'].includes(step.label)&&step.completed)
     .filter(step=>{const event=history.find(e=>text(e.eventId)==step.sourceEventId);const raw=event?(text(event.eventType)??text(event.label)??text(event.summary)??''):step.summary??'';return !/(request|accept|accepted|acceptance)/i.test(raw);});

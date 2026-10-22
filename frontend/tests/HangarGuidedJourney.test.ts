@@ -64,6 +64,7 @@ describe('Case A guided journey',()=>{
     const baselineEvidence=[witness('wit-finding','cp-case-c'),witness('wit-review','cp-case-c'),witness('wit-response','cp-case-c'),witness('wit-basis','cp-case-c')];
     const baseline=buildCaseCJourney({...c,variant:'baseline',history:baselineHistory,evidence:baselineEvidence});expect(baseline.variant).toBe('baseline');expect(baseline.steps.map(step=>step.label)).toEqual(['Finding','Review','Response','New basis']);expect(baseline.steps.map(step=>step.label)).not.toContain('Acceptance');expect(baseline.steps.map(step=>step.label)).not.toContain('blocked');expect(baseline.steps.map(step=>step.label)).not.toContain('retryable');
     const summaryOnly=buildCaseCJourney({...c,variant:undefined,history:[{...event('c-finding',1,'finding-recorded',['wit-finding']),summary:'Blocked retryable processing reset',caseId:'cp-case-c',runId:'run-c'}]});expect(summaryOnly.variant).toBe('baseline');expect(summaryOnly.steps.map(step=>step.label)).not.toContain('blocked');expect(summaryOnly.steps.map(step=>step.label)).not.toContain('retryable');
+    const retryableEvent=buildCaseCJourney({...c,variant:undefined,history:[{...event('c-finding',1,'finding-recorded',['wit-finding']),caseId:'cp-case-c',runId:'run-c',variant:'retryable'}]});expect(retryableEvent.variant).toBe('blocked');expect(retryableEvent.steps.map(step=>step.label)).toEqual(['Finding','blocked','retryable']);
   });
 
   it('Case B and C journey preserve older-history omission semantics',async()=>{
@@ -77,5 +78,6 @@ describe('Case A guided journey',()=>{
     expect(screen.getByRole('status').textContent).toBe('Older history unavailable');expect(screen.queryByRole('button',{name:'Open delivered ARR older history'})).toBeNull();cleanup();
     expect((await openCaseAOlderHistory({...b,olderHistoryAvailable:true,basisId:'basis-a'},async()=>({caseId:'cp-case-c',runId:'run-b',basisId:'basis-a',events:[]}))).error).toContain('Out-of-scope');
     const window=buildCaseBJourney({...scene(),case:{caseId:'cp-case-b'},olderHistoryAvailable:true,currentRunId:'run-b',history:[{...event('b-finding',1,'finding-recorded',['wit-finding']),caseId:'cp-case-b',runId:'run-b'}],evidence:[witness('wit-finding','cp-case-b')]});expect(window.steps[0].future).toBe(false);
+    expect((await openCaseAOlderHistory({...b,olderHistoryAvailable:true,basisId:'basis-a'},async()=>({caseId:'cp-case-b',runId:'run-b',basisId:'basis-a',events:[]}))).ok).toBe(true);
   });
 });
