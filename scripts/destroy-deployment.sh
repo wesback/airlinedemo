@@ -1,0 +1,58 @@
+#!/bin/bash
+set -euo pipefail
+
+resource_group=${RESOURCE_GROUP_NAME:-}
+if [ -z "$resource_group" ]; then
+  printf 'Missing required deployment configuration: RESOURCE_GROUP_NAME\n' >&2
+  exit 2
+fi
+
+confirmed=false
+for argument in "$@"; do
+  if [ "$argument" = "--yes" ]; then
+    confirmed=true
+  fi
+done
+if [ "$confirmed" != true ]; then
+  printf 'Destroy requires explicit confirmation: pass --yes\n' >&2
+  exit 2
+fi
+
+for name in AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID; do
+  eval "value=\${${name}-}"
+  if [ -z "$value" ]; then
+    printf 'Missing required deployment configuration: %s\n' "$name" >&2
+    exit 2
+  fi
+done
+
+for command_name in terraform az; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    printf 'Required command is not available: %s\n' "$command_name" >&2
+    exit 3
+  fi
+done
+
+logged_tenant=$(az account show --query tenantId --output tsv) || exit 3
+logged_subscription=$(az account show --query id --output tsv) || exit 3
+
+if [ "$(printf '%s' "$logged_tenant" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$AZURE_TENANT_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+  printf 'Azure tenant mismatch: expected %s, logged in to %s\n' "$AZURE_TENANT_ID" "$logged_tenant" >&2
+  exit 3
+fi
+if [ "$(printf '%s' "$logged_subscription" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$AZURE_SUBSCRIPTION_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+  printf 'Azure subscription mismatch: expected %s, logged in to %s\n' "$AZURE_SUBSCRIPTION_ID" "$logged_subscription" >&2
+  exit 3
+fi
+
+if [ -n "${BACKEND_CONFIG_FILE:-}" ]; then
+  terraform -chdir=infra/terraform init -backend-config="$BACKEND_CONFIG_FILE"
+fi
+
+if [ -n "${TFVARS_FILE:-}" ]; then
+  terraform -chdir=infra/terraform destroy -var-file="$TFVARS_FILE" -auto-approve
+else
+  terraform -chdir=infra/terraform destroy -auto-approve
+fi
+
+printf 'Destroyed deployment resources for %s.\n' "$resource_group"

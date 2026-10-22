@@ -27,11 +27,16 @@ The .NET 10 API owns workflow state, policy, and decisions; the React client is 
 
 ## Prerequisites
 
-- An organization-approved Azure subscription, resource names, region/model availability, quota, budget owner, and deployment window.
-- An approved Entra identity for Terraform, SQL administration, the application, and the protected state backend; release OIDC identities and the private-network release runner.
-- Approved presenter/reviewer ingress CIDRs, private endpoint/DNS connectivity, and required restricted egress destinations. The app allowlist is empty-deny.
+External organization-provided prerequisites remain outside Terraform deployment inventory:
+
+- An organization-approved Azure subscription, tenant, region/model availability, quota, budget owner, and deployment window.
+- Protected Terraform state storage bootstrap by a separately authorized backend owner, including Entra authentication and blob lease locking.
+- Organization-provided Entra identities and grants for Terraform, SQL administration, application managed identity, release OIDC, private-network runner, and backend access.
+- Approved private endpoint/DNS and restricted egress connectivity; approved VNet and subnet CIDRs; presenter/reviewer CIDRs; model deployment and signing materials.
 - Terraform 1.9 or later, Azure CLI, Git, .NET 10 SDK, Node.js LTS/npm, and access to the repository's protected build and release workflows.
 - An approved model deployment and reviewed model manifest before investigation or scored evaluation.
+
+The deployment requires approved resource names from `infra/terraform/variables.tf`, including `resource_group_name`, SQL server/database names, storage account name, Key Vault name, model account/deployment names, Container Registry name, Container Apps environment/app names, subnet names and ACR configuration. CIDRs must be explicit and valid: `vnet_address_space`, `app_subnet_cidr`, `private_endpoint_subnet_cidr`, `presenter_reviewer_cidrs`, and `egress_allowed_destinations`. The Container Apps ingress allowlist uses only configured presenter/reviewer CIDRs. An empty allowlist produces a deny-all rule and denies all ingress.
 
 Stop if identity, private connectivity, model approval, or organization approval is missing. Do not substitute public endpoints or personal credentials.
 
@@ -41,7 +46,9 @@ Use the approved Entra/OIDC identity and a protected remote Terraform state back
 
 Keep non-secret Terraform inputs in a reviewed file outside tracked paths and pass it with `-var-file`. Keep the backend configuration outside the repository as well. Pass only a Key Vault secret URI for the demo passcode; store its value in Key Vault. Never commit passcodes, tokens, access keys, connection strings, state, plans, logs, or secret-bearing configuration. Terraform uses managed identity for app access; do not enable storage shared keys or public data-service access.
 
-## Setup and deployment
+## Protected state bootstrap, login, and deployment
+
+Use `scripts/bootstrap-deployment.sh` for operator bootstrap. It requires `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `RESOURCE_GROUP_NAME`, `TFVARS_FILE`, and `BACKEND_CONFIG_FILE`, verifies Azure CLI and Terraform availability, verifies logged-in tenant and subscription, runs Terraform initialization, creates and displays one saved plan, then applies exactly that plan only after explicit `yes` confirmation. It does not build, sign, push, or deploy an image.
 
 1. Check out the approved repository revision and record `git rev-parse HEAD`; use a clean worktree and retain the revision with the evidence.
 2. Have the authorized platform owner complete and verify the protected state bootstrap. Confirm Entra-only state access and locking. No manual portal resource creation is part of provisioning.
@@ -62,7 +69,22 @@ Keep non-secret Terraform inputs in a reviewed file outside tracked paths and pa
 7. From an allowlisted network, verify the release succeeded, `/api/health` is healthy, sign-in and role boundaries work, private dependencies resolve, and the synthetic case can be opened. Record the deployment and smoke-check results.
 8. Follow [Seed, run and reset](#seed-run-and-reset), then complete the [rehearsal evidence](rehearsal-evidence.md). Teardown is in [Removal and teardown](#removal-and-teardown).
 
-The documented lifecycle is revision, protected state bootstrap, Terraform plan/apply/repeated-plan evidence, signed deployment, smoke checks, seeding, operation, evaluation, and teardown. No deployment-owned resource is created manually in the portal.
+The operator form may replace steps 3–5 with:
+
+```sh
+az login --tenant "$AZURE_TENANT_ID"
+az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+export AZURE_SUBSCRIPTION_ID='<approved-subscription-id>'
+export AZURE_TENANT_ID='<approved-tenant-id>'
+export RESOURCE_GROUP_NAME='<approved-resource-group>'
+export TFVARS_FILE='/absolute/path/readiness.tfvars'
+export BACKEND_CONFIG_FILE='/absolute/path/backend.hcl'
+scripts/bootstrap-deployment.sh
+```
+
+Repeat planning with the same revision, variable file, backend, tenant, and subscription. Retain and compare the repeat-plan output; stop on unexplained drift. The existing `infra/terraform/tests/network-boundaries.tftest.hcl` and `infra/terraform/tests/container-hosting.tftest.hcl` are the network-boundary and Container Apps configuration tests for this deployment; they are not changed here.
+
+The documented lifecycle is revision, protected state bootstrap, Terraform plan/apply/repeat-plan evidence, signed protected release, smoke checks, seeding, operation, evaluation, and teardown. No deployment-owned resource is created manually in the portal. No unsigned image or mutable tag is deployed through a local script.
 
 ## Seed, run and reset
 
@@ -89,7 +111,16 @@ No numeric estimate or spending cap is approved. The Terraform budget notificati
 
 ## Removal and teardown
 
-Stop demonstrations and evaluation first. Preserve required rehearsal, audit, and release evidence under the approved retention policy. The authorized Terraform identity must review and apply a saved destroy plan for the same state and inputs:
+Stop demonstrations and evaluation first. Preserve required rehearsal, audit, and release evidence under the approved retention policy. The authorized Terraform identity must verify tenant and subscription, review and apply a destroy plan for the same state and inputs:
+
+```sh
+export RESOURCE_GROUP_NAME='<approved-resource-group>'
+export AZURE_SUBSCRIPTION_ID='<approved-subscription-id>'
+export AZURE_TENANT_ID='<approved-tenant-id>'
+scripts/destroy-deployment.sh --yes
+```
+
+The script requires the exact `--yes` argument and prints a success message only after Terraform destroy succeeds. A direct saved-plan destroy remains available for evidence-retention workflows:
 
 ```sh
 terraform -chdir=infra/terraform plan -destroy -var-file=/absolute/path/readiness.tfvars -out=/absolute/path/destroy.tfplan
