@@ -22,9 +22,12 @@ public static class CasePackDiagnostics
         if (durationMs < 0) throw new ArgumentOutOfRangeException(nameof(durationMs));
         var fields = new Dictionary<string, object?>(StringComparer.Ordinal)
         { ["contractVersion"] = ContractVersion, ["outcome"] = outcome, ["durationMs"] = durationMs, ["eventType"] = eventType };
-        if (IsCaseId(caseId)) fields["caseId"] = caseId;
-        if (IsCommandId(commandId)) fields["commandId"] = commandId;
-        if (IsPackVersion(packVersion)) fields["packVersion"] = packVersion;
+        if (eventType is "pack_load" && IsPackVersion(packVersion)) fields["packVersion"] = packVersion;
+        if (eventType is "scene_projection" or "reset")
+        {
+            if (IsCaseId(caseId)) fields["caseId"] = caseId;
+        }
+        if (eventType == "reset" && IsCommandId(commandId)) fields["commandId"] = commandId;
         logger.Log(LogLevel.Information, new EventId(0, eventType), fields, null,
             static (values, _) => "case-pack diagnostic event");
         using var activity = ActivitySource.StartActivity(eventType, ActivityKind.Internal);

@@ -3,13 +3,21 @@ using System.Net;
 using System.Net.Http.Json;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Evidence;
+using AirlineDemo.Api.Fixtures;
+using AirlineDemo.Api.Finance;
+using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.Projection;
+using AirlineDemo.Api.Requests;
+using AirlineDemo.Api.Reviews;
 using AirlineDemo.Api.Runs;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -17,13 +25,19 @@ public sealed class CasePackDiagnosticsTests
 {
     private sealed class CaptureLogger : ILogger
     {
-        public List<IReadOnlyDictionary<string, object?>> Events { get; } = [];
+        private readonly Lock _gate = new();
+        private readonly List<IReadOnlyDictionary<string, object?>> _events = [];
+        public IReadOnlyList<IReadOnlyDictionary<string, object?>> Events { get { lock (_gate) return _events.ToArray(); } }
+        public int Count { get { lock (_gate) return _events.Count; } }
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (state is IEnumerable<KeyValuePair<string, object?>> values)
-                Events.Add(values.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+            {
+                var snapshot = values.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+                lock (_gate) _events.Add(snapshot);
+            }
         }
     }
 
@@ -71,6 +85,13 @@ public sealed class CasePackDiagnosticsTests
         Assert.DoesNotContain("caseId", withoutIdentifiers.Keys);
         Assert.DoesNotContain("commandId", withoutIdentifiers.Keys);
         Assert.DoesNotContain("packVersion", withoutIdentifiers.Keys);
+
+        var countBeforeInvalidEvent = logger.Count;
+        Assert.Throws<ArgumentException>(() => CasePackDiagnostics.Emit(logger, "other", "success", 1));
+        Assert.Equal(countBeforeInvalidEvent, logger.Count);
+        var countBeforeInvalidOutcome = logger.Count;
+        Assert.Throws<ArgumentException>(() => CasePackDiagnostics.Emit(logger, "reset", "other", 1));
+        Assert.Equal(countBeforeInvalidOutcome, logger.Count);
 
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -135,6 +156,191 @@ public sealed class CasePackDiagnosticsTests
         Assert.Equal(HttpStatusCode.BadRequest, deniedReset.StatusCode);
         Assert.Contains(logger.Events, fields => fields.TryGetValue("eventType", out var value) && Equals(value, "case_list"));
         Assert.Contains(logger.Events, fields => fields.TryGetValue("eventType", out var value) && Equals(value, "reset") && fields.TryGetValue("outcome", out var outcome) && Equals(outcome, "invalid"));
+    }
+
+    [Fact]
+    public async Task AC022_RuntimeOperationsEmitIsolatedDiagnostics()
+    {
+        var logger = new CaptureLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Demo:Passcode"] = "runtime-diagnostics-passcode",
+                ["Persistence:EvidenceProvider"] = "Memory",
+            })).ConfigureServices(services =>
+            {
+                services.AddSingleton<ILoggerProvider>(new CaptureLoggerProvider(logger));
+                services.RemoveAll<IArrCaseHistorySource>();
+                services.AddSingleton<IArrCaseHistorySource>(sp => new RuntimeArrHistorySource(sp.GetRequiredService<ICaseStateStore>()));
+            }));
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        IReadOnlyDictionary<string, object?>[] AddedEvents(Action operation)
+        {
+            var before = logger.Count;
+            operation();
+            return logger.Events.Skip(before).Where(IsCasePackDiagnostic).ToArray();
+        }
+        async Task<IReadOnlyDictionary<string, object?>[]> AddedEventsAsync(Func<Task> operation)
+        {
+            var before = logger.Count;
+            await operation();
+            return logger.Events.Skip(before).Where(IsCasePackDiagnostic).ToArray();
+        }
+
+        var publisher = factory.Services.GetRequiredService<AircraftCasePackPublisher>();
+        var configuredLoader = factory.Services.GetRequiredService<AircraftCasePackLoader>();
+        var successEvents = await AddedEventsAsync(() => publisher.PublishAsync(configuredLoader, 0));
+        Assert.Single(successEvents);
+        Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType", "packVersion" }, successEvents[0].Keys.ToHashSet());
+        Assert.Equal("pack_load", successEvents[0]["eventType"]);
+        Assert.Equal("success", successEvents[0]["outcome"]);
+        Assert.Equal(1, successEvents[0]["contractVersion"]);
+        Assert.True(successEvents[0]["durationMs"] is long duration && duration >= 0);
+
+        var emptyDirectory = Path.Combine(Path.GetTempPath(), "airlinedemo-empty-pack-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(emptyDirectory);
+        try
+        {
+            var failedEvents = await AddedEventsAsync(() => Assert.ThrowsAsync<FileNotFoundException>(() => publisher.PublishAsync(new AircraftCasePackLoader(emptyDirectory), 0)));
+            Assert.Single(failedEvents);
+            Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType" }, failedEvents[0].Keys.ToHashSet());
+            Assert.Equal("pack_load", failedEvents[0]["eventType"]);
+            Assert.Equal("validation_failed", failedEvents[0]["outcome"]);
+        }
+        finally
+        {
+            Directory.Delete(emptyDirectory, recursive: true);
+        }
+
+        var store = factory.Services.GetRequiredService<ICaseStateStore>();
+        if (store.OwnerOf("cp-case-c") is null) store.CreateCase("cp-case-c", "runtime-owner");
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var presenter = sessions.Create(new DemoUser("runtime-presenter", "Runtime Presenter", "presenter", ["cp-case-c"]));
+
+        using var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/cases");
+        listRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+        var listEvents = await AddedEventsAsync(async () => { using var response = await client.SendAsync(listRequest, ct); Assert.Equal(HttpStatusCode.OK, response.StatusCode); });
+        Assert.Single(listEvents);
+        Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType" }, listEvents[0].Keys.ToHashSet());
+        Assert.Equal("case_list", listEvents[0]["eventType"]);
+        Assert.Equal("success", listEvents[0]["outcome"]);
+
+        var sceneOwner = store.OwnerOf("cp-case-c")!;
+        var sceneScope = store.AuthorizeCase("cp-case-c", sceneOwner);
+        var sceneState = store.Read(sceneScope);
+        var at = new DateTimeOffset(2026, 10, 21, 0, 0, 0, TimeSpan.Zero);
+        if (sceneState.Basis.Count == 0)
+        {
+            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(
+                CaseStateStore.CreateBasisVersion(1, "runtime basis", string.Empty), null,
+                "runtime-owner", "basis", "runtime scene basis", At: at));
+        }
+        sceneState = store.Read(sceneScope);
+        if ((sceneState.Assessments?.Count ?? 0) == 0)
+        {
+            var receipt = new DeliveryReceipt("runtime-request-event", "runtime-request", "cp-case-c", "runtime-report", "basis-v1", 1, "1", "runtime request");
+            var assessment = new CaseAssessment("runtime-assessment", "cp-case-c", "basis-v1", 1, "assessment-ready", "runtime assessment", [], receipt.RequestId, null);
+            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, receipt.EventId, "runtime-owner", "assessment-delivered", "delivered", At: at, Assessment: assessment, RequestReceipt: receipt));
+            var createWork = store.CreateWorkItem(sceneScope, store.Read(sceneScope).Revision,
+                new WorkItemDraft("runtime-review", AssessmentExecutionService.ReviewCapability, "open", "technical-reviewer"), "runtime-owner");
+            sceneState = createWork.State;
+            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, null, "finance-reviewer", FinanceEndpoints.ReserveDecisionAction,
+                "{\"decision\":\"approve\"}", At: at));
+            sceneState = store.Read(sceneScope);
+            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, null, "legal-reviewer", FinanceEndpoints.LegalDecisionAction,
+                "{\"decision\":\"signed-off\"}", At: at));
+            sceneState = store.Read(sceneScope);
+            var reviewRevision = store.Read(sceneScope).Revision;
+            TechnicalReviewPolicy.Decide(store, ["cp-case-c"], "technical-reviewer", "technical-reviewer", "cp-case-c",
+                new TechnicalReviewCommand(reviewRevision, 1, "accept", "Current basis approved."), "runtime-trace");
+        }
+        sceneState = store.Read(sceneScope);
+        if ((sceneState.JourneyEvents?.Count ?? 0) == 0)
+        {
+            store.Commit(sceneScope, sceneState.Revision, new CaseCommit(null, null, "runtime-owner", "journey", "runtime scene history", At: at,
+                JourneyEvent: new CaseJourneyEventDraft("runtime-event-1", "runtime-run", "cp-case-c", "evidence-reviewed", "basis-v1", 1,
+                    "presenter", "Runtime scene history", "AI agent", [new CaseJourneyWitness("runtime-witness-1", "case-c/aircraft-summary.txt", 1, 1, "basis-v1", 1)])));
+        }
+        var packages = factory.Services.GetRequiredService<EvidencePackageStore>();
+        packages.Submit("runtime-package", "cp-case-c", () => new EvidencePackageOutcome("complete",
+            [new EvidenceDocumentResult("aircraft-summary.txt", "accepted", "accepted", 1, null)]));
+
+        var projectionSnapshot = factory.Services.GetRequiredService<IAircraftCasePackSnapshotStore>().Read()!;
+        var runtimeHistory = factory.Services.GetRequiredService<IArrCaseHistorySource>();
+        var direct = CasePackSceneProjection.BuildResult(store, sceneScope, projectionSnapshot, "presenter", packages, runtimeHistory);
+        Assert.True(direct.Succeeded, $"scene build failed: {direct.ErrorCode}; payload={direct.PayloadLimit}");
+
+        using var sceneRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/cases/cp-case-c/scene");
+        sceneRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+        var sceneEvents = await AddedEventsAsync(async () => { using var response = await client.SendAsync(sceneRequest, ct); Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync(ct)); });
+        Assert.Single(sceneEvents);
+        Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType", "caseId" }, sceneEvents[0].Keys.ToHashSet());
+        Assert.Equal("scene_projection", sceneEvents[0]["eventType"]);
+        Assert.Equal("success", sceneEvents[0]["outcome"]);
+        Assert.Equal("cp-case-c", sceneEvents[0]["caseId"]);
+
+        async Task<(HttpStatusCode Status, IReadOnlyDictionary<string, object?>[] Events)> SendReset(string commandId, string variant, long revision)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant");
+            request.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={presenter.Id}");
+            request.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, presenter.CsrfToken);
+            request.Content = JsonContent.Create(new { contractVersion = 1, commandId, expectedRevision = revision, variant });
+            return await SendResetWithResponse(request);
+        }
+        async Task<(HttpStatusCode Status, IReadOnlyDictionary<string, object?>[] Events)> SendResetWithResponse(HttpRequestMessage request)
+        {
+            var before = logger.Count;
+            using var response = await client.SendAsync(request, ct);
+            return (response.StatusCode, logger.Events.Skip(before).Where(IsCasePackDiagnostic).ToArray());
+        }
+
+        var owner = store.OwnerOf("cp-case-c")!;
+        var scope = store.AuthorizeCase("cp-case-c", owner);
+        var firstRevision = store.Read(scope).Revision;
+        var acceptedCommand = "runtime-reset-accepted";
+        var accepted = await SendReset(acceptedCommand, "blocked", firstRevision);
+        Assert.Equal(HttpStatusCode.OK, accepted.Status);
+        Assert.Single(accepted.Events);
+        Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType", "caseId", "commandId" }, accepted.Events[0].Keys.ToHashSet());
+        Assert.Equal("reset", accepted.Events[0]["eventType"]);
+        Assert.Equal("success", accepted.Events[0]["outcome"]);
+        Assert.Equal("cp-case-c", accepted.Events[0]["caseId"]);
+        Assert.Equal(acceptedCommand, accepted.Events[0]["commandId"]);
+
+        var replayed = await SendReset(acceptedCommand, "blocked", firstRevision);
+        Assert.Equal(HttpStatusCode.OK, replayed.Status);
+        Assert.Single(replayed.Events);
+        Assert.Equal("reset", replayed.Events[0]["eventType"]);
+        Assert.Equal("replayed", replayed.Events[0]["outcome"]);
+        Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType", "caseId", "commandId" }, replayed.Events[0].Keys.ToHashSet());
+
+        var currentRevision = store.Read(scope).Revision;
+        var allowed = await SendReset("runtime-reset-third", "blocked", currentRevision);
+        Assert.Equal(HttpStatusCode.OK, allowed.Status);
+        var limited = await SendReset("runtime-reset-limited", "blocked", store.Read(scope).Revision);
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.Status);
+        Assert.Single(limited.Events);
+        Assert.Equal("reset", limited.Events[0]["eventType"]);
+        Assert.Equal("rate_limited", limited.Events[0]["outcome"]);
+        Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType", "caseId" }, limited.Events[0].Keys.ToHashSet());
+
+        var invalidPresenter = sessions.Create(new DemoUser("runtime-invalid-presenter", "Runtime Invalid Presenter", "presenter", ["cp-case-c"]));
+        using var invalidRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant");
+        invalidRequest.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={invalidPresenter.Id}");
+        invalidRequest.Headers.Add(DemoAuthEndpoints.CsrfHeaderName, invalidPresenter.CsrfToken);
+        invalidRequest.Content = JsonContent.Create(new { contractVersion = 1, commandId = "runtime-reset-invalid", expectedRevision = store.Read(scope).Revision, variant = "unsupported" });
+        var beforeInvalid = logger.Count;
+        using var invalidResponse = await client.SendAsync(invalidRequest, ct);
+        var invalidEvents = logger.Events.Skip(beforeInvalid).Where(IsCasePackDiagnostic).ToArray();
+        var invalidStatus = invalidResponse.StatusCode;
+        var invalid = (Status: invalidStatus, Events: invalidEvents);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.Status);
+        Assert.Single(invalid.Events);
+        Assert.Equal("reset", invalid.Events[0]["eventType"]);
+        Assert.Equal("invalid", invalid.Events[0]["outcome"]);
+        Assert.Equal(new HashSet<string> { "contractVersion", "outcome", "durationMs", "eventType", "caseId", "commandId" }, invalid.Events[0].Keys.ToHashSet());
     }
 
     [Fact]
@@ -275,6 +481,25 @@ public sealed class CasePackDiagnosticsTests
 
         Assert.DoesNotContain(logger.Events.SelectMany(e => e.Keys), key => key.Equals("auditDetail", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(logger.Events.SelectMany(e => e.Values).OfType<string>(), value => value.Contains("canary", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsCasePackDiagnostic(IReadOnlyDictionary<string, object?> fields) =>
+        fields.TryGetValue("eventType", out var eventType)
+        && eventType is string type
+        && CasePackDiagnostics.AllowedEventTypes.Contains(type);
+
+    private sealed class RuntimeArrHistorySource(ICaseStateStore store) : IArrCaseHistorySource
+    {
+        public ArrCaseHistorySelection? Read(string caseId, string runId, string basisId)
+        {
+            var owner = store.OwnerOf(caseId);
+            if (owner is null) return null;
+            var state = store.Read(store.AuthorizeCase(caseId, owner));
+            var events = (state.JourneyEvents ?? [])
+                .Where(item => item.CaseId == caseId && item.RunId == runId && item.BasisId == basisId)
+                .OrderBy(item => item.Sequence).ToArray();
+            return events.Length == 0 ? null : new ArrCaseHistorySelection(caseId, runId, basisId, events, false);
+        }
     }
 
     private sealed class CaptureLoggerProvider(CaptureLogger logger) : ILoggerProvider

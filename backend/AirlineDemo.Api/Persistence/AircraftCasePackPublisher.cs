@@ -210,6 +210,11 @@ public sealed class AircraftCasePackPublisher(
             CasePackDiagnostics.PackLoad(diagnosticsLogger, "conflict", CasePackDiagnostics.ElapsedMilliseconds(started));
             throw;
         }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or InvalidDataException)
+        {
+            CasePackDiagnostics.PackLoad(diagnosticsLogger, "validation_failed", CasePackDiagnostics.ElapsedMilliseconds(started));
+            throw;
+        }
         catch (Exception)
         {
             CasePackDiagnostics.PackLoad(diagnosticsLogger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started));
