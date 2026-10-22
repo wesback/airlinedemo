@@ -50,15 +50,61 @@ afterEach(() => {
 });
 
   it('HangarEntry lazy loads only after selection', async () => {
-    const loader = vi.fn(async () => ({ scene: true }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url === '/api/health') return json({ status: 'ok' });
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'token' });
+      if (url === '/api/cases/case-001' && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/case-001/dashboard' && method === 'GET') return json({ allowedDecisions: [], capabilities: [{ id: 'technical-review', name: 'Technical review', label: 'Human decision', designOnly: false, openItems: 0, nextDecisionOwner: 'Technical reviewer', evidence: [], design: null }], queue: [], activity: [] });
+      if (url === '/api/cases/case-001/technical-reviews' && method === 'GET') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/case-001/readiness' && method === 'GET') return json({ monthsUntilReturn: 9, gapsFound: 1, requestsSent: 1, heldForReview: 1, notProcessed: 2, sentence: 'Review is ready.' });
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    }));
+
+    function LoadedScene() { return null; }
+    const loader = vi.fn(async () => LoadedScene);
     const modelRequest = vi.fn();
-    const regular = await selectHangarEntry({ browserSupported: true, webgl2: { webgl2: true } });
-    expect(regular.mode).toBe('3d');
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: loader,
+    } as HangarEntryAppProps));
     expect(loader).not.toHaveBeenCalled();
     expect(modelRequest).not.toHaveBeenCalled();
-    await selectHangarEntry({ browserSupported: false, webgl2: { webgl2: true } }, loader);
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
+    fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Revision: 7');
     expect(loader).not.toHaveBeenCalled();
     expect(modelRequest).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await waitFor(() => expect(loader).toHaveBeenCalledTimes(1));
+    expect(modelRequest).not.toHaveBeenCalled();
+
+    cleanup();
+    const fallbackLoader = vi.fn();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: false,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: fallbackLoader,
+    } as HangarEntryAppProps));
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
+    fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Revision: 7');
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByText('Your browser is not supported. Use the current or previous major version of Chrome or Edge.');
+    expect(fallbackLoader).not.toHaveBeenCalled();
   });
 
   it('HangarEntry default loader returns a renderable scene component', async () => {
