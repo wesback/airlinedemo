@@ -1,3 +1,5 @@
+import { createElement, type ComponentType } from 'react';
+
 export const SUPPORTED_HANGAR_CONTRACT_VERSION = 1;
 export const SUPPORTED_HANGAR_BROWSERS = ['Chrome', 'Edge'] as const;
 export type HangarFallbackReason = 'unsupported_browser' | 'webgl_unavailable' | 'contract_invalid';
@@ -19,6 +21,7 @@ export type HangarEntryDecision = {
   browserSupported: boolean;
   contractValid: boolean;
   loaderCalled: boolean;
+  loadedScene?: unknown;
 };
 
 export function isHangarBrowserSupported(browser: unknown, userAgent?: string): boolean {
@@ -78,13 +81,24 @@ export function getHangarEntryDecision(options: HangarEntryOptions = {}): Hangar
 export async function selectHangarEntry<T>(options: HangarEntryOptions = {}, lazyLoader?: () => Promise<T> | T): Promise<HangarEntryDecision> {
   const decision = getHangarEntryDecision(options);
   if (decision.mode !== '3d' || !lazyLoader) return decision;
-  await lazyLoader();
-  return { ...decision, loaderCalled: true };
+  const loadedScene = await lazyLoader();
+  return { ...decision, loaderCalled: true, loadedScene };
 }
 
-export async function loadHangarScene(): Promise<{ fiber: unknown }> {
-  const fiber = await import('@react-three/fiber');
-  return { fiber };
+export async function loadHangarScene(): Promise<ComponentType> {
+  const { Canvas } = await import('@react-three/fiber');
+  const HangarScene: ComponentType = () => createElement(
+    Canvas,
+    { shadows: true, camera: { position: [4, 3, 6], fov: 45 } },
+    createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
+    createElement('ambientLight', { intensity: 1 }),
+    createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
+    createElement('mesh', { position: [0, 0, 0] },
+      createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
+      createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
+    ),
+  );
+  return HangarScene;
 }
 
 export function isNon3dFallbackDecision(decision: HangarEntryDecision): boolean { return decision.mode === 'fallback'; }

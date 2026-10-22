@@ -9,6 +9,7 @@ import {
   getHangarFallbackReason,
   getHangarNon3dActions,
   selectHangarEntry,
+  loadHangarScene,
 } from '../src/hangar/entryController';
 
 const HangarApp = App as ComponentType<HangarEntryAppProps>;
@@ -57,6 +58,11 @@ afterEach(() => {
     await selectHangarEntry({ browserSupported: false, webgl2: { webgl2: true } }, loader);
     expect(loader).not.toHaveBeenCalled();
     expect(modelRequest).not.toHaveBeenCalled();
+  });
+
+  it('HangarEntry default loader returns a renderable scene component', async () => {
+    const Scene = await loadHangarScene();
+    expect(typeof Scene).toBe('function');
   });
 
   it('HangarEntry non-3D parity', () => {

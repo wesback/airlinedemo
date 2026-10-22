@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
@@ -45,10 +45,12 @@ export default function App({
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
   const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
+  const [HangarScene, setHangarScene] = useState<ComponentType | null>(null);
 
   async function enterHangar() {
     setHangarView('loading');
     setHangarSceneLoaded(false);
+    setHangarScene(null);
     const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene } = await import('./hangar/entryController');
     const browserSupported = hangarBrowserSupported !== undefined
       ? isHangarBrowserSupported(hangarBrowserSupported)
@@ -62,6 +64,7 @@ export default function App({
       webgl2,
     }, hangarLazyLoader ?? loadHangarScene);
     if (decision.mode === '3d') {
+      if (typeof decision.loadedScene === 'function') setHangarScene(decision.loadedScene as ComponentType);
       setHangarSceneLoaded(true);
       setHangarView('3d');
     } else if (decision.fallbackReason === 'contract_invalid') setHangarView('contract-error');
@@ -197,7 +200,11 @@ export default function App({
               {hangarView !== 'regular' && hangarView !== 'loading' && (
                 <section aria-labelledby="hangar-heading">
                   <h2 id="hangar-heading">Hangar</h2>
-                  {hangarView === '3d' && hangarSceneLoaded && <div aria-label="Hangar 3D scene"><canvas aria-label="3D hangar scene" /></div>}
+                  {hangarView === '3d' && hangarSceneLoaded && (
+                    <div aria-label="Hangar 3D scene">
+                      {HangarScene ? <HangarScene /> : <canvas aria-label="3D hangar scene" />}
+                    </div>
+                  )}
                   {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'
                     ? 'Your browser is not supported. Use the current or previous major version of Chrome or Edge.'
                     : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
