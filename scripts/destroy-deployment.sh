@@ -45,14 +45,16 @@ if [ "$(printf '%s' "$logged_subscription" | tr '[:upper:]' '[:lower:]')" != "$(
   exit 3
 fi
 
-if [ -n "${BACKEND_CONFIG_FILE:-}" ]; then
-  terraform -chdir=infra/terraform init -backend-config="$BACKEND_CONFIG_FILE"
+if [ -z "${BACKEND_CONFIG_FILE:-}" ]; then
+  printf 'Missing required deployment configuration: BACKEND_CONFIG_FILE\n' >&2
+  exit 2
+fi
+if [ -z "${TFVARS_FILE:-}" ]; then
+  printf 'Missing required deployment configuration: TFVARS_FILE\n' >&2
+  exit 2
 fi
 
-if [ -n "${TFVARS_FILE:-}" ]; then
-  terraform -chdir=infra/terraform destroy -var-file="$TFVARS_FILE" -auto-approve
-else
-  terraform -chdir=infra/terraform destroy -auto-approve
-fi
+terraform -chdir=infra/terraform init -backend-config="$BACKEND_CONFIG_FILE"
+terraform -chdir=infra/terraform destroy -var-file="$TFVARS_FILE" -var="resource_group_name=$resource_group" -auto-approve
 
 printf 'Destroyed deployment resources for %s.\n' "$resource_group"

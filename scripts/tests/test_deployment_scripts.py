@@ -59,6 +59,9 @@ class LifecycleScriptTests(unittest.TestCase):
         self.assertLess(calls.index(init), calls.index(plan))
         self.assertLess(calls.index(plan), calls.index(show))
         self.assertLess(calls.index(show), calls.index(apply))
+        plan_path = plan.split("-out=", 1)[1]
+        self.assertTrue(show.endswith(f" show {plan_path}"))
+        self.assertTrue(apply.endswith(f" apply {plan_path}"))
         self.assertFalse(any("docker" in c.lower() or "containerapp update" in c.lower() for c in calls))
 
         for name in ("AZURE_SUBSCRIPTION_ID", "AZURE_TENANT_ID", "RESOURCE_GROUP_NAME",
@@ -90,6 +93,7 @@ class LifecycleScriptTests(unittest.TestCase):
         self.assertEqual(0, success.returncode, success.stderr)
         destroy_calls = [c for c in self.calls() if " destroy " in c]
         self.assertEqual(1, len(destroy_calls))
+        self.assertTrue(destroy_calls[0].endswith(" destroy -var-file=/tmp/readiness.tfvars -var=resource_group_name=rg-airline-demo -auto-approve"))
         self.assertIn("Destroyed deployment resources for rg-airline-demo.", success.stdout)
 
         self.log.unlink(missing_ok=True)

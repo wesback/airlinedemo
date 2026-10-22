@@ -46,7 +46,7 @@ Use the approved Entra/OIDC identity and a protected remote Terraform state back
 
 Keep non-secret Terraform inputs in a reviewed file outside tracked paths and pass it with `-var-file`. Keep the backend configuration outside the repository as well. Pass only a Key Vault secret URI for the demo passcode; store its value in Key Vault. Never commit passcodes, tokens, access keys, connection strings, state, plans, logs, or secret-bearing configuration. Terraform uses managed identity for app access; do not enable storage shared keys or public data-service access.
 
-## Protected state bootstrap, login, and deployment
+## Setup and deployment
 
 Use `scripts/bootstrap-deployment.sh` for operator bootstrap. It requires `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `RESOURCE_GROUP_NAME`, `TFVARS_FILE`, and `BACKEND_CONFIG_FILE`, verifies Azure CLI and Terraform availability, verifies logged-in tenant and subscription, runs Terraform initialization, creates and displays one saved plan, then applies exactly that plan only after explicit `yes` confirmation. It does not build, sign, push, or deploy an image.
 
@@ -117,6 +117,8 @@ Stop demonstrations and evaluation first. Preserve required rehearsal, audit, an
 export RESOURCE_GROUP_NAME='<approved-resource-group>'
 export AZURE_SUBSCRIPTION_ID='<approved-subscription-id>'
 export AZURE_TENANT_ID='<approved-tenant-id>'
+export TFVARS_FILE='/absolute/path/readiness.tfvars'
+export BACKEND_CONFIG_FILE='/absolute/path/backend.hcl'
 scripts/destroy-deployment.sh --yes
 ```
 
