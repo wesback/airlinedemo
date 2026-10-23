@@ -28,9 +28,13 @@ function viewIsValid(view: unknown): boolean {
 }
 
 function material(color: string, basic = false, opacity = 1): THREE.MeshStandardMaterial | THREE.MeshBasicMaterial {
-  return basic
-    ? Object.assign(new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity }), { map: null })
-    : Object.assign(new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.05, transparent: opacity < 1, opacity }), { map: null });
+  const result = basic
+    ? new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity })
+    : new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.05, transparent: opacity < 1, opacity });
+  for (const slot of ['map','alphaMap','aoMap','bumpMap','displacementMap','emissiveMap','envMap','metalnessMap','normalMap','roughnessMap','clearcoatMap','clearcoatNormalMap','clearcoatRoughnessMap','iridescenceMap','iridescenceThicknessMap','sheenColorMap','sheenRoughnessMap','thicknessMap','transmissionMap','specularIntensityMap','specularColorMap','lightMap'] as const) {
+    (result as any)[slot] = null;
+  }
+  return result;
 }
 
 function box(name: string, size: [number, number, number], position: [number, number, number], mat: THREE.Material, parent: THREE.Object3D) {
@@ -72,7 +76,6 @@ function buildAircraft(layout: any, model: any): THREE.Group {
   aircraft.position.set(layout.centre.x, -bounds.min.y, layout.centre.z);
   aircraft.updateMatrixWorld(true);
   fuselage.userData.objectId = objectId;
-  aircraft.userData.objectId = objectId;
   return aircraft;
 }
 
@@ -83,10 +86,10 @@ function buildEngine(layout: any, model: any, parent: THREE.Group) {
   visible.name = `${nodes.engine}Visible`; visible.rotation.x = Math.PI / 2; visible.userData.objectId = nodes.objectIds[1]; engine.add(visible);
   visible.position.set(layout.centre.x - span * 0.27, height * 0.26, layout.centre.z + length * 0.05);
   const pickRadius = Math.max(1, 1.25 * visible.geometry.boundingSphere?.radius || 1);
-  const pickMaterial = Object.assign(new THREE.MeshBasicMaterial({ color: HANGAR_SCENE_THEME.groundShadow }), { map: null }); pickMaterial.visible = false;
+  const pickMaterial = material(HANGAR_SCENE_THEME.groundShadow, true); pickMaterial.visible = false;
   const pick = new THREE.Mesh(new THREE.SphereGeometry(pickRadius, 12, 8), pickMaterial);
-  pick.name = `${nodes.engine}PickSphere`; pick.position.copy(visible.position); pick.userData.objectId = nodes.objectIds[1]; engine.add(pick);
-  engine.userData.objectId = nodes.objectIds[1]; parent.add(engine);
+  pick.name = `${nodes.engine}PickSphere`; pick.position.copy(visible.position); engine.add(pick);
+  parent.add(engine);
   return engine;
 }
 
@@ -118,10 +121,10 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
       if (c === 1) visible.rotation.z = Math.PI / 2;
       visible.position.set(c === 1 ? -0.45 : 0.45, 1.35, 0);
       visible.userData.objectId = model.nodes.objectIds[c + 1];
-      component.userData.objectId = model.nodes.objectIds[c + 1]; component.add(visible);
+      component.add(visible);
       const pickRadius = Math.max(1, 1.25 * Math.max(c === 1 ? 0.5 : 0.6, 0.5));
-      const pickMaterial = Object.assign(new THREE.MeshBasicMaterial({ color: HANGAR_SCENE_THEME.groundShadow }), { map: null }); pickMaterial.visible = false;
-      const pick = new THREE.Mesh(new THREE.SphereGeometry(pickRadius, 12, 8), pickMaterial); pick.name = `${componentName}PickSphere`; pick.position.copy(visible.position); pick.userData.objectId = model.nodes.objectIds[c + 1]; component.add(pick);
+      const pickMaterial = material(HANGAR_SCENE_THEME.groundShadow, true); pickMaterial.visible = false;
+      const pick = new THREE.Mesh(new THREE.SphereGeometry(pickRadius, 12, 8), pickMaterial); pick.name = `${componentName}PickSphere`; pick.position.copy(visible.position); component.add(pick);
       stand.add(component);
     }
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 32), material(HANGAR_SCENE_THEME.groundShadow, true, 0.18));

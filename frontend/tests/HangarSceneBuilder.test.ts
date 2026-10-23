@@ -16,12 +16,17 @@ describe('Hangar scene builder', () => {
   it('builds exact three aircraft groups without WebGL', () => {
     const root = buildHangarAircraftSceneGroups(manifest, view)!;
     expect(root).toBeInstanceOf(THREE.Group);
+    const caseGroups: THREE.Object3D[] = [];
+    root.traverse((child: THREE.Object3D) => { if (/^Case[A-C]$/.test(child.name)) caseGroups.push(child); });
+    expect(caseGroups.map(group => group.userData.caseId)).toEqual(['cp-case-a', 'cp-case-b', 'cp-case-c']);
+    expect(caseGroups).toHaveLength(3);
     for (const [letter, id, length, span, height] of [['A','cp-case-a',24,22,7],['B','cp-case-b',18,17,6],['C','cp-case-c',32,30,10]] as const) {
       const aircraft = traverse(root, `Aircraft${letter}`)!;
       expect(aircraft).toBeInstanceOf(THREE.Group);
       expect(traverse(root, `Engine${letter}`)).toBeInstanceOf(THREE.Group);
       expect(traverse(root, `Component${letter}1`)).toBeInstanceOf(THREE.Group);
       expect(traverse(root, `Component${letter}2`)).toBeInstanceOf(THREE.Group);
+      expect(traverse(root, `PartsStand${letter}`)).toBeInstanceOf(THREE.Group);
       const bounds = new THREE.Box3().setFromObject(aircraft);
       const size = bounds.getSize(new THREE.Vector3());
       expect(Math.abs(size.z - length) / length).toBeLessThanOrEqual(0.05);
@@ -36,13 +41,26 @@ describe('Hangar scene builder', () => {
   });
 
   it('assigns exact selectable object IDs only', () => {
-    const root = buildHangarAircraftSceneGroups(manifest, view)!;
+    const handler = vi.fn();
+    const root = buildHangarAircraftSceneGroups(manifest, view, handler)!;
     const meshIds: string[] = []; root.traverse(o => { if (o instanceof THREE.Mesh && typeof o.userData.objectId === 'string') meshIds.push(o.userData.objectId); });
     expect([...new Set(meshIds)].sort()).toEqual([...manifest.objectIds].sort());
     expect(new Set(meshIds).size).toBe(12);
-    const floor = traverse(root,'Floor')!; expect(floor.userData.objectId).toBeUndefined();
+    expect(meshIds).toHaveLength(12);
+    for (const [letter, suffixes] of [['A',['AIR-001','ENG-001','CMP-001','CMP-002']],['B',['AIR-001','ENG-001','CMP-001','CMP-002']],['C',['AIR-001','ENG-001','CMP-001','CMP-002']]] as const) {
+      const intended = [`SYN-CP-${letter}-${suffixes[0]}`, `SYN-CP-${letter}-${suffixes[1]}`, `SYN-CP-${letter}-${suffixes[2]}`, `SYN-CP-${letter}-${suffixes[3]}`];
+      for (const id of intended) {
+        let matches = 0; root.traverse(o => { if (typeof o.userData.objectId === 'string' && o.userData.objectId === id) { matches++; expect(o.userData.selectionHandler).toBe(handler); } });
+        expect(matches).toBeGreaterThanOrEqual(1);
+      }
+    }
+    for (const name of ['Floor','PartsStandBase','AircraftAWingLeft','AircraftBWingLeft','AircraftCWingLeft','GroundShadowA','GroundShadowB','GroundShadowC','EngineAPickSphere','EngineBPickSphere','EngineCPickSphere','ComponentA1PickSphere','ComponentA2PickSphere','ComponentB1PickSphere','ComponentB2PickSphere','ComponentC1PickSphere','ComponentC2PickSphere']) {
+      const object = traverse(root, name)!; expect(object).toBeInstanceOf(THREE.Object3D); expect(object.userData.objectId).toBeUndefined();
+    }
     const duplicate = clone(); duplicate.objectIds[1] = duplicate.objectIds[2];
-    const handler = vi.fn(); expect(buildHangarAircraftSceneGroups(duplicate, view, handler)).toBeNull(); expect(handler).not.toHaveBeenCalled();
+    expect(buildHangarAircraftSceneGroups(duplicate, view, handler)).toBeNull(); expect(handler).not.toHaveBeenCalled();
+    const unknown = clone(); unknown.objectIds[0] = 'UNKNOWN-ID'; unknown.aircraft.models[0].nodes.objectIds[0] = 'UNKNOWN-ID';
+    expect(buildHangarAircraftSceneGroups(unknown, view, handler)).toBeNull(); expect(handler).not.toHaveBeenCalled();
   });
 
   it('builds status-independent untextured aircraft materials', () => {
@@ -51,6 +69,14 @@ describe('Hangar scene builder', () => {
     const second = buildHangarAircraftSceneGroups(manifest, changed)!;
     const snapshot = (root: THREE.Object3D) => { const result: unknown[]=[]; root.traverse(o => { if (o instanceof THREE.Mesh) result.push([o.name,o.position.toArray(),o.scale.toArray(),o.userData.objectId??null,(o.material as THREE.MeshStandardMaterial).color?.getHexString(),o.visible,(o.material as any).map]); }); return result; };
     expect(snapshot(first)).toEqual(snapshot(second));
-    first.traverse(o => { if (o instanceof THREE.Mesh) { const material = o.material as THREE.Material; expect(material).toBeInstanceOf(THREE.MeshStandardMaterial instanceof Function ? material.constructor : THREE.MeshBasicMaterial); expect(['MeshStandardMaterial','MeshBasicMaterial']).toContain(material.type); expect((material as any).map).toBeNull(); if ((material as any).color) expect(Object.values(HANGAR_SCENE_THEME).map(v => v.toUpperCase())).toContain(`#${(material as any).color.getHexString().toUpperCase()}`); } });
+    first.traverse(o => { if (o instanceof THREE.Mesh) {
+      const material = o.material as THREE.MeshStandardMaterial | THREE.MeshBasicMaterial;
+      expect(['MeshStandardMaterial','MeshBasicMaterial']).toContain(material.type);
+      for (const slot of ['map','alphaMap','aoMap','bumpMap','displacementMap','emissiveMap','envMap','metalnessMap','normalMap','roughnessMap','clearcoatMap','clearcoatNormalMap','clearcoatRoughnessMap','iridescenceMap','iridescenceThicknessMap','sheenColorMap','sheenRoughnessMap','thicknessMap','transmissionMap','specularIntensityMap','specularColorMap','lightMap']) expect((material as any)[slot]).toBeNull();
+      const color = (material as any).color;
+      if (color) {
+        expect(Object.values(HANGAR_SCENE_THEME).map(v => v.toUpperCase())).toContain(`#${color.getHexString().toUpperCase()}`);
+      }
+    } });
   });
 });
