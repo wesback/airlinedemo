@@ -127,10 +127,12 @@ function buildEngine(layout: any, model: any, parent: THREE.Group) {
   const visible = new THREE.Mesh(new THREE.CapsuleGeometry(Math.min(span, length) * 0.07, height * 0.55, 8, 12), material(HANGAR_SCENE_THEME.aircraftTrim));
   visible.name = `${nodes.engine}Visible`; visible.rotation.x = Math.PI / 2; visible.userData.objectId = nodes.objectIds[1]; engine.add(visible);
   visible.position.set(layout.centre.x - span * 0.27, height * 0.26, layout.centre.z + length * 0.05);
-  const pickRadius = Math.max(1, 1.25 * visible.geometry.boundingSphere?.radius || 1);
+  visible.geometry.computeBoundingSphere();
+  const visibleRadius = visible.geometry.boundingSphere?.radius ?? 0;
+  const pickRadius = Math.max(1, 1.25 * visibleRadius);
   const pickMaterial = material(HANGAR_SCENE_THEME.groundShadow, true); pickMaterial.visible = false;
   const pick = new THREE.Mesh(new THREE.SphereGeometry(pickRadius, 12, 8), pickMaterial);
-  pick.name = `${nodes.engine}PickSphere`; pick.position.copy(visible.position); engine.add(pick);
+  pick.name = `${nodes.engine}PickSphere`; pick.position.copy(visible.position); pick.userData.pickObjectId = nodes.objectIds[1]; engine.add(pick);
   parent.add(engine);
   return engine;
 }
@@ -209,9 +211,11 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
       visible.position.set(c === 1 ? -0.45 : 0.45, 1.35, 0);
       visible.userData.objectId = model.nodes.objectIds[c + 1];
       component.add(visible);
-      const pickRadius = Math.max(1, 1.25 * Math.max(c === 1 ? 0.5 : 0.6, 0.5));
+      visible.geometry.computeBoundingSphere();
+      const visibleRadius = visible.geometry.boundingSphere?.radius ?? 0;
+      const pickRadius = Math.max(1, 1.25 * visibleRadius);
       const pickMaterial = material(HANGAR_SCENE_THEME.groundShadow, true); pickMaterial.visible = false;
-      const pick = new THREE.Mesh(new THREE.SphereGeometry(pickRadius, 12, 8), pickMaterial); pick.name = `${componentName}PickSphere`; pick.position.copy(visible.position); component.add(pick);
+      const pick = new THREE.Mesh(new THREE.SphereGeometry(pickRadius, 12, 8), pickMaterial); pick.name = `${componentName}PickSphere`; pick.position.copy(visible.position); pick.userData.pickObjectId = model.nodes.objectIds[c + 1]; component.add(pick);
       stand.add(component);
     }
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 32), material(HANGAR_SCENE_THEME.groundShadow, true, 0.18));

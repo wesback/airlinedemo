@@ -40,6 +40,24 @@ describe('Hangar scene builder', () => {
     expect(buildHangarAircraftSceneGroups(swapped, view)).toBeNull();
   });
 
+  it('Hangar engine and component pick spheres stay unrendered', () => {
+    const handler=vi.fn(); const root=buildHangarAircraftSceneGroups(manifest,view,handler)!;
+    for(const letter of ['A','B','C']){
+      const engine=traverse(root,`Engine${letter}Visible`)! as THREE.Mesh;
+      engine.geometry.computeBoundingSphere();
+      const enginePick=traverse(root,`Engine${letter}PickSphere`)! as THREE.Mesh;
+      expect(enginePick).toBeInstanceOf(THREE.Mesh); expect((enginePick.material as THREE.MeshBasicMaterial).visible).toBe(false); expect(enginePick.geometry).toBeInstanceOf(THREE.SphereGeometry);
+      expect((enginePick.geometry as THREE.SphereGeometry).parameters.radius).toBeGreaterThanOrEqual(1); expect((enginePick.geometry as THREE.SphereGeometry).parameters.radius).toBeGreaterThanOrEqual(1.25*(engine.geometry.boundingSphere?.radius??0));
+      for(const component of [1,2]){
+        const visible=traverse(root,`Component${letter}${component}Visible`)! as THREE.Mesh;
+        visible.geometry.computeBoundingSphere(); const pick=traverse(root,`Component${letter}${component}PickSphere`)! as THREE.Mesh;
+        expect(pick).toBeInstanceOf(THREE.Mesh); expect((pick.material as THREE.MeshBasicMaterial).visible).toBe(false); expect((pick.geometry as THREE.SphereGeometry).parameters.radius).toBeGreaterThanOrEqual(1); expect((pick.geometry as THREE.SphereGeometry).parameters.radius).toBeGreaterThanOrEqual(1.25*(visible.geometry.boundingSphere?.radius??0));
+      }
+    }
+    root.traverse(object=>{if(object.userData.objectId!==undefined)expect(['AircraftA','EngineAVisible','ComponentA1Visible','ComponentA2Visible','AircraftB','EngineBVisible','ComponentB1Visible','ComponentB2Visible','AircraftC','EngineCVisible','ComponentC1Visible','ComponentC2Visible','AircraftAFuselage','AircraftBFuselage','AircraftCFuselage'].includes(object.name)).toBe(true);});
+    const bad=clone(); bad.objectIds[1]=bad.objectIds[2]; expect(buildHangarAircraftSceneGroups(bad,view,handler)).toBeNull(); expect(handler).not.toHaveBeenCalled();
+  });
+
   it('assigns exact selectable object IDs only', () => {
     const handler = vi.fn();
     const root = buildHangarAircraftSceneGroups(manifest, view, handler)!;
