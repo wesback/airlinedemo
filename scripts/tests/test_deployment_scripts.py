@@ -24,6 +24,29 @@ class LifecycleScriptTests(unittest.TestCase):
         for name in ("AZURE_SUBSCRIPTION_ID", "AZURE_TENANT_ID",
                      "RESOURCE_GROUP_NAME", "TFVARS_FILE", "BACKEND_CONFIG_FILE"):
             self.assertIn(f"required deployment environment variable {name}", missing.stderr)
+
+        aliases = os.environ.copy()
+        aliases.update({
+            "PATH": f"{self.bin}:{aliases['PATH']}",
+            "AIRLINEDEMO_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000000",
+            "AIRLINEDEMO_TENANT_ID": "11111111-1111-1111-1111-111111111111",
+            "AIRLINEDEMO_RESOURCE_GROUP_NAME": "rg-airline-demo",
+            "AIRLINEDEMO_OPERATOR_VARS_FILE": "/tmp/readiness.tfvars",
+            "BACKEND_CONFIG_FILE": "/tmp/backend.hcl",
+        })
+        aliased = self.run_script(PREBOOTSTRAP, env=aliases)
+        self.assertNotIn(
+            "required deployment environment variable AZURE_SUBSCRIPTION_ID",
+            aliased.stderr)
+        self.assertNotIn(
+            "required deployment environment variable AZURE_TENANT_ID",
+            aliased.stderr)
+        self.assertNotIn(
+            "required deployment environment variable RESOURCE_GROUP_NAME",
+            aliased.stderr)
+        self.assertNotIn(
+            "required deployment environment variable TFVARS_FILE",
+            aliased.stderr)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.bin = Path(self.temp.name)

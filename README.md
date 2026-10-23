@@ -66,6 +66,11 @@ REHEARSAL_EXPECTED_ORIGIN=<approved independently verified origin>
 
 The operator supplies subscription, tenant, resource-group, file-path, network, deployment, and origin values through protected environment variables or reviewed external files. The passcode value is supplied from Key Vault and never stored in the repository. Configuration contains names or secret URIs, not secret values. State files, plans, tokens, connection strings, real customer records, and private-network addresses must remain outside tracked paths.
 
+For compatibility with the legacy demo scripts, the pre-bootstrap gate also
+accepts `AIRLINEDEMO_SUBSCRIPTION_ID` and `AIRLINEDEMO_TENANT_ID` when the
+matching `AZURE_*` variables are unset. The deployment script itself uses the
+documented `AZURE_*` names.
+
 ## Deploy and release
 
 Run `scripts/prebootstrap-deployment.sh` before deployment to verify tools,

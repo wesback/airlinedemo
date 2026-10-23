@@ -4,6 +4,14 @@ set -uo pipefail
 REGISTER_PROVIDERS=false
 ISSUES=0
 
+# Accept the legacy AirlineDemo names used by the demo scripts while preserving
+# the deployment script's current AZURE_* contract.
+AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:-${AIRLINEDEMO_SUBSCRIPTION_ID:-}}"
+AZURE_TENANT_ID="${AZURE_TENANT_ID:-${AIRLINEDEMO_TENANT_ID:-}}"
+RESOURCE_GROUP_NAME="${RESOURCE_GROUP_NAME:-${AIRLINEDEMO_RESOURCE_GROUP_NAME:-}}"
+TFVARS_FILE="${TFVARS_FILE:-${AIRLINEDEMO_OPERATOR_VARS_FILE:-}}"
+export AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID RESOURCE_GROUP_NAME TFVARS_FILE
+
 usage() {
   cat <<'EOF'
 Usage: scripts/prebootstrap-deployment.sh [--register-providers]
