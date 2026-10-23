@@ -1,0 +1,218 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 586,
+  "branch": "ai-sdlc/issue-586",
+  "commitSha": "0c3eb5c162f0b5977899de4da888744971652486",
+  "round": 0,
+  "pipelineVersion": "d128747",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The entry path loads scenes using server-provided IDs, but the later refresh path uses synthetic IDs and fails for those cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 169,
+          "message": "Preserve each server case ID in hangarEntries so focus refresh requests the same listed cases that were loaded at entry.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Entry reads scene envelopes using each caseId from the server list, but then maps the entries used by refreshHangarSnapshot to synthetic AIR-N IDs. The focus handler calls refreshHangarSnapshot, which requests scenes using those entry IDs.",
+            "failureScenario": "When the server returns case IDs such as cp-case-a, cp-case-b and cp-case-c, entry succeeds, but window focus requests /api/v1/cases/AIR-1/scene and similar synthetic paths. Those requests fail, so the valid server snapshot is marked stale and the Hangar switches to the refresh_failed fallback."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The entry flow substitutes synthetic case IDs, so focus refresh requests unknown cases and falls back. Explicit refresh is also not wired or tested as required by the acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 155,
+          "message": "Keep the server case IDs in `hangarEntries`. The focus refresh uses these IDs, but entry replaces them with synthetic IDs, making refresh fail for every loaded case.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Entry maps each server envelope to an `AIR-N` caseId, while `refreshHangarSnapshot` uses `hangarEntries` caseIds to request scene envelopes.",
+            "failureScenario": "After entry returns a server caseId such as `cp-case-a`, a window focus requests `/api/v1/cases/AIR-1/scene`; that read fails, so the app falls back instead of refreshing the current scene."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 138,
+          "message": "The refresh criterion requires both focus and explicit refresh behavior, but this change wires refresh only to focus and adds no test for the App refresh path. Connect an explicit refresh action and cover it in the named refresh test.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`refreshHangarSnapshot` is invoked only by the window focus listener; no explicit refresh action is connected to it, and the named refresh test is not changed in this diff.",
+            "failureScenario": "After a failed refresh, a user explicitly requests a refresh while the window remains focused; no request runs, so stale state cannot be restored as the criterion requires."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed code encodes case IDs in scene requests, but the required entry test for the exact request sequence is missing. I found no other concrete security defect in the diff.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 75,
+          "message": "The first acceptance criterion requires a test named `HangarEntry loads scene envelopes in exact case-list order` that asserts the exact ordered requests and returned names. That test is missing from this change, so the criterion is not verified.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed assertion checks the displayed menu labels; the diff adds no test asserting the exact ordered fetch sequence required by the first acceptance criterion.",
+            "failureScenario": "If entry uses hard-coded Air One, Air Two, and Air Three labels without fetching the case list and its scene envelopes, this label assertion can still pass while the required transport behavior is absent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarEntry.test.ts",
+      "frontend/tests/hangarAppHarness.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
