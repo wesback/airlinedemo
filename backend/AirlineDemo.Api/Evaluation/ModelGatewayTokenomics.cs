@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using Microsoft.Extensions.AI;
 
 namespace AirlineDemo.Api.Evaluation;
 
@@ -102,6 +103,26 @@ public static class ModelGatewayTokenomics
         var i = input ?? 0; var o = output ?? 0; var t = total ?? i + o;
         if (i < 0 || o < 0 || t < 0) throw new ArgumentOutOfRangeException(nameof(total), "token usage cannot be negative");
         return new GatewayUsage(i, o, t, "available");
+    }
+}
+
+public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelation correlation, GatewayQuota quota) : DelegatingChatClient(inner)
+{
+    private readonly GatewayQuotaGovernor _governor = new(quota);
+    public GatewayUsage Usage => _governor.ExactUsage();
+
+    public override async Task<ChatResponse> GetResponseAsync(
+        IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        ModelGatewayTokenomics.ValidateCorrelation(correlation);
+        var prompt = string.Join('\n', messages.Select(message => message.Text));
+        var estimatedInput = Encoding.UTF8.GetByteCount(prompt);
+        var denial = _governor.BeforeCall(estimatedInput);
+        if (denial is not null) throw new InvalidOperationException(denial);
+        var response = await base.GetResponseAsync(messages, options, cancellationToken);
+        var denialAfter = _governor.Record(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount);
+        if (denialAfter is not null) throw new InvalidOperationException(denialAfter);
+        return response;
     }
 }
 

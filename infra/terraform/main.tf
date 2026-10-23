@@ -259,6 +259,16 @@ resource "azurerm_api_management" "gateway" {
   virtual_network_configuration {
     subnet_id = azurerm_subnet.private_endpoints.id
   }
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+resource "azurerm_role_assignment" "gateway_cognitive_services" {
+  scope                = azurerm_cognitive_account.model.id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = azurerm_api_management.gateway.identity[0].principal_id
 }
 
 resource "azurerm_api_management_api" "gateway_model" {
@@ -270,14 +280,38 @@ resource "azurerm_api_management_api" "gateway_model" {
   path                = "openai"
   protocols           = ["https"]
   subscription_required = false
-  service_url         = "https://${var.model_endpoint_subdomain}.privatelink.openai.azure.com/openai/deployments/${var.gateway_model_deployment}"
+  service_url         = "https://${var.model_endpoint_subdomain}.privatelink.openai.azure.com/openai"
+}
 
-  import {
-    content_format = "openapi"
-    content_value  = <<EOF
-{"openapi":"3.0.1","info":{"title":"Foundry private model gateway","version":"${var.gateway_api_version}"},"paths":{"/chat/completions":{"post":{"responses":{"200":{"description":"accepted"}}}}}}
-EOF
+resource "azurerm_api_management_api_operation" "gateway_chat_completions" {
+  operation_id        = "chat-completions"
+  api_name            = azurerm_api_management_api.gateway_model.name
+  api_management_name = azurerm_api_management.gateway.name
+  resource_group_name = azurerm_resource_group.demo.name
+  display_name        = "Private chat completions"
+  method              = "POST"
+  url_template        = "deployments/{deployment}/chat/completions"
+
+  template_parameter {
+    name     = "deployment"
+    type     = "string"
+    required = true
   }
+}
+
+resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions" {
+  api_name            = azurerm_api_management_api.gateway_model.name
+  api_management_name = azurerm_api_management.gateway.name
+  resource_group_name = azurerm_resource_group.demo.name
+  operation_id        = azurerm_api_management_api_operation.gateway_chat_completions.operation_id
+  xml_content         = <<XML
+<policies>
+  <inbound>
+    <base />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+  </inbound>
+</policies>
+XML
 }
 
 resource "azurerm_cognitive_deployment" "model" {

@@ -79,6 +79,7 @@ public sealed class ProductionEvaluationArmExecutor(
         """;
 
     private IChatClient? _chatClient;
+    private readonly GatewayReplayStore<EvaluationArmExecution> _replay = new();
     private bool _disposed;
 
     public EvaluationArm Arm => arm;
@@ -96,16 +97,28 @@ public sealed class ProductionEvaluationArmExecutor(
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (request.Arm != arm) throw new ArgumentException("executor received a request for another arm", nameof(request));
         if (arm == EvaluationArm.A) return new(EvaluateRules(request.Case), 0, 0, 0, 0);
+
+        var manifest = request.Manifest?.RequireUsable() ?? throw new EvaluationInputException("model arm has no approved manifest");
+        var correlation = new GatewayCorrelation(
+            arm.ToString(), "frozen-v2", "aircraft-return-readiness", request.Case.CaseId,
+            $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
+            FourArmEvaluationRunner.FrozenV2Sha256,
+            $"{arm.ToString().ToLowerInvariant()}-{request.Case.Sha256}");
+        if (_replay.TryReplay(correlation, out var replayed)) return replayed!;
+        var modelClient = _chatClient ??= chatClientFactory(manifest);
+        _chatClient = new GatewayGovernedChatClient(modelClient, correlation, new GatewayQuota(
+            MaximumBoundedInputTokens, MaximumBoundedOutputTokens, MaximumBoundedModelCalls * (MaximumBoundedInputTokens + MaximumBoundedOutputTokens),
+            MaximumBoundedModelCalls, MaximumBoundedToolCalls, 1, TimeSpan.FromSeconds(30)));
         if (request.Mode == EvaluationExecutionMode.BoundedAgent)
         {
-            return await ExecuteBoundedAgentAsync(request, cancellationToken);
+            var bounded = await ExecuteBoundedAgentAsync(request, cancellationToken);
+            _replay.Store(correlation, bounded);
+            return bounded;
         }
         if (request.Mode != EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection)
             throw new ArgumentException("model arm received an unsupported execution mode", nameof(request));
 
-        var manifest = request.Manifest?.RequireUsable()
-            ?? throw new EvaluationInputException("model arm has no approved manifest");
-        var client = _chatClient ??= chatClientFactory(manifest);
+        var client = _chatClient ?? throw new InvalidOperationException("model gateway client is not initialized");
         using var document = JsonDocument.Parse(request.Case.Content);
         var caseInputs = document.RootElement.GetProperty("inputs").GetRawText();
         var userPrompt = $"Case ID: {request.Case.CaseId}\nCase inputs:\n{caseInputs}";
@@ -127,7 +140,13 @@ public sealed class ProductionEvaluationArmExecutor(
                 ? (long)inputTokens + outputTokens
                 : Encoding.UTF8.GetByteCount(prompt) +
                   Math.Min(MaximumOutputTokens, Encoding.UTF8.GetByteCount(answer));
-            return new(answer, usage, 1, 0, 0);
+            var execution = new EvaluationArmExecution(answer, usage, 1, 0, 0);
+            _replay.Store(new GatewayCorrelation(
+                arm.ToString(), "frozen-v2", "aircraft-return-readiness", request.Case.CaseId,
+                $"{manifest.DeploymentName}|{manifest.Model}|{manifest.ApiVersion}|{manifest.Region}",
+                FourArmEvaluationRunner.FrozenV2Sha256,
+                $"{arm.ToString().ToLowerInvariant()}-{request.Case.Sha256}"), execution);
+            return execution;
         }
         catch (Exception ex)
         {
@@ -141,7 +160,7 @@ public sealed class ProductionEvaluationArmExecutor(
     {
         var manifest = request.Manifest?.RequireUsable()
             ?? throw new EvaluationInputException("model arm has no approved manifest");
-        var client = _chatClient ??= chatClientFactory(manifest);
+        var client = _chatClient ?? throw new InvalidOperationException("model gateway client is not initialized");
         using var limits = new InvestigationLimits(new InvestigationLimitOptions
         {
             MaxModelCalls = MaximumBoundedModelCalls,

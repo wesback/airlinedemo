@@ -362,7 +362,7 @@ run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct
     error_message = "The plan must expose only the private gateway endpoint and no secret, key, connection string, or access token."
   }
   assert {
-    condition     = azurerm_api_management_api.gateway_model.path == "openai" && azurerm_api_management_api.gateway_model.subscription_required == false && azurerm_api_management_api.gateway_model.service_url == "https://aoai-demo-test.privatelink.openai.azure.com/openai/deployments/gpt-demo-test"
+    condition     = azurerm_api_management_api.gateway_model.path == "openai" && azurerm_api_management_api.gateway_model.subscription_required == false && azurerm_api_management_api.gateway_model.service_url == "https://aoai-demo-test.privatelink.openai.azure.com/openai" && azurerm_api_management_api_operation.gateway_chat_completions.url_template == "deployments/{deployment}/chat/completions" && can(regex("authentication-managed-identity", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && azurerm_role_assignment.gateway_cognitive_services.role_definition_name == "Cognitive Services OpenAI User"
     error_message = "The private API Management route must target only the private model deployment and require no alternate public route."
   }
 }
