@@ -154,7 +154,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
       ),
       createElement('section', { 'aria-label': 'Scene aircraft selection' },
         createElement('button', { type: 'button', 'aria-label': 'Pointer select AIR-1', onClick: () => onSelect?.('AIR-1') }, 'AIR-1'),
-        createElement('button', { type: 'button', 'aria-label': 'Keyboard select AIR-2', onClick: () => onSelect?.('AIR-2'), onKeyDown: (event: { key: string; preventDefault: () => void }) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect?.('AIR-2'); } } }, 'AIR-2'),
+        createElement('button', { type: 'button', 'aria-label': 'Keyboard select AIR-2', onClick: () => onSelect?.('AIR-2') }, 'AIR-2'),
       ),
       createElement('section', { 'aria-label': 'Motion controls' },
         createElement('button', { type: 'button', onClick: () => setMotionOverride(true) }, 'Reduce motion'),

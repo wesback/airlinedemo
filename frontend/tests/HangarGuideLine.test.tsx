@@ -7,6 +7,7 @@ import { HangarGuideLineController, createHangarGuideLineController } from '../s
 import HangarGuideLineAdapter from '../src/hangar/GuideLineAdapter';
 import App, { type HangarEntryAppProps } from '../src/App';
 import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import userEvent from '@testing-library/user-event';
 
 const floor=[{x:-5,z:-5},{x:5,z:-5},{x:5,z:5},{x:-5,z:5}];
 const config={walkablePolygon:floor,aircraftFootprints:[{x:1,z:1,width:2,depth:2}],avatarRadius:0.3,gridSize:0.25,avatar:{x:-4,z:-4}};
@@ -119,34 +120,47 @@ describe('Hangar guide line',()=>{
       hangarAircraftSelectionHandler:productionSelection,
     }));
     await signInAsReviewer();
+    // Diagnostics calls: console output and beacons. The Hangar's local diagnostics never leave the page.
+    const beacon=vi.fn(()=>true); Object.defineProperty(navigator,'sendBeacon',{value:beacon,configurable:true});
+    const consoleSpies=(['log','info','warn','error','debug'] as const).map(level=>vi.spyOn(console,level).mockImplementation(()=>{}));
+    const diagnosticsCalls=()=>beacon.mock.calls.length+consoleSpies.reduce((sum,spy)=>sum+spy.mock.calls.length,0);
     const requestsBeforeEnter=vi.mocked(fetch).mock.calls.length;
     fireEvent.click(screen.getByRole('button',{name:'Enter Hangar'}));
     const requestsAfterEnter=vi.mocked(fetch).mock.calls.length;
     expect(requestsAfterEnter).toBe(requestsBeforeEnter);
     const requestsBeforeRack=requestsAfterEnter;
+    const diagnosticsBeforeRack=diagnosticsCalls();
     fireEvent.click(await screen.findByRole('button',{name:'Open data rack'}));
     fireEvent.click(screen.getByRole('menuitem',{name:'Air One'}));
     expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeRack);
+    expect(diagnosticsCalls()).toBe(diagnosticsBeforeRack);
     const requestsBeforeReduced=vi.mocked(fetch).mock.calls.length;
     fireEvent.click(screen.getByRole('button',{name:'Enable reduced motion'}));
     expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeReduced);
     expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
     expect(document.querySelector('[data-static-line="true"]')).not.toBeNull();
     const fetchBeforeGuide=vi.mocked(fetch).mock.calls.length;
+    const diagnosticsBeforeGuide=diagnosticsCalls();
     fireEvent.click(screen.getByRole('button',{name:'Pointer select AIR-1'}));
     expect(vi.mocked(fetch).mock.calls.length).toBe(fetchBeforeGuide);
     expect(productionSelection).toHaveBeenCalledTimes(1);
     expect(productionSelection).toHaveBeenCalledWith('AIR-1');
-    fireEvent.keyDown(screen.getByRole('button',{name:'Keyboard select AIR-2'}),{key:'Enter'});
+    screen.getByRole('button',{name:'Keyboard select AIR-2'}).focus();
+    await userEvent.setup().keyboard('{Enter}');
     expect(vi.mocked(fetch).mock.calls.length).toBe(fetchBeforeGuide);
     expect(productionSelection).toHaveBeenCalledTimes(2);
     expect(productionSelection).toHaveBeenLastCalledWith('AIR-2');
+    expect(diagnosticsCalls()).toBe(diagnosticsBeforeGuide);
     const requestsBeforeWalk=vi.mocked(fetch).mock.calls.length;
+    const diagnosticsBeforeWalk=diagnosticsCalls();
     const productionWalk=screen.getByRole('region',{name:'Walk region'});
     fireEvent.keyDown(productionWalk,{key:'ArrowRight'});
     expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeWalk);
     fireEvent.keyDown(productionWalk,{key:'Escape'});
     expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeWalk);
     expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('');
+    expect(diagnosticsCalls()).toBe(diagnosticsBeforeWalk);
+    expect(diagnosticsCalls()).toBe(0);
+    consoleSpies.forEach(spy=>spy.mockRestore());
   });
 });

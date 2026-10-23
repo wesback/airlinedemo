@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { type HangarEntryAppProps } from '../src/App';
 import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
 import { confirmHangarRackMenuEntry } from '../src/hangar/rackMenu';
+import userEvent from '@testing-library/user-event';
 import {
   HANGAR_3D_ACTIONS,
   HANGAR_NON_3D_ACTIONS,
@@ -70,6 +71,10 @@ afterEach(() => {
     await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
+    // App offers only its Data Room entries: an unmapped identifier such as AIR-X has no menu item to confirm.
+    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two']);
+    expect(screen.queryByRole('menuitem', { name: /AIR-X/ })).toBeNull();
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
     expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
     const routePoints = document.querySelector('polyline')?.getAttribute('points')?.trim().split(/\s+/) ?? [];
@@ -108,7 +113,9 @@ afterEach(() => {
     fireEvent.click(await screen.findByRole('button', { name: 'Pointer select AIR-1' }));
     expect(selection).toHaveBeenCalledTimes(1);
     expect(selection).toHaveBeenLastCalledWith('AIR-1');
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Keyboard select AIR-2' }), { key: 'Enter' });
+    // A real keyboard press (keydown, then the button's own click): exactly one selection.
+    screen.getByRole('button', { name: 'Keyboard select AIR-2' }).focus();
+    await userEvent.setup().keyboard('{Enter}');
     expect(selection).toHaveBeenCalledTimes(2);
     expect(selection).toHaveBeenLastCalledWith('AIR-2');
     selection.mockClear();
