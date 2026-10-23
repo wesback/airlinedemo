@@ -21,6 +21,7 @@ vi.mock('@react-three/fiber', async () => {
   const React = await import('react');
   return {
     useFrame: () => undefined,
+    useThree: (selector: (state: { invalidate: () => void }) => unknown) => selector({ invalidate: vi.fn() }),
     Canvas: ({ children, camera }: { children?: unknown; camera?: { position?: number[] | {toArray?:()=>number[]} } }) => {
       const childList=React.Children.toArray(children as ReactNode);
       const sceneMounted=childList.some((child:any)=>React.isValidElement(child)&&(child as any).props?.object instanceof THREE.Group);
@@ -115,7 +116,11 @@ describe('HangarReducedMotion', () => {
     ]};
     const scene=buildHangarAircraftSceneGroups(manifest,view)!;
     expect(scene).toBeInstanceOf(THREE.Group);
-    const MountCanvas=({children}:any)=>createElement('div',{'data-hangar-scene-mounted':'true'},children);
+    const MountCanvas=({children}:any)=>{
+      const childList=Array.isArray(children)?children:[children];
+      const mountedObject=childList.find((child:any)=>child?.props?.object===scene);
+      return createElement('div',{'data-hangar-scene-mounted':mountedObject?'true':'false'},children);
+    };
     const mounted=render(createElement(HangarCanvasAdapter,{sceneGroup:scene,camera,sceneData:view,selection:'A',canvasComponent:MountCanvas,invalidate:vi.fn()}));
     expect(mounted.container.querySelector('[data-hangar-scene-mounted]')?.getAttribute('data-hangar-scene-mounted')).toBe('true');
     expect(mounted.container.querySelector('[data-hangar-visible-fallback]')).toBeNull();
