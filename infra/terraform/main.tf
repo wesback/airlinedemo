@@ -25,7 +25,7 @@ provider "azurerm" {
 }
 
 locals {
-  rg_scope = "/subscriptions/${var.subscription_id}/resourceGroups/${var.resource_group_name}"
+  rg_scope = "/subscriptions/${var.subscription_id}/resourceGroups/${local.resource_group_name}"
 
   private_dns_zones = {
     sql   = "privatelink.database.windows.net"
@@ -48,7 +48,7 @@ locals {
 }
 
 resource "azurerm_resource_group" "demo" {
-  name     = var.resource_group_name
+  name     = local.resource_group_name
   location = var.location
 }
 
@@ -63,7 +63,7 @@ resource "azurerm_subnet" "app" {
   name                 = "snet-app"
   resource_group_name  = azurerm_resource_group.demo.name
   virtual_network_name = azurerm_virtual_network.demo.name
-  address_prefixes     = [var.app_subnet_cidr]
+  address_prefixes     = [local.app_subnet_cidr]
 
   delegation {
     name = "container-apps-environment"
@@ -79,7 +79,7 @@ resource "azurerm_subnet" "private_endpoints" {
   name                              = "snet-private-endpoints"
   resource_group_name               = azurerm_resource_group.demo.name
   virtual_network_name              = azurerm_virtual_network.demo.name
-  address_prefixes                  = [var.private_endpoint_subnet_cidr]
+  address_prefixes                  = [local.private_endpoint_subnet_cidr]
   private_endpoint_network_policies = "Enabled"
 }
 
@@ -105,7 +105,7 @@ resource "azurerm_network_security_rule" "ingress_allow" {
   source_port_range           = "*"
   destination_port_range      = "443"
   source_address_prefix       = each.value
-  destination_address_prefix  = var.app_subnet_cidr
+  destination_address_prefix  = local.app_subnet_cidr
   resource_group_name         = azurerm_resource_group.demo.name
   network_security_group_name = azurerm_network_security_group.app.name
 }
@@ -132,8 +132,8 @@ resource "azurerm_network_security_rule" "egress_private_endpoints" {
   protocol                    = "Tcp"
   source_port_range           = "*"
   destination_port_range      = "443"
-  source_address_prefix       = var.app_subnet_cidr
-  destination_address_prefix  = var.private_endpoint_subnet_cidr
+  source_address_prefix       = local.app_subnet_cidr
+  destination_address_prefix  = local.private_endpoint_subnet_cidr
   resource_group_name         = azurerm_resource_group.demo.name
   network_security_group_name = azurerm_network_security_group.app.name
 }
@@ -147,7 +147,7 @@ resource "azurerm_network_security_rule" "egress_allow" {
   protocol                    = "Tcp"
   source_port_range           = "*"
   destination_port_range      = "443"
-  source_address_prefix       = var.app_subnet_cidr
+  source_address_prefix       = local.app_subnet_cidr
   destination_address_prefix  = each.value
   resource_group_name         = azurerm_resource_group.demo.name
   network_security_group_name = azurerm_network_security_group.app.name
@@ -168,7 +168,7 @@ resource "azurerm_network_security_rule" "egress_deny_all" {
 }
 
 resource "azurerm_mssql_server" "sql" {
-  name                          = var.sql_server_name
+  name                          = local.sql_server_name
   resource_group_name           = azurerm_resource_group.demo.name
   location                      = azurerm_resource_group.demo.location
   version                       = "12.0"
@@ -187,7 +187,7 @@ resource "azurerm_mssql_server_transparent_data_encryption" "sql" {
 }
 
 resource "azurerm_storage_account" "blob" {
-  name                              = var.storage_account_name
+  name                              = local.storage_account_name
   resource_group_name               = azurerm_resource_group.demo.name
   location                          = azurerm_resource_group.demo.location
   account_tier                      = "Standard"
@@ -215,7 +215,7 @@ resource "azurerm_storage_account" "blob" {
 }
 
 resource "azurerm_key_vault" "kv" {
-  name                          = var.key_vault_name
+  name                          = local.key_vault_name
   resource_group_name           = azurerm_resource_group.demo.name
   location                      = azurerm_resource_group.demo.location
   tenant_id                     = var.tenant_id
@@ -232,12 +232,12 @@ resource "azurerm_key_vault" "kv" {
 }
 
 resource "azurerm_cognitive_account" "model" {
-  name                          = var.model_account_name
+  name                          = local.model_account_name
   resource_group_name           = azurerm_resource_group.demo.name
   location                      = "swedencentral"
   kind                          = "OpenAI"
   sku_name                      = "S0"
-  custom_subdomain_name         = var.model_endpoint_subdomain
+  custom_subdomain_name         = local.model_endpoint_subdomain
   public_network_access_enabled = false
   local_auth_enabled            = false
 
@@ -247,7 +247,7 @@ resource "azurerm_cognitive_account" "model" {
 }
 
 resource "azurerm_cognitive_deployment" "model" {
-  name                 = var.model_deployment_name
+  name                 = local.model_deployment_name
   cognitive_account_id = azurerm_cognitive_account.model.id
 
   model {
@@ -310,7 +310,7 @@ resource "azurerm_role_assignment" "terraform_contributor" {
 }
 
 resource "azurerm_consumption_budget_resource_group" "demo" {
-  name              = "budget-${var.resource_group_name}"
+  name              = "budget-${local.resource_group_name}"
   resource_group_id = azurerm_resource_group.demo.id
   amount            = var.budget_amount
   time_grain        = "Monthly"
@@ -329,5 +329,5 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
 
 output "model_endpoint" {
   description = "Model endpoint host and path, reachable only through the private endpoint."
-  value       = "${var.model_endpoint_subdomain}.openai.azure.com/"
+  value       = "${local.model_endpoint_subdomain}.openai.azure.com/"
 }
