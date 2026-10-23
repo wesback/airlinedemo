@@ -107,7 +107,7 @@ export function createHangarSceneMotionControllers(targetRadius: number | Hangar
   return {
     motion: resolvedMotion,
     camera: createHangarCameraController(resolvedTargetRadius, resolvedMotion),
-    avatar: createHangarAvatarController({ x: 0, z: 0 }, resolvedMotion),
+    avatar: createHangarAvatarController({ x: manifest.layout.avatarStart.x, z: manifest.layout.avatarStart.z }, resolvedMotion),
   };
 }
 
@@ -116,11 +116,12 @@ export type HangarSceneProps = { onSelect?: (aircraftId: string) => unknown };
 export async function loadHangarScene(controllers = createHangarSceneMotionControllers()): Promise<ComponentType<HangarSceneProps>> {
   const fiber = await import('@react-three/fiber');
   const { Canvas } = fiber;
-  const cameraTransition = controllers.camera.overview(); controllers.avatar.move({ x: 0, z: 0 }, 240);
+  const cameraTransition = controllers.camera.overview(); controllers.avatar.move({ x: manifest.layout.avatarStart.x, z: manifest.layout.avatarStart.z }, 240);
   const HangarScene: ComponentType<HangarSceneProps> = function HangarScene(props: HangarSceneProps | null = {}) {
     const onSelect = props?.onSelect;
     const [reduced, setReduced] = useState(controllers.motion.reduced);
     const [cameraState, setCameraState] = useState(cameraTransition.state);
+    const [avatarState, setAvatarState] = useState(controllers.avatar.getState());
     const [selected, setSelected] = useState<string|null>(null);
     const [ownedCamera] = useState(()=>{const camera=createHangarOwnedPerspectiveCamera();applyHangarOwnedCamera(camera,3*Math.sqrt(2650),0,45,{x:0,y:0,z:0});return camera;});
     const [canvasInvalidate,setCanvasInvalidate]=useState<(() => unknown)|undefined>();
@@ -133,6 +134,8 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
     useEffect(() => controllers.motion.subscribe((active) => {
       setReduced(active);
       setCameraState(controllers.camera.applyCameraTransition(controllers.camera.getState(), 480).target);
+      const avatarTransition=controllers.avatar.move(controllers.avatar.getState(),240);
+      setAvatarState(avatarTransition.target);
     }), []);
     const navigateCamera = (preset: 'overview'|'aircraft', letter?: 'A'|'B'|'C') => {
       setSelected(letter ? `SYN-CP-${letter}-AIR-001` : null);
@@ -141,15 +144,19 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         controllers.camera.setTargetRadius(R);
         const transition=controllers.camera.overview();
         setCameraState(transition.state);
-        applyHangarOwnedCamera(ownedCamera,3*R,0,45,{x:0,y:0,z:0});
       }else if(letter){
-        const layout=(manifest.layout.aircraft as any[]).find(row=>row.caseId===`cp-case-${letter.toLowerCase()}`);if(layout){const d=layout.dimensions;const R=Math.sqrt((d.span/2)**2+(d.length/2)**2+(d.height/2)**2);
+        const layout=(manifest.layout.aircraft as any[]).find(row=>row.caseId===`cp-case-${letter.toLowerCase()}`);
+        if(layout){
+          const d=layout.dimensions;
+          const R=Math.sqrt((d.span/2)**2+(d.length/2)**2+(d.height/2)**2);
           controllers.camera.setTargetRadius(R);
-          const transition=controllers.camera.aircraft();setCameraState(transition.state);
-          applyHangarOwnedCamera(ownedCamera,2*R,0,35,{x:layout.centre.x,y:d.height/2,z:layout.centre.z});}}
+          const transition=controllers.camera.aircraft();
+          setCameraState(transition.state);
+        }
+      }
     };
     const setMotionOverride=(override:true|false)=>{controllers.motion.setOverride(override);setCameraState(controllers.camera.getState());setReduced(controllers.motion.reduced);};
-    const handleCameraKey=(key:string)=>{const result=controllers.camera.key(key);if(result.handled){setCameraState(result.state);if(selected){const match=selected.match(/^SYN-CP-([ABC])-AIR-001$/);const letter=match?.[1];const layout=letter?(manifest.layout.aircraft as any[]).find(row=>row.caseId===`cp-case-${letter.toLowerCase()}`):undefined;if(layout){const d=layout.dimensions;applyHangarOwnedCamera(ownedCamera,result.state.radius,result.state.azimuthDegrees,result.state.polarDegrees,{x:layout.centre.x,y:d.height/2,z:layout.centre.z});}}else applyHangarOwnedCamera(ownedCamera,result.state.radius,result.state.azimuthDegrees,result.state.polarDegrees,{x:0,y:0,z:0});}};
+    const handleCameraKey=(key:string)=>{const result=controllers.camera.key(key);if(result.handled)setCameraState(result.state);};
     const sceneView={contractVersion:1,cases:[{caseId:'cp-case-a',status:{assessment:'ready'},owner:'A',nextAction:{text:'Review'},capabilityLabel:'Rules-based'},{caseId:'cp-case-b',status:{assessment:'ready'},owner:'B',nextAction:{text:'Review'},capabilityLabel:'Rules-based'},{caseId:'cp-case-c',status:{assessment:'ready'},owner:'C',nextAction:{text:'Review'},capabilityLabel:'Rules-based'}],selectedObjectId:selected};
     const sceneGroup=buildHangarAircraftSceneGroups(undefined,sceneView,(id)=>{setSelected(id);onSelect?.(id);});
     return createElement('div',{'data-hangar-reduced-motion':reduced?'true':'false','data-hangar-camera-duration':String(controllers.camera.transitionDuration),'data-hangar-camera-position':`${cameraState.radius},${cameraState.azimuthDegrees},${cameraState.polarDegrees}`},
@@ -160,7 +167,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         createElement('button',{type:'button',onClick:()=>navigateCamera('aircraft','C')},'View Case C'),
       ),
       createElement('section',{'aria-label':'Motion controls'},createElement('button',{type:'button',onClick:()=>setMotionOverride(true)},'Reduce motion'),createElement('button',{type:'button',onClick:()=>setMotionOverride(false)},'Allow motion')),
-      createElement(HangarCanvasAdapter,{camera:ownedCamera,sceneGroup,sceneData:sceneView,selection:selected,avatar:{x:0,z:0},route:null,invalidate:canvasInvalidate,invalidationCapture:CaptureCanvasInvalidation,target:selected?(()=>{const letter=selected.match(/^SYN-CP-([ABC])-AIR-001$/)?.[1]?.toLowerCase();const layout=(manifest.layout.aircraft as any[]).find(row=>row.caseId===`cp-case-${letter}`);return layout?{x:layout.centre.x,y:layout.dimensions.height/2,z:layout.centre.z}:{x:0,y:0,z:0};})():{x:0,y:0,z:0},radius:cameraState.radius,reducedMotion:reduced,azimuthDegrees:cameraState.azimuthDegrees,polarDegrees:cameraState.polarDegrees,canvasComponent:Canvas}),
+      createElement(HangarCanvasAdapter,{camera:ownedCamera,sceneGroup,sceneData:sceneView,selection:selected,avatar:avatarState,route:null,invalidate:canvasInvalidate,invalidationCapture:CaptureCanvasInvalidation,target:selected?(()=>{const letter=selected.match(/^SYN-CP-([ABC])-AIR-001$/)?.[1]?.toLowerCase();const layout=(manifest.layout.aircraft as any[]).find(row=>row.caseId===`cp-case-${letter}`);return layout?{x:layout.centre.x,y:layout.dimensions.height/2,z:layout.centre.z}:{x:0,y:0,z:0};})():{x:0,y:0,z:0},radius:cameraState.radius,reducedMotion:reduced,azimuthDegrees:cameraState.azimuthDegrees,polarDegrees:cameraState.polarDegrees,canvasComponent:Canvas}),
     );
   };
   return HangarScene;
