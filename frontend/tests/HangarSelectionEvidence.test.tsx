@@ -37,11 +37,19 @@ describe('HangarSelectionEvidence',()=>{
     for(const call of handler.mock.calls) expect(call[0]).toMatch(/^SYN-CP-[ABC]-(AIR|ENG|CMP)-001|^SYN-CP-[ABC]-CMP-002$/);
     fireEvent.pointerDown(canvas,{clientX:400,clientY:300}); fireEvent.pointerMove(canvas,{clientX:407,clientY:300}); fireEvent.pointerUp(canvas,{clientX:407,clientY:300}); expect(handler).toHaveBeenCalledTimes(12);
     fireEvent.pointerDown(canvas,{clientX:799,clientY:599}); fireEvent.pointerUp(canvas,{clientX:799,clientY:599}); expect(handler).toHaveBeenCalledTimes(12);
-    for(const name of ['Floor','AvatarBody','AvatarHead','GuideLine','SelectionRing','HardHat','RackFrame']){
+    for(const name of ['Floor','AvatarBody','AvatarHead','GuideLine','SelectionRing','HardHat','RackFrame','GroundShadowA','GroundShadowB','GroundShadowC']){
       const target=scene.getObjectByName(name);
       if(!target) continue;
       const targetBox=new THREE.Box3().setFromObject(target);
-      const center=targetBox.getCenter(new THREE.Vector3()); center.project(camera);
+      const center=targetBox.getCenter(new THREE.Vector3());
+      if(name==='SelectionRing'){
+        const ring=target as THREE.Mesh;
+        center.copy(ring.position); center.x+=(ring.geometry as THREE.TorusGeometry).parameters.radius??0;
+      }else if(name.startsWith('GroundShadow')){
+        const shadow=target as THREE.Mesh;
+        center.copy(shadow.position); center.x+=shadow.scale.x*0.75;
+      }
+      center.project(camera);
       const x=(center.x*.5+.5)*800,y=(-center.y*.5+.5)*600;
       const before=handler.mock.calls.length;
       fireEvent.pointerDown(canvas,{clientX:x,clientY:y}); fireEvent.pointerUp(canvas,{clientX:x,clientY:y});
