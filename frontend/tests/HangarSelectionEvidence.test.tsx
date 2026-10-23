@@ -150,12 +150,19 @@ describe('HangarSelectionEvidence',()=>{
   });
   it('Hangar stale refresh preserves evidence and disables commands',()=>{
     const mutation=vi.fn(); const reset=vi.fn(); const stale={revision:7,current:false,fallbackReason:'refresh_failed',caseId:'cp-case-a'};
-    render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={stale} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    const preserved=render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={stale} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
     expect(screen.getByText('Stale server snapshot: evidence and commands are unavailable.')).toBeTruthy();
     expect((screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'}) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.queryByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.queryByRole('button',{name:'Page witness 3'}) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'})); expect(reset).not.toHaveBeenCalled(); expect(mutation).not.toHaveBeenCalled();
+
+    const recovered=envelope({case:{...envelope().case,caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'},allowedActions:['evidence']},allowedActions:['evidence'],objects:envelope().objects.map((o)=>o.objectId==='SYN-CP-A-CMP-001'?{...o,nextAction:{actionId:'approve',text:'Approve server evidence'}}:o)});
+    preserved.rerender(<HangarSelectionEvidence envelope={recovered} manifest={manifest} snapshot={{revision:8,current:true,fallbackReason:null,caseId:'cp-case-a'}} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    expect(screen.queryByText('Stale server snapshot: evidence and commands are unavailable.')).toBeNull();
+    expect((screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'}) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText('Next action: Approve server evidence')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).toHaveBeenCalledTimes(1); expect(reset).not.toHaveBeenCalled();
   });
   it('HangarSelectionEvidence blocks witnesses and renders markup as text',()=>{
     const read=vi.fn(); const blocked=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,basisId:'basis-v1',basisVersion:1,displayLabel:'<img src=x onerror=alert(1)>',processingState:'rejected-retryable',retryable:true,usableAsEvidence:false}],evidence:[{witnessId:'secret',evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,page:9,basisId:'basis-v1',basisVersion:1,displayLabel:'SECRET-WITNESS'}]});

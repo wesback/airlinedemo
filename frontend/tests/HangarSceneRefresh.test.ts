@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, waitFor } from '@testing-library/react';
+import { createElement } from 'react';
+import * as THREE from 'three';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildHangarSceneDescriptor, projectHangarScene, validateHangarSceneEnvelope } from '../src/hangar/sceneProjection';
 import { applyServerRefresh, canAdmitHangarCommands, refreshHangarScene, markRefreshStale, buildHangarServerSceneView } from '../src/hangar/sceneRefresh';
+import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/hangar/HangarCanvasAdapter';
+
+afterEach(cleanup);
 
 const envelope = (overrides: Record<string, unknown> = {}) => ({
   contractVersion: 1, packVersion: '1.0.2', case: {
@@ -40,7 +46,7 @@ describe('HangarSceneRefresh', () => {
   it('Hangar refresh rebuilds label and panel text from server snapshot', async () => {
     const injected={revision:1,status:'client',owner:'Injected owner',nextAction:{text:'fake'},capabilityLabel:'Unknown'};
     const first=applyServerRefresh(injected as never,envelope()).snapshot!;
-    const higher=envelope({case:{...envelope().case,caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'}}});
+    const higher=envelope({case:{...envelope().case,name:'Aircraft A',category:'Passenger aircraft',caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'}}});
     const result=await refreshHangarScene(()=>higher,first);
     expect(result.valid).toBe(true); expect(result.snapshot?.revision).toBe(8); expect(result.snapshot?.nextAction).toEqual({actionId:'approve',text:'Approve server evidence'});
     expect(result.scene).toBe(higher);
@@ -50,6 +56,13 @@ describe('HangarSceneRefresh', () => {
     expect(stale.valid).toBe(false); expect(stale.snapshot?.nextAction).toEqual({actionId:'review',text:'Review evidence'});
     expect(stale.snapshot?.revision).toBe(7); expect(canAdmitHangarCommands(stale.snapshot)).toBe(false);
     expect(buildHangarServerSceneView({contractVersion:99,case:{}})).toBeNull();
+
+    const sceneGroup=new THREE.Group(); const aircraft=new THREE.Group(); aircraft.name='AircraftA'; sceneGroup.add(aircraft);
+    const camera=createHangarOwnedPerspectiveCamera(); camera.position.set(0,30,50); camera.lookAt(0,0,0);
+    const Canvas=()=>createElement('div',{'data-testid':'hangar-live-canvas'});
+    const live=render(createElement(HangarCanvasAdapter,{sceneGroup,camera,selection:'SYN-CP-A-AIR-001',sceneData:buildHangarServerSceneView(envelope()),refreshReader:()=>higher,snapshot:first,canvasComponent:Canvas}));
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(()=>expect(live.container.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.textContent).toContain('Approve server evidence'));
   });
 
   it('HangarSceneRefresh preserves stale state and command admission', async () => {
