@@ -124,12 +124,12 @@ run "gateway_policy_requires_the_seven_correlation_headers" {
         "x-gateway-suite-version",
         "x-gateway-call-identity"
       ] : can(regex(name, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
-    ]) && can(regex("A-Za-z0-9", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("0,127", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("<set-status code=\"400\" reason=\"Bad Request\" />", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("gateway correlation rejected", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && index(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "validate-jwt") < index(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "x-gateway-arm") && index(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "x-gateway-arm") < index(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "rewrite-uri")
+    ]) && can(regex("\\^\\[A-Za-z0-9\\]\\[A-Za-z0-9._-\\]\\{0,127\\}\\$", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("<set-status code=\"400\" reason=\"Bad Request\" />", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("gateway correlation rejected", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("(?s)validate-jwt.*x-gateway-arm.*rewrite-uri", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
     error_message = "The gateway policy must validate all seven correlation headers after JWT validation and before URI rewriting, returning HTTP 400 with gateway correlation rejected."
   }
 
   assert {
-    condition = alltrue([
+    condition = !alltrue([
       for name in ["x-gateway-arm", "x-gateway-run", "x-gateway-package", "x-gateway-case", "x-gateway-model-configuration", "x-gateway-suite-version", "x-gateway-call-identity"] : can(regex(name, replace(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "x-gateway-case", "")))
     ])
     error_message = "Removing x-gateway-case by string replacement must make the seven-header assertion fail."
