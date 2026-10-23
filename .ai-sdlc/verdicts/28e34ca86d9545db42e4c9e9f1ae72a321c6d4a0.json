@@ -1,0 +1,205 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 578,
+  "branch": "ai-sdlc/issue-578",
+  "commitSha": "28e34ca86d9545db42e4c9e9f1ae72a321c6d4a0",
+  "round": 0,
+  "pipelineVersion": "8a97d37",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds coverage for the null-name case but leaves the production cause of the failing Terraform plan unchanged.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/names.tftest.hcl",
+          "line": 49,
+          "message": "This adds a regression test but does not fix the null handling that the issue requires; update the deployment-name expression so a null value uses the derived name.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new Terraform plan test sets model_deployment_name to null and checks the deployment name, but the diff changes no production expression that handles this value.",
+            "failureScenario": "When the plan evaluates the deployment name with model_deployment_name set to null, the existing trimspace call can still fail; the added test exposes that failure without fixing its cause, so the build check remains red."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added test describes the null-name failure, but the diff contains no fix for it. The build can still fail when planning with model_deployment_name set to null.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/names.tftest.hcl",
+          "line": 49,
+          "message": "Acceptance criterion 1 requires fixing the cause of the failing build. This change only adds a regression test for null model_deployment_name; it does not change the name expression or otherwise fix the plan failure.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new run sets model_deployment_name to null and plans the existing azurerm_cognitive_deployment.model resource; the diff adds no change to the expression that derives that resource's name.",
+            "failureScenario": "When the name expression calls trimspace on the null input, the plan errors before the assertion can pass, so the reported build failure remains unfixed."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added Terraform case describes the required null-name behavior, but the diff does not change the code that must implement it. The reported CI failure therefore remains unaddressed.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/names.tftest.hcl",
+          "line": 56,
+          "message": "The acceptance criterion requires fixing the red build, but this change only adds an assertion for the null-name case. Update the deployment-name expression so null uses the derived name, then this assertion can verify the fix.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new assertion plans azurerm_cognitive_deployment.model with model_deployment_name set to null.",
+            "failureScenario": "When Terraform evaluates the deployment name for a null model_deployment_name, trimspace receives null and the plan fails before this assertion can pass; this diff adds the regression case but does not fix the expression causing that failure."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/names.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
