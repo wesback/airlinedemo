@@ -1,0 +1,221 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 529,
+  "branch": "ai-sdlc/issue-529",
+  "commitSha": "f46c2612b38db81c9955d2375215344ccecae377",
+  "round": 1,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds a polyline and verifies live directions through the adapter. The menu-close callback still misses a repeated confirmation after clearing the marker, and the SVG does not map hangar coordinates into its viewport.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/GuideLineAdapter.tsx",
+          "line": 26,
+          "message": "Menu close is skipped when the same entry is confirmed again after marker becomes null. Reset the confirmation key when the marker clears, and cover this transition.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The effect does nothing when marker is null, so confirmedKeyRef keeps its previous key. When that same marker and aircraft ID are confirmed again, the equality check skips the menu-close callback.",
+            "failureScenario": "After confirming a rack entry, clearing marker to null, reopening the rack menu, and confirming the same entry again, the route is confirmed but the menu remains open."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/GuideLineAdapter.tsx",
+          "line": 46,
+          "message": "The polyline is present but raw hangar coordinates are rendered in the SVG's default viewport, clipping negative coordinates and leaving world-scale routes tiny or outside the viewport. Map the route bounds into a suitable viewBox or coordinate transform.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The polyline receives raw hangar world coordinates, but its parent SVG has no viewBox or explicit dimensions. The default SVG viewport uses a 300 by 150 coordinate space beginning at (0, 0).",
+            "failureScenario": "For the tested route from (-4, -4) to (4, -4), negative coordinates are clipped and the remaining segment is only a few default viewport units long, so users do not see a usable guide line."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The polyline is now rendered, and the adapter test checks the live region after an accepted keyboard step. Menu closure is verified only when a callback is explicitly supplied; the repository has no production call site wiring that callback to the rack menu.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/GuideLineAdapter.tsx",
+          "line": 29,
+          "message": "Menu closure remains opt-in and is not wired to the rack menu in the production path. Confirming a rack entry without a close callback leaves the menu open, so the menu-close acceptance criterion remains unmet.",
+          "confidence": 0.93,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The marker effect calls a menu-close callback only when one of the optional closeMenu, onMenuClose, or onCloseMenu props is supplied. No production call site for HangarGuideLineAdapter exists in the repository; the test supplies closeMenu explicitly.",
+            "failureScenario": "When a rack entry is confirmed without one of those props, the route updates but the callback is undefined and the rack menu stays open."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds menu-close handling, renders the route as an SVG polyline, and asserts the live-region text after an accepted keyboard step. I found no security vulnerability in the reviewed change.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarGuideLine.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

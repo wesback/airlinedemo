@@ -5,6 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { type HangarEntryAppProps } from '../src/App';
 import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import { confirmHangarRackMenuEntry } from '../src/hangar/rackMenu';
+import userEvent from '@testing-library/user-event';
 import {
   HANGAR_3D_ACTIONS,
   HANGAR_NON_3D_ACTIONS,
@@ -55,6 +57,79 @@ afterEach(() => {
   it('HangarEntry default loader returns a renderable scene component', async () => {
     const Scene = await loadHangarScene();
     expect(typeof Scene).toBe('function');
+  });
+
+  it('HangarEntry production Data Room confirmation starts mapped guide route', async () => {
+    stubCaseApi();
+    const selection = vi.fn();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: () => { function ProductionScene() { return null; } return ProductionScene; },
+      hangarAircraftSelectionHandler: selection,
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
+    // App offers only its Data Room entries: an unmapped identifier such as AIR-X has no menu item to confirm.
+    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two']);
+    expect(screen.queryByRole('menuitem', { name: /AIR-X/ })).toBeNull();
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+    const routePoints = document.querySelector('polyline')?.getAttribute('points')?.trim().split(/\s+/) ?? [];
+    expect(routePoints.at(-1)).toBe('4,-4');
+    expect(screen.queryByRole('menu', { name: 'Data rack menu' })).toBeNull();
+    expect(selection).not.toHaveBeenCalled();
+
+    const unknownConfirmed = confirmHangarRackMenuEntry(hangarDataRoomEntriesForTest(), 'AIR-X', selection);
+    expect(unknownConfirmed).toBe(false);
+    expect(selection).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+
+    const walk = screen.getByRole('region', { name: 'Walk region' });
+    fireEvent.keyDown(walk, { key: 'Escape' });
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open data rack' }));
+    expect(confirmHangarRackMenuEntry(hangarDataRoomEntriesForTest(), 'AIR-X', selection)).toBe(false);
+    expect(selection).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+  });
+
+  function hangarDataRoomEntriesForTest() {
+    return [{ caseId: 'AIR-1', name: 'Air One', category: 'narrow-body', unavailable: false, sources: null }];
+  }
+
+  it('HangarEntry production guide arrival uses shared aircraft selection once', async () => {
+    stubCaseApi();
+    const selection = vi.fn();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarAircraftSelectionHandler: selection,
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Pointer select AIR-1' }));
+    expect(selection).toHaveBeenCalledTimes(1);
+    expect(selection).toHaveBeenLastCalledWith('AIR-1');
+    // A real keyboard press (keydown, then the button's own click): exactly one selection.
+    screen.getByRole('button', { name: 'Keyboard select AIR-2' }).focus();
+    await userEvent.setup().keyboard('{Enter}');
+    expect(selection).toHaveBeenCalledTimes(2);
+    expect(selection).toHaveBeenLastCalledWith('AIR-2');
+    selection.mockClear();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
+    const walk = screen.getByRole('region', { name: 'Walk region' });
+    for (let index = 0; index < 8; index += 1) fireEvent.keyDown(walk, { key: 'ArrowRight' });
+    for (let index = 0; index < 8; index += 1) fireEvent.keyDown(walk, { key: 'ArrowUp' });
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('Arrival');
+    expect(selection).toHaveBeenCalledTimes(1);
+    expect(selection).toHaveBeenCalledWith('AIR-1');
+    fireEvent.keyDown(walk, { key: 'ArrowDown' });
+    expect(selection).toHaveBeenCalledTimes(1);
   });
 
   it('HangarEntry non-3D parity', async () => {
