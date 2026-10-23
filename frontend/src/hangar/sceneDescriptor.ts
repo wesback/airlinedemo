@@ -40,8 +40,9 @@ export function validateHangarAircraftDescriptor(input:unknown=manifestDefault):
     for(let j=0;j<4;j++){if(nodes[keys[j]]!==nodeNames[j]||seenIds.has(ids[j])||seenNodes.has(nodeNames[j])||!m.objectIds.includes(ids[j])||!HANGAR_ACTUAL_OBJECT_IDS.includes(ids[j] as any)) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};seenIds.add(ids[j]);seenNodes.add(nodeNames[j]);descriptor.push({objectId:ids[j],caseId,kind:kinds[j],node:nodeNames[j]});}
   }
   const rackNodes=m.rack?.units;if(!Array.isArray(rackNodes)||rackNodes.length!==5) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
+  const approvedRack=[['technical','RackUnitTechnical'],['maintenance','RackUnitMaintenance'],['finance','RackUnitFinance'],['records','RackUnitRecords'],['contracts','RackUnitContracts']] as const;
   const avatarNode=m.avatar?.hardHat;if(!avatarNode||avatarNode.node!=='HardHat'||avatarNode.color!=='#FFD400'||m.avatar.synthetic!==true||m.avatar.realPerson!==false||m.avatar.brandMarks!==false) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
-  for(const unit of rackNodes){if(!unit?.node||seenNodes.has(unit.node))return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};seenNodes.add(unit.node);}
+  for(let i=0;i<approvedRack.length;i++){const unit=rackNodes[i];const approved=approvedRack[i];if(!unit||unit.source!==approved[0]||unit.node!==approved[1]||seenNodes.has(unit.node))return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};seenNodes.add(unit.node);}
   if(seenIds.size!==12||descriptor.length!==12||new Set(m.objectIds).size!==12||m.objectIds.some((id:any)=>!HANGAR_ACTUAL_OBJECT_IDS.includes(id))) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
   return {valid:true,descriptor};
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import manifest from '../src/hangar/sceneManifest.json';
+import { HANGAR_SCENE_THEME } from '../src/hangar/sceneTheme';
 import { createHangarRackMenuController } from '../src/hangar/rackMenu';
 import {
   HANGAR_MANIFEST_ERROR,
@@ -22,6 +23,12 @@ describe('Hangar rack and avatar manifest', () => {
     expect(validateHangarRackAvatarManifest(realPerson)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
     const brandMarks = clone(); brandMarks.avatar.brandMarks = true;
     expect(validateHangarRackAvatarManifest(brandMarks)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    const missingSynthetic = clone(); delete missingSynthetic.avatar.synthetic;
+    expect(validateHangarRackAvatarManifest(missingSynthetic)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    const originalLabelText = HANGAR_SCENE_THEME.labelText;
+    (HANGAR_SCENE_THEME as { labelText: string }).labelText = '#FFFFFF';
+    expect(validateHangarRackAvatarManifest(manifest)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    (HANGAR_SCENE_THEME as { labelText: string }).labelText = originalLabelText;
   });
 
   it('Hangar rack manifest exact five-unit mapping', () => {
