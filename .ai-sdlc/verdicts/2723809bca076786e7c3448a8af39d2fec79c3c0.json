@@ -1,0 +1,302 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 549,
+  "branch": "ai-sdlc/issue-549",
+  "commitSha": "2723809bca076786e7c3448a8af39d2fec79c3c0",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change validates and selects a gateway endpoint, but it does not configure a model route or wire the required telemetry, quota, and replay behavior into production. The named ModelGatewayTokenomicsTests.cs is also absent from the diff.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 249,
+          "message": "The Terraform change provisions a private gateway instance but does not configure the private model route required by the acceptance criterion.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The gateway resource creates an internal API Management instance, but the diff defines no API, backend, or operation that forwards requests to the model. The gateway_api_version and gateway_model_deployment inputs are not used to configure a route.",
+            "failureScenario": "When the application sends a model request to the configured gateway endpoint, the plan has no model route to receive and forward it, so the request cannot reach the Azure OpenAI deployment."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 72,
+          "message": "The production adapter only changes the endpoint. It does not implement the required tokenomics telemetry or enforce the application quotas.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The production factory creates and returns the Azure OpenAI IChatClient directly. It does not add correlation metadata, record usage or telemetry, or invoke GatewayQuotaGovernor.",
+            "failureScenario": "A model call can be dispatched and its result returned without the required correlation identifier, token and call metrics, or quota checks; a call exceeding an approved limit is not rejected by this adapter."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 72,
+          "message": "The required replay behavior and the named behavior tests are missing. The production adapter can dispatch a repeated call instead of returning the original result without another charge or trace.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The factory returns a client without a replay store or dispatch wrapper, and the diff does not include the acceptance criterion's named ModelGatewayTokenomicsTests.cs.",
+            "failureScenario": "Repeating the same approved call identity dispatches another gateway request because no production replay path returns the stored result. The named tests that should prove replay and the other gateway behaviors are absent from this change."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform plan creates an internal gateway resource without configuring a model route. The production adapter also returns an uninstrumented client, leaving tokenomics and replay behavior disconnected; the named .NET tests for those criteria are not included.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 249,
+          "message": "The plan does not configure the private gateway route required by the first acceptance criterion. The Terraform test checks gateway access flags and the output value, but not a route to the model.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The Terraform change creates an internal API Management instance and outputs its endpoint, but defines no API, backend, or routing policy connecting it to the cognitive deployment.",
+            "failureScenario": "After applying this plan, the application sends a model request to the configured gateway endpoint, but the gateway has no configured route to the model and cannot forward the request."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 63,
+          "message": "The production adapter does not implement the tokenomics and correlation behavior in the second criterion, and `Production_adapter_routes_to_gateway_and_records_available_or_unavailable_usage` is missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The production factory validates the endpoint, creates an AzureOpenAIClient, and returns its unwrapped IChatClient. The named ModelGatewayTokenomicsTests.cs test is absent from the diff.",
+            "failureScenario": "When the adapter handles a model call, no code in this path adds correlation metadata or records usage, call count, retries, latency, throttling, or estimated cost; the named test that should catch this is not present."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 31,
+          "message": "Quota enforcement is not connected to the production call path, and the third criterion’s named test is missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "GatewayQuotaGovernor exposes quota checks, but the production factory returns a plain chat client without creating or invoking a governor. The named quota test is absent from the diff.",
+            "failureScenario": "A model call exceeding a configured limit is dispatched through the production client without a quota check, so a successful result can be returned; `Quota_boundary_and_over_limit_calls_report_exact_usage_and_reject_result` is missing."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 107,
+          "message": "Replay behavior is not wired into production, and the fifth criterion’s named test is missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "GatewayReplayStore stores and returns a result, but the production factory does not use the store. The named replay test is absent from the diff.",
+            "failureScenario": "Repeated production calls are dispatched again because replay lookup is not part of the adapter path; `Replay_returns_original_result_without_dispatch_charge_or_duplicate_trace` is missing."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change creates an API Management instance and changes the configured endpoint, but does not configure a model route or connect the added governance helpers to production calls. The required behavior tests are absent, and replay storage does not protect stored results from mutation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 253,
+          "message": "The Terraform change creates a private gateway instance, but does not configure the private gateway route required by the acceptance criterion.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The Terraform change creates an API Management instance but adds no API, backend, or routing policy connecting it to the Azure OpenAI account.",
+            "failureScenario": "With the configured gateway endpoint, the application sends a model request to API Management, which has no configured model route to handle it; the request cannot reach the model."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 79,
+          "message": "The production adapter does not enforce quotas or collect tokenomics telemetry; the added governance helpers are not wired into model calls.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The production factory constructs and returns the Azure OpenAI chat client directly. The new quota governor, usage metrics, correlation validation, and replay store are not connected to this client.",
+            "failureScenario": "A production caller makes a model call that exceeds an approved token or call limit; the client dispatches it without checking the limit or recording the required telemetry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 1,
+          "message": "The behavior criteria have no tests in this change: the named production adapter, quota, trace/correlation, and replay tests are absent.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The issue names this test file and four behavior tests, but the diff adds no such file or tests.",
+            "failureScenario": "A broken production route, quota check, privacy filter, or replay implementation can pass the repository test command because none of the named tests exercises those criteria."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 125,
+          "message": "Replay storage does not preserve result content: mutable results can be changed after storing and those changes appear on replay.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "GatewayReplayStore<T>.Store retains the supplied result object by reference, and TryReplay returns that same reference.",
+            "failureScenario": "A caller stores a mutable result and then changes its contents; replay returns the changed contents instead of the original result."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
