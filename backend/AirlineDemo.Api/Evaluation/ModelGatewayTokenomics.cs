@@ -23,7 +23,7 @@ public sealed record GatewayCorrelation(string Arm, string Run, string Package, 
     string SuiteVersion, string CallIdentity)
 {
     private static readonly Regex Identifier = new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant);
-    private static readonly Regex CardNumber = new(@"(?:\d{13,19}|\d{3}-\d{2}-\d{4}|\d{9})", RegexOptions.CultureInvariant);
+    private static readonly Regex CardNumber = new(@"(?:\d{13,19}|\d{10}|\d{3}-\d{2}-\d{4}|\d{9})", RegexOptions.CultureInvariant);
     public IReadOnlyList<string> Validate()
     {
         var values = new (string Name, string Value)[] { (nameof(Arm), Arm), (nameof(Run), Run), (nameof(Package), Package),
@@ -170,10 +170,11 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
         if (denial is not null)
         {
             var preCallUsage = _governor.ExactUsage();
+            var preCallCost = rates is null ? null : ModelGatewayTokenomics.EstimateCost(preCallUsage, rates);
             Metrics = new GatewayTokenMetrics(preCallUsage.Status == "available" ? preCallUsage.InputTokens : null,
                 preCallUsage.Status == "available" ? preCallUsage.OutputTokens : null,
                 preCallUsage.Status == "available" ? preCallUsage.TotalTokens : null, _modelCallCount, _retryCount,
-                0, false, correlation.ModelConfiguration, null, preCallUsage);
+                0, false, correlation.ModelConfiguration, preCallCost, preCallUsage);
             throw new InvalidOperationException(denial);
         }
 

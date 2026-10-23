@@ -165,6 +165,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     [InlineData("modelresponse-1")]
     [InlineData("123-45-6789")]
     [InlineData("123456789")]
+    [InlineData("5551234567")]
     [InlineData("4111111111111111")]
     [InlineData("user@example.test")]
     public async Task Production_executor_rejects_sensitive_correlation_and_keeps_trace_content_private(string caseId)
