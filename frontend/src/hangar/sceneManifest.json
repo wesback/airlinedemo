@@ -45,6 +45,7 @@
         "category": "narrow-body",
         "synthetic": true,
         "realAircraftType": false,
+        "realPerson": false,
         "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftA",
@@ -64,6 +65,7 @@
         "category": "regional",
         "synthetic": true,
         "realAircraftType": false,
+        "realPerson": false,
         "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftB",
@@ -83,6 +85,7 @@
         "category": "wide-body",
         "synthetic": true,
         "realAircraftType": false,
+        "realPerson": false,
         "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftC",

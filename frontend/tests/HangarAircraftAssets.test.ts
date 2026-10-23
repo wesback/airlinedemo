@@ -20,6 +20,7 @@ describe('Hangar aircraft assets', () => {
       expect(model).not.toHaveProperty('type');
       expect(model.synthetic).toBe(true);
       expect(model.realAircraftType).toBe(false);
+      expect(model.realPerson).toBe(false);
       expect(model.brandMarks).toBe(false);
     }
 

@@ -93,7 +93,7 @@ describe('Hangar asset policy', () => {
     const manifest = JSON.parse(readFileSync('src/hangar/sceneManifest.json', 'utf8'));
     for (const model of manifest.aircraft.models) {
       expect(model.path).toBeUndefined(); expect(model.type).toBeUndefined();
-      expect(model.synthetic).toBe(true); expect(model.realAircraftType).toBe(false); expect(model.brandMarks).toBe(false);
+      expect(model.synthetic).toBe(true); expect(model.realAircraftType).toBe(false); expect(model.realPerson).toBe(false); expect(model.brandMarks).toBe(false);
     }
 
     const invalidManifests = [cloneManifest(), cloneManifest(), cloneManifest()];
