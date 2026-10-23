@@ -12,7 +12,7 @@ import {
 } from '../src/hangar/reducedMotion';
 import * as THREE from 'three';
 import { createHangarCameraController } from '../src/hangar/cameraController';
-import { HangarCanvasAdapter, applyHangarOwnedCamera, createHangarOwnedPerspectiveCamera, getHangarDemandCanvasProps } from '../src/hangar/HangarCanvasAdapter';
+import { HangarCanvasAdapter, applyHangarOwnedCamera, createHangarOwnedPerspectiveCamera, getHangarDemandCanvasProps, createHangarDemandInvalidator } from '../src/hangar/HangarCanvasAdapter';
 import { createHangarSceneMotionControllers, loadHangarScene } from '../src/hangar/entryController';
 
 vi.mock('@react-three/fiber', async () => {
@@ -72,9 +72,10 @@ describe('HangarReducedMotion', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'View Case A' }));
     expect(controllers.camera.transitionDuration).toBe(0);
-    expect(controllers.camera.getState().radius).toBe(20);
+    const firstCaseRadius = 2 * Math.sqrt((22 / 2) ** 2 + (24 / 2) ** 2 + (7 / 2) ** 2);
+    expect(controllers.camera.getState().radius).toBeCloseTo(firstCaseRadius, 12);
     fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
-    expect(controllers.camera.getState()).toMatchObject({ radius: 30, azimuthDegrees: 0, polarDegrees: 45 });
+    expect(controllers.camera.getState()).toMatchObject({ radius: 3 * Math.sqrt(2650), azimuthDegrees: 0, polarDegrees: 45 });
 
     const normalMotion = new HangarReducedMotion(() => ({ matches: false }), memoryStorage());
     const normalControllers = createHangarSceneMotionControllers(normalMotion);
@@ -82,7 +83,8 @@ describe('HangarReducedMotion', () => {
     render(createElement(NormalScene));
     fireEvent.click(screen.getAllByRole('button', { name: 'View Case A' }).at(-1)!);
     expect(normalControllers.camera.transitionDuration).toBe(480);
-    expect(normalControllers.camera.getState().radius).toBe(20);
+    const caseARadius = 2 * Math.sqrt((22 / 2) ** 2 + (24 / 2) ** 2 + (7 / 2) ** 2);
+    expect(normalControllers.camera.getState().radius).toBeCloseTo(caseARadius, 12);
   });
 
   it('HangarCamera mounts one owned perspective camera and exact presets', () => {
@@ -96,16 +98,22 @@ describe('HangarReducedMotion', () => {
     const before=camera.position.clone();
     expect(applyHangarOwnedCamera(camera, Number.NaN, 0, 35)).toBe(false);
     expect(camera.position.clone().toArray()).toEqual(before.toArray());
+    const caseARadius=2*Math.sqrt((22/2)**2+(24/2)**2+(7/2)**2);
+    expect(applyHangarOwnedCamera(camera,caseARadius,350,35,{x:-28,y:3.5,z:0})).toBe(true);
   });
 
   it('Hangar demand canvas invalidates only on named changes', () => {
     const invalidate=vi.fn(); const camera=createHangarOwnedPerspectiveCamera(); const props=getHangarDemandCanvasProps(camera);
     expect(props).toEqual({frameloop:'demand',dpr:[1,2],gl:{antialias:true},camera}); expect(props).not.toHaveProperty('shadows');
-    render(createElement(HangarCanvasAdapter,{camera,sceneData:{},invalidate}));
+    const rendered=render(createElement(HangarCanvasAdapter,{camera,sceneData:{},invalidate}));
     expect(invalidate.mock.calls.length).toBeGreaterThanOrEqual(1);
-    invalidate.mockClear(); for(let i=0;i<10;i++) invalidate.mockClear(); expect(invalidate).not.toHaveBeenCalled();
-    const scene=new THREE.Group(); render(createElement(HangarCanvasAdapter,{camera,sceneGroup:scene,avatar:{x:0,z:0},selection:'A',route:['x'],invalidate}));
+    invalidate.mockClear();
+    const demand=createHangarDemandInvalidator(invalidate); for(let i=0;i<10;i++) demand.tick(); expect(invalidate).not.toHaveBeenCalled();
+    const scene=new THREE.Group(); rendered.rerender(createElement(HangarCanvasAdapter,{camera,sceneGroup:scene,avatar:{x:0,z:0},selection:'A',route:['x'],invalidate}));
     expect(invalidate).toHaveBeenCalled();
+    invalidate.mockClear(); demand.reset();
+    demand.easing({x:0,y:0,z:0},{x:1,y:0,z:0}); expect(invalidate).toHaveBeenCalledTimes(1);
+    invalidate.mockClear(); demand.easing({x:0.04,y:0,z:0},{x:0,y:0,z:0}); expect(invalidate).not.toHaveBeenCalled();
   });
 
   it('HangarReducedMotion session override controls rendered transitions in both directions', async () => {
@@ -133,11 +141,25 @@ describe('HangarReducedMotion', () => {
     render(createElement(Scene));
 
     fireEvent.click(screen.getByRole('button', { name: 'View Case A' }));
-    expect(controllers.camera.getState().radius).toBe(20);
+    const caseARadius = 2 * Math.sqrt((22 / 2) ** 2 + (24 / 2) ** 2 + (7 / 2) ** 2);
+    expect(controllers.camera.getState().radius).toBeCloseTo(caseARadius, 12);
     expect(controllers.camera.transitionDuration).toBe(0);
-    expect(document.querySelector('[data-hangar-camera-position]')?.getAttribute('data-hangar-camera-position')).toBe('20,0,35');
+    expect(document.querySelector('[data-hangar-camera-position]')?.getAttribute('data-hangar-camera-position')).toBe(`${caseARadius},0,35`);
     fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
-    expect(controllers.camera.getState()).toMatchObject({ radius:30, azimuthDegrees:0, polarDegrees:45 });
+    expect(controllers.camera.getState()).toMatchObject({ radius:3*Math.sqrt(2650), azimuthDegrees:0, polarDegrees:45 });
+  });
+
+  it('Case A ArrowLeft preserves preset radius and exact camera pose', async () => {
+    const motion=new HangarReducedMotion(()=>({matches:true}),memoryStorage());
+    const controllers=createHangarSceneMotionControllers(motion); const Scene=await loadHangarScene(controllers);
+    render(createElement(Scene)); fireEvent.click(screen.getByRole('button',{name:'View Case A'}));
+    fireEvent.keyDown(screen.getByRole('region',{name:'Camera controls'}),{key:'ArrowLeft'});
+    const R=2*Math.sqrt((22/2)**2+(24/2)**2+(7/2)**2);
+    expect(controllers.camera.getState()).toMatchObject({targetRadius:Math.sqrt((11)**2+(12)**2+(3.5)**2),radius:R,azimuthDegrees:350,polarDegrees:35});
+    const camera=createHangarOwnedPerspectiveCamera(); expect(applyHangarOwnedCamera(camera,R,350,35,{x:-28,y:3.5,z:0})).toBe(true);
+    const polar=35*Math.PI/180,azimuth=350*Math.PI/180,horizontal=R*Math.sin(polar);
+    const expected=new THREE.Vector3(-28-horizontal*Math.sin(azimuth),3.5+R*Math.cos(polar),0+horizontal*Math.cos(azimuth));
+    expect(camera.position.distanceTo(expected)).toBeLessThanOrEqual(1e-6);
   });
 
   it('HangarReducedMotion session override', () => {
