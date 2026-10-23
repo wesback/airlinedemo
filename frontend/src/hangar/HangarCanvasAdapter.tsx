@@ -26,6 +26,32 @@ export function applyHangarOwnedCamera(camera:THREE.PerspectiveCamera|null|undef
 }
 export function getHangarDemandCanvasProps(camera:THREE.PerspectiveCamera){ return {frameloop:'demand'as const,dpr:[1,2] as [number,number],gl:{antialias:true},camera}; }
 
+export function raycastHangarSelection(sceneGroup:THREE.Group|null|undefined,camera:THREE.PerspectiveCamera|null|undefined,clientX:number,clientY:number,width:number,height:number):{objectId:string;object:THREE.Object3D}|null{
+  if(!sceneGroup||!camera||width<=0||height<=0||!Number.isFinite(clientX)||!Number.isFinite(clientY))return null;
+  const ndc=new THREE.Vector2((clientX/width)*2-1,-(clientY/height)*2+1);
+  camera.updateMatrixWorld(true); camera.updateProjectionMatrix(); sceneGroup.updateMatrixWorld(true);
+  const raycaster=new THREE.Raycaster(); raycaster.setFromCamera(ndc,camera);
+  const hits=raycaster.intersectObject(sceneGroup,true).sort((a,b)=>a.distance-b.distance);
+  if(!hits.length)return null;
+  if(/^(Floor|FloorMarking|Rack|RackUnit|Avatar|AvatarBody|AvatarHead|HardHat|GuideLine|SelectionRing|GroundShadow)/.test(hits[0].object.name))return null;
+  for(const hit of hits){
+    if(/^(Floor|FloorMarking|Rack|RackUnit|Avatar|AvatarBody|AvatarHead|HardHat|GuideLine|SelectionRing|GroundShadow)/.test(hit.object.name))continue;
+    let node:THREE.Object3D|null=hit.object;
+    while(node){
+      const visibleId=typeof node.userData.objectId==='string'&&node.visible&&!(node instanceof THREE.Mesh&&(node.material as THREE.Material).visible===false)?node.userData.objectId:null;
+      const pickId=typeof node.userData.pickObjectId==='string'?node.userData.pickObjectId:null;
+      const id=visibleId??pickId;
+      if(id){
+        let selectable=node;
+        if(pickId){let match:THREE.Object3D|null=null;sceneGroup.traverse(candidate=>{if(!match&&typeof candidate.userData.objectId==='string'&&candidate.userData.objectId===pickId)match=candidate;});if(match)selectable=match;}
+        return {objectId:id,object:selectable};
+      }
+      node=node.parent;
+    }
+  }
+  return null;
+}
+
 export type HangarCanvasAdapterProps={sceneGroup?:THREE.Group|null;camera?:THREE.PerspectiveCamera;invalidate?:()=>unknown;invalidationCapture?:ComponentType<any>;sceneData?:unknown;avatar?:unknown;selection?:unknown;route?:unknown;target?:{x:number;y:number;z:number};radius?:number;azimuthDegrees?:number;polarDegrees?:number;reducedMotion?:boolean;canvasComponent?:ComponentType<any>};
 export function projectHangarLabelAnchor(camera:THREE.PerspectiveCamera|null|undefined,anchor:{x:number;y:number;z:number}|THREE.Vector3|null|undefined):{x:number;y:number;z:number;visible:boolean}|null{
   if(!camera||!anchor)return null;
@@ -78,6 +104,13 @@ function HangarDemandFrame({invalidate,camera,target,radius,azimuthDegrees,polar
 
 export function HangarCanvasAdapter({sceneGroup,camera,invalidate,invalidationCapture,sceneData,avatar,selection,route,target,radius,azimuthDegrees,polarDegrees,reducedMotion,canvasComponent}:HangarCanvasAdapterProps){
   const [ownedCamera,setOwnedCamera]=useState(()=>camera ?? createHangarOwnedPerspectiveCamera());
+  const pointerRef=useRef<{x:number;y:number;max:number}|null>(null);
+  const pointerProps={
+    onPointerDown:(event:any)=>{pointerRef.current={x:Number(event.clientX)||0,y:Number(event.clientY)||0,max:0};},
+    onPointerMove:(event:any)=>{const start=pointerRef.current;if(start){const dx=Number(event.clientX)-start.x,dy=Number(event.clientY)-start.y;start.max=Math.max(start.max,Math.hypot(dx,dy));}},
+    onPointerUp:(event:any)=>{const start=pointerRef.current;pointerRef.current=null;if(!start)return;const dx=Number(event.clientX)-start.x,dy=Number(event.clientY)-start.y;const distance=Math.max(start.max,Math.hypot(dx,dy));if(distance>6)return;const rect=(event.currentTarget?.getBoundingClientRect?.()??{width:1,height:1,left:0,top:0});const x=Number(event.clientX)-Number(rect.left||0),y=Number(event.clientY)-Number(rect.top||0);const hit=raycastHangarSelection(sceneGroup,ownedCamera,x,y,Number(rect.width)||1,Number(rect.height)||1);if(!hit)return;const handler=hit.object.userData.selectionHandler;if(typeof handler==='function')handler(hit.objectId,hit.object);},
+    onPointerCancel:()=>{pointerRef.current=null;},
+  };
   useEffect(()=>{if(camera)setOwnedCamera(camera)},[camera]);
   useEffect(()=>{if(radius!==undefined&&Number.isFinite(radius)&&radius>0&&reducedMotion)applyHangarOwnedCamera(ownedCamera,radius,azimuthDegrees,polarDegrees,target)},[ownedCamera,radius,azimuthDegrees,polarDegrees,target,reducedMotion]);
   useEffect(()=>{
@@ -92,7 +125,7 @@ export function HangarCanvasAdapter({sceneGroup,camera,invalidate,invalidationCa
   if (!canvasComponent) return createElement('canvas',{'aria-label':'3D hangar scene','data-hangar-visible-fallback':'true'});
   const frame=createElement(HangarDemandFrame,{camera:ownedCamera,invalidate,target,radius,azimuthDegrees,polarDegrees,reducedMotion});
   const capture=invalidationCapture?createElement(invalidationCapture):null;
-  const canvas=createElement(canvasComponent,{...getHangarDemandCanvasProps(ownedCamera)},sceneGroup?createElement('primitive',{object:sceneGroup}):createElement('group',{'data-hangar-visible-fallback':'true'}),capture,frame);
+  const canvas=createElement(canvasComponent,{...getHangarDemandCanvasProps(ownedCamera),...pointerProps},sceneGroup?createElement('primitive',{object:sceneGroup}):createElement('group',{'data-hangar-visible-fallback':'true'}),capture,frame);
   return createElement(HangarLabelOverlay,{sceneGroup,camera:ownedCamera,sceneData,selection},canvas);
 }
 

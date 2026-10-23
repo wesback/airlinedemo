@@ -1,0 +1,205 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 587,
+  "branch": "ai-sdlc/issue-587",
+  "commitSha": "ced5db551a9f398cec72c0884f34edfd46767d4e",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The raycast path can select the wrong object when a selectable mesh and a pick sphere overlap along the ray, because hit distance is discarded when the two hit types are grouped.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 33,
+          "message": "Order all ray hits by distance before resolving selectable IDs. The current grouping lets a farther visible mesh override a nearer engine or component pick sphere.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "raycastHangarSelection gathers direct objectId hits first, then appends pickObjectId hits, so the loop checks every selectable mesh hit before any pick sphere hit, regardless of distance.",
+            "failureScenario": "When a ray intersects an engine or component pick sphere and a selectable aircraft mesh, the aircraft mesh is chosen even if the pick sphere is closer. A click aimed at the engine or component can therefore call the shared handler with the aircraft ID instead of the exact object ID required by the first acceptance criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The pointer test exercises real scene picking, but its assertions do not establish the ID-to-center mapping and omit the named non-selectable targets. Those gaps leave two explicit acceptance behaviors unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 22,
+          "message": "The test does not prove that each projected center invokes the handler with that object's exact ID. Assert the new call for each pointer up, including that it occurs exactly once.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The loop clicks each projected object center, then `toHaveBeenCalledWith` searches all handler calls made so far rather than checking the call caused by that click.",
+            "failureScenario": "If raycasting returns the wrong IDs in a permutation, every expected ID can still appear somewhere in the 12 calls and the total call count can still be 12, so the test passes although centers select the wrong objects."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 31,
+          "message": "The named behavior test does not cover the acceptance criterion's non-selectable scene targets. Add taps on the listed targets and assert zero handler calls.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The negative checks exercise a 7-pixel drag and one tap at the canvas corner; they do not tap the floor, avatar, guide line, ring, or shadow.",
+            "failureScenario": "A regression that selects one of those scene objects could pass this test because the only non-drag tap is in empty corner space, despite the acceptance criterion requiring zero calls for each listed non-selectable target."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security defect is evident in the changed code. Picking operates on the supplied scene and camera, and invokes the selection handler only for a raycast hit with a string object ID.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSceneBuilder.test.ts",
+      "frontend/tests/HangarSelectionEvidence.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
