@@ -8,7 +8,7 @@ import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
 import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
-import { refreshHangarScene, type ServerSceneSnapshot } from './hangar/sceneRefresh';
+import { canAdmitHangarCommands, refreshHangarScene, type ServerSceneSnapshot } from './hangar/sceneRefresh';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -67,7 +67,10 @@ export default function App({
   const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
   const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = Object.fromEntries(hangarEntries.map((entry, index) => [entry.caseId, index === 0 ? { x: 4, z: -4 } : index === 1 ? { x: -4, z: 4 } : { x: 0, z: 6 }]));
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
-    hangarAircraftSelectionHandler?.(aircraftId);
+    if (!canAdmitHangarCommands(hangarSnapshot)) return;
+    const serverIndex = hangarEntries.findIndex((entry) => entry.caseId === aircraftId);
+    const selectionId = serverIndex >= 0 ? `AIR-${serverIndex + 1}` : aircraftId;
+    hangarAircraftSelectionHandler?.(selectionId);
   };
 
   function setHangarMotionOverride(enabled: boolean) {
@@ -165,11 +168,14 @@ export default function App({
         const validated = validateHangarSceneEnvelope(envelope);
         if (!validated.valid) throw {fallback:'contract_invalid'};
       }
-      const entries = envelopes.map((envelope) => {
+      const entries = envelopes.map((envelope, index) => {
         const scene = envelope as Record<string,unknown>;
         const c = typeof scene.case === 'object' && scene.case !== null ? scene.case as Record<string,unknown> : {};
+        const listedId = typeof cases[index]?.caseId === 'string' ? cases[index].caseId as string : '';
+        const envelopeId = typeof c.caseId === 'string' ? c.caseId : '';
+        if (!listedId || envelopeId !== listedId) throw {fallback:'contract_invalid'};
         return {
-          caseId: `AIR-${envelopes.indexOf(envelope) + 1}`,
+          caseId: listedId,
           name: typeof c.name === 'string' ? c.name : (typeof c.aircraftName === 'string' ? c.aircraftName : ''),
           category: typeof c.aircraftCategory === 'string' ? c.aircraftCategory : '',
           unavailable: false,
@@ -360,6 +366,7 @@ export default function App({
                   />
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
+                      <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
                       {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} /> : <canvas aria-label="3D hangar scene" />}
                       <HangarGuideLineAdapter
                         entries={hangarEntries}

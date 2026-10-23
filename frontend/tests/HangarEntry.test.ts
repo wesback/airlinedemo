@@ -54,6 +54,29 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+  it('HangarEntry loads scene envelopes in exact case-list order', async () => {
+    stubCaseApi();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: () => { function Scene() { return null; } return Scene; },
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    const requests = vi.mocked(fetch).mock.calls.map(([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`);
+    expect(requests.filter((request) => request.includes('/api/v1/cases'))).toEqual([
+      'GET /api/v1/cases',
+      'GET /api/v1/cases/cp-case-a/scene',
+      'GET /api/v1/cases/cp-case-b/scene',
+      'GET /api/v1/cases/cp-case-c/scene',
+    ]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two', 'Air Three']);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Hangar scene' }));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/scene')).length).toBe(6));
+  });
+
   it('HangarEntry default loader returns a renderable scene component', async () => {
     const Scene = await loadHangarScene();
     expect(typeof Scene).toBe('function');

@@ -46,6 +46,17 @@ describe('HangarSceneRefresh', () => {
     const malformed = applyServerRefresh(first, envelope({ contractVersion: 99 }));
     expect(malformed.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
     expect(canAdmitHangarCommands(malformed.snapshot)).toBe(false);
+    const missingRevision = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseRevision: undefined } }));
+    expect(missingRevision.valid).toBe(false);
+    expect(missingRevision.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+    expect(canAdmitHangarCommands(missingRevision.snapshot)).toBe(false);
+    const badWitness = applyServerRefresh(first, envelope({ history: [{ witnessIds: ['missing-witness'] }] }));
+    expect(badWitness.valid).toBe(false);
+    expect(canAdmitHangarCommands(badWitness.snapshot)).toBe(false);
+    const recovered = applyServerRefresh(missingRevision.snapshot, envelope({ case: { ...envelope().case, caseRevision: 8 } }));
+    expect(recovered.valid).toBe(true);
+    expect(recovered.snapshot).toMatchObject({ revision: 8, current: true, fallbackReason: null });
+    expect(canAdmitHangarCommands(recovered.snapshot)).toBe(true);
     const malformedV1 = await refreshHangarScene(() => envelope({ case: { ...envelope().case, permission: undefined } }), first);
     expect(malformedV1.valid).toBe(false);
     expect(malformedV1.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
