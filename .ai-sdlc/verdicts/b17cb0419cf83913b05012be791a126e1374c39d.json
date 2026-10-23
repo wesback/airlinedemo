@@ -1,0 +1,228 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 588,
+  "branch": "ai-sdlc/issue-588",
+  "commitSha": "b17cb0419cf83913b05012be791a126e1374c39d",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The App-host test covers part of the composition, but it does not prove the exact selection/evidence behavior or the permission-denial and error-fallback guarantees required by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 165,
+          "message": "The first acceptance criterion lacks a test tied to it that verifies the exact selection and evidence for the activated object. Add the named HangarEntry test or an equivalent App-host test with an AC reference and exact assertions.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new App-host test checks the object-control count, preset presence, and broad selection and journey regions. It does not identify itself as covering the first acceptance criterion or assert the exact selected object and evidence content.",
+            "failureScenario": "If activating an object opens evidence for a different object, the broad /^Selection SYN-CP-/ assertion can still pass, so the first criterion's exact selection and evidence behavior is not proven."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 165,
+          "message": "The second acceptance criterion is not covered for denied roles, canvas render failure, zero mutation requests, or preservation of the last snapshot. Add the named HangarEntry test exercising those cases through the App host.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added test uses canReset: true, asserts only that the reset button is present, and renders a canvas that does not throw. It does not exercise denied permissions or a canvas render error.",
+            "failureScenario": "If a user without reset permission sees the control, or a canvas render error fails to show the fallback or triggers a mutation, the changed tests still pass; they also do not assert that the last server snapshot remains intact."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The App-host test covers the positive composition path, but the required reset-denial and render-error behavior is untested. The current test can pass even if those AC-2 guarantees regress.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 168,
+          "message": "AC-2 is not covered by the required `Hangar App compose reset and error fallback` test in `frontend/tests/HangarEntry.test.ts`. Add App-host cases for denied or missing permission, another role, and a canvas render error that assert zero mutation requests and the unchanged last snapshot.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added App-host test calls setupApi({ canReset: true }), then checks that the reset button is present. It does not render a different role or a throwing canvas component, and it does not inspect reset requests or the retained snapshot. The required HangarEntry tests named in the acceptance criteria are absent.",
+            "failureScenario": "If reset permission is exposed to another role, or a canvas render error triggers a mutation or loses the last server snapshot, this test still passes. The AC-2 behavior therefore has no test that fails for those regressions."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed test covers the successful composition path, but does not verify the reset denial and error-fallback cases required by the acceptance criteria. I found no concrete injection, credential exposure, or authorization bypass in the changed code.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 165,
+          "message": "The reset and error-fallback behavior criterion is not covered by the required `frontend/tests/HangarEntry.test.ts` / `Hangar App compose reset and error fallback` test. Add the App-host cases for denied roles and render errors, asserting zero mutation requests and an unchanged last snapshot.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added App-host test sets canReset: true and checks that the reset button is visible. It does not exercise the App composition with missing or false permission, another role, a canvas render error, or the resulting mutation and snapshot behavior.",
+            "failureScenario": "If App exposes reset to another role or sends a reset after a canvas render error, the changed test still passes; the acceptance criterion's named App composition test for these cases is missing."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
