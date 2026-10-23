@@ -7,7 +7,7 @@ import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/
 import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
 import { loadHangarScene } from '../src/hangar/entryController';
 
-const productionCanvasHarness = vi.hoisted(() => ({ mounts: vi.fn(), contextCanvas: null as HTMLCanvasElement | null }));
+const productionCanvasHarness = vi.hoisted(() => ({ mounts: vi.fn(), canvases: [] as HTMLCanvasElement[] }));
 vi.mock('@react-three/fiber', async () => {
   const React = await import('react');
   return {
@@ -20,8 +20,8 @@ vi.mock('@react-three/fiber', async () => {
   function ProductionCanvasCreated(props: any) {
     React.useEffect(() => {
       productionCanvasHarness.mounts();
-      const element = productionCanvasHarness.contextCanvas ?? document.createElement('canvas');
-      productionCanvasHarness.contextCanvas = element;
+      const element = document.createElement('canvas');
+      productionCanvasHarness.canvases.push(element);
       props.onCreated?.({ gl: { domElement: element } });
     }, []);
     return null;
@@ -74,8 +74,7 @@ describe('HangarLocalDiagnostics', () => {
       return baseFetch(input, init);
     }));
     productionCanvasHarness.mounts.mockClear();
-    productionCanvasHarness.contextCanvas = document.createElement('canvas');
-    const contextCanvas = productionCanvasHarness.contextCanvas;
+    productionCanvasHarness.canvases.length = 0;
     const mountCanvas = productionCanvasHarness.mounts;
     const loader = vi.fn(async () => loadHangarScene());
     render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: loader }));
@@ -83,6 +82,8 @@ describe('HangarLocalDiagnostics', () => {
     mutationCalls.length = 0;
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await waitFor(() => expect(mountCanvas).toHaveBeenCalledTimes(1));
+    const contextCanvas = productionCanvasHarness.canvases[0];
+    expect(contextCanvas).toBeInstanceOf(HTMLCanvasElement);
 
     fireEvent(contextCanvas, new Event('webglcontextlost'));
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
@@ -98,6 +99,8 @@ describe('HangarLocalDiagnostics', () => {
     expect(screen.queryByLabelText('Hangar 3D scene')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await waitFor(() => expect(mountCanvas).toHaveBeenCalledTimes(2));
+    expect(productionCanvasHarness.canvases).toHaveLength(2);
+    expect(productionCanvasHarness.canvases[1]).not.toBe(productionCanvasHarness.canvases[0]);
     expect(mutationCalls).toEqual([]);
     expect(screen.getByLabelText('Hangar retained snapshot').textContent).toBe('Revision: 7; Labels: Technical reviewer; Rules-based');
   });
@@ -107,7 +110,7 @@ describe('HangarLocalDiagnostics', () => {
     const clock = vi.fn()
       .mockReturnValueOnce(1000)
       .mockReturnValueOnce(3400);
-    productionCanvasHarness.contextCanvas = document.createElement('canvas');
+    productionCanvasHarness.canvases.length = 0;
     productionCanvasHarness.mounts.mockClear();
     const successView = render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => loadHangarScene(), hangarMonotonicClock: clock }));
     await signInAsReviewer();
