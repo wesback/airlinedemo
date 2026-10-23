@@ -133,10 +133,6 @@ export default function App({
           const result = await refreshHangarScene(() => envelope, nextCaseSnapshots[entry.caseId] ?? hangarSnapshotRef.current);
           if (!result.valid || !result.snapshot) throw new Error('refresh_failed');
           nextCaseSnapshots[entry.caseId] = result.snapshot;
-          hangarCaseSnapshotsRef.current = { ...hangarCaseSnapshotsRef.current, [entry.caseId]: result.snapshot };
-          setHangarCaseSnapshots(hangarCaseSnapshotsRef.current);
-          hangarSnapshotRef.current = result.snapshot;
-          setHangarSnapshot(result.snapshot);
           if (!nextSnapshot?.revision || (result.snapshot.revision ?? -1) >= (nextSnapshot.revision ?? -1)) nextSnapshot = result.snapshot;
         }
         if (!cases.length) throw new Error('refresh_failed');

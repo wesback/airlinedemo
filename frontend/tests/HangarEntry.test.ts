@@ -120,6 +120,24 @@ afterEach(() => {
       cleanup(); vi.unstubAllGlobals();
     }
 
+    stubCaseApi();
+    const originalMismatch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/cases') return new Response(JSON.stringify({ contractVersion: 1, cases: [{ caseId: 'cp-case-a' }] }), { status: 200 });
+      if (url === '/api/v1/cases/cp-case-a/scene') return new Response(JSON.stringify({ contractVersion: 1, case: {
+        caseId: 'cp-case-b', caseRevision: 7, status: {}, owner: 'Technical reviewer', nextAction: null, capabilityLabel: 'Rules-based', permission: true,
+      }, objects: [{ objectId: 'SYN-CP-B-AIR-001', kind: 'aircraft', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-ENG-001', kind: 'engine', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-CMP-001', kind: 'component', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-CMP-002', kind: 'component', caseId: 'cp-case-b' }], canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return originalMismatch(input, init);
+    });
+    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByText(/Invalid hangar scene contract/);
+    expect(document.querySelectorAll('canvas')).toHaveLength(0);
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input)).filter((url) => url.endsWith('/scene'))).toEqual(['/api/v1/cases/cp-case-a/scene']);
+    cleanup(); vi.unstubAllGlobals();
+
     for (const status of [403, 500]) {
       stubCaseApi();
       const original = vi.mocked(fetch).getMockImplementation()!;
@@ -164,10 +182,13 @@ afterEach(() => {
     });
     window.dispatchEvent(new Event('focus'));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Hangar scene' }));
+    await waitFor(() => expect(sceneCalls).toBe(1));
     const makeEnvelope = (revision: number) => new Response(JSON.stringify({ contractVersion: 1, case: { caseId: 'cp-case-a', caseRevision: revision, status: {}, owner: 'Technical reviewer', nextAction: null, capabilityLabel: 'Rules-based', permission: true }, objects: [
       { objectId: 'SYN-CP-A-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-ENG-001', kind: 'engine', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-001', kind: 'component', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-002', kind: 'component', caseId: 'cp-case-a' },
     ], canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     resolveFocus(makeEnvelope(8));
+    await waitFor(() => expect(sceneCalls).toBe(2));
+    expect(sceneCalls).toBe(2);
     resolveExplicit(makeEnvelope(7));
     await screen.findByText(/Hangar refresh failed/);
     expect(screen.getByLabelText('Hangar retained snapshot').textContent).toBe('Revision: 8; Labels: Technical reviewer; Rules-based');
