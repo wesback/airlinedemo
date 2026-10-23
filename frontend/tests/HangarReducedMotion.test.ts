@@ -187,14 +187,19 @@ describe('HangarReducedMotion', () => {
     productionCamera.position.set(desired.x+0.04,desired.y,desired.z);
     fiberHarness.invalidate.mockClear();
     const thresholdFrame=fiberHarness.frames.shift();
-    if(thresholdFrame)thresholdFrame(performance.now()+16);
+    expect(thresholdFrame).toBeTypeOf('function');
+    const settledPosition=productionCamera.position.clone();
+    thresholdFrame!(performance.now()+16);
     expect(fiberHarness.invalidate.mock.calls.length).toBe(0);
     expect(fiberHarness.frames).toHaveLength(0);
 
+    // Ten idle injected clock ticks: the production easing callback runs with no input change.
     fiberHarness.invalidate.mockClear();
-    if(thresholdFrame)for(let i=0;i<10;i++)thresholdFrame(performance.now()+16);
+    let clock=performance.now();
+    for(let i=0;i<10;i++){clock+=16; thresholdFrame!(clock);}
     expect(fiberHarness.invalidate.mock.calls.length).toBe(0);
     expect(fiberHarness.frames).toHaveLength(0);
+    expect(productionCamera.position.distanceTo(settledPosition)).toBe(0);
     raf.mockRestore();
   });
 
