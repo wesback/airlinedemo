@@ -168,6 +168,11 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     [InlineData("5551234567")]
     [InlineData("4111111111111111")]
     [InlineData("user@example.test")]
+    [InlineData("555-123-4567")]
+    [InlineData("case-555-123-4567")]
+    [InlineData("case-12345")]
+    [InlineData("case-1-2")]
+    [InlineData("a1234567")]
     public async Task Production_executor_rejects_sensitive_correlation_and_keeps_trace_content_private(string caseId)
     {
         var activities = new List<Activity>();
@@ -193,15 +198,20 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.DoesNotContain(caseId, logger.Text, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task Production_executor_accepts_valid_case_identifier_as_case_field()
+    [Theory]
+    [InlineData("case-1")]
+    [InlineData("EVAL-V2-01")]
+    [InlineData("DEMO-CASE-01")]
+    [InlineData("cp-case-a")]
+    [InlineData("case-0001")]
+    public async Task Production_executor_accepts_allowed_case_identifier_as_case_field(string caseId)
     {
         var fake = new GatewayChatClient();
         using var host = Host(Private, fake);
 
-        await Executor(host).ExecuteAsync(Request("case-1"), TestContext.Current.CancellationToken);
+        await Executor(host).ExecuteAsync(Request(caseId), TestContext.Current.CancellationToken);
 
-        Assert.Equal(("case-1", 1), (fake.LastOptions!.AdditionalProperties!["gateway.case"], fake.Calls));
+        Assert.Equal((caseId, 1), (fake.LastOptions!.AdditionalProperties!["gateway.case"], fake.Calls));
     }
 
     [Fact]

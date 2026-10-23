@@ -23,15 +23,18 @@ public sealed record GatewayCorrelation(string Arm, string Run, string Package, 
     string SuiteVersion, string CallIdentity)
 {
     private static readonly Regex Identifier = new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant);
-    private static readonly Regex CardNumber = new(@"(?:\d{13,19}|\d{10}|\d{3}-\d{2}-\d{4}|\d{9})", RegexOptions.CultureInvariant);
+    // Case is the only field a person chooses, so it is an allowlist: up to four words (letters, then at most two digits)
+    // and one optional counter of at most four digits, for example case-1, DEMO-CASE-01, EVAL-V2-01. A phone number, a
+    // national identifier or a card number cannot take this shape, whatever its separators.
+    private static readonly Regex CaseShape = new(@"^[A-Za-z]{1,16}[0-9]{0,2}(-[A-Za-z]{1,16}[0-9]{0,2}){0,3}(-[0-9]{1,4})?$", RegexOptions.CultureInvariant);
     public IReadOnlyList<string> Validate()
     {
         var values = new (string Name, string Value)[] { (nameof(Arm), Arm), (nameof(Run), Run), (nameof(Package), Package),
             (nameof(Case), Case), (nameof(ModelConfiguration), ModelConfiguration), (nameof(SuiteVersion), SuiteVersion), (nameof(CallIdentity), CallIdentity) };
         var forbiddenShape = new Regex("bearer\\s|authorization:|__host-|aspnetcore\\.cookies|pass(?:code)?|cookie|secret|access[_ -]?key|connection[_ -]?string|@[^\\s]+\\.[^\\s]+|raw[_ -]?prompt|prompt[_ -]?text|model[_ -]?response|document[_ -]?text|\\d{3}-\\d{2}-\\d{4}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        // Only Case carries an identifier chosen by a person; the other fields hold digests that can contain long digit runs.
+        // The other fields hold digests that can contain long digit runs, so only Case is held to the allowlist above.
         return values.Where(v => string.IsNullOrWhiteSpace(v.Value) || !Identifier.IsMatch(v.Value) || forbiddenShape.IsMatch(v.Value) ||
-                                 (v.Name == nameof(Case) && CardNumber.IsMatch(v.Value))).Select(v => v.Name).ToArray();
+                                 (v.Name == nameof(Case) && !CaseShape.IsMatch(v.Value))).Select(v => v.Name).ToArray();
     }
     public string ReplayIdentity() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', Arm, Run, Package, Case, ModelConfiguration, SuiteVersion, CallIdentity)))).ToLowerInvariant();
 }
