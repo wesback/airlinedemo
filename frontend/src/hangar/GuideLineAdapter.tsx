@@ -26,7 +26,13 @@ export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'sele
   const effectiveAircraft = marker !== undefined ? aircraftId : selectedAircraft;
   const confirmEntry = (caseId: string) => {
     rackConfirmedRef.current = true;
-    const nextMarker = markers?.[caseId] ?? config.marker ?? null;
+    const nextMarker = markers?.[caseId] ?? null;
+    if (!nextMarker || !entries?.some(entry => entry.caseId === caseId && !entry.unavailable)) {
+      setSelectedMarker(null);
+      setState(controller.escape());
+      rackConfirmedRef.current = false;
+      return;
+    }
     setSelectedAircraft(caseId);
     setSelectedMarker(nextMarker);
   };

@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { type HangarEntryAppProps } from '../src/App';
 import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import { confirmHangarRackMenuEntry } from '../src/hangar/rackMenu';
 import {
   HANGAR_3D_ACTIONS,
   HANGAR_NON_3D_ACTIONS,
@@ -75,7 +76,16 @@ afterEach(() => {
     expect(routePoints.at(-1)).toBe('4,-4');
     expect(screen.queryByRole('menu', { name: 'Data rack menu' })).toBeNull();
     expect(selection).not.toHaveBeenCalled();
+
+    const unknownConfirmed = confirmHangarRackMenuEntry(hangarDataRoomEntriesForTest(), 'AIR-X', selection);
+    expect(unknownConfirmed).toBe(false);
+    expect(selection).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
   });
+
+  function hangarDataRoomEntriesForTest() {
+    return [{ caseId: 'AIR-1', name: 'Air One', category: 'narrow-body', unavailable: false, sources: null }];
+  }
 
   it('HangarEntry production guide arrival uses shared aircraft selection once', async () => {
     stubCaseApi();
@@ -83,11 +93,17 @@ afterEach(() => {
     render(createElement(HangarApp, {
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
-      hangarLazyLoader: () => { function ProductionScene() { return null; } return ProductionScene; },
       hangarAircraftSelectionHandler: selection,
     }));
     await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Pointer select AIR-1' }));
+    expect(selection).toHaveBeenCalledTimes(1);
+    expect(selection).toHaveBeenLastCalledWith('AIR-1');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Keyboard select AIR-2' }), { key: 'Enter' });
+    expect(selection).toHaveBeenCalledTimes(2);
+    expect(selection).toHaveBeenLastCalledWith('AIR-2');
+    selection.mockClear();
     fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
     const walk = screen.getByRole('region', { name: 'Walk region' });

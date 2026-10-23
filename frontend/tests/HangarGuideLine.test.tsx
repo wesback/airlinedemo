@@ -1,4 +1,6 @@
 import { createElement, type ComponentType } from 'react';
+
+vi.mock('@react-three/fiber', () => ({ Canvas: () => null }));
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HangarGuideLineController, createHangarGuideLineController } from '../src/hangar/guideLine';
@@ -87,7 +89,7 @@ describe('Hangar guide line',()=>{
     stubCaseApi();
     const productionSelection=vi.fn();
     render(createElement(App as ComponentType<HangarEntryAppProps>,{
-      hangarBrowserSupported:true,hangarWebGl2Probe:{webgl2:true},hangarLazyLoader:()=>{ function ProductionScene(){return null;} return ProductionScene;},
+      hangarBrowserSupported:true,hangarWebGl2Probe:{webgl2:true},
       hangarAircraftSelectionHandler:productionSelection,
     }));
     await signInAsReviewer();

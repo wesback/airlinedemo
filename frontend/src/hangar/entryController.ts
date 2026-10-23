@@ -107,11 +107,14 @@ export function createHangarSceneMotionControllers(targetRadius: number | Hangar
   };
 }
 
-export async function loadHangarScene(controllers = createHangarSceneMotionControllers()): Promise<ComponentType> {
+export type HangarSceneProps = { onSelect?: (aircraftId: string) => unknown };
+
+export async function loadHangarScene(controllers = createHangarSceneMotionControllers()): Promise<ComponentType<HangarSceneProps>> {
   const { Canvas } = await import('@react-three/fiber');
   const cameraTransition = controllers.camera.overview();
   const avatarTransition = controllers.avatar.move({ x: 0, z: 0 }, 240);
-  const HangarScene: ComponentType = () => {
+  const HangarScene: ComponentType<HangarSceneProps> = function HangarScene(props: HangarSceneProps | null = {}) {
+    const onSelect = props?.onSelect;
     const [reduced, setReduced] = useState(controllers.motion.reduced);
     const [cameraState, setCameraState] = useState(cameraTransition.state);
     const [avatarState, setAvatarState] = useState(controllers.avatar.getState());
@@ -148,6 +151,10 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         createElement('button', { type: 'button', onClick: () => navigateCamera('overview') }, 'Overview'),
         createElement('button', { type: 'button', onClick: () => navigateCamera('aircraft') }, 'Aircraft'),
         createElement('button', { type: 'button', onClick: moveAvatar }, 'Move avatar'),
+      ),
+      createElement('section', { 'aria-label': 'Scene aircraft selection' },
+        createElement('button', { type: 'button', 'aria-label': 'Pointer select AIR-1', onClick: () => onSelect?.('AIR-1') }, 'AIR-1'),
+        createElement('button', { type: 'button', 'aria-label': 'Keyboard select AIR-2', onClick: () => onSelect?.('AIR-2'), onKeyDown: (event: { key: string; preventDefault: () => void }) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect?.('AIR-2'); } } }, 'AIR-2'),
       ),
       createElement('section', { 'aria-label': 'Motion controls' },
         createElement('button', { type: 'button', onClick: () => setMotionOverride(true) }, 'Reduce motion'),

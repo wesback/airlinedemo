@@ -6,6 +6,7 @@ import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTr
 import HangarLocalDiagnostics from './hangar/localDiagnostics';
 import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
+import type { HangarSceneProps } from './hangar/entryController';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -50,7 +51,7 @@ export default function App({
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
   const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
-  const [HangarScene, setHangarScene] = useState<ComponentType | null>(null);
+  const HangarSceneRef = useRef<ComponentType<HangarSceneProps> | null>(null);
   const [hangarActionMessage, setHangarActionMessage] = useState('');
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
@@ -110,7 +111,7 @@ export default function App({
     const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     setHangarView('loading');
     setHangarSceneLoaded(false);
-    setHangarScene(null);
+    HangarSceneRef.current = null;
     const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene, createHangarSceneMotionControllers } = await import('./hangar/entryController');
     const browserSupported = hangarBrowserSupported !== undefined
       ? isHangarBrowserSupported(hangarBrowserSupported)
@@ -133,7 +134,7 @@ export default function App({
     const webgl2Available = webgl2 !== null && typeof webgl2 === 'object';
     setHangarDiagnostics({ sceneLoadDurationMs: Math.max(0, Math.round(endedAt - startedAt)), webgl2Available, browserSupported, fallbackReason });
     if (decision.mode === '3d') {
-      if (typeof decision.loadedScene === 'function') setHangarScene(decision.loadedScene as ComponentType);
+      if (typeof decision.loadedScene === 'function') HangarSceneRef.current = decision.loadedScene as ComponentType<HangarSceneProps>;
       setHangarSceneLoaded(true);
       setHangarView('3d');
     } else if (decision.fallbackReason === 'contract_invalid') setHangarView('contract-error');
@@ -248,6 +249,7 @@ export default function App({
     unavailable: 'Service unavailable. Try again later.',
   }[apiState];
 
+  const LoadedHangarScene = HangarSceneRef.current;
   return (
     <main>
       <h1>Airline asset review</h1>
@@ -275,11 +277,7 @@ export default function App({
                   />
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
-                      {HangarScene ? <HangarScene /> : <canvas aria-label="3D hangar scene" />}
-                      <section aria-label="Aircraft selection">
-                        <button type="button" aria-label="Pointer select AIR-1" onClick={() => sharedHangarAircraftSelectionHandler('AIR-1')}>AIR-1</button>
-                        <button type="button" aria-label="Keyboard select AIR-2" onClick={() => sharedHangarAircraftSelectionHandler('AIR-2')} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); sharedHangarAircraftSelectionHandler('AIR-2'); } }}>AIR-2</button>
-                      </section>
+                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} /> : <canvas aria-label="3D hangar scene" />}
                       <HangarGuideLineAdapter
                         entries={hangarDataRoomEntries}
                         markers={hangarDataRoomMarkers}
