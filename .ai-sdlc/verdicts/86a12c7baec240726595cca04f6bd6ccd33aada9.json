@@ -1,0 +1,252 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 593,
+  "branch": "ai-sdlc/issue-593",
+  "commitSha": "86a12c7baec240726595cca04f6bd6ccd33aada9",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation includes context-loss and duration handling, but the named tests bypass App's production paths and do not prove key acceptance-criterion outcomes.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 39,
+          "message": "The context-loss test does not cover the criterion's App-level fallback, snapshot preservation, zero mutation, or re-entry behavior. Exercise the production entry path and assert those outcomes.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test renders HangarCanvasAdapter directly with a standalone CanvasStub and a callback that only increments contextLostCount. It does not render App or assert App's fallback reason, server snapshot, mutation requests, or behavior after re-entry.",
+            "failureScenario": "If App fails to show the non-3D view with fallback reason render_failed, sends a mutation, changes the snapshot, or remounts on re-entry, this test still passes because none of those App behaviors are exercised."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 53,
+          "message": "The duration test does not exercise App's injected clock or canvas onCreated path, which is where the acceptance criterion's duration is recorded. Test that production path and assert the reported duration is 2400.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "This test calls buildHangarLocalDiagnostics directly with clockStart and now. The measured duration in the application is set in App's Canvas onCreated callback using hangarMonotonicClock and hangarEntryStartedAt.",
+            "failureScenario": "If App never records the injected-clock duration at canvas creation, this helper-only test still passes, so the required 1000-to-3400 production path can be broken without failing the named test."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed tests cover adapter-local context loss and diagnostic helper calculations, but they do not verify the two named production behaviors through Hangar's entry and rendering flow.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 39,
+          "message": "The test named for the context-loss criterion does not exercise Hangar's production entry path or verify the required fallback, snapshot preservation, zero mutation requests, and fresh canvas on re-entry.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test renders HangarCanvasAdapter with a local onContextLost counter. It does not render App or connect the callback to Hangar's fallback view, server snapshot, or entry flow.",
+            "failureScenario": "If App stops handling the context-loss callback, this test still passes: the adapter hides its canvas, but Hangar can remain in the 3D view without fallback reason render_failed, and the test never checks re-entry or the real server snapshot."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 52,
+          "message": "The named duration test verifies the helper calculation but not the required entry-to-canvas onCreated behavior through App, so it cannot catch a broken production wiring path.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The duration test calls buildHangarLocalDiagnostics directly with clockStart and now. It does not render App, inject hangarMonotonicClock, or trigger the canvas onCreated callback that records the duration.",
+            "failureScenario": "If App no longer records elapsed time when the canvas is created, this helper-only test still reports 2400 and passes, while the user-visible duration criterion is broken."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed code shows no clear security vulnerability. Two acceptance criteria are not proved by tests that exercise the production path, leaving context-loss handling and duration wiring able to regress while the named tests still pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 39,
+          "message": "The context-loss test does not prove the acceptance criterion's snapshot preservation, zero mutation requests, or fresh canvas after re-entry. Exercise the production path and assert those outcomes.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test renders HangarCanvasAdapter directly with a stub and checks its callback, but does not exercise App's fallback view, snapshot, mutation, or re-entry behavior.",
+            "failureScenario": "If context loss fails to preserve the actual server snapshot, triggers a mutation request, or re-entering Hangar reuses the stale canvas, this test still passes because `snapshots` and `mutation` are local values unrelated to the production path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 53,
+          "message": "The duration test does not cover the acceptance criterion's injected-clock entry-to-canvas flow or the diagnostic panel fields and transport behavior. Test that production path so wiring regressions fail.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test calls buildHangarLocalDiagnostics with clockStart and now directly; it never injects the clock into App or triggers canvas onCreated.",
+            "failureScenario": "If App stops recording the entry time or computing duration when the canvas is created, this helper-only test still reports 2400 and passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarLocalDiagnostics.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
