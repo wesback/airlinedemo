@@ -30,6 +30,7 @@ function setupApi(options: {
   traceStatus?: number;
   trace?: unknown;
   canReset?: boolean;
+  resetStatus?: number;
 } = {}) {
   const calls: { url: string; init?: RequestInit }[] = [];
   let dashboardRequests = 0;
@@ -72,6 +73,8 @@ function setupApi(options: {
       return json({ basisVersion: 4, decisions: dashboardRequests > 1 ? [{ decision: 'accept', current: true }] : [] });
     if (url === '/api/cases/case-001/technical-reviews' && method === 'POST')
       return options.decisionStatus ? json({ error: 'decision rejected' }, options.decisionStatus) : json({ decision: 'accept', current: true });
+    if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && method === 'POST')
+      return json({ accepted: true }, options.resetStatus ?? 200);
     throw new Error(`Unexpected request: ${method} ${url}`);
   }));
   return calls;
@@ -182,8 +185,12 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
 
     fireEvent.click(objectButtons[0]);
-    expect(screen.getByRole('region', { name: /^Selection SYN-CP-/ })).toBeTruthy();
+    expect(screen.getByRole('region', { name: /^Selection SYN-CP-A-/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'SYN-CP-A-AIR-001' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Hangar object selection' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Move avatar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Reset blocked variant' })).toBeTruthy();
   });
 

@@ -55,6 +55,119 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+  it('Hangar App composes semantic controls evidence journey and presets', async () => {
+    stubCaseApi();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; },
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+
+    expect(screen.getByLabelText('Hangar scene objects').querySelectorAll('button')).toHaveLength(12);
+    for (const name of ['Air One', 'Air Two', 'Air Three']) expect(screen.getByRole('button', { name: `View ${name}` })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Overview' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Move avatar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
+
+    const objectButtons = screen.getByLabelText('Hangar scene objects').querySelectorAll('button');
+    fireEvent.click(objectButtons[0]);
+    expect(screen.getByRole('region', { name: 'Selection SYN-CP-A-AIR-001' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'SYN-CP-A-AIR-001' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
+  });
+
+  it('Hangar App compose reset and error fallback', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubCaseApi();
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/cases/cp-case-c/scene' && (init?.method ?? 'GET') === 'GET') {
+        const envelope = await original(input, init).then((response) => response.json());
+        envelope.case.permission = true;
+        envelope.canResetBlockedVariant = true;
+        envelope.allowedActions = ['reset'];
+        return new Response(JSON.stringify(envelope), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return original(input, init);
+    });
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; },
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'View Air Three' });
+    fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
+    expect(screen.getAllByRole('button', { name: 'Reset blocked variant' }).length).toBeGreaterThanOrEqual(1);
+
+    for (const status of [400, 403, 404, 409, 422]) {
+      const before = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('reset-blocked-variant')).length;
+      const latest = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant') return new Response(JSON.stringify({ error: 'rejected' }), { status, headers: { 'Content-Type': 'application/json' } });
+        return latest(input, init);
+      });
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      fireEvent.click(screen.getAllByRole('button', { name: 'Reset blocked variant' }).at(-1)!);
+      await screen.findByText(`Reset rejected (${status}).`);
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('reset-blocked-variant')).length).toBe(before + 1);
+      cleanup();
+      stubCaseApi();
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/v1/cases/cp-case-c/scene') {
+          const envelope = await original(input, init).then((response) => response.json());
+          envelope.case.permission = true; envelope.canResetBlockedVariant = true; envelope.allowedActions = ['reset'];
+          return new Response(JSON.stringify(envelope), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant') return new Response(JSON.stringify({ error: 'rejected' }), { status, headers: { 'Content-Type': 'application/json' } });
+        return original(input, init);
+      });
+      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } }));
+      await signInAsReviewer();
+      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      await screen.findByRole('button', { name: 'View Air Three' });
+      fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
+    }
+
+    cleanup();
+    stubCaseApi();
+    const deniedOriginal = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/cases/cp-case-c/scene') {
+        const envelope = await deniedOriginal(input, init).then((response) => response.json());
+        envelope.case.permission = false; envelope.canResetBlockedVariant = false; envelope.allowedActions = [];
+        return new Response(JSON.stringify(envelope), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return deniedOriginal(input, init);
+    });
+    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'View Air Three' });
+    fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
+    expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes('reset-blocked-variant') && (init?.method ?? 'GET') === 'POST')).toHaveLength(0);
+
+    cleanup();
+    stubCaseApi();
+    function Throws(): never { throw new Error('canvas render failed'); }
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement(Throws); } return Scene; } }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('alert', { name: 'Hangar fallback' });
+    expect(screen.getByText(/Last labelled server state: Rules-based, revision 7/)).toBeTruthy();
+    expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes('reset-blocked-variant') && (init?.method ?? 'GET') === 'POST')).toHaveLength(0);
+  });
+
   it('HangarEntry loads scene envelopes in exact case-list order', async () => {
     stubCaseApi();
     render(createElement(HangarApp, {
