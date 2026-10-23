@@ -1,0 +1,246 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 593,
+  "branch": "ai-sdlc/issue-593",
+  "commitSha": "ce6ee35f6eba882587f203f78d745a0d737866a5",
+  "round": 1,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The revised tests exercise App’s context-loss and injected-clock paths and cover snapshot preservation, re-entry, and load duration. The context-loss test still does not assert the required fallback reason.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 68,
+          "message": "The context-loss test does not verify fallback reason render_failed.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The context-loss test asserts only that an element with role alert appears. It does not assert that Hangar reports the required fallback reason render_failed.",
+            "failureScenario": "If context loss sets another fallback reason, the alert still appears and this test passes even though the acceptance criterion is broken."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated tests now exercise App’s context-loss and successful duration paths. They still do not assert the exact context-loss reason or verify null duration on an App fallback.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 68,
+          "message": "The context-loss test does not assert the required fallback reason `render_failed`, so an incorrect reason can pass.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The context-loss test renders App, but after dispatching the event it asserts only that an alert appears. It does not inspect the fallback reason.",
+            "failureScenario": "If App handles context loss but records fallbackReason as webgl_unavailable instead of render_failed, the alert assertion and remaining test assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 102,
+          "message": "The test does not verify that an App fallback reports a null duration through the production entry path.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The duration test checks the successful App entry-to-canvas path, but its fallback assertion calls buildHangarLocalDiagnostics directly rather than triggering an App fallback.",
+            "failureScenario": "If App assigns a non-null duration when entry ends in a fallback, the helper-only assertion still returns null and passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The follow-up improves coverage through App, but the named tests use a custom lazy-loaded scene that bypasses production callback forwarding. They also do not assert the exact render_failed fallback reason or verify App's fallback duration in the panel.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 48,
+          "message": "The context-loss test still does not prove the named criterion through the production HangarScene and HangarCanvasAdapter path, or assert fallback reason render_failed. A regression in production callback forwarding or the fallback reason could pass this test.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test renders App but supplies a custom hangarLazyLoader that returns ProductionScene directly. It bypasses the production HangarScene and HangarCanvasAdapter path that forwards onCreated and context-loss handling.",
+            "failureScenario": "If that production forwarding is removed or broken, this test still passes because its custom scene invokes App's onCreated callback itself. It also waits for an alert without asserting the required fallback reason is exactly render_failed."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarLocalDiagnostics.test.tsx",
+          "line": 82,
+          "message": "The duration test still bypasses production scene wiring, and its fallback-null check covers only the helper. A broken production onCreated path or an App fallback that reports a duration could pass the named test.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The duration test's custom loader returns ProductionScene directly, which calls the supplied onCreated callback. It does not exercise production HangarScene and HangarCanvasAdapter forwarding. Its fallback-null assertion calls buildHangarLocalDiagnostics directly rather than checking App's fallback state and diagnostic panel.",
+            "failureScenario": "If the production scene stops forwarding onCreated, or App reports a non-null duration during fallback, these assertions still pass because the test bypasses that wiring and checks fallback null only in the helper."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarLocalDiagnostics.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
