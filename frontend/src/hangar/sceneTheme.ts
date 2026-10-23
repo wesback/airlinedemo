@@ -36,6 +36,14 @@ export const labelMuted = HANGAR_SCENE_THEME.labelMuted;
 
 export const sceneTheme = HANGAR_SCENE_THEME;
 
+export function isApprovedHangarSceneColor(color: unknown): boolean {
+  return typeof color === 'string' && Object.values(HANGAR_SCENE_THEME).includes(color as typeof HANGAR_SCENE_THEME[keyof typeof HANGAR_SCENE_THEME]);
+}
+
+export function validateHangarSceneColor(color: unknown): { valid: true } | { valid: false; error: 'Visible mapping error' } {
+  return isApprovedHangarSceneColor(color) ? { valid: true } : { valid: false, error: 'Visible mapping error' };
+}
+
 export function hangarLabelContrastRatio(foreground: string, background = HANGAR_SCENE_THEME.labelBackground): number {
   const luminance = (hex: string) => {
     const value = hex.replace('#', '').trim();

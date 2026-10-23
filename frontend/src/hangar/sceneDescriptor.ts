@@ -1,6 +1,6 @@
 import manifestDefault from './sceneManifest.json';
 import { HANGAR_ACTUAL_OBJECT_IDS } from './sceneProjection';
-import { HANGAR_SCENE_THEME, hangarLabelContrastRatio } from './sceneTheme';
+import { HANGAR_SCENE_THEME, hangarLabelContrastRatio, validateHangarSceneColor } from './sceneTheme';
 
 export const HANGAR_DESCRIPTOR_ERROR = 'Visible mapping error';
 export type HangarAircraftViewEntry = {caseId:string;name:string;category:string;status:Record<string,string|null>;capabilityLabel:string;objectId:string};
@@ -21,6 +21,8 @@ export function validateHangarAircraftDescriptor(input:unknown=manifestDefault):
   if(!input||typeof input!=='object') return {valid:false,error:HANGAR_DESCRIPTOR_ERROR}; const m=input as any;
   const approvedTheme={background:'#E8EDF2',floor:'#C3CBD4',floorMarking:'#F2F4F6',aircraftBody:'#F5F7F9',aircraftTrim:'#9AA5B1',partsStand:'#5A6573',component:'#B7C0CA',rack:'#2F3A47',rackUnit:'#4C5866',avatarBody:'#3D6E9E',groundShadow:'#000000',guideLine:'#0E7C66',selection:'#1F6FEB',labelBackground:'#FFFFFF',labelText:'#1B2430',labelMuted:'#4A5563'};
   if(Object.keys(approvedTheme).some(key=>(HANGAR_SCENE_THEME as any)[key]!==approvedTheme[key as keyof typeof approvedTheme])||hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelText)<4.5||hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelMuted)<4.5) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
+  const validateColors=(value:unknown,path:string=''):boolean=>{if(!value||typeof value!== 'object')return true;if(Array.isArray(value))return value.every((item,index)=>validateColors(item,path+`[${index}]`));for(const [key,child] of Object.entries(value as Record<string,unknown>)){const childPath=path?`${path}.${key}`:key;if(/color/i.test(key)){if(childPath==='avatar.hardHat.color'){if(child!=='#FFD400')return false;}else if(!validateHangarSceneColor(child).valid)return false;}if(!validateColors(child,childPath))return false;}return true};
+  if(!validateColors(m)) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
   if(m.contractVersion!==1||m.packVersion!=='0.4.0'||!m.layout||m.layout.floorPolygon?.length!==4||!Array.isArray(m.aircraft?.models)||m.aircraft.models.length!==3||!Array.isArray(m.objectIds)||m.objectIds.length!==12) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
   const floor=[[-45,-25],[45,-25],[45,25],[-45,25]];
   if(!floor.every((p,i)=>m.layout.floorPolygon[i]?.x===p[0]&&m.layout.floorPolygon[i]?.z===p[1])) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};

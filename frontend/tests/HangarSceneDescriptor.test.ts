@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import manifest from '../src/hangar/sceneManifest.json';
 import { activateHangarSceneObject, validateHangarAircraftDescriptor } from '../src/hangar/sceneDescriptor';
-import { HANGAR_SCENE_THEME, hangarLabelContrastRatio } from '../src/hangar/sceneTheme';
+import { HANGAR_SCENE_THEME, hangarLabelContrastRatio, validateHangarSceneColor } from '../src/hangar/sceneTheme';
 const clone=()=>JSON.parse(JSON.stringify(manifest));
 describe('Hangar scene descriptor',()=>{
  it('Hangar descriptor exact 12-object wiring',()=>{
@@ -57,5 +57,13 @@ describe('hangar scene manifest layout contract cases', () => {
     expect(validateHangarAircraftDescriptor(statusIndependent).valid).toBe(true);
     expect(hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelText)).toBeGreaterThanOrEqual(4.5);
     expect(hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelMuted)).toBeGreaterThanOrEqual(4.5);
+
+    expect(validateHangarSceneColor('#FF0000')).toEqual({ valid: false, error: 'Visible mapping error' });
+    expect(validateHangarSceneColor('#00FF00')).toEqual({ valid: false, error: 'Visible mapping error' });
+    expect(validateHangarSceneColor('#FFD400')).toEqual({ valid: false, error: 'Visible mapping error' });
+    const outsideToken = clone(); outsideToken.layout.aircraft[0].materialColor = '#FF0000';
+    expect(validateHangarAircraftDescriptor(outsideToken)).toEqual({ valid: false, error: 'Visible mapping error' });
+    const outsideMeshToken = clone(); outsideMeshToken.layout.aircraft[0].meshColor = '#00FF00';
+    expect(validateHangarAircraftDescriptor(outsideMeshToken)).toEqual({ valid: false, error: 'Visible mapping error' });
   });
 });
