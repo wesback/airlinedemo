@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -109,7 +110,11 @@ public static class ModelGatewayTokenomics
 public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelation correlation, GatewayQuota quota) : DelegatingChatClient(inner)
 {
     private readonly GatewayQuotaGovernor _governor = new(quota);
+    private int _modelCallCount;
+    private int _retryCount;
+    private long _latencyMilliseconds;
     public GatewayUsage Usage => _governor.ExactUsage();
+    public GatewayTokenMetrics? Metrics { get; private set; }
 
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
@@ -119,11 +124,37 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
         var estimatedInput = Encoding.UTF8.GetByteCount(prompt);
         var denial = _governor.BeforeCall(estimatedInput);
         if (denial is not null) throw new InvalidOperationException(denial);
+
+        options ??= new ChatOptions();
+        options.ModelId = correlation.ModelConfiguration;
+        options.AdditionalProperties ??= new AdditionalPropertiesDictionary();
+        foreach (var field in new[] { "Arm", "Run", "Package", "Case", "ModelConfiguration", "SuiteVersion", "CallIdentity" })
+        {
+            var value = field switch
+            {
+                "Arm" => correlation.Arm, "Run" => correlation.Run, "Package" => correlation.Package,
+                "Case" => correlation.Case, "ModelConfiguration" => correlation.ModelConfiguration,
+                "SuiteVersion" => correlation.SuiteVersion, "CallIdentity" => correlation.CallIdentity, _ => ""
+            };
+            options.AdditionalProperties[$"gateway.{field.ToLowerInvariant()}"] = value;
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        _modelCallCount++;
         var response = await base.GetResponseAsync(messages, options, cancellationToken);
+        _latencyMilliseconds = (long)(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        var usage = ModelGatewayTokenomics.Usage(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount,
+            response.Usage?.TotalTokenCount);
         var denialAfter = _governor.Record(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount);
         if (denialAfter is not null) throw new InvalidOperationException(denialAfter);
+        var throttled = response.AdditionalProperties?.TryGetValue("gateway.throttled", out var throttle) == true &&
+                        bool.TryParse(throttle?.ToString(), out var isThrottled) && isThrottled;
+        Metrics = new GatewayTokenMetrics(usage.InputTokens, usage.OutputTokens, usage.TotalTokens,
+            _modelCallCount, _retryCount, _latencyMilliseconds, throttled, correlation.ModelConfiguration, null, usage);
         return response;
     }
+
+    public void RecordRetry() => _retryCount++;
 }
 
 public sealed class GatewayReplayStore<T>

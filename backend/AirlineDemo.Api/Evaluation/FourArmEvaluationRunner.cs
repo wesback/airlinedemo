@@ -104,21 +104,22 @@ public sealed class ProductionEvaluationArmExecutor(
             $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
             FourArmEvaluationRunner.FrozenV2Sha256,
             $"{arm.ToString().ToLowerInvariant()}-{request.Case.Sha256}");
-        if (_replay.TryReplay(correlation, out var replayed)) return replayed!;
+        if (request.Mode == EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection &&
+            _replay.TryReplay(correlation, out var replayed)) return replayed!;
         var modelClient = _chatClient ??= chatClientFactory(manifest);
-        _chatClient = new GatewayGovernedChatClient(modelClient, correlation, new GatewayQuota(
+        var gatewayClient = new GatewayGovernedChatClient(modelClient, correlation, new GatewayQuota(
             MaximumBoundedInputTokens, MaximumBoundedOutputTokens, MaximumBoundedModelCalls * (MaximumBoundedInputTokens + MaximumBoundedOutputTokens),
             MaximumBoundedModelCalls, MaximumBoundedToolCalls, 1, TimeSpan.FromSeconds(30)));
         if (request.Mode == EvaluationExecutionMode.BoundedAgent)
         {
-            var bounded = await ExecuteBoundedAgentAsync(request, cancellationToken);
+            var bounded = await ExecuteBoundedAgentAsync(request, gatewayClient, cancellationToken);
             _replay.Store(correlation, bounded);
             return bounded;
         }
         if (request.Mode != EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection)
             throw new ArgumentException("model arm received an unsupported execution mode", nameof(request));
 
-        var client = _chatClient ?? throw new InvalidOperationException("model gateway client is not initialized");
+        var client = gatewayClient;
         using var document = JsonDocument.Parse(request.Case.Content);
         var caseInputs = document.RootElement.GetProperty("inputs").GetRawText();
         var userPrompt = $"Case ID: {request.Case.CaseId}\nCase inputs:\n{caseInputs}";
@@ -141,11 +142,7 @@ public sealed class ProductionEvaluationArmExecutor(
                 : Encoding.UTF8.GetByteCount(prompt) +
                   Math.Min(MaximumOutputTokens, Encoding.UTF8.GetByteCount(answer));
             var execution = new EvaluationArmExecution(answer, usage, 1, 0, 0);
-            _replay.Store(new GatewayCorrelation(
-                arm.ToString(), "frozen-v2", "aircraft-return-readiness", request.Case.CaseId,
-                $"{manifest.DeploymentName}|{manifest.Model}|{manifest.ApiVersion}|{manifest.Region}",
-                FourArmEvaluationRunner.FrozenV2Sha256,
-                $"{arm.ToString().ToLowerInvariant()}-{request.Case.Sha256}"), execution);
+            _replay.Store(correlation, execution);
             return execution;
         }
         catch (Exception ex)
@@ -156,11 +153,11 @@ public sealed class ProductionEvaluationArmExecutor(
     }
 
     private async Task<EvaluationArmExecution> ExecuteBoundedAgentAsync(
-        EvaluationArmRequest request, CancellationToken cancellationToken)
+        EvaluationArmRequest request, GatewayGovernedChatClient gatewayClient, CancellationToken cancellationToken)
     {
         var manifest = request.Manifest?.RequireUsable()
             ?? throw new EvaluationInputException("model arm has no approved manifest");
-        var client = _chatClient ?? throw new InvalidOperationException("model gateway client is not initialized");
+        var client = gatewayClient;
         using var limits = new InvestigationLimits(new InvestigationLimitOptions
         {
             MaxModelCalls = MaximumBoundedModelCalls,

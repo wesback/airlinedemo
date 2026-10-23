@@ -8,7 +8,7 @@ public sealed class ModelGatewayTokenomicsTests
     private static GatewayCorrelation Correlation(string model = "model-v1") => new("B", "run-1", "package-1", "case-1", model, "suite-v1", "call-1");
 
     [Fact]
-    public void Production_adapter_routes_to_gateway_and_records_available_or_unavailable_usage()
+    public async Task Production_adapter_routes_to_gateway_and_records_available_or_unavailable_usage()
     {
         var endpoint = ModelGatewayTokenomics.RequirePrivateGatewayEndpoint("https://gateway-demo.private.invalid/");
         Assert.Equal("gateway-demo.private.invalid", endpoint.Host);
@@ -19,6 +19,18 @@ public sealed class ModelGatewayTokenomicsTests
             ModelGatewayTokenomics.Usage(42, 7, 49).Status));
         var unavailable = ModelGatewayTokenomics.Usage(null, null, null);
         Assert.Equal((null, null, null, "unavailable"), (unavailable.InputTokens, unavailable.OutputTokens, unavailable.TotalTokens, unavailable.Status));
+
+        var fake = new GatewayChatClient();
+        var governed = new GatewayGovernedChatClient(fake, Correlation(), new GatewayQuota(1000, 1000, 2000, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        var response = await governed.GetResponseAsync([new ChatMessage(ChatRole.User, "approved case")]);
+        Assert.Equal("ok", response.Text);
+        Assert.Equal(1, fake.Calls);
+        Assert.Equal((42L, 7L, 49L, 1, 0, Correlation().ModelConfiguration),
+            (governed.Metrics!.InputTokens, governed.Metrics.OutputTokens, governed.Metrics.TotalTokens,
+             governed.Metrics.ModelCallCount, governed.Metrics.RetryCount, governed.Metrics.ModelConfiguration));
+        Assert.False(governed.Metrics.Throttled);
+        Assert.True(governed.Metrics.LatencyMilliseconds >= 0);
+        Assert.Equal("available", governed.Metrics.Usage.Status);
     }
 
     [Fact]
@@ -67,6 +79,24 @@ public sealed class ModelGatewayTokenomicsTests
         original.Value = "mutated";
         Assert.True(store.TryReplay(Correlation(), out var replay));
         Assert.Equal("unchanged", replay!.Value);
+    }
+
+    private sealed class GatewayChatClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public ChatClientMetadata Metadata { get; } = new("gateway-test");
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "ok"))
+            {
+                Usage = new UsageDetails { InputTokenCount = 42, OutputTokenCount = 7, TotalTokenCount = 49 }
+            });
+        }
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
     }
 
     public sealed class MutableResult { public string Value { get; set; } = ""; }

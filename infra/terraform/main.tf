@@ -279,7 +279,7 @@ resource "azurerm_api_management_api" "gateway_model" {
   display_name        = "Foundry private model gateway"
   path                = "openai"
   protocols           = ["https"]
-  subscription_required = false
+  subscription_required = true
   service_url         = "https://${var.model_endpoint_subdomain}.privatelink.openai.azure.com/openai"
 }
 
@@ -290,13 +290,7 @@ resource "azurerm_api_management_api_operation" "gateway_chat_completions" {
   resource_group_name = azurerm_resource_group.demo.name
   display_name        = "Private chat completions"
   method              = "POST"
-  url_template        = "deployments/{deployment}/chat/completions"
-
-  template_parameter {
-    name     = "deployment"
-    type     = "string"
-    required = true
-  }
+  url_template        = "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}"
 }
 
 resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions" {
@@ -308,6 +302,7 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
 <policies>
   <inbound>
     <base />
+    <rewrite-uri template="/openai/deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" copy-unmatched-params="false" />
     <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
   </inbound>
 </policies>
