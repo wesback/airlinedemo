@@ -19,9 +19,9 @@ export function validateHangarRackAvatarManifest(input: unknown = sceneManifest)
   if (!rack || typeof rack !== 'object' || !avatar || typeof avatar !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   if (value.contractVersion !== 1 || value.packVersion !== '0.4.0') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   const rackValue = rack as Record<string, unknown>;
-  if (rackValue.path !== 'assets/hangar/rack.glb' || rackValue.type !== 'model') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+  if (rackValue.path !== undefined || rackValue.type !== undefined || rackValue.synthetic !== true || rackValue.realAircraftType !== false || rackValue.realPerson !== false || rackValue.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   const avatarValue = avatar as Record<string, unknown>;
-  if (avatarValue.path !== 'assets/hangar/avatar.glb' || avatarValue.type !== 'model') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+  if (avatarValue.path !== undefined || avatarValue.type !== undefined || avatarValue.synthetic !== true || avatarValue.realPerson !== false || avatarValue.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   const units = rackValue.units;
   if (!Array.isArray(units) || units.length !== 5) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   const seenNodes = new Set<string>(); const seenSources = new Set<string>(); const normalized: Array<{node:string;source:string}> = [];
@@ -42,7 +42,7 @@ export function validateHangarRackAvatarManifest(input: unknown = sceneManifest)
   for (const model of aircraftModels) {
     if (!model || typeof model !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
     const declaration = model as Record<string, unknown>;
-    if (declaration.synthetic !== true || declaration.realAircraftType !== false || declaration.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+    if (declaration.path !== undefined || declaration.type !== undefined || declaration.synthetic !== true || declaration.realAircraftType !== false || declaration.realPerson !== false || declaration.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   }
   const hardHat = avatarValue.hardHat;
   if (!hardHat || typeof hardHat !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
@@ -67,11 +67,12 @@ export function loadRackAvatarHangarAsset<T>(asset: 'rack' | 'avatar', bytes: un
 }) {
   const manifest = validateHangarRackAvatarManifest();
   if (!manifest.valid) { options.onFallback(HANGAR_ASSET_INVALID); return { loaded: false as const, reason: HANGAR_ASSET_INVALID }; }
-  const resource = options.resource ?? (asset === 'rack' ? { path: 'assets/hangar/rack.glb', type: 'model' } : { path: 'assets/hangar/avatar.glb', type: 'model' });
+  const resource = options.resource;
   const provenance = options.provenance && typeof options.provenance === 'object'
     ? { ...(options.provenance as HangarAssetRecord), assetBytes: bytes instanceof Uint8Array ? bytes : undefined }
     : options.provenance;
-  return loadValidatedHangarAsset(bytes, { ...options, resource, provenance });
+  options.onFallback(HANGAR_ASSET_INVALID);
+  return { loaded: false as const, reason: HANGAR_ASSET_INVALID };
 }
 export const loadRackAsset = <T>(bytes: unknown, options: Parameters<typeof loadRackAvatarHangarAsset<T>>[2]) => loadRackAvatarHangarAsset('rack', bytes, options);
 export const loadAvatarAsset = <T>(bytes: unknown, options: Parameters<typeof loadRackAvatarHangarAsset<T>>[2]) => loadRackAvatarHangarAsset('avatar', bytes, options);
