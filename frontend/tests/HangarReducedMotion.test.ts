@@ -185,17 +185,16 @@ describe('HangarReducedMotion', () => {
     for(let i=0;i<3;i++){const callback=fiberHarness.frames.shift(); if(callback)callback(performance.now()+16);}
     expect(fiberHarness.invalidate.mock.calls.length).toBe(3);
     productionCamera.position.set(desired.x+0.04,desired.y,desired.z);
-    fiberHarness.frames=[]; fiberHarness.invalidate.mockClear();
-    // Queue a final tick after the threshold test; it must stop without invalidation or scheduling.
-    const thresholdFrame=(_time:number)=>undefined;
-    await waitFor(()=>expect(fiberHarness.frames.length).toBe(0));
-    thresholdFrame(performance.now()+16);
+    fiberHarness.invalidate.mockClear();
+    const thresholdFrame=fiberHarness.frames.shift();
+    if(thresholdFrame)thresholdFrame(performance.now()+16);
     expect(fiberHarness.invalidate.mock.calls.length).toBe(0);
     expect(fiberHarness.frames).toHaveLength(0);
 
     fiberHarness.invalidate.mockClear();
-    for(let i=0;i<10;i++){ /* injected idle clock tick */ }
+    if(thresholdFrame)for(let i=0;i<10;i++)thresholdFrame(performance.now()+16);
     expect(fiberHarness.invalidate.mock.calls.length).toBe(0);
+    expect(fiberHarness.frames).toHaveLength(0);
     raf.mockRestore();
   });
 
