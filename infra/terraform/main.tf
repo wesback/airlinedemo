@@ -247,12 +247,12 @@ resource "azurerm_cognitive_account" "model" {
 }
 
 resource "azurerm_api_management" "gateway" {
-  name                = "apim-foundry-${var.resource_group_name}"
-  location            = var.gateway_region
-  resource_group_name = azurerm_resource_group.demo.name
-  publisher_name      = "Airline Demo"
-  publisher_email     = "owner@example.invalid"
-  sku_name            = "${var.gateway_api_management_tier}_1"
+  name                          = "apim-foundry-${var.resource_group_name}"
+  location                      = var.gateway_region
+  resource_group_name           = azurerm_resource_group.demo.name
+  publisher_name                = "Airline Demo"
+  publisher_email               = "owner@example.invalid"
+  sku_name                      = "${var.gateway_api_management_tier}_1"
   public_network_access_enabled = false
   virtual_network_type          = "Internal"
 
@@ -272,15 +272,15 @@ resource "azurerm_role_assignment" "gateway_cognitive_services" {
 }
 
 resource "azurerm_api_management_api" "gateway_model" {
-  name                = "foundry-model-gateway"
-  resource_group_name = azurerm_resource_group.demo.name
-  api_management_name = azurerm_api_management.gateway.name
-  revision            = "1"
-  display_name        = "Foundry private model gateway"
-  path                = "openai"
-  protocols           = ["https"]
+  name                  = "foundry-model-gateway"
+  resource_group_name   = azurerm_resource_group.demo.name
+  api_management_name   = azurerm_api_management.gateway.name
+  revision              = "1"
+  display_name          = "Foundry private model gateway"
+  path                  = "openai"
+  protocols             = ["https"]
   subscription_required = false
-  service_url         = "https://${var.model_endpoint_subdomain}.privatelink.openai.azure.com/openai"
+  service_url           = "https://${var.model_endpoint_subdomain}.privatelink.openai.azure.com/openai"
 }
 
 resource "azurerm_api_management_api_operation" "gateway_chat_completions" {
