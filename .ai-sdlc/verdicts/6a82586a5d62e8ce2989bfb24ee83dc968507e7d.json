@@ -1,0 +1,312 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 594,
+  "branch": "ai-sdlc/issue-594",
+  "commitSha": "6a82586a5d62e8ce2989bfb24ee83dc968507e7d",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The overlay does not update label positions as the camera moves, and mapping failures can be silently omitted. The added tests exercise helper data rather than the rendered projection and visibility behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 123,
+          "message": "Reproject labels when the camera moves; the current one-time update leaves their positions stale.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "HangarLabelOverlay calls update in an effect whose dependencies are data, camera, sceneData, and selection. Camera movement does not change those dependencies.",
+            "failureScenario": "After the initial render, the user moves the camera. The camera projection changes, but the effect does not run again, so labels remain at their old DOM positions instead of following their anchors."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 126,
+          "message": "Show the required mapping error when an in-scope label cannot be mapped, even if other labels were built.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "mappingError is set only when data.length is zero. Missing aircraft anchors, duplicate aircraft names, and unrecognized selected IDs can omit an entry while other aircraft entries remain in data.",
+            "failureScenario": "A scene has one valid aircraft and a duplicate or missing anchor for another aircraft. The invalid label is omitted, but data is nonempty, so no visible mapping error is rendered."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/selectionPanel.tsx",
+          "line": 19,
+          "message": "Do not synthesize case names or categories for server-backed labels; missing values should prevent the label from being presented as exact envelope text.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "buildHangarAircraftLabelText substitutes hardcoded fallback names and categories when the matching case omits those fields.",
+            "failureScenario": "A matching envelope case has no name or category. The label displays synthesized values such as “Case A” and “narrow-body” instead of the exact envelope values required by the criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 59,
+          "message": "The named label tests do not exercise the overlay behavior they are meant to prove; add assertions against the rendered labels and projection states.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added label tests call data helpers and resolveHangarSelection, but do not render HangarCanvasAdapter or assert projected positions, hidden anchors, aria-hidden, or mapping errors.",
+            "failureScenario": "The overlay can stop rendering labels or stop hiding labels outside NDC while both added tests still pass, so the acceptance criteria's named behavior tests do not detect a broken implementation."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The adapter can suppress required mapping errors and leaves labels stale after camera movement. The two added label tests exercise helper or selection code rather than the production canvas label path, so they do not verify the stated behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 125,
+          "message": "The mapping error is hidden when any label remains, contrary to the criterion requiring a visible mapping error for a missing anchor, duplicate aircraft, or unknown object ID.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "HangarLabelOverlay omits labels for missing or duplicate anchors, then sets mappingError only when data.length is zero.",
+            "failureScenario": "If one aircraft anchor is missing or duplicated while another aircraft still has a valid label, data is nonempty and no mapping error appears. An unknown selected object ID also produces no selected label while valid aircraft labels suppress the error."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 116,
+          "message": "Labels are projected only when the effect dependencies change, so camera movement does not update their position or visibility.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The effect projects each anchor and writes its position to DOM styles, but its dependencies omit camera position and orientation; the owned camera is mutated in place during movement.",
+            "failureScenario": "After the initial projection, moving the camera leaves each label at its previous DOM coordinates and visibility, so a label can remain visible at a stale position after its anchor moves off screen."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 58,
+          "message": "The test named for the aircraft-label criterion does not exercise label rendering or projection and cannot fail if that behavior is removed.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named `Hangar labels use projected server text` test checks `resolveHangarSelection` and the case array; it never renders HangarCanvasAdapter or calls the label-building path.",
+            "failureScenario": "Removing or breaking aircraft label construction and projection would leave this test passing, so the criterion for exact server-backed projected aircraft labels is untested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 59,
+          "message": "The test does not verify the criterion's React text-node, aria-hidden, no-action, or projected-anchor hiding behavior.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named `Hangar labels hide and render as text only` test checks a helper's returned string; it does not render the React label or exercise anchor projection and visibility.",
+            "failureScenario": "Rendering the label as HTML, exposing it as a control, or failing to hide it outside NDC would not change the helper's returned string, so this test would still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The overlay does not update label projection as the camera moves, and partial aircraft mapping failures can go unreported. The added tests do not exercise the rendered overlay or its projection behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 121,
+          "message": "Label positions and visibility are not refreshed when the camera moves, so projected labels become stale.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HangarLabelOverlay runs update in an effect whose dependencies are data, camera, sceneData, and selection. Camera movement mutates the existing camera object without changing those dependencies.",
+            "failureScenario": "After the camera moves, a label stays at its old DOM position and can remain visible even when its anchor is behind the camera or outside NDC bounds."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 126,
+          "message": "A missing or duplicate aircraft mapping is not reported when any other label is valid.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Missing or duplicate aircraft anchors are skipped while building data. The mapping error is rendered only when data.length is zero.",
+            "failureScenario": "If AircraftA is missing or duplicated while AircraftB and AircraftC are valid, the affected aircraft gets no label and no visible mapping error."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 59,
+          "message": "The named label behavior tests do not exercise the overlay, so the story's aircraft label and projected visibility criteria are not verified.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test named Hangar labels use projected server text checks the case count and resolveHangarSelection output; it does not render HangarCanvasAdapter or assert any projected label text. The next test checks a helper's returned string without rendering the React overlay or testing anchor visibility.",
+            "failureScenario": "If the overlay renders no labels, uses incorrect text, or fails to hide labels outside the camera bounds, these tests still pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSelectionEvidence.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

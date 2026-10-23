@@ -5,6 +5,26 @@ const isObject=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!=
 const text=(v:unknown):string|null=>typeof v==='string'&&v.trim().length>0?v:null;
 const integer=(v:unknown):number|null=>typeof v==='number'&&Number.isInteger(v)&&v>=0?v:null;
 
+export const HANGAR_LABEL_MAPPING_ERROR='Visible mapping error';
+const exactText=(v:unknown):string|null=>typeof v==='string'&&v.trim().length>0?v:v===null?'':null;
+export function buildHangarAircraftLabelText(source:unknown,caseId:string):string|null {
+  if(typeof caseId!=='string'||!/^cp-case-[abc]$/.test(caseId))return null;
+  const root=isObject(source)?source:{}; const list=Array.isArray(root.cases)?root.cases:Array.isArray(root.caseList)?root.caseList:null;
+  const c=(list&&Array.isArray(list)?list.find((v)=>isObject(v)&&(v.caseId===caseId||v.id===caseId)):null)||(isObject(root.case)&&root.case.caseId===caseId?root.case:null);
+  if(!c||!isObject(c))return null;
+  const name=exactText(c.name??c.caseName??c.displayName); const category=exactText(c.category??c.aircraftCategory);
+  if(!name||!category)return null;
+  const capability=exactText(c.capabilityLabel)??'Unknown'; const rawAction=c.nextAction;
+  const action=capability==='Unknown'?'No next action':rawAction===null||rawAction===undefined?'No next action':isObject(rawAction)?exactText(rawAction.text)??'No next action':exactText(rawAction)??'No next action';
+  return `${name}\n${category}\n${capability}\n${action}`;
+}
+export function buildHangarSelectedObjectLabel(source:unknown,objectId:unknown):string|null {
+  if(typeof objectId!=='string'||typeof source!=='object'||source===null)return null;
+  const root=source as Record<string,unknown>; const objects=Array.isArray(root.objects)?root.objects:[];
+  const object=objects.find((v)=>isObject(v)&&v.objectId===objectId);
+  if(!object||!isObject(object)||!['engine','component'].includes(String(object.kind)))return null;
+  return exactText(object.displayName);
+}
 export type HangarEvidenceTuple={documentId:string;version:number;basisId:string;basisVersion:number;displayLabel:string;witnesses:unknown[];status:string|null;blocked:boolean};
 export type HangarSelection={objectId:string;caseId:string;kind:string;status:unknown;owner:string;nextAction:string;capabilityLabel:string;evidence:HangarEvidenceTuple[];error:string|null};
 export type SelectionReader=(identifier:string)=>unknown|Promise<unknown>;
