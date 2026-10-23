@@ -118,7 +118,7 @@ variable "model_deployment_name" {
   type        = string
   default     = null
   validation {
-    condition     = var.model_deployment_name == null || length(trimspace(var.model_deployment_name)) > 0
+    condition     = var.model_deployment_name == null ? true : length(trimspace(var.model_deployment_name)) > 0
     error_message = "model_deployment_name must not be empty or whitespace."
   }
 }
