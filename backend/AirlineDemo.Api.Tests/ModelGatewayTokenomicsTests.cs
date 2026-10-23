@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Diagnostics;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -129,17 +130,26 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
 
         var overInput = new GatewayChatClient();
         using var overInputHost = Host(Private, overInput);
-        var inputDenied = await Assert.ThrowsAsync<InvalidOperationException>(() => Executor(overInputHost)
+        var overInputExecutor = Executor(overInputHost);
+        var inputDenied = await Assert.ThrowsAsync<InvalidOperationException>(() => overInputExecutor
             .ExecuteAsync(Request(padding: new string('x', 10_001 - baseBytes)), TestContext.Current.CancellationToken));
         Assert.Equal("gateway quota exceeded by one unit: input-tokens", inputDenied.Message);
         Assert.Equal(0, overInput.Calls);
+        Assert.Null(overInputExecutor.LastGatewayMetrics!.InputTokens);
+        Assert.Null(overInputExecutor.LastGatewayMetrics!.OutputTokens);
+        Assert.Null(overInputExecutor.LastGatewayMetrics!.TotalTokens);
+        Assert.Equal("unavailable", overInputExecutor.LastGatewayMetrics!.Usage.Status);
 
         var overOutput = new GatewayChatClient { OutputTokenCount = 2001, TotalTokenCount = null };
         using var overOutputHost = Host(Private, overOutput);
+        var overOutputExecutor = Executor(overOutputHost);
         var outputDenied = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => Executor(overOutputHost).ExecuteAsync(Request(), TestContext.Current.CancellationToken));
+            () => overOutputExecutor.ExecuteAsync(Request(), TestContext.Current.CancellationToken));
         Assert.Equal("gateway quota exceeded by one unit: output-tokens", outputDenied.Message);
         Assert.Equal(1, overOutput.Calls);
+        var outputMetrics = overOutputExecutor.LastGatewayMetrics!;
+        Assert.Equal((42L, 2001L, 2043L, "available"),
+            (outputMetrics.InputTokens, outputMetrics.OutputTokens, outputMetrics.TotalTokens, outputMetrics.Usage.Status));
     }
 
     [Theory]
@@ -152,10 +162,19 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     [InlineData("connectionstring-1")]
     [InlineData("modelresponse-1")]
     [InlineData("123-45-6789")]
+    [InlineData("123456789")]
     [InlineData("4111111111111111")]
     [InlineData("user@example.test")]
     public async Task Production_executor_rejects_sensitive_correlation_and_keeps_trace_content_private(string caseId)
     {
+        var activities = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "AirlineDemo.Api.ModelGateway",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => activities.Add(activity)
+        };
+        ActivitySource.AddActivityListener(listener);
         var fake = new GatewayChatClient();
         using var host = Host(Private, fake);
         var request = Request(caseId);
@@ -166,6 +185,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.Equal(0, fake.Calls);
         Assert.Null(fake.LastOptions);
         Assert.DoesNotContain(caseId, error.Message, StringComparison.Ordinal);
+        Assert.Empty(activities);
     }
 
     [Fact]
@@ -182,6 +202,14 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     [Fact]
     public async Task Production_executor_replay_returns_original_result_without_second_dispatch()
     {
+        var activities = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "AirlineDemo.Api.ModelGateway",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => activities.Add(activity)
+        };
+        ActivitySource.AddActivityListener(listener);
         var fake = new GatewayChatClient();
         using var host = Host(Private, fake);
         var executor = Executor(host);
@@ -193,6 +221,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.Equal(first, replay);
         Assert.Equal(49, replay.TokenUsage);
         Assert.Equal(1, fake.Calls);
+        Assert.Single(activities);
 
         var otherModel = ApprovedModelManifest.Parse("""{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"other-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""");
         var rejected = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -243,6 +272,18 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.Equal("gateway quota exceeded by one unit: total-tokens", over.Record(30, 30));
         Assert.Equal((110L, 50L, 160L, "available"), (over.ExactUsage().InputTokens, over.ExactUsage().OutputTokens,
             over.ExactUsage().TotalTokens, over.ExactUsage().Status));
+
+        var modelCalls = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 1, 3, 1, TimeSpan.FromSeconds(30)));
+        Assert.Null(modelCalls.BeforeCall(100));
+        Assert.Equal("gateway quota exceeded by one unit: model-calls", modelCalls.BeforeCall(100));
+        var toolCalls = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 2, 1, 1, TimeSpan.FromSeconds(30)));
+        Assert.Equal("gateway quota exceeded by one unit: tool-calls", toolCalls.BeforeCall(100, toolCalls: 2));
+        var retries = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        Assert.Equal("gateway quota exceeded by one unit: retries", retries.BeforeCall(100, retries: 2));
+        long ticks = 0;
+        var elapsed = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 2, 3, 1, TimeSpan.FromMilliseconds(10)), () => ticks);
+        ticks = 11;
+        Assert.Equal("gateway quota exceeded by one unit: elapsed-time", elapsed.BeforeCall(100));
     }
 
     [Fact]
