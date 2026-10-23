@@ -14,15 +14,22 @@ import * as THREE from 'three';
 import { createHangarCameraController } from '../src/hangar/cameraController';
 import { HangarCanvasAdapter, applyHangarOwnedCamera, createHangarOwnedPerspectiveCamera, getHangarDemandCanvasProps, createHangarDemandInvalidator } from '../src/hangar/HangarCanvasAdapter';
 import { createHangarSceneMotionControllers, loadHangarScene } from '../src/hangar/entryController';
+import manifest from '../src/hangar/sceneManifest.json';
+import { buildHangarAircraftSceneGroups } from '../src/hangar/sceneBuilder';
 
 vi.mock('@react-three/fiber', async () => {
   const React = await import('react');
   return {
-    Canvas: ({ children, camera }: { children?: unknown; camera?: { position?: number[] | {toArray?:()=>number[]} } }) => React.createElement(
-      'div',
-      { 'data-hangar-rendered-camera-position': Array.isArray(camera?.position) ? camera.position.join(',') : camera?.position?.toArray?.().join(',') ?? '' },
-      children as ReactNode,
-    ),
+    useFrame: () => undefined,
+    Canvas: ({ children, camera }: { children?: unknown; camera?: { position?: number[] | {toArray?:()=>number[]} } }) => {
+      const childList=React.Children.toArray(children as ReactNode);
+      const sceneMounted=childList.some((child:any)=>React.isValidElement(child)&&(child as any).props?.object instanceof THREE.Group);
+      return React.createElement(
+        'div',
+        { 'data-hangar-rendered-camera-position': Array.isArray(camera?.position) ? camera.position.join(',') : camera?.position?.toArray?.().join(',') ?? '', 'data-hangar-scene-mounted': sceneMounted?'true':'false' },
+        children as ReactNode,
+      );
+    },
   };
 });
 
@@ -100,6 +107,18 @@ describe('HangarReducedMotion', () => {
     expect(camera.position.clone().toArray()).toEqual(before.toArray());
     const caseARadius=2*Math.sqrt((22/2)**2+(24/2)**2+(7/2)**2);
     expect(applyHangarOwnedCamera(camera,caseARadius,350,35,{x:-28,y:3.5,z:0})).toBe(true);
+
+    const view={contractVersion:1,cases:[
+      {caseId:'cp-case-a',status:{assessment:'ready'},owner:'A',nextAction:{text:'Review'},capabilityLabel:'Rules-based'},
+      {caseId:'cp-case-b',status:{assessment:'ready'},owner:'B',nextAction:{text:'Request'},capabilityLabel:'AI agent'},
+      {caseId:'cp-case-c',status:{assessment:'ready'},owner:'C',nextAction:null,capabilityLabel:'Simulated'}
+    ]};
+    const scene=buildHangarAircraftSceneGroups(manifest,view)!;
+    expect(scene).toBeInstanceOf(THREE.Group);
+    const MountCanvas=({children}:any)=>createElement('div',{'data-hangar-scene-mounted':'true'},children);
+    const mounted=render(createElement(HangarCanvasAdapter,{sceneGroup:scene,camera,sceneData:view,selection:'A',canvasComponent:MountCanvas,invalidate:vi.fn()}));
+    expect(mounted.container.querySelector('[data-hangar-scene-mounted]')?.getAttribute('data-hangar-scene-mounted')).toBe('true');
+    expect(mounted.container.querySelector('[data-hangar-visible-fallback]')).toBeNull();
   });
 
   it('Hangar demand canvas invalidates only on named changes', () => {

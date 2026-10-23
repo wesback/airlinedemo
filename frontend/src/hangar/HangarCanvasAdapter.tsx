@@ -24,7 +24,7 @@ export function applyHangarOwnedCamera(camera:THREE.PerspectiveCamera|null|undef
 }
 export function getHangarDemandCanvasProps(camera:THREE.PerspectiveCamera){ return {frameloop:'demand'as const,dpr:[1,2] as [number,number],gl:{antialias:true},camera}; }
 
-export type HangarCanvasAdapterProps={sceneGroup?:THREE.Group|null;camera?:THREE.PerspectiveCamera;invalidate?:()=>unknown;sceneData?:unknown;avatar?:unknown;selection?:unknown;route?:unknown;target?:{x:number;y:number;z:number};radius?:number;azimuthDegrees?:number;polarDegrees?:number;canvasComponent?:ComponentType<any>};
+export type HangarCanvasAdapterProps={sceneGroup?:THREE.Group|null;camera?:THREE.PerspectiveCamera;invalidate?:()=>unknown;sceneData?:unknown;avatar?:unknown;selection?:unknown;route?:unknown;target?:{x:number;y:number;z:number};radius?:number;azimuthDegrees?:number;polarDegrees?:number;reducedMotion?:boolean;canvasComponent?:ComponentType<any>};
 export function createHangarDemandInvalidator(invalidate:()=>unknown){
   const values=new Map<string,unknown>(); let easingActive=false; let easingTargetDistance=Infinity;
   const invalidateOnChange=(name:string,value:unknown)=>{if(!Object.is(values.get(name),value)){values.set(name,value);invalidate();return true;}return false;};
@@ -37,11 +37,37 @@ export function createHangarDemandInvalidator(invalidate:()=>unknown){
 }
 export const HangarDemandInvalidator=createHangarDemandInvalidator;
 
-export function HangarCanvasAdapter({sceneGroup,camera,invalidate,sceneData,avatar,selection,route,target,radius,azimuthDegrees,polarDegrees,canvasComponent}:HangarCanvasAdapterProps){
+function HangarDemandFrame({invalidate,camera,target,radius,azimuthDegrees,polarDegrees,reducedMotion}:HangarCanvasAdapterProps){
+  useEffect(()=>{
+    if(reducedMotion||!camera||typeof radius!== 'number'||!Number.isFinite(radius)||radius<=0)return;
+    const desired=getHangarCameraPosition(radius,azimuthDegrees,polarDegrees,target);
+    if(!desired)return;
+    let active=true;
+    const tick=()=>{
+      if(!active)return;
+      const distance=camera.position.distanceTo(desired);
+      if(distance<=0.05)return;
+      const nextX=camera.position.x+(desired.x-camera.position.x)*0.2;
+      const nextY=camera.position.y+(desired.y-camera.position.y)*0.2;
+      const nextZ=camera.position.z+(desired.z-camera.position.z)*0.2;
+      camera.position.x=nextX;camera.position.y=nextY;camera.position.z=nextZ;
+      camera.lookAt(target?.x??0,target?.y??0,target?.z??0);
+      camera.updateProjectionMatrix();
+      invalidate?.();
+      if(typeof requestAnimationFrame==='function')requestAnimationFrame(tick);
+    };
+    if(typeof requestAnimationFrame==='function')requestAnimationFrame(tick);
+    return ()=>{active=false;};
+  },[invalidate,camera,target,radius,azimuthDegrees,polarDegrees,reducedMotion]);
+  return null;
+}
+
+export function HangarCanvasAdapter({sceneGroup,camera,invalidate,sceneData,avatar,selection,route,target,radius,azimuthDegrees,polarDegrees,reducedMotion,canvasComponent}:HangarCanvasAdapterProps){
   const [ownedCamera]=useState(()=>camera ?? createHangarOwnedPerspectiveCamera());
-  useEffect(()=>{if(radius!==undefined&&Number.isFinite(radius)&&radius>0)applyHangarOwnedCamera(ownedCamera,radius,azimuthDegrees,polarDegrees,target)},[ownedCamera,radius,azimuthDegrees,polarDegrees,target]);
+  useEffect(()=>{if(radius!==undefined&&Number.isFinite(radius)&&radius>0&&reducedMotion)applyHangarOwnedCamera(ownedCamera,radius,azimuthDegrees,polarDegrees,target)},[ownedCamera,radius,azimuthDegrees,polarDegrees,target,reducedMotion]);
   useEffect(()=>{invalidate?.()},[invalidate,sceneData,avatar,selection,route,ownedCamera,sceneGroup,radius,target,azimuthDegrees,polarDegrees]);
   if (!canvasComponent) return createElement('canvas',{'aria-label':'3D hangar scene','data-hangar-visible-fallback':'true'});
-  return createElement(canvasComponent,{...getHangarDemandCanvasProps(ownedCamera)},sceneGroup?createElement('primitive',{object:sceneGroup}):createElement('group',{'data-hangar-visible-fallback':'true'}));
+  const frame=createElement(HangarDemandFrame,{camera:ownedCamera,invalidate,target,radius,azimuthDegrees,polarDegrees,reducedMotion});
+  return createElement(canvasComponent,{...getHangarDemandCanvasProps(ownedCamera)},sceneGroup?createElement('primitive',{object:sceneGroup}):createElement('group',{'data-hangar-visible-fallback':'true'}),frame);
 }
 export default HangarCanvasAdapter;
