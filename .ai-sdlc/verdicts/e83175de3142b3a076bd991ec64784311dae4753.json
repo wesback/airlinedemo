@@ -1,0 +1,264 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 592,
+  "branch": "ai-sdlc/issue-592",
+  "commitSha": "e83175de3142b3a076bd991ec64784311dae4753",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The aircraft preset handler moves the camera directly to its target, bypassing normal motion easing. The named camera and demand tests also exercise helpers or the adapter in isolation and leave the required production scene wiring unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 134,
+          "message": "Aircraft presets bypass normal camera easing by applying the target pose immediately. Preserve the current pose for normal motion so the production easing loop can animate to the target.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The aircraft preset handler calls applyHangarOwnedCamera immediately for the owned camera. The demand frame then eases toward the same cameraState radius and target.",
+            "failureScenario": "With normal motion enabled, clicking View Case A moves the camera straight to its target before the easing loop runs. The preset does not animate over the required 480 ms."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 94,
+          "message": "The named camera test does not exercise production scene mounting or verify the required camera and builder group identities, camera look direction, all aircraft presets, and invalid radius cases.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named camera test creates its own camera and builder group, then renders HangarCanvasAdapter directly. It does not render the component returned by loadHangarScene or inspect the production Canvas props and primitive.",
+            "failureScenario": "If loadHangarScene mounts a different group or passes a different camera to Canvas, this test still passes, so the first acceptance criterion is not verified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 126,
+          "message": "The named demand test does not verify the production easing path or each named input change independently, as required by the second acceptance criterion.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named demand test calls createHangarDemandInvalidator directly for idle ticks and easing. It renders HangarCanvasAdapter with a test invalidation callback, but does not render loadHangarScene, capture the production useThree invalidator, or advance a controllable requestAnimationFrame queue. Its rerender changes several adapter inputs together.",
+            "failureScenario": "If production easing fails to invalidate on each animation frame, or a single camera, avatar, selection, route, or scene-data change stops invalidating, these assertions still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff has production camera and demand-rendering changes, but the named tests bypass the production scene paths required by the acceptance criteria. The reduced-motion avatar-target behavior is also absent from the scene.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 99,
+          "message": "The test named for the first acceptance criterion bypasses production scene mounting and omits several required cases, so it cannot catch failures in that criterion’s production wiring.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named camera test creates its own camera and builder group, then renders HangarCanvasAdapter directly. It does not render the component returned by loadHangarScene or observe the production Canvas props and primitive child as the criterion requires.",
+            "failureScenario": "If loadHangarScene passes a different camera or stops mounting the real builder result, this test still passes. It also does not verify the listed Case B/C poses, camera look direction, or invalid-radius cases beyond NaN."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 130,
+          "message": "The test named for the second acceptance criterion does not exercise production invalidation or easing, leaving its required behavior unverified.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The demand-canvas test calls createHangarDemandInvalidator directly for idle ticks and easing. It does not render loadHangarScene, capture the production useThree invalidate callback, advance an injected animation-frame queue, or change each adapter input separately.",
+            "failureScenario": "If the production easing loop fails to invalidate on a frame, fails to stop within 0.05, or one named input change stops invalidating, these helper-only assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 144,
+          "message": "The reduced-motion criterion requires avatar targets to apply immediately, but the production scene removes avatar movement and supplies a fixed avatar position.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The scene no longer renders the temporary avatar mesh or provides a Move avatar action. Its sceneView is built with fixed scene data, and the avatar prop passed to HangarCanvasAdapter is always `{x:0,z:0}`; no avatar target is applied to the builder result.",
+            "failureScenario": "With reduced-motion enabled, choosing an avatar target cannot move the scene avatar immediately because the production scene has no avatar target action or state to apply."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is apparent in the changed application code. The diff does not expose a reachable injection, authorization bypass, credential leak, or path traversal scenario.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

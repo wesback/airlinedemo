@@ -1,0 +1,223 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 592,
+  "branch": "ai-sdlc/issue-592",
+  "commitSha": "25c761dc809e7eefb48d759cc49326d0ac013e57",
+  "round": 1,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Case A keyboard pose issue is fixed. The production canvas still has no connected easing-tick invalidation path, and the named camera test still does not verify the production scene mounting requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 32,
+          "message": "Follow easing invalidation remains disconnected from the production canvas, so easing ticks cannot keep demand rendering active until the target is within 0.05.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "`createHangarDemandInvalidator` is not used by `HangarCanvasAdapter`; `tick()` only returns the count. The production adapter has no easing-tick invalidation path, and `entryController.ts` does not pass it an `invalidate` callback.",
+            "failureScenario": "During a follow transition, camera easing advances without a prop change. The demand-rendered canvas receives no invalidation for that tick and can stop before reaching the target, even though the standalone helper test passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 90,
+          "message": "The named camera test still does not verify production scene mounting of the owned camera and real builder group, as required by the first acceptance criterion.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test constructs a camera and calls `applyHangarOwnedCamera` directly; it does not render `HangarScene` or assert that its Canvas mounts exactly one owned camera and the group returned by the real scene builder.",
+            "failureScenario": "If `HangarScene` stops mounting the builder result or mounts a different group, this test still passes, leaving the first acceptance criterion unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The updated tests cover idle ticks and the helper's easing threshold, but the adapter still does not connect easing ticks to canvas invalidation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 30,
+          "message": "Follow easing invalidation remains disconnected from the canvas. The helper's easing test does not prove that the production adapter invalidates on follow ticks.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "HangarCanvasAdapter invalidates from its prop-change effect, but does not call createHangarDemandInvalidator's easing method or otherwise invalidate on follow ticks. The updated test calls the helper directly, so it does not exercise the adapter's canvas during a follow transition.",
+            "failureScenario": "During a follow transition with no prop changes, easing ticks do not invalidate the demand-rendered canvas, so it can stop rendering before the camera reaches its target."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability is apparent in the reviewed changes. The previously reported demand-rendering defect remains: easing ticks are not wired to production canvas invalidation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 43,
+          "message": "Follow easing still does not invalidate the demand canvas on each tick, so the transition can stop before reaching its target.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The adapter invalidates only when its effect dependencies change. The easing helper is not connected to the adapter or the Canvas, and no per-tick invalidation path is present.",
+            "failureScenario": "During a follow transition, the camera pose changes on easing ticks without a prop change. Demand rendering receives no invalidation for those ticks and can stop before the camera reaches its target."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -1,0 +1,305 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 592,
+  "branch": "ai-sdlc/issue-592",
+  "commitSha": "91da4bc3e2960802c97afa8663107adba6ea6ddb",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change has a reachable demand-rendering defect: rerendering with unchanged inputs still invalidates because scene objects are recreated. The camera and demand tests also leave required acceptance-criterion behaviors able to pass when broken.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 174,
+          "message": "Unchanged scene rerenders still invalidate the demand canvas because sceneView and sceneGroup are recreated on every render. Preserve their identities when their inputs have not changed.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Each HangarScene render creates a new sceneView object and calls buildHangarAircraftSceneGroups again, producing a new sceneGroup. HangarCanvasAdapter's invalidation effect depends on both sceneData and sceneGroup.",
+            "failureScenario": "When the scene rerenders with unchanged camera, avatar, selection, route, and server data, the new object identities retrigger the effect and call invalidate, violating the requirement that unchanged inputs cause zero invalidations."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 115,
+          "message": "The named camera test does not prove all of acceptance criterion 1: incorrect look direction, changed look target on invalid radius, and a missing-group fallback can pass unnoticed.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The camera test records the builder group and Canvas props, but checks only that the mounted group appears somewhere in the recorded groups and that the camera is a PerspectiveCamera. It never checks camera look direction or that invalid radii preserve the look target; it also has no assertion for the missing-group fallback.",
+            "failureScenario": "If applyHangarOwnedCamera stops calling lookAt, or an invalid radius changes the look target while leaving position unchanged, the named test still passes. A missing-group adapter that renders no visible fallback would also pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 153,
+          "message": "The named demand test does not verify several required cases in acceptance criterion 2, including route and scene-data changes, real idle ticks, unchanged rerenders, and easing stopping at 0.05.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The demand test advances at most ten animation callbacks and checks only for at least eight invalidations. Its idle loop merely splices the frame array and invokes no clock callbacks. It does not independently change route or scene data, assert zero invalidations on an unchanged rerender, or verify the exact three-frame and 0.05 stop behavior.",
+            "failureScenario": "If easing invalidates too few or too many times, continues after reaching the threshold, route or scene-data changes stop invalidating, or idle clock ticks invalidate, the named test can still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff misses several required behavioral assertions, and unchanged scene rerenders can trigger unwanted demand-canvas invalidations because object-valued effect dependencies are recreated on each render.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 111,
+          "message": "The test for the first acceptance criterion does not verify camera look direction, preservation of the look target for invalid radii, or the visible fallback when the adapter receives no builder group.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named camera test checks camera positions, builder-group identity, and camera settings, but `look` is only a clone of the position and is never asserted. The invalid-radius cases also check only position, and the test does not exercise the no-group fallback.",
+            "failureScenario": "If `applyHangarOwnedCamera` stops looking at the requested target, or an invalid radius changes the look target while preserving position, the named test still passes despite the first acceptance criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 166,
+          "message": "Unchanged scene rerenders can invalidate the demand canvas because `sceneData` and `target` are recreated on every render.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "`HangarScene` creates a new `sceneView` object on each render and passes it as `sceneData`; it also creates a new target object inline. `HangarCanvasAdapter` invalidates in an effect that depends on both `sceneData` and `target`.",
+            "failureScenario": "When the scene rerenders with unchanged inputs, these new object references change the effect dependencies and trigger `invalidate`, violating the criterion that an unchanged rerender causes zero additional invalidations."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 148,
+          "message": "The demand-canvas test does not cover the required route and scene-data changes, real idle ticks, unchanged rerenders, or easing stop threshold and exact frame counts.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named demand test changes avatar target and selection, but does not independently change route or scene data, does not rerender with unchanged inputs, and its idle loop only calls `frames.splice` without invoking any clock callback. Its easing assertions check at least eight invalidations, not exactly three frames or stopping at distance 0.05.",
+            "failureScenario": "If route or scene-data changes stop invalidating, idle ticks begin invalidating, unchanged rerenders invalidate, or easing continues after reaching the threshold, the named test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 92,
+          "message": "The reduced-motion test checks avatar target state but does not verify that the production scene applies that target to the avatar node immediately.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The system-preference test asserts the `data-hangar-avatar-target` attribute, which is derived from React state. It does not assert the built scene's `Avatar` node position after `HangarCanvasAdapter` applies that state.",
+            "failureScenario": "If the adapter stops moving the scene's Avatar node while the React state and data attribute still update, the named test passes although the avatar target is not applied to the rendered scene."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is apparent in the changed application code. The scene and camera updates do not expose a reachable injection, authorization bypass, credential leak, or path traversal scenario.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -1,0 +1,265 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 592,
+  "branch": "ai-sdlc/issue-592",
+  "commitSha": "a196a23280f58d244e96a10b893e12f64e1b722e",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Case A keyboard path does not preserve the preset camera pose, and the demand invalidator has no easing convergence condition. The named demand-canvas test also does not detect idle-tick invalidations or easing that never stops.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 133,
+          "message": "The Case A keyboard path loses the selected case identifier and uses a radius inconsistent with the aircraft preset. Case A followed by ArrowLeft therefore cannot produce the specified camera pose.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Selecting Case A sets selected to SYN-CP-A-AIR-001. handleCameraKey then reads selected.slice(8, 9), which returns '-', and fails to find the case layout. Even if that lookup were corrected, the aircraft preset applies radius 2R but leaves cameraState at the controller's radius 20; ArrowLeft applies result.state.radius from that controller state to the owned camera.",
+            "failureScenario": "Select Case A, then press ArrowLeft. The camera does not retain the Case A target and radius 2R with azimuth 350 as required; the case lookup fails and the owned camera receives the controller radius instead."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 30,
+          "message": "Follow easing never checks whether the camera is within 0.05 of its target, so its invalidator cannot stop at convergence as required.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "createHangarDemandInvalidator.easing() always calls invalidate and increments count; it receives no current or target pose and has no distance check. The adapter's effect invalidates on prop changes, but the component contains no easing loop that stops once the target is within 0.05.",
+            "failureScenario": "When a caller invokes easing for successive follow ticks after the camera reaches its target, every tick still invalidates. The required stop condition is absent, so rendering does not become idle."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 97,
+          "message": "The named demand-canvas test does not cover the criterion's ten idle ticks or easing convergence, so it passes when either behavior is broken.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named demand-canvas test checks props and that a rerender causes an invalidation. Its loop only clears the mock; it does not call a clock tick or assert zero invalidations for ten idle ticks. It also does not exercise follow easing or its 0.05 stop condition.",
+            "failureScenario": "If idle ticks start invalidating continuously, or easing keeps invalidating after reaching its target, this test still passes. The acceptance criterion's named test therefore does not detect those broken implementations."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Case A keyboard path applies the controller's radius instead of preserving the Case A radius. The named tests also leave the specified easing, idle tick, and production scene mounting behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 140,
+          "message": "Arrow-key navigation replaces the Case A camera radius with the controller's radius of 20, so the required Case A then ArrowLeft pose is incorrect.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "View Case A applies a camera radius of 2R, but the camera controller retains its aircraft preset radius of 20. When ArrowLeft is handled, the code applies result.state.radius to the owned camera.",
+            "failureScenario": "After selecting Case A, pressing ArrowLeft applies radius 20 instead of preserving 2R while changing the azimuth to 350 degrees."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 103,
+          "message": "The demand-canvas test does not exercise idle clock ticks or follow easing, so it cannot verify the criterion's zero-idle-invalidation and within-0.05 behavior.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named demand-canvas test clears the invalidate mock repeatedly without invoking any clock tick or easing operation, then asserts it was not called. It also does not assert invalidation stops when a follow target is within 0.05.",
+            "failureScenario": "If idle ticks continuously invalidate, or easing never invalidates, this test still passes; the acceptance criterion's idle and easing behavior is not verified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 80,
+          "message": "The camera test does not prove that the production Hangar scene mounts exactly one owned camera and the real scene builder result, as required by the first acceptance criterion.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named camera test constructs a camera and checks its properties and pose directly, but never renders HangarScene or asserts that its Canvas mounts exactly one camera and the group returned by the real scene builder.",
+            "failureScenario": "If HangarScene stops mounting the real builder group or mounts a different group, the named camera test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No direct injection, authorization, credential exposure, or other security vulnerability is apparent in the diff. The case keyboard path fails to update the camera, and demand rendering does not invalidate during easing as required.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 137,
+          "message": "The aircraft letter is read from the wrong character position, so keyboard camera navigation after selecting a case does not update the owned camera pose. This breaks the Case A then ArrowLeft acceptance case.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "After a camera key is handled, the selected aircraft letter is read with selected.slice(8, 9), then used to find the aircraft layout before applying the camera pose.",
+            "failureScenario": "Select Case A, then press ArrowLeft. For the ID SYN-CP-A-AIR-001, slice(8, 9) returns '-', so no layout is found and the owned camera stays at its prior pose instead of applying the updated azimuth."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 29,
+          "message": "The required easing-tick invalidation is not implemented. The named test does not exercise easing ticks or ten idle ticks, so it does not cover this behavior criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "createHangarDemandInvalidator returns a tick method that only returns count; HangarCanvasAdapter's effects call invalidate on prop changes but do not use this helper or implement easing ticks.",
+            "failureScenario": "When a follow transition is easing toward its target, no change to the listed props occurs on each easing tick, so the adapter never calls invalidate for those ticks and the demand-rendered canvas can stop before reaching the target."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

@@ -127,6 +127,8 @@ export class HangarAvatarController<T extends { x?: number; z?: number }> {
     this.lastTransition = transition;
     return transition;
   }
+  setTarget(target: T, requestedDuration = 240): HangarTransitionTarget<T> { return this.move(target, requestedDuration); }
+  setAvatarTarget(target: T, requestedDuration = 240): HangarTransitionTarget<T> { return this.move(target, requestedDuration); }
   setOverride(override: HangarReducedMotionOverride): HangarReducedMotionOverride { return this.motion.setOverride(override); }
   clearOverride(): null { return this.motion.clearOverride(); }
 }

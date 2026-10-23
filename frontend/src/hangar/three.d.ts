@@ -1,8 +1,9 @@
 declare module 'three' {
   export type Vector3Tuple = [number, number, number];
-  export class Vector3 { constructor(x?:number,y?:number,z?:number); x:number;y:number;z:number; set(x:number,y:number,z?:number):this; copy(v:Vector3):this; toArray():Vector3Tuple; }
+  export class Vector3 { constructor(x?:number,y?:number,z?:number); x:number;y:number;z:number; set(x:number,y:number,z?:number):this; copy(v:Vector3):this; toArray():Vector3Tuple; clone():Vector3; distanceTo(v:Vector3):number; }
   export class Object3D { name:string; visible:boolean; position:Vector3; scale:Vector3; userData:Record<string,any>; add(...objects:Object3D[]):this; traverse(callback:(object:Object3D)=>void):void; updateMatrixWorld(force?:boolean):void; }
   export class Group extends Object3D { constructor(); }
+  export class PerspectiveCamera { constructor(fov?:number,aspect?:number,near?:number,far?:number); fov:number; near:number; far:number; position:Vector3; lookAt(x:number,y:number,z:number):void; updateProjectionMatrix():void; isPerspectiveCamera:boolean; }
   export class Mesh extends Object3D { constructor(geometry?:any,material?:any); geometry:any; material:any; rotation:{x:number;y:number;z:number}; }
   export class Material { type:string; map:any; visible:boolean; }
   export class MeshStandardMaterial extends Material { constructor(options?:Record<string,any>); color:{getHexString():string}; roughness:number; metalness:number; transparent:boolean; opacity:number; }
