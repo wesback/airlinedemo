@@ -108,6 +108,7 @@ public sealed class ProductionEvaluationArmExecutor(
             $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
             FourArmEvaluationRunner.FrozenV2Sha256,
             $"{arm.ToString().ToLowerInvariant()}-{request.Case.Sha256}");
+        ModelGatewayTokenomics.ValidateCorrelation(correlation);
         if (request.Mode == EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection &&
             _replay.TryReplay(correlation, out var replayed)) return replayed!;
         var modelClient = _chatClient ??= chatClientFactory(manifest);
@@ -118,10 +119,22 @@ public sealed class ProductionEvaluationArmExecutor(
             MaximumBoundedModelCalls, MaximumBoundedToolCalls, 1, TimeSpan.FromSeconds(30)), tokenRates);
         if (request.Mode == EvaluationExecutionMode.BoundedAgent)
         {
-            var bounded = await ExecuteBoundedAgentAsync(request, gatewayClient, cancellationToken);
-            LastGatewayMetrics = gatewayClient.Metrics;
-            _replay.Store(correlation, bounded);
-            return bounded;
+            try
+            {
+                var bounded = await ExecuteBoundedAgentAsync(request, gatewayClient, cancellationToken);
+                LastGatewayMetrics = gatewayClient.Metrics;
+                _replay.Store(correlation, bounded);
+                return bounded;
+            }
+            catch
+            {
+                LastGatewayMetrics = gatewayClient.Metrics ?? new GatewayTokenMetrics(
+                    gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.InputTokens : null,
+                    gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.OutputTokens : null,
+                    gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.TotalTokens : null,
+                    0, 0, 0, false, correlation.ModelConfiguration, null, gatewayClient.Usage);
+                throw;
+            }
         }
         if (request.Mode != EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection)
             throw new ArgumentException("model arm received an unsupported execution mode", nameof(request));
@@ -155,6 +168,11 @@ public sealed class ProductionEvaluationArmExecutor(
         }
         catch (Exception ex)
         {
+            LastGatewayMetrics = gatewayClient.Metrics ?? new GatewayTokenMetrics(
+                gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.InputTokens : null,
+                gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.OutputTokens : null,
+                gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.TotalTokens : null,
+                0, 0, 0, false, correlation.ModelConfiguration, null, gatewayClient.Usage);
             request.Calls.RecordFailure(prompt, ex.Message);
             throw;
         }
@@ -419,8 +437,7 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
                     var started = _timeProvider.GetTimestamp();
                     using var activity = ActivitySource.StartActivity("evaluation.arm");
                     activity?.SetTag("evaluation.arm", arm.ToString());
-                    activity?.SetTag("evaluation.case_id", input.CaseId);
-                    _logger?.LogInformation("Evaluation dispatch {Arm} {CaseId}", arm, input.CaseId);
+                    _logger?.LogInformation("Evaluation dispatch {Arm}", arm);
                     try
                     {
                         var execution = await executor.ExecuteAsync(
@@ -442,8 +459,8 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
-                        _logger?.LogWarning("Evaluation dispatch failed for {Arm} {CaseId}: {ErrorType}",
-                            arm, input.CaseId, ex.GetType().FullName ?? ex.GetType().Name);
+                        _logger?.LogWarning("Evaluation dispatch failed for {Arm}: {ErrorType}",
+                            arm, ex.GetType().FullName ?? ex.GetType().Name);
                         dispatches.Add(new EvaluationDispatch(arm, null, 0, calls.Snapshot(),
                             new EvaluationArmFailure(arm.ToString(), input.CaseId, ex.GetType().FullName ?? ex.GetType().Name))
                         {

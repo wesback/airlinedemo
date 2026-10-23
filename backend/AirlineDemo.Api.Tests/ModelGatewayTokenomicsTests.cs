@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -23,7 +25,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
 
     // The production host startup, with the network edge faked: the chat client factory, or the token credential and HTTP transport.
     private WebApplicationFactory<Program> Host(string endpoint, GatewayChatClient? fake = null, Func<Azure.Core.TokenCredential>? credential = null,
-        HttpMessageHandler? handler = null, string? audience = null) =>
+        HttpMessageHandler? handler = null, string? audience = null, ILoggerProvider? loggerProvider = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -37,6 +39,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
                 if (fake is not null) services.AddSingleton<Func<ApprovedModelManifest, IChatClient>>(_ => _ => fake);
                 if (credential is not null) services.AddSingleton(credential);
                 if (handler is not null) services.AddSingleton(handler);
+                if (loggerProvider is not null) services.AddSingleton<ILoggerProvider>(loggerProvider);
             });
         });
 
@@ -129,17 +132,26 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
 
         var overInput = new GatewayChatClient();
         using var overInputHost = Host(Private, overInput);
-        var inputDenied = await Assert.ThrowsAsync<InvalidOperationException>(() => Executor(overInputHost)
+        var overInputExecutor = Executor(overInputHost);
+        var inputDenied = await Assert.ThrowsAsync<InvalidOperationException>(() => overInputExecutor
             .ExecuteAsync(Request(padding: new string('x', 10_001 - baseBytes)), TestContext.Current.CancellationToken));
         Assert.Equal("gateway quota exceeded by one unit: input-tokens", inputDenied.Message);
         Assert.Equal(0, overInput.Calls);
+        Assert.Null(overInputExecutor.LastGatewayMetrics!.InputTokens);
+        Assert.Null(overInputExecutor.LastGatewayMetrics!.OutputTokens);
+        Assert.Null(overInputExecutor.LastGatewayMetrics!.TotalTokens);
+        Assert.Equal("unavailable", overInputExecutor.LastGatewayMetrics!.Usage.Status);
 
         var overOutput = new GatewayChatClient { OutputTokenCount = 2001, TotalTokenCount = null };
         using var overOutputHost = Host(Private, overOutput);
+        var overOutputExecutor = Executor(overOutputHost);
         var outputDenied = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => Executor(overOutputHost).ExecuteAsync(Request(), TestContext.Current.CancellationToken));
+            () => overOutputExecutor.ExecuteAsync(Request(), TestContext.Current.CancellationToken));
         Assert.Equal("gateway quota exceeded by one unit: output-tokens", outputDenied.Message);
         Assert.Equal(1, overOutput.Calls);
+        var outputMetrics = overOutputExecutor.LastGatewayMetrics!;
+        Assert.Equal((42L, 2001L, 2043L, "available"),
+            (outputMetrics.InputTokens, outputMetrics.OutputTokens, outputMetrics.TotalTokens, outputMetrics.Usage.Status));
     }
 
     [Theory]
@@ -152,12 +164,23 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     [InlineData("connectionstring-1")]
     [InlineData("modelresponse-1")]
     [InlineData("123-45-6789")]
+    [InlineData("123456789")]
+    [InlineData("5551234567")]
     [InlineData("4111111111111111")]
     [InlineData("user@example.test")]
     public async Task Production_executor_rejects_sensitive_correlation_and_keeps_trace_content_private(string caseId)
     {
+        var activities = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name is "AirlineDemo.Api.ModelGateway" or "AirlineDemo.Api.Evaluation",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => activities.Add(activity)
+        };
+        ActivitySource.AddActivityListener(listener);
         var fake = new GatewayChatClient();
-        using var host = Host(Private, fake);
+        var logger = new CapturingLogger();
+        using var host = Host(Private, fake, loggerProvider: new CapturingLoggerProvider(logger));
         var request = Request(caseId);
 
         var error = await Assert.ThrowsAsync<ArgumentException>(() => Executor(host).ExecuteAsync(request, TestContext.Current.CancellationToken));
@@ -166,6 +189,8 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.Equal(0, fake.Calls);
         Assert.Null(fake.LastOptions);
         Assert.DoesNotContain(caseId, error.Message, StringComparison.Ordinal);
+        Assert.Empty(activities);
+        Assert.DoesNotContain(caseId, logger.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -182,17 +207,37 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     [Fact]
     public async Task Production_executor_replay_returns_original_result_without_second_dispatch()
     {
+        var activities = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "AirlineDemo.Api.ModelGateway",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => activities.Add(activity)
+        };
+        ActivitySource.AddActivityListener(listener);
         var fake = new GatewayChatClient();
         using var host = Host(Private, fake);
         var executor = Executor(host);
 
         var first = await executor.ExecuteAsync(Request(), TestContext.Current.CancellationToken);
+        var usageBeforeReplay = (executor.LastGatewayMetrics!.InputTokens, executor.LastGatewayMetrics.OutputTokens,
+            executor.LastGatewayMetrics.TotalTokens, executor.LastGatewayMetrics.ModelCallCount,
+            executor.LastGatewayMetrics.EstimatedCost);
         fake.InputTokenCount = 999; fake.OutputTokenCount = 999;
         var replay = await executor.ExecuteAsync(Request(), TestContext.Current.CancellationToken);
 
+        Assert.Equal(usageBeforeReplay, (executor.LastGatewayMetrics!.InputTokens, executor.LastGatewayMetrics.OutputTokens,
+            executor.LastGatewayMetrics.TotalTokens, executor.LastGatewayMetrics.ModelCallCount,
+            executor.LastGatewayMetrics.EstimatedCost));
         Assert.Equal(first, replay);
         Assert.Equal(49, replay.TokenUsage);
         Assert.Equal(1, fake.Calls);
+        Assert.Equal(first.TokenUsage, replay.TokenUsage);
+        Assert.Equal((42L, 7L, 49L, "available", 0.000105m),
+            (executor.LastGatewayMetrics!.InputTokens, executor.LastGatewayMetrics!.OutputTokens,
+             executor.LastGatewayMetrics!.TotalTokens, executor.LastGatewayMetrics!.Usage.Status,
+             executor.LastGatewayMetrics!.EstimatedCost));
+        Assert.Single(activities);
 
         var otherModel = ApprovedModelManifest.Parse("""{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"other-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""");
         var rejected = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -229,7 +274,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     }
 
     [Fact]
-    public void Quota_boundary_and_over_limit_calls_report_exact_usage_and_reject_result()
+    public async Task Quota_boundary_and_over_limit_calls_report_exact_usage_and_reject_result()
     {
         var quota = new GatewayQuota(100, 50, 140, 2, 3, 1, TimeSpan.FromSeconds(30));
         var governor = new GatewayQuotaGovernor(quota);
@@ -243,6 +288,29 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.Equal("gateway quota exceeded by one unit: total-tokens", over.Record(30, 30));
         Assert.Equal((110L, 50L, 160L, "available"), (over.ExactUsage().InputTokens, over.ExactUsage().OutputTokens,
             over.ExactUsage().TotalTokens, over.ExactUsage().Status));
+
+        var multiFake = new GatewayChatClient { InputTokenCount = 80, OutputTokenCount = 20, TotalTokenCount = 100 };
+        var multi = new GatewayGovernedChatClient(multiFake, Correlation(),
+            new GatewayQuota(100, 50, 120, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        await multi.GetResponseAsync([new ChatMessage(ChatRole.User, "first")]);
+        multiFake.InputTokenCount = 30; multiFake.OutputTokenCount = 30; multiFake.TotalTokenCount = 60;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => multi.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "second")], cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal((110L, 50L, 160L, 2, "available"),
+            (multi.Metrics!.InputTokens, multi.Metrics.OutputTokens, multi.Metrics.TotalTokens,
+             multi.Metrics.ModelCallCount, multi.Metrics.Usage.Status));
+
+        var modelCalls = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 1, 3, 1, TimeSpan.FromSeconds(30)));
+        Assert.Null(modelCalls.BeforeCall(100));
+        Assert.Equal("gateway quota exceeded by one unit: model-calls", modelCalls.BeforeCall(100));
+        var toolCalls = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 2, 1, 1, TimeSpan.FromSeconds(30)));
+        Assert.Equal("gateway quota exceeded by one unit: tool-calls", toolCalls.BeforeCall(100, toolCalls: 2));
+        var retries = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        Assert.Equal("gateway quota exceeded by one unit: retries", retries.BeforeCall(100, retries: 2));
+        long ticks = 0;
+        var elapsed = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 120, 2, 3, 1, TimeSpan.FromMilliseconds(10)), () => ticks);
+        ticks = 11;
+        Assert.Equal("gateway quota exceeded by one unit: elapsed-time", elapsed.BeforeCall(100));
     }
 
     [Fact]
@@ -311,6 +379,24 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         }
         public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext context, CancellationToken cancellationToken) =>
             ValueTask.FromResult(GetToken(context, cancellationToken));
+    }
+
+    private sealed class CapturingLoggerProvider(CapturingLogger logger) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => logger;
+        public void Dispose() { }
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        private readonly List<string> _messages = [];
+        public string Text { get { lock (_messages) return string.Join("\n", _messages); } }
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (_messages) _messages.Add(formatter(state, exception));
+        }
     }
 
     private sealed class CountingHandler(Action onRequest) : HttpMessageHandler

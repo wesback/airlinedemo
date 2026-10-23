@@ -23,7 +23,7 @@ public sealed record GatewayCorrelation(string Arm, string Run, string Package, 
     string SuiteVersion, string CallIdentity)
 {
     private static readonly Regex Identifier = new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant);
-    private static readonly Regex CardNumber = new(@"\d{13,19}", RegexOptions.CultureInvariant);
+    private static readonly Regex CardNumber = new(@"(?:\d{13,19}|\d{10}|\d{3}-\d{2}-\d{4}|\d{9})", RegexOptions.CultureInvariant);
     public IReadOnlyList<string> Validate()
     {
         var values = new (string Name, string Value)[] { (nameof(Arm), Arm), (nameof(Run), Run), (nameof(Package), Package),
@@ -49,8 +49,15 @@ public sealed class GatewayQuotaGovernor
     private long _evaluationTotalTokens;
     private int _modelCalls, _toolCalls, _retries;
     private readonly long _startedTicks;
+    private readonly Func<long> _tick;
 
-    public GatewayQuotaGovernor(GatewayQuota quota) { _quota = quota; _startedTicks = Environment.TickCount64; }
+    public GatewayQuotaGovernor(GatewayQuota quota) : this(quota, () => Environment.TickCount64) { }
+    public GatewayQuotaGovernor(GatewayQuota quota, Func<long> tick)
+    {
+        _quota = quota;
+        _tick = tick;
+        _startedTicks = tick();
+    }
 
     public string? BeforeCall(long estimatedInputTokens, int retries = 0, int toolCalls = 0)
     {
@@ -58,7 +65,7 @@ public sealed class GatewayQuotaGovernor
         if (retries > _quota.MaxRetries) return string.Format(ModelGatewayTokenomics.OverLimit, "retries");
         if (_modelCalls >= _quota.MaxModelCalls) return string.Format(ModelGatewayTokenomics.OverLimit, "model-calls");
         if (_toolCalls + toolCalls > _quota.MaxToolCalls) return string.Format(ModelGatewayTokenomics.OverLimit, "tool-calls");
-        if (Environment.TickCount64 - _startedTicks > (long)_quota.MaxElapsed.TotalMilliseconds) return string.Format(ModelGatewayTokenomics.OverLimit, "elapsed-time");
+        if (_tick() - _startedTicks > (long)_quota.MaxElapsed.TotalMilliseconds) return string.Format(ModelGatewayTokenomics.OverLimit, "elapsed-time");
         _modelCalls++; _toolCalls += toolCalls; _retries += retries;
         return null;
     }
@@ -145,6 +152,7 @@ public sealed class GatewayScopedTokenCredential(TokenCredential inner, string s
 public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelation correlation, GatewayQuota quota,
     GatewayTokenRateSchedule? rates = null) : DelegatingChatClient(inner)
 {
+    private static readonly ActivitySource ActivitySource = new("AirlineDemo.Api.ModelGateway");
     private readonly GatewayQuotaGovernor _governor = new(quota);
     private int _modelCallCount;
     private int _retryCount;
@@ -159,7 +167,16 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
         var prompt = string.Join('\n', messages.Select(message => message.Text));
         var estimatedInput = Encoding.UTF8.GetByteCount(prompt);
         var denial = _governor.BeforeCall(estimatedInput);
-        if (denial is not null) throw new InvalidOperationException(denial);
+        if (denial is not null)
+        {
+            var preCallUsage = _governor.ExactUsage();
+            var preCallCost = rates is null ? null : ModelGatewayTokenomics.EstimateCost(preCallUsage, rates);
+            Metrics = new GatewayTokenMetrics(preCallUsage.Status == "available" ? preCallUsage.InputTokens : null,
+                preCallUsage.Status == "available" ? preCallUsage.OutputTokens : null,
+                preCallUsage.Status == "available" ? preCallUsage.TotalTokens : null, _modelCallCount, _retryCount,
+                0, false, correlation.ModelConfiguration, preCallCost, preCallUsage);
+            throw new InvalidOperationException(denial);
+        }
 
         options ??= new ChatOptions();
         options.ModelId = correlation.ModelConfiguration;
@@ -177,17 +194,29 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
 
         var started = Stopwatch.GetTimestamp();
         _modelCallCount++;
+        using var activity = ActivitySource.StartActivity("model.gateway.dispatch");
+        activity?.SetTag("gateway.arm", correlation.Arm);
+        activity?.SetTag("gateway.run", correlation.Run);
+        activity?.SetTag("gateway.package", correlation.Package);
+        activity?.SetTag("gateway.case", correlation.Case);
+        activity?.SetTag("gateway.modelconfiguration", correlation.ModelConfiguration);
+        activity?.SetTag("gateway.suiteversion", correlation.SuiteVersion);
+        activity?.SetTag("gateway.callidentity", correlation.CallIdentity);
         var response = await base.GetResponseAsync(messages, options, cancellationToken);
         _latencyMilliseconds = (long)(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         var usage = ModelGatewayTokenomics.Usage(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount,
             response.Usage?.TotalTokenCount);
         var denialAfter = _governor.Record(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount);
-        if (denialAfter is not null) throw new InvalidOperationException(denialAfter);
         var throttled = response.AdditionalProperties?.TryGetValue("gateway.throttled", out var throttle) == true &&
                         bool.TryParse(throttle?.ToString(), out var isThrottled) && isThrottled;
         var estimatedCost = rates is null ? null : ModelGatewayTokenomics.EstimateCost(usage, rates);
-        Metrics = new GatewayTokenMetrics(usage.InputTokens, usage.OutputTokens, usage.TotalTokens,
-            _modelCallCount, _retryCount, _latencyMilliseconds, throttled, correlation.ModelConfiguration, estimatedCost, usage);
+        var accumulated = _governor.ExactUsage();
+        var accumulatedCost = rates is null ? null : ModelGatewayTokenomics.EstimateCost(accumulated, rates);
+        Metrics = new GatewayTokenMetrics(accumulated.Status == "available" ? accumulated.InputTokens : null,
+            accumulated.Status == "available" ? accumulated.OutputTokens : null,
+            accumulated.Status == "available" ? accumulated.TotalTokens : null,
+            _modelCallCount, _retryCount, _latencyMilliseconds, throttled, correlation.ModelConfiguration, accumulatedCost, accumulated);
+        if (denialAfter is not null) throw new InvalidOperationException(denialAfter);
         return response;
     }
 
