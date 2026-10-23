@@ -1,0 +1,244 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 586,
+  "branch": "ai-sdlc/issue-586",
+  "commitSha": "9274b69eb66bd54ca193d2973a86d1d20d8f4ca3",
+  "round": 1,
+  "pipelineVersion": "d128747",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The recovery path can return the Hangar to 3D while its global snapshot remains stale and command admission remains disabled.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneRefresh.ts",
+          "line": 44,
+          "message": "An identical same-revision response preserves a stale snapshot as stale. During recovery, unchanged cases therefore remain stale even when another case advances; restore current state only when the refresh has established valid current snapshots for all listed cases.",
+          "confidence": 0.93,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "After a failed refresh, App marks every per-case snapshot stale. On the later refresh, an unchanged-revision envelope with identical content returns the previous snapshot unchanged, including current:false. App then sets the view to 3D even if another case's snapshot remains stale.",
+            "failureScenario": "With cases A, B, and C stale after a failed refresh, a retry returns revision 9 for A and unchanged revision 7 for B and C. A becomes current, but B and C remain stale; the global snapshot ends on C, so command admission stays disabled while the app returns to 3D. This fails the criterion that a later valid higher-revision refresh restores current state."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added overlap test addresses the prior missing App-level regression test, and entry failures now cover invalid list versions and denied scene reads. The required absent and unsupported scene-envelope fallback cases and the retained revision 8 assertion remain unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 81,
+          "message": "Add App-host cases for an absent scene envelope and an envelope with an unsupported contract version, asserting the required contract_invalid fallback and zero canvas mounts.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The App entry test covers invalid case-list versions and 403/500 scene responses, but does not pass an absent scene envelope or an envelope with an unsupported contract version through the App host.",
+            "failureScenario": "If App handles an absent or unsupported scene envelope with the wrong fallback or mounts a canvas, these tests still pass. The first acceptance criterion requires those inputs to produce contract_invalid, the non-3D list, and zero canvas mounts."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 150,
+          "message": "Assert that the stale state retains revision 8 and its labels after the lower revision response; the current overlap test checks fallback and mutation denial but not the retained snapshot.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The overlap test resolves revision 8 and then revision 7, and checks for a refresh failure and denied selection, but never asserts that the stale retained snapshot is revision 8.",
+            "failureScenario": "If the failure path retains revision 7 instead of revision 8, the fallback and mutation assertions still pass; the later revision 9 can also restore current state. The second acceptance criterion's required retained revision is therefore unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no concrete security vulnerability in the changed code. The previously reported entry-test gap remains for unsupported scene envelopes.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 82,
+          "message": "The previously reported entry failure-case gap remains: add an App-host case for an absent or unsupported scene envelope and assert contract_invalid fallback with zero canvas mounts.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The invalid-entry test covers missing or unsupported case-list versions and 403/500 scene reads, but never returns a successful scene response with an absent or unsupported envelope contract.",
+            "failureScenario": "If entry stops rejecting a scene envelope with contractVersion 2 and mounts the canvas, the changed tests still pass; the acceptance criterion requires contract_invalid fallback and zero canvas mounts for that input."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarEntry.test.ts",
+      "frontend/tests/HangarGuideLine.test.tsx",
+      "frontend/tests/HangarSceneRefresh.test.ts",
+      "frontend/tests/hangarAppHarness.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
