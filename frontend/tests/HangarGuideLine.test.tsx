@@ -156,6 +156,11 @@ describe('Hangar guide line',()=>{
     const productionWalk=screen.getByRole('region',{name:'Walk region'});
     fireEvent.keyDown(productionWalk,{key:'ArrowRight'});
     expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeWalk);
+    const requestsBeforeRefused=vi.mocked(fetch).mock.calls.length;
+    const diagnosticsBeforeRefused=diagnosticsCalls();
+    for(let i=0;i<20;i+=1)fireEvent.keyDown(productionWalk,{key:'ArrowLeft'});
+    expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeRefused);
+    expect(diagnosticsCalls()).toBe(diagnosticsBeforeRefused);
     fireEvent.keyDown(productionWalk,{key:'Escape'});
     expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeWalk);
     expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('');

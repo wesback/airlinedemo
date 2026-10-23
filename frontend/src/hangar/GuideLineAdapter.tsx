@@ -78,7 +78,10 @@ export function HangarGuideLineAdapter({ config = {}, marker, aircraftId = 'sele
     if (!isHangarWalkStepAllowed(current, next, config)) { setState(controller.step(false, current)); event.preventDefault(); return; }
     setPosition(next); setState(controller.acceptedStep(next)); event.preventDefault();
   };
-  return createElement('section', { 'data-hangar-guide-line': 'true', 'data-static-line': staticLine ? 'true' : 'false', onKeyDown: entries ? key : undefined },
+  return createElement('section', { 'data-hangar-guide-line': 'true', 'data-static-line': staticLine ? 'true' : 'false', onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('[data-hangar-walk-region]')) key(event);
+    } },
     entries ? createElement(HangarRackMenu, { entries, onConfirm: confirmEntry, onClose: closeMenu, closeMenu, onMenuClose: onMenuClose, transport, walkRegionLabel }) : null,
     staticLine && state.route.length ? createElement('span', { 'aria-hidden': true, 'data-hangar-static-guide': true }) : null,
     !entries ? createElement('section', { 'data-hangar-walk-region': true, tabIndex: 0, 'aria-label': walkRegionLabel, onKeyDown: key }, 'Hangar walk region') : null,
