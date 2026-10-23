@@ -1,0 +1,229 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 595,
+  "branch": "ai-sdlc/issue-595",
+  "commitSha": "7a1fc6ed6868affc51c1869bd762830658ef9880",
+  "round": 2,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The refresh result can update the adapter's local scene view, but it is not propagated to an open selection panel.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 128,
+          "message": "A successful refresh still does not update an open selection panel, leaving the first acceptance criterion unmet.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "A successful refresh stores the rebuilt view in the adapter's local refreshedView state. The adapter does not pass that view to HangarSelectionEvidence, and the production App call does not provide onRefresh to connect the refreshed result to the open panel.",
+            "failureScenario": "When a focus refresh returns a higher revision with changed next-action text while a selection panel is open, the canvas label can update but the panel continues showing its old text."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production caller now initiates a focus refresh, but the refreshed scene is not propagated to the label or selection panel. The adapter-level test does not exercise this production configuration.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 433,
+          "message": "The production focus refresh still does not apply the refreshed scene to labels or an open selection panel, leaving the first acceptance criterion unmet.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The production scene is given externalRefresh=true, so HangarCanvasAdapter skips its refresh handler. App's focus handler refreshes hangarSnapshot, but the scene receives only that snapshot; the refreshed scene envelope is not passed to the label builder or an open selection panel. HangarSelectionEvidence also has no production usage.",
+            "failureScenario": "When focus returns after the server changes the next-action text, App fetches the new snapshot, but the rendered label and any open selection panel continue showing the old scene data. The adapter test misses this because it renders the adapter directly without externalRefresh=true."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production focus refresh now runs, but its fetched scene is not connected to the label builder. A higher-revision server response can leave the displayed aircraft label stale.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 433,
+          "message": "The production refresh still does not rebuild aircraft labels from the fetched server scene. The App refresh updates snapshot state, while the adapter receives no refreshed scene view, so the required label refresh remains unmet.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The production scene receives externalRefresh=true, so HangarCanvasAdapter skips its own refresh handler. App's focus refresh updates the snapshot prop, but the adapter's rendered scene data still comes from the unchanged sceneData or its locally generated sceneView; the fetched envelope is never passed to the label builder.",
+            "failureScenario": "After the server changes a case's next-action text, a focus refresh fetches the new envelope and updates hangarSnapshot, but the aircraft label still displays the old text. The higher-revision refresh therefore does not update the production label as required."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSceneRefresh.test.ts",
+      "frontend/tests/HangarSelectionEvidence.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
