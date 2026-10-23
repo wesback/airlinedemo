@@ -1,11 +1,13 @@
 import { createElement } from 'react';
-import hangarProvenance from '../assets/hangar/hangar-provenance.json';
 import { HANGAR_ASSET_INVALID } from './assetPolicy';
-import { loadValidatedHangarAsset } from './hangarAssetLoader';
 import { validateHangarAircraftDescriptor } from './sceneDescriptor';
-import { computeHangarAssetChecksum } from './assetPolicy';
 export type HangarAircraftAsset='aircraft-a'|'aircraft-b'|'aircraft-c';
-export function loadHangarAircraftAsset<T>(asset:HangarAircraftAsset,bytes:unknown,options:{loader:(bytes:Uint8Array)=>T;onFallback:(reason:typeof HANGAR_ASSET_INVALID)=>void;aggregateBytes:number;resource?:unknown;provenance?:unknown}){const descriptor=validateHangarAircraftDescriptor();if(!descriptor.valid){options.onFallback(HANGAR_ASSET_INVALID);return{loaded:false as const,reason:HANGAR_ASSET_INVALID};}const suffix=asset.endsWith('-a')?'a':asset.endsWith('-b')?'b':'c',path=`assets/hangar/aircraft-${suffix}.glb`;const canonical=(hangarProvenance.assets as any[]).find(r=>r.path===path);if(!canonical){options.onFallback(HANGAR_ASSET_INVALID);return{loaded:false as const,reason:HANGAR_ASSET_INVALID};}const supplied=options.provenance;if(!supplied||typeof supplied!== 'object'||Array.isArray(supplied)){options.onFallback(HANGAR_ASSET_INVALID);return{loaded:false as const,reason:HANGAR_ASSET_INVALID};}const provenance=supplied as Record<string,unknown>;if(provenance.path!==path||provenance.synthetic!==true||provenance.realAircraftType!==false||provenance.brandMarks!==false||provenance.type!== 'model'||provenance.illustrativeCategory!==canonical.illustrativeCategory||provenance.aircraft!==true||typeof provenance.syntheticMarkerDeclaration!== 'string'||!provenance.syntheticMarkerDeclaration.includes('Synthetic')||provenance.checksum!==canonical.checksum||typeof canonical.checksum!== 'string'||provenance.source!==canonical.source||provenance.author!==canonical.author||provenance.rightsBasis!==canonical.rightsBasis||provenance.rightsDeclaration!==canonical.rightsDeclaration||provenance.syntheticMarker!==canonical.syntheticMarker||provenance.sizeBytes!==canonical.sizeBytes||!(bytes instanceof Uint8Array)||computeHangarAssetChecksum(bytes)!==canonical.checksum||bytes.length!==canonical.sizeBytes){options.onFallback(HANGAR_ASSET_INVALID);return{loaded:false as const,reason:HANGAR_ASSET_INVALID};}return loadValidatedHangarAsset(bytes,{...options,resource:options.resource??{path,type:'model'},provenance:{...canonical,assetBytes:bytes}});}
+export function loadHangarAircraftAsset<T>(_asset:HangarAircraftAsset,_bytes:unknown,options:{loader:(bytes:Uint8Array)=>T;onFallback:(reason:typeof HANGAR_ASSET_INVALID)=>void;aggregateBytes:number;resource?:unknown;provenance?:unknown}){
+  if(!validateHangarAircraftDescriptor().valid){options.onFallback(HANGAR_ASSET_INVALID);return {loaded:false as const,reason:HANGAR_ASSET_INVALID};}
+  options.onFallback(HANGAR_ASSET_INVALID);
+  return {loaded:false as const,reason:HANGAR_ASSET_INVALID};
+}
 export const loadAircraftAsset = loadHangarAircraftAsset;
 export const loadAircraftHangarAsset = loadHangarAircraftAsset;
-export function HangarCanvasAdapter(){return createElement('div',{'data-hangar-canvas':'admitted'});}export default HangarCanvasAdapter;
+export function HangarCanvasAdapter(){return createElement('div',{'data-hangar-canvas':'admitted'});}
+export default HangarCanvasAdapter;

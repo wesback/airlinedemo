@@ -1,3 +1,4 @@
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   HANGAR_ASSET_INVALID,
@@ -15,7 +16,7 @@ const assetBytes = bytesOf('synthetic hangar asset');
 const otherBytes = bytesOf('different hangar asset');
 
 const grant = (overrides: Record<string, unknown> = {}) => ({
-  path: 'assets/hangar/aircraft.glb', source: 'Project design pack', author: 'Hangar team',
+  path: 'assets/hangar/synthetic-a.bin', source: 'Project design pack', author: 'Hangar team',
   rightsBasis: 'Project-authored', rightsDeclaration: 'Approved project-authored asset declaration',
   checksum: computeHangarAssetChecksum(assetBytes), assetBytes, synthetic: true, type: 'model', ...overrides,
 });
@@ -74,10 +75,23 @@ describe('Hangar asset policy', () => {
     }
   });
 
+  it('hangar release asset declarations contain no GLB or texture records', () => {
+    const dir = 'src/assets/hangar';
+    const files = readdirSync(dir);
+    expect(files.filter(file => /\.(glb|gltf|ktx2|basis)$/i.test(file))).toEqual([]);
+    const provenance = JSON.parse(readFileSync(`${dir}/hangar-provenance.json`, 'utf8'));
+    expect(provenance.assets).toEqual([]);
+    const manifest = JSON.parse(readFileSync('src/hangar/sceneManifest.json', 'utf8'));
+    for (const model of manifest.aircraft.models) {
+      expect(model.path).toBeUndefined(); expect(model.type).toBeUndefined();
+      expect(model.synthetic).toBe(true); expect(model.realAircraftType).toBe(false); expect(model.brandMarks).toBe(false);
+    }
+  });
+
   it('rejects real identity and missing synthetic rack or avatar markers', () => {
-    const rack = (overrides: Record<string, unknown> = {}) => grant({ path: 'assets/hangar/rack.glb', rack: true, syntheticMarkerDeclaration: 'Synthetic rack; no brand', ...overrides });
+    const rack = (overrides: Record<string, unknown> = {}) => grant({ path: 'assets/hangar/rack.bin', rack: true, syntheticMarkerDeclaration: 'Synthetic rack; no brand', ...overrides });
     const avatar = (overrides: Record<string, unknown> = {}) => grant({
-      path: 'assets/hangar/avatar.glb', avatar: true, syntheticMarkerDeclaration: 'Synthetic avatar; no real person',
+      path: 'assets/hangar/avatar.bin', avatar: true, syntheticMarkerDeclaration: 'Synthetic avatar; no real person',
       hardHatNode: 'HardHat', manifestHardHatNode: 'HardHat', ...overrides,
     });
     expect(check(rack())).toEqual({ valid: true });

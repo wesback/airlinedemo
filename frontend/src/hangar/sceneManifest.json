@@ -2,8 +2,6 @@
   "contractVersion": 1,
   "packVersion": "0.4.0",
   "rack": {
-    "path": "assets/hangar/rack.glb",
-    "type": "model",
     "units": [
       {
         "node": "RackUnitTechnical",
@@ -25,11 +23,13 @@
         "node": "RackUnitContracts",
         "source": "contracts"
       }
-    ]
+    ],
+    "synthetic": true,
+    "realPerson": false,
+    "realAircraftType": false,
+    "brandMarks": false
   },
   "avatar": {
-    "path": "assets/hangar/avatar.glb",
-    "type": "model",
     "hardHat": {
       "node": "HardHat",
       "color": "#FFD400"
@@ -39,12 +39,9 @@
     "brandMarks": false
   },
   "aircraft": {
-    "pathPrefix": "assets/hangar/aircraft-",
-    "type": "model",
     "models": [
       {
         "caseId": "cp-case-a",
-        "path": "assets/hangar/aircraft-a.glb",
         "category": "narrow-body",
         "synthetic": true,
         "realAircraftType": false,
@@ -64,7 +61,6 @@
       },
       {
         "caseId": "cp-case-b",
-        "path": "assets/hangar/aircraft-b.glb",
         "category": "regional",
         "synthetic": true,
         "realAircraftType": false,
@@ -84,7 +80,6 @@
       },
       {
         "caseId": "cp-case-c",
-        "path": "assets/hangar/aircraft-c.glb",
         "category": "wide-body",
         "synthetic": true,
         "realAircraftType": false,
