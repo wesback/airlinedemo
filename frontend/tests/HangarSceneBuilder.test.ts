@@ -47,14 +47,25 @@ describe('Hangar scene builder', () => {
     expect([...new Set(meshIds)].sort()).toEqual([...manifest.objectIds].sort());
     expect(new Set(meshIds).size).toBe(12);
     expect(meshIds).toHaveLength(12);
-    for (const [letter, suffixes] of [['A',['AIR-001','ENG-001','CMP-001','CMP-002']],['B',['AIR-001','ENG-001','CMP-001','CMP-002']],['C',['AIR-001','ENG-001','CMP-001','CMP-002']]] as const) {
-      const intended = [`SYN-CP-${letter}-${suffixes[0]}`, `SYN-CP-${letter}-${suffixes[1]}`, `SYN-CP-${letter}-${suffixes[2]}`, `SYN-CP-${letter}-${suffixes[3]}`];
-      for (const id of intended) {
-        let matches = 0; root.traverse(o => { if (typeof o.userData.objectId === 'string' && o.userData.objectId === id) { matches++; expect(o.userData.selectionHandler).toBe(handler); } });
-        expect(matches).toBeGreaterThanOrEqual(1);
-      }
+    const exactMeshIds = new Map<string, string>();
+    root.traverse(o => {
+      if (o instanceof THREE.Mesh && typeof o.userData.objectId === 'string') exactMeshIds.set(o.name, o.userData.objectId);
+    });
+    const expectedMeshIds = new Map<string, string>();
+    for (const letter of ['A', 'B', 'C'] as const) {
+      expectedMeshIds.set(`Aircraft${letter}Fuselage`, `SYN-CP-${letter}-AIR-001`);
+      expectedMeshIds.set(`Engine${letter}Visible`, `SYN-CP-${letter}-ENG-001`);
+      expectedMeshIds.set(`Component${letter}1Visible`, `SYN-CP-${letter}-CMP-001`);
+      expectedMeshIds.set(`Component${letter}2Visible`, `SYN-CP-${letter}-CMP-002`);
     }
-    for (const name of ['Floor','PartsStandBase','AircraftAWingLeft','AircraftBWingLeft','AircraftCWingLeft','GroundShadowA','GroundShadowB','GroundShadowC','EngineAPickSphere','EngineBPickSphere','EngineCPickSphere','ComponentA1PickSphere','ComponentA2PickSphere','ComponentB1PickSphere','ComponentB2PickSphere','ComponentC1PickSphere','ComponentC2PickSphere']) {
+    expect(Object.fromEntries(exactMeshIds)).toEqual(Object.fromEntries(expectedMeshIds));
+    for (const [name, id] of expectedMeshIds) {
+      const object = traverse(root, name)!;
+      expect(object).toBeInstanceOf(THREE.Mesh);
+      expect(object.userData.objectId).toBe(id);
+      expect(object.userData.selectionHandler).toBe(handler);
+    }
+    for (const name of ['Floor','PartsStandBase','AircraftAWingLeft','AircraftAWingRight','AircraftBWingLeft','AircraftBWingRight','AircraftCWingLeft','AircraftCWingRight','GroundShadowA','GroundShadowB','GroundShadowC','EngineAPickSphere','EngineBPickSphere','EngineCPickSphere','ComponentA1PickSphere','ComponentA2PickSphere','ComponentB1PickSphere','ComponentB2PickSphere','ComponentC1PickSphere','ComponentC2PickSphere']) {
       const object = traverse(root, name)!; expect(object).toBeInstanceOf(THREE.Object3D); expect(object.userData.objectId).toBeUndefined();
     }
     const duplicate = clone(); duplicate.objectIds[1] = duplicate.objectIds[2];
