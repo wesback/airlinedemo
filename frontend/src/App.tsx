@@ -7,6 +7,8 @@ import HangarLocalDiagnostics from './hangar/localDiagnostics';
 import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
+import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
+import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -51,21 +53,28 @@ export default function App({
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
   const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
+  const [hangarEntries, setHangarEntries] = useState<Array<{caseId:string;name:string;category:string;unavailable:boolean;sources:null}>>([
+    { caseId: 'cp-case-a', name: 'Case A', category: 'narrow-body', unavailable: false, sources: null },
+    { caseId: 'cp-case-b', name: 'Case B', category: 'regional', unavailable: false, sources: null },
+    { caseId: 'cp-case-c', name: 'Case C', category: 'wide-body', unavailable: false, sources: null },
+  ]);
+  const [hangarSnapshot, setHangarSnapshot] = useState<ServerSceneSnapshot|null>(null);
+  const [hangarCaseSnapshots, setHangarCaseSnapshots] = useState<Record<string, ServerSceneSnapshot>>({});
+  const hangarSnapshotRef = useRef<ServerSceneSnapshot|null>(null);
+  const hangarCaseSnapshotsRef = useRef<Record<string, ServerSceneSnapshot>>({});
+  const hangarRefreshQueue = useRef<Promise<void>>(Promise.resolve());
+  const [hangarStale, setHangarStale] = useState(false);
   const HangarSceneRef = useRef<ComponentType<HangarSceneProps> | null>(null);
   const [hangarActionMessage, setHangarActionMessage] = useState('');
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
   const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
-  const hangarDataRoomEntries = [
-    { caseId: 'AIR-1', name: 'Air One', category: 'narrow-body', unavailable: false, sources: null },
-    { caseId: 'AIR-2', name: 'Air Two', category: 'wide-body', unavailable: false, sources: null },
-  ];
-  const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = {
-    'AIR-1': { x: 4, z: -4 },
-    'AIR-2': { x: -4, z: 4 },
-  };
+  const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = Object.fromEntries(hangarEntries.map((entry, index) => [entry.caseId, index === 0 ? { x: 4, z: -4 } : index === 1 ? { x: -4, z: 4 } : { x: 0, z: 6 }]));
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
-    hangarAircraftSelectionHandler?.(aircraftId);
+    if (!canAdmitHangarCommands(hangarSnapshot)) return;
+    const serverIndex = hangarEntries.findIndex((entry) => entry.caseId === aircraftId);
+    const selectionId = serverIndex >= 0 ? `AIR-${serverIndex + 1}` : aircraftId;
+    hangarAircraftSelectionHandler?.(selectionId);
   };
 
   function setHangarMotionOverride(enabled: boolean) {
@@ -107,11 +116,126 @@ export default function App({
     }[action]);
   }
 
+  function refreshHangarSnapshot() {
+    hangarRefreshQueue.current = hangarRefreshQueue.current.then(async () => {
+      setHangarStale(false);
+      try {
+        const cases = hangarEntries;
+        const nextCaseSnapshots = { ...hangarCaseSnapshotsRef.current };
+        let nextSnapshot = hangarSnapshotRef.current;
+        for (const entry of cases) {
+          const response = await fetch(`/api/v1/cases/${encodeURIComponent(entry.caseId)}/scene`);
+          if (!response.ok) throw new Error('refresh_failed');
+          const envelope = await response.json();
+          const envelopeCase = typeof envelope === 'object' && envelope !== null ? (envelope as Record<string,unknown>).case : null;
+          const envelopeCaseId = typeof envelopeCase === 'object' && envelopeCase !== null ? (envelopeCase as Record<string,unknown>).caseId : null;
+          if (envelopeCaseId !== entry.caseId) throw new Error('refresh_failed');
+          const result = await refreshHangarScene(() => envelope, nextCaseSnapshots[entry.caseId] ?? hangarSnapshotRef.current);
+          if (!result.valid || !result.snapshot) throw new Error('refresh_failed');
+          nextCaseSnapshots[entry.caseId] = result.snapshot;
+          if (!nextSnapshot?.revision || (result.snapshot.revision ?? -1) >= (nextSnapshot.revision ?? -1)) nextSnapshot = result.snapshot;
+        }
+        if (!cases.length) throw new Error('refresh_failed');
+        const recoveredCaseSnapshots = Object.fromEntries(Object.entries(nextCaseSnapshots).map(([caseId, snapshot]) => [caseId,{...snapshot,current:true,fallbackReason:null}]));
+        const recoveredSnapshot = Object.values(recoveredCaseSnapshots).reduce<ServerSceneSnapshot|null>((highest, snapshot) => !highest || (snapshot.revision ?? -1) > (highest.revision ?? -1) ? snapshot : highest, nextSnapshot);
+        hangarCaseSnapshotsRef.current = recoveredCaseSnapshots;
+        hangarSnapshotRef.current = recoveredSnapshot;
+        setHangarCaseSnapshots(recoveredCaseSnapshots);
+        setHangarSnapshot(recoveredSnapshot);
+        setHangarStale(false);
+        setHangarView('3d');
+        setHangarSceneLoaded(true);
+      } catch {
+        const staleCases: Record<string, ServerSceneSnapshot> = Object.fromEntries(Object.entries(hangarCaseSnapshotsRef.current).map(([caseId, snapshot]) => [caseId, {...snapshot,current:false,fallbackReason:'refresh_failed' as const}]));
+        const result = await refreshHangarScene(() => { throw new Error('refresh_failed'); }, hangarSnapshotRef.current);
+        const retained = Object.values(staleCases).reduce<ServerSceneSnapshot|null>((highest, snapshot) => !highest || (snapshot.revision ?? -1) >= (highest.revision ?? -1) ? snapshot : highest, hangarSnapshotRef.current);
+        const retainedStale = retained ? {...retained,current:false,fallbackReason:'refresh_failed' as const} : null;
+        hangarCaseSnapshotsRef.current = staleCases;
+        hangarSnapshotRef.current = retainedStale;
+        setHangarCaseSnapshots(staleCases);
+        setHangarSnapshot(retainedStale);
+        setHangarStale(true);
+        setHangarView('fallback');
+        setHangarFallback('refresh_failed');
+        setHangarDiagnostics((current) => ({ ...current, fallbackReason: 'refresh_failed' }));
+      }
+    });
+  }
+
+  useEffect(() => {
+    if (hangarView !== '3d') return;
+    const onFocus = () => { void refreshHangarSnapshot(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [hangarView, hangarEntries, hangarSnapshot]);
+
   async function enterHangar() {
     const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     setHangarView('loading');
     setHangarSceneLoaded(false);
     HangarSceneRef.current = null;
+    try {
+      const listResponse = await fetch('/api/v1/cases');
+      if (!listResponse.ok) throw new Error('refresh_failed');
+      const list = await listResponse.json() as Record<string,unknown>;
+      if (list.contractVersion !== 1 || !Array.isArray(list.cases)) throw {fallback:'contract_invalid'};
+      const cases = list.cases as Array<Record<string,unknown>>;
+      const envelopes: unknown[] = [];
+      for (const entry of cases) {
+        const caseId = typeof entry.caseId === 'string' ? entry.caseId : '';
+        if (!caseId) throw {fallback:'contract_invalid'};
+        const sceneResponse = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}/scene`);
+        if (sceneResponse.status === 403 || sceneResponse.status === 500) throw {fallback:'refresh_failed'};
+        if (!sceneResponse.ok) throw {fallback:'refresh_failed'};
+        let envelope: unknown;
+        try { envelope = await sceneResponse.json(); } catch { throw {fallback:'contract_invalid'}; }
+        envelopes.push(envelope);
+      }
+      for (const envelope of envelopes) {
+        const validated = validateHangarSceneEnvelope(envelope);
+        if (!validated.valid) throw {fallback:'contract_invalid'};
+      }
+      const entries = envelopes.map((envelope, index) => {
+        const scene = envelope as Record<string,unknown>;
+        const c = typeof scene.case === 'object' && scene.case !== null ? scene.case as Record<string,unknown> : {};
+        const listedId = typeof cases[index]?.caseId === 'string' ? cases[index].caseId as string : '';
+        const envelopeId = typeof c.caseId === 'string' ? c.caseId : '';
+        if (!listedId || envelopeId !== listedId) throw {fallback:'contract_invalid'};
+        return {
+          caseId: listedId,
+          name: typeof c.name === 'string' ? c.name : (typeof c.aircraftName === 'string' ? c.aircraftName : ''),
+          category: typeof c.aircraftCategory === 'string' ? c.aircraftCategory : '',
+          unavailable: false,
+          sources: null,
+        };
+      }).filter((entry) => entry.caseId && entry.name && entry.category);
+      setHangarEntries(entries);
+      const initialCaseSnapshots: Record<string, ServerSceneSnapshot> = {};
+      let latestSnapshot: ServerSceneSnapshot | null = hangarSnapshot;
+      for (let index = 0; index < envelopes.length; index += 1) {
+        const snapshot = snapshotFromServer(envelopes[index]);
+        if (!snapshot) throw {fallback:'contract_invalid'};
+        const caseId = typeof cases[index]?.caseId === 'string' ? cases[index].caseId as string : '';
+        initialCaseSnapshots[caseId] = snapshot;
+        latestSnapshot = snapshot;
+      }
+      hangarCaseSnapshotsRef.current = initialCaseSnapshots;
+      hangarSnapshotRef.current = latestSnapshot;
+      setHangarCaseSnapshots(initialCaseSnapshots);
+      if (latestSnapshot) setHangarSnapshot(latestSnapshot);
+      setHangarStale(false);
+    } catch (error) {
+      const fallback = typeof error === 'object' && error !== null && 'fallback' in error
+        ? String((error as {fallback:unknown}).fallback) : 'refresh_failed';
+      if (fallback === 'contract_invalid') {
+        setHangarView('contract-error');
+        return;
+      }
+      setHangarFallback('refresh_failed');
+      setHangarView('fallback');
+      setHangarDiagnostics((current) => ({ ...current, fallbackReason: 'refresh_failed' }));
+      return;
+    }
     const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene, createHangarSceneMotionControllers } = await import('./hangar/entryController');
     const browserSupported = hangarBrowserSupported !== undefined
       ? isHangarBrowserSupported(hangarBrowserSupported)
@@ -271,15 +395,17 @@ export default function App({
               {hangarView !== 'regular' && hangarView !== 'loading' && (
                 <section aria-labelledby="hangar-heading">
                   <h2 id="hangar-heading">Hangar</h2>
+                  {hangarSnapshot && <p aria-label="Hangar retained snapshot">Revision: {hangarSnapshot.revision}; Labels: {String(hangarSnapshot.owner)}; {String(hangarSnapshot.capabilityLabel)}</p>}
                   <HangarLocalDiagnostics
                     session={session}
                     {...hangarDiagnostics}
                   />
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
+                      <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
                       {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} /> : <canvas aria-label="3D hangar scene" />}
                       <HangarGuideLineAdapter
-                        entries={hangarDataRoomEntries}
+                        entries={hangarEntries}
                         markers={hangarDataRoomMarkers}
                         avatar={{ x: 0, z: 0 }}
                         config={{
@@ -301,8 +427,13 @@ export default function App({
                   )}
                   {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'
                     ? 'Your browser is not supported. Use the current or previous major version of Chrome or Edge.'
-                    : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
-                  {hangarView === 'contract-error' && <p role="alert">Unsupported hangar contract version {String(hangarContractVersion)}. <a href="#non-3d-list">Use the supported contract version in the non-3D list.</a></p>}
+                    : hangarFallback === 'refresh_failed'
+                      ? 'Hangar refresh failed. Use the non-3D list.'
+                      : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
+                  {hangarView === 'contract-error' && <p role="alert">Invalid hangar scene contract. <a href="#non-3d-list">Use the supported contract version in the non-3D list.</a></p>}
+                  {(hangarView === 'fallback' || hangarView === 'contract-error') && (
+                    hangarView === 'fallback' && <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
+                  )}
                   {(hangarView === 'fallback' || hangarView === 'contract-error') && (
                     <section id="non-3d-list" aria-labelledby="non-3d-heading">
                       <h3 id="non-3d-heading">Non-3D hangar</h3>

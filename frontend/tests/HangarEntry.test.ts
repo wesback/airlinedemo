@@ -21,10 +21,10 @@ const HangarApp = App as ComponentType<HangarEntryAppProps>;
 
 describe('HangarEntry', () => {
   it('HangarEntry rejects unsupported browser and missing WebGL', () => {
-    expect(getHangarEntryDecision({ browserSupported: false, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
-    expect(getHangarEntryDecision({ browserSupported: true, webgl2: null }).fallbackReason).toBe('webgl_unavailable');
-    expect(getHangarEntryDecision({ browserSupported: false, webgl2: null })).toMatchObject({ mode: 'fallback', fallbackReason: 'unsupported_browser' });
-    expect(getHangarEntryDecision({ browserSupported: true, webgl2: { webgl2: true }, webgl2Probe: null }).fallbackReason).toBe('webgl_unavailable');
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: false, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: true, webgl2: null }).fallbackReason).toBe('webgl_unavailable');
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: false, webgl2: null })).toMatchObject({ mode: 'fallback', fallbackReason: 'unsupported_browser' });
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: true, webgl2: { webgl2: true }, webgl2Probe: null }).fallbackReason).toBe('webgl_unavailable');
   });
 
   it('HangarEntry contract eligibility cases', async () => {
@@ -36,6 +36,7 @@ describe('HangarEntry', () => {
     expect(unsupported).toMatchObject({ fallbackReason: 'unsupported_browser', mode: 'fallback' });
 
     const contractCases: Array<{ contractVersion: unknown; browserEligibility: unknown; probe: unknown }> = [
+      { contractVersion: undefined, browserEligibility: true, probe: { webgl2: true } },
       { contractVersion: null, browserEligibility: true, probe: { webgl2: true } },
       { contractVersion: 2, browserEligibility: true, probe: { webgl2: true } },
       { contractVersion: 1, browserEligibility: false, probe: { webgl2: true } },
@@ -53,6 +54,162 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+  it('HangarEntry loads scene envelopes in exact case-list order', async () => {
+    stubCaseApi();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: () => { function Scene() { return null; } return Scene; },
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    const requests = vi.mocked(fetch).mock.calls.map(([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`);
+    expect(requests.filter((request) => request.includes('/api/v1/cases'))).toEqual([
+      'GET /api/v1/cases',
+      'GET /api/v1/cases/cp-case-a/scene',
+      'GET /api/v1/cases/cp-case-b/scene',
+      'GET /api/v1/cases/cp-case-c/scene',
+    ]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two', 'Air Three']);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Hangar scene' }));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/scene')).length).toBe(6));
+  });
+
+  it('HangarEntry rejects invalid contracts and scene reads with exact fallback', async () => {
+    const cases = [
+      { label: 'absent version', list: { cases: [] } },
+      { label: 'string version', list: { contractVersion: '1', cases: [] } },
+      { label: 'numeric two', list: { contractVersion: 2, cases: [] } },
+    ];
+    for (const testCase of cases) {
+      stubCaseApi();
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/v1/cases') return new Response(JSON.stringify(testCase.list), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return original(input, init);
+      });
+      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
+      await signInAsReviewer();
+      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      await screen.findByText(/Invalid hangar scene contract/);
+      expect(document.querySelectorAll('canvas')).toHaveLength(0);
+      cleanup(); vi.unstubAllGlobals();
+    }
+
+    for (const sceneCase of [
+      { label: 'absent envelope', body: null },
+      { label: 'unsupported envelope', body: { contractVersion: 2 } },
+    ]) {
+      stubCaseApi();
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/v1/cases') return new Response(JSON.stringify({ contractVersion: 1, cases: [{ caseId: 'cp-case-a' }] }), { status: 200 });
+        if (url === '/api/v1/cases/cp-case-a/scene') return new Response(sceneCase.body === null ? null : JSON.stringify(sceneCase.body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return original(input, init);
+      });
+      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
+      await signInAsReviewer();
+      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      await screen.findByText(/Invalid hangar scene contract/);
+      expect(document.querySelectorAll('canvas')).toHaveLength(0);
+      cleanup(); vi.unstubAllGlobals();
+    }
+
+    stubCaseApi();
+    const originalMismatch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/cases') return new Response(JSON.stringify({ contractVersion: 1, cases: [{ caseId: 'cp-case-a' }] }), { status: 200 });
+      if (url === '/api/v1/cases/cp-case-a/scene') return new Response(JSON.stringify({ contractVersion: 1, case: {
+        caseId: 'cp-case-b', caseRevision: 7, status: {}, owner: 'Technical reviewer', nextAction: null, capabilityLabel: 'Rules-based', permission: true,
+      }, objects: [{ objectId: 'SYN-CP-B-AIR-001', kind: 'aircraft', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-ENG-001', kind: 'engine', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-CMP-001', kind: 'component', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-CMP-002', kind: 'component', caseId: 'cp-case-b' }], canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return originalMismatch(input, init);
+    });
+    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByText(/Invalid hangar scene contract/);
+    expect(document.querySelectorAll('canvas')).toHaveLength(0);
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input)).filter((url) => url.endsWith('/scene'))).toEqual(['/api/v1/cases/cp-case-a/scene']);
+    cleanup(); vi.unstubAllGlobals();
+
+    for (const status of [403, 500]) {
+      stubCaseApi();
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/v1/cases') return new Response(JSON.stringify({ contractVersion: 1, cases: [{ caseId: 'cp-case-a' }] }), { status: 200 });
+        if (url === '/api/v1/cases/cp-case-a/scene') return new Response(null, { status });
+        return original(input, init);
+      });
+      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
+      await signInAsReviewer();
+      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      await screen.findByText(/Hangar refresh failed/);
+      expect(document.querySelectorAll('canvas')).toHaveLength(0);
+      cleanup(); vi.unstubAllGlobals();
+    }
+  });
+
+  it('HangarEntry queues overlapping focus and explicit refreshes and rejects the lower revision', async () => {
+    stubCaseApi();
+    const selection = vi.fn();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarAircraftSelectionHandler: selection,
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    let resolveFocus!: (value: Response) => void; let resolveExplicit!: (value: Response) => void;
+    const focusResponse = new Promise<Response>((resolve) => { resolveFocus = resolve; });
+    const explicitResponse = new Promise<Response>((resolve) => { resolveExplicit = resolve; });
+    let sceneCalls = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/cases/cp-case-a/scene') {
+        sceneCalls += 1;
+        return sceneCalls === 1 ? focusResponse : sceneCalls === 2 ? explicitResponse : new Response(JSON.stringify({ contractVersion: 1, case: { caseId: 'cp-case-a', caseRevision: 9, status: {}, owner: 'Technical reviewer', nextAction: null, capabilityLabel: 'Rules-based', permission: true }, objects: [
+          { objectId: 'SYN-CP-A-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-ENG-001', kind: 'engine', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-001', kind: 'component', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-002', kind: 'component', caseId: 'cp-case-a' },
+        ], canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return original(input, init);
+    });
+    window.dispatchEvent(new Event('focus'));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Hangar scene' }));
+    await waitFor(() => expect(sceneCalls).toBe(1));
+    const makeEnvelope = (revision: number) => new Response(JSON.stringify({ contractVersion: 1, case: { caseId: 'cp-case-a', caseRevision: revision, status: {}, owner: 'Technical reviewer', nextAction: null, capabilityLabel: 'Rules-based', permission: true }, objects: [
+      { objectId: 'SYN-CP-A-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-ENG-001', kind: 'engine', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-001', kind: 'component', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-002', kind: 'component', caseId: 'cp-case-a' },
+    ], canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    resolveFocus(makeEnvelope(8));
+    await waitFor(() => expect(sceneCalls).toBe(2));
+    expect(sceneCalls).toBe(2);
+    resolveExplicit(makeEnvelope(7));
+    await screen.findByText(/Hangar refresh failed/);
+    expect(screen.getByLabelText('Hangar retained snapshot').textContent).toBe('Revision: 8; Labels: Technical reviewer; Rules-based');
+    expect(document.querySelectorAll('canvas')).toHaveLength(0);
+    expect(screen.getAllByRole('button').some((button) => button.getAttribute('name') === null)).toBe(true);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select case' }));
+    expect(document.querySelectorAll('canvas')).toHaveLength(0);
+    expect(selection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Hangar scene' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    await screen.findByRole('button', { name: 'Open data rack' });
+    await waitFor(() => expect(screen.queryByText(/Hangar refresh failed/)).toBeNull());
+    await waitFor(() => expect(screen.getByLabelText('Hangar retained snapshot').textContent).toBe('Revision: 9; Labels: Technical reviewer; Rules-based'));
+    expect(screen.getByLabelText('Hangar retained snapshot')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Open data rack' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Pointer select AIR-1' }));
+    expect(selection).toHaveBeenCalledTimes(1);
+    expect(selection).toHaveBeenCalledWith('AIR-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Open data rack' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two', 'Air Three']);
+  });
 
   it('HangarEntry default loader returns a renderable scene component', async () => {
     const Scene = await loadHangarScene();
@@ -72,7 +229,7 @@ afterEach(() => {
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
     // App offers only its Data Room entries: an unmapped identifier such as AIR-X has no menu item to confirm.
-    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two', 'Air Three']);
     expect(screen.queryByRole('menuitem', { name: /AIR-X/ })).toBeNull();
     expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
@@ -137,7 +294,7 @@ afterEach(() => {
     expect(HANGAR_NON_3D_ACTIONS).toEqual(requiredActions);
     expect(HANGAR_3D_ACTIONS).toEqual(requiredActions);
     expect(getHangarNon3dActions()).toEqual(requiredActions);
-    expect(getHangarFallbackReason({ browserSupported: false, webgl2: { webgl2: true } })).toBe('unsupported_browser');
+    expect(getHangarFallbackReason({ contractVersion: 1, browserSupported: false, webgl2: { webgl2: true } })).toBe('unsupported_browser');
 
     stubCaseApi();
     render(createElement(HangarApp, {
@@ -221,7 +378,7 @@ afterEach(() => {
     // A fresh mount verifies contract rejection with the same production entry path.
     await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
-    await screen.findByText(/Unsupported hangar contract version 2/);
+    await screen.findByText(/Invalid hangar scene contract/);
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
     expect(loader).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('link', { name: 'Use the supported contract version in the non-3D list.' }).getAttribute('href')).toBe('#non-3d-list');
@@ -229,9 +386,9 @@ afterEach(() => {
 
   it('supported versions pass eligibility and unsupported versions reject', () => {
     for (const version of [120, 121, 139, 140]) {
-      expect(getHangarEntryDecision({ browser: { name: 'Chrome', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
-      expect(getHangarEntryDecision({ browser: { name: 'Edge', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
+      expect(getHangarEntryDecision({ contractVersion: 1, browser: { name: 'Chrome', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
+      expect(getHangarEntryDecision({ contractVersion: 1, browser: { name: 'Edge', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
     }
-    expect(getHangarEntryDecision({ browser: { name: 'Firefox', version: 140 }, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
+    expect(getHangarEntryDecision({ contractVersion: 1, browser: { name: 'Firefox', version: 140 }, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
   });
 });

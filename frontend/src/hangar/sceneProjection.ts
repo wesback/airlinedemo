@@ -19,7 +19,7 @@ export function validateHangarSceneEnvelope(envelope: unknown): ProjectionResult
   const c=envelope.case;
   const revision=c && isObject(c)?(c.caseRevision ?? c.revision):undefined;
   if (!isObject(c)||typeof revision!== 'number'||!Number.isInteger(revision)||revision<0) return {valid:false,scene:null,error:'Missing or invalid scene revision'};
-  if (!nonempty(c.caseId)||!HANGAR_CASE_IDS.includes(c.caseId as typeof HANGAR_CASE_IDS[number])) return {valid:false,scene:null,error:'Invalid scene case identifier'};
+  if (!nonempty(c.caseId)) return {valid:false,scene:null,error:'Invalid scene case identifier'};
   if (typeof c.status!=='object'||c.status===null||Array.isArray(c.status)||typeof envelope.canResetBlockedVariant!== 'boolean'||!Array.isArray(envelope.allowedActions)||!Array.isArray(envelope.history)||!Array.isArray(envelope.evidence)||!Array.isArray(envelope.documentRefs)) return {valid:false,scene:null,error:'Malformed hangar scene envelope'};
   if (typeof c.capabilityLabel!=='string'||!HANGAR_CAPABILITY_LABELS.includes(c.capabilityLabel as typeof HANGAR_CAPABILITY_LABELS[number])) return {valid:false,scene:null,error:'Unknown capability label'};
   const permission = c.permission ?? c.permissions;
