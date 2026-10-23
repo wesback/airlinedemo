@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using Azure.Core;
 using Microsoft.Extensions.AI;
 
 namespace AirlineDemo.Api.Evaluation;
@@ -22,12 +23,15 @@ public sealed record GatewayCorrelation(string Arm, string Run, string Package, 
     string SuiteVersion, string CallIdentity)
 {
     private static readonly Regex Identifier = new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant);
+    private static readonly Regex CardNumber = new(@"\d{13,19}", RegexOptions.CultureInvariant);
     public IReadOnlyList<string> Validate()
     {
         var values = new (string Name, string Value)[] { (nameof(Arm), Arm), (nameof(Run), Run), (nameof(Package), Package),
             (nameof(Case), Case), (nameof(ModelConfiguration), ModelConfiguration), (nameof(SuiteVersion), SuiteVersion), (nameof(CallIdentity), CallIdentity) };
-        var forbiddenShape = new Regex("bearer\\s|authorization:|__host-|aspnetcore\\.cookies|pass(?:code)?|cookie|secret|access[_ -]?key|connection[_ -]?string|@[^\\s]+\\.[^\\s]+|raw[_ -]?prompt|prompt[_ -]?text|model[_ -]?response|document[_ -]?text", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        return values.Where(v => string.IsNullOrWhiteSpace(v.Value) || !Identifier.IsMatch(v.Value) || forbiddenShape.IsMatch(v.Value)).Select(v => v.Name).ToArray();
+        var forbiddenShape = new Regex("bearer\\s|authorization:|__host-|aspnetcore\\.cookies|pass(?:code)?|cookie|secret|access[_ -]?key|connection[_ -]?string|@[^\\s]+\\.[^\\s]+|raw[_ -]?prompt|prompt[_ -]?text|model[_ -]?response|document[_ -]?text|\\d{3}-\\d{2}-\\d{4}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // Only Case carries an identifier chosen by a person; the other fields hold digests that can contain long digit runs.
+        return values.Where(v => string.IsNullOrWhiteSpace(v.Value) || !Identifier.IsMatch(v.Value) || forbiddenShape.IsMatch(v.Value) ||
+                                 (v.Name == nameof(Case) && CardNumber.IsMatch(v.Value))).Select(v => v.Name).ToArray();
     }
     public string ReplayIdentity() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', Arm, Run, Package, Case, ModelConfiguration, SuiteVersion, CallIdentity)))).ToLowerInvariant();
 }
@@ -79,6 +83,7 @@ public static class ModelGatewayTokenomics
 {
     public const string PrivateEndpointRequired = "model route rejected: direct Azure OpenAI endpoints are forbidden";
     public const string MissingUsage = "unavailable";
+    public const string DefaultAudience = "api://airline-demo-model-gateway";
     public const string OverLimit = "gateway quota exceeded by one unit: {0}";
 
     public static Uri RequirePrivateGatewayEndpoint(string? configured)
@@ -91,6 +96,13 @@ public static class ModelGatewayTokenomics
             throw new InvalidOperationException(PrivateEndpointRequired);
         if (string.IsNullOrWhiteSpace(host) || !host.Contains('.')) throw new InvalidOperationException(PrivateEndpointRequired);
         return uri;
+    }
+
+    /// <summary>The token scope whose issued token audience is the APIM policy audience.</summary>
+    public static string TokenScope(string? audience)
+    {
+        var value = string.IsNullOrWhiteSpace(audience) ? DefaultAudience : audience.Trim().TrimEnd('/');
+        return value + "/.default";
     }
 
     public static void ValidateCorrelation(GatewayCorrelation correlation)
@@ -115,6 +127,19 @@ public static class ModelGatewayTokenomics
         if (i < 0 || o < 0 || t < 0) throw new ArgumentOutOfRangeException(nameof(total), "token usage cannot be negative");
         return new GatewayUsage(i, o, t, "available");
     }
+}
+
+/// <summary>Requests the gateway token scope whatever scope the Azure OpenAI client asks for.</summary>
+public sealed class GatewayScopedTokenCredential(TokenCredential inner, string scope) : TokenCredential
+{
+    public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+        inner.GetToken(Rescope(requestContext), cancellationToken);
+
+    public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+        inner.GetTokenAsync(Rescope(requestContext), cancellationToken);
+
+    private TokenRequestContext Rescope(TokenRequestContext context) =>
+        new([scope], context.ParentRequestId, context.Claims, context.TenantId, context.IsCaeEnabled);
 }
 
 public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelation correlation, GatewayQuota quota,

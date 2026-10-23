@@ -68,7 +68,8 @@ builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.A
     var deployment = manifest.DeploymentName
         ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
     var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
-    var credential = new LazyTokenCredential(createCredential);
+    var credential = new GatewayScopedTokenCredential(new LazyTokenCredential(createCredential),
+        ModelGatewayTokenomics.TokenScope(builder.Configuration["ModelGateway:Audience"]));
     var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions();
     var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
     if (handler is not null)

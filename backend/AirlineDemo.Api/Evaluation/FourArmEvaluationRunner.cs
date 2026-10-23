@@ -85,6 +85,9 @@ public sealed class ProductionEvaluationArmExecutor(
 
     public EvaluationArm Arm => arm;
 
+    /// <summary>Gateway token metrics of the latest dispatched call; null before any dispatch.</summary>
+    public GatewayTokenMetrics? LastGatewayMetrics { get; private set; }
+
     public long MaximumTokenUsage(EvaluationCase input) => arm switch
     {
         EvaluationArm.A => 0,
@@ -116,6 +119,7 @@ public sealed class ProductionEvaluationArmExecutor(
         if (request.Mode == EvaluationExecutionMode.BoundedAgent)
         {
             var bounded = await ExecuteBoundedAgentAsync(request, gatewayClient, cancellationToken);
+            LastGatewayMetrics = gatewayClient.Metrics;
             _replay.Store(correlation, bounded);
             return bounded;
         }
@@ -145,6 +149,7 @@ public sealed class ProductionEvaluationArmExecutor(
                 : Encoding.UTF8.GetByteCount(prompt) +
                   Math.Min(MaximumOutputTokens, Encoding.UTF8.GetByteCount(answer));
             var execution = new EvaluationArmExecution(answer, usage, 1, 0, 0);
+            LastGatewayMetrics = gatewayClient.Metrics;
             _replay.Store(correlation, execution);
             return execution;
         }
