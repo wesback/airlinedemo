@@ -209,8 +209,12 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
         var throttled = response.AdditionalProperties?.TryGetValue("gateway.throttled", out var throttle) == true &&
                         bool.TryParse(throttle?.ToString(), out var isThrottled) && isThrottled;
         var estimatedCost = rates is null ? null : ModelGatewayTokenomics.EstimateCost(usage, rates);
-        Metrics = new GatewayTokenMetrics(usage.InputTokens, usage.OutputTokens, usage.TotalTokens,
-            _modelCallCount, _retryCount, _latencyMilliseconds, throttled, correlation.ModelConfiguration, estimatedCost, usage);
+        var accumulated = _governor.ExactUsage();
+        var accumulatedCost = rates is null ? null : ModelGatewayTokenomics.EstimateCost(accumulated, rates);
+        Metrics = new GatewayTokenMetrics(accumulated.Status == "available" ? accumulated.InputTokens : null,
+            accumulated.Status == "available" ? accumulated.OutputTokens : null,
+            accumulated.Status == "available" ? accumulated.TotalTokens : null,
+            _modelCallCount, _retryCount, _latencyMilliseconds, throttled, correlation.ModelConfiguration, accumulatedCost, accumulated);
         if (denialAfter is not null) throw new InvalidOperationException(denialAfter);
         return response;
     }
