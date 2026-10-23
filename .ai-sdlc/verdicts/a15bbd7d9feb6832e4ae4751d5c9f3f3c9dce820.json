@@ -1,0 +1,220 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 589,
+  "branch": "ai-sdlc/issue-589",
+  "commitSha": "a15bbd7d9feb6832e4ae4751d5c9f3f3c9dce820",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The non-3D Data Room is limited to fallback and contract-error modes, so regular scene mode misses the required list. The diff also omits the App-host behavior tests named by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 592,
+          "message": "The non-3D Data Room is not rendered in regular scene mode.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The non-3D Data Room is rendered only when hangarView is 'fallback' or 'contract-error'.",
+            "failureScenario": "When the Hangar loads in regular scene mode, the condition is false and the Data Room list is absent, contrary to the criterion requiring it in both regular and fallback modes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 556,
+          "message": "The required App-host behavior tests are missing from this change: `Hangar App composes walk region and follow camera`, `Hangar App rack menu guide route composition`, and `Hangar App non-3D Data Room parity`.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The provided diff changes App.tsx but includes no test changes. The issue names App-host tests for the walk and follow camera, rack menu and guide route, and non-3D Data Room parity.",
+            "failureScenario": "If the App composition is removed or does not work through the real App host, none of the named behavior tests added or updated in this change can fail to expose it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The App does not provide the walk region required by its keyboard handler, and the non-3D Data Room is absent in regular mode. The named App-host behavior tests are also missing from the change.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 481,
+          "message": "The App composition does not expose the labelled, focusable walk region required by the first acceptance criterion, so its ArrowUp handler cannot move the avatar from the composed area.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The key handler returns unless the event target is inside an element matching [data-hangar-walk-region]. The new App composition wrapper does not add that attribute or make a walk region focusable.",
+            "failureScenario": "When a user focuses the newly composed App area and presses ArrowUp, the target does not match the required selector, so the handler returns and neither avatar nor follow-camera pose changes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 592,
+          "message": "The non-3D Data Room is limited to fallback and contract-error modes; it is missing from regular mode.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "HangarNon3dDataRoom is rendered only when hangarView is 'fallback' or 'contract-error'. The regular-mode branch does not render it.",
+            "failureScenario": "When the Hangar loads in regular mode, the user sees no non-3D Data Room list, despite the criterion requiring it in both fallback and regular modes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 463,
+          "message": "The behavior criteria name App-host tests for walk/follow-camera, rack-menu routing, and non-3D parity, but this change adds or updates none of those tests.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff changes App composition and behavior, but includes no changes to the named App-host behavior tests in HangarEntry.test.ts, HangarRackMenu.test.tsx, or HangarNon3dDataRoom.test.tsx.",
+            "failureScenario": "If the App walk, rack-route, or non-3D composition is removed or wired incorrectly, the named acceptance tests are not added or updated in this change to detect the regression."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability is evident in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "tdd-red",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 0,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": false,
+    "reason": "no test files added or changed in this branch"
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
