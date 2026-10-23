@@ -1,10 +1,13 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createElement, type ComponentType } from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HangarRackMenu, { HangarRackMenuController, HANGAR_RACK_MENU_INVALID_ENTRY, HANGAR_RACK_MENU_OPEN_LABEL } from '../src/hangar/rackMenu';
 import sceneManifest from '../src/hangar/sceneManifest.json';
 import { HANGAR_MANIFEST_ERROR } from '../src/hangar/dataRoomAdapter';
 import { HANGAR_SOURCE_IDS } from '../src/hangar/sourceSummary';
+import App, { type HangarEntryAppProps } from '../src/App';
+import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
 
 const entries=[
  {caseId:'cp-case-a',name:'Case A',category:'narrow-body',unavailable:false,sources:HANGAR_SOURCE_IDS.map(sourceId=>({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`}))},
@@ -15,6 +18,32 @@ const entries=[
 afterEach(cleanup);
 
 describe('HangarRackMenu',()=>{
+ it('Hangar App rack menu guide route composition', async () => {
+   stubCaseApi();
+   const selection = vi.fn();
+   render(createElement(App as ComponentType<HangarEntryAppProps>, {
+     hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true },
+     hangarLazyLoader: () => { function Scene() { return createElement('canvas', { 'aria-label': '3D hangar scene' }); } return Scene; },
+     hangarAircraftSelectionHandler: selection,
+   }));
+   await signInAsReviewer();
+   fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+   fireEvent.click(await screen.findByRole('button', { name: HANGAR_RACK_MENU_OPEN_LABEL }));
+   expect(screen.getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two', 'Air Three']);
+   fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
+   expect(screen.queryByRole('menu', { name: 'Data rack menu' })).toBeNull();
+   expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+   const walk = screen.getByRole('region', { name: 'Walk region' });
+   for (let index = 0; index < 8; index += 1) fireEvent.keyDown(walk, { key: 'ArrowRight' });
+   for (let index = 0; index < 8; index += 1) fireEvent.keyDown(walk, { key: 'ArrowUp' });
+   await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+   expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('Arrival');
+   expect(selection).toHaveBeenCalledTimes(1);
+   expect(selection).toHaveBeenCalledWith('AIR-1');
+   fireEvent.keyDown(walk, { key: 'ArrowDown' });
+   expect(selection).toHaveBeenCalledTimes(1);
+ });
+
  it('HangarRackMenu zone entry and focus lifecycle',async()=>{
    const selection=vi.fn(); render(<HangarRackMenu entries={entries} onConfirm={selection}/>);
    const walk=screen.getByRole('region',{name:'Walk region'});

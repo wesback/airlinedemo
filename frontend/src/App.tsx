@@ -473,8 +473,17 @@ export default function App({
   const handleHangarAppWalk = (event: ReactKeyboardEvent<HTMLElement>) => {
     const target = event.target;
     if (!(target instanceof HTMLElement) || !target.closest('[data-hangar-walk-region]')) return;
-    if (event.defaultPrevented) return;
+    if (target !== event.currentTarget && target.closest('[data-hangar-rack-menu], [data-hangar-guide-line]')) return;
+    if (target.closest('button, a, input, textarea, select, [role="button"], [role="menu"], [role="menuitem"]')) return;
+    if (event.key === 'Escape') {
+      const rackWalk = document.querySelector<HTMLElement>('[data-hangar-guide-line] [data-hangar-walk-region]');
+      rackWalk?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      event.preventDefault();
+      return;
+    }
     if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)) return;
+    const rackWalk = document.querySelector<HTMLElement>('[data-hangar-guide-line] [data-hangar-walk-region]');
+    if (rackWalk && rackWalk !== target) rackWalk.dispatchEvent(new KeyboardEvent('keydown', { key: event.key, repeat: event.repeat, bubbles: true }));
     const controller = hangarWalkControllerRef.current;
     const camera = hangarFollowCameraRef.current;
     if (!controller || !camera) return;
@@ -507,6 +516,13 @@ export default function App({
               <p>Evidence basis: {data.caseState.basis.length}</p>
               <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
               <button type="button" onClick={() => { void enterHangar(); }}>Enter Hangar</button>
+              {hangarView === 'regular' && (
+                <HangarNon3dDataRoom
+                  entries={hangarEntries}
+                  scope={hangarEntries.map(entry => entry.caseId)}
+                  onConfirm={sharedHangarAircraftSelectionHandler}
+                />
+              )}
               {hangarView !== 'regular' && hangarView !== 'loading' && (
                 <section aria-labelledby="hangar-heading">
                   <h2 id="hangar-heading">Hangar</h2>
@@ -556,7 +572,7 @@ export default function App({
                         refetch={() => refreshHangarSnapshot()}
                         confirmReset={() => true}
                       />
-                      <div data-hangar-app-composition="true" onKeyDown={handleHangarAppWalk}>
+                      <section data-hangar-app-composition="true" data-hangar-walk-region="true" role="region" aria-label="Walk region" tabIndex={0} onKeyDown={handleHangarAppWalk}>
                       <p data-hangar-avatar-position={`${hangarAvatarPosition.x},${hangarAvatarPosition.z}`}>{`Avatar: ${hangarAvatarPosition.x}, ${hangarAvatarPosition.z}`}</p>
                       <p data-hangar-camera-pose={`${hangarCameraPose.x},${hangarCameraPose.y},${hangarCameraPose.z}`}>Camera pose</p>
                       {hangarFollowCameraRef.current && <button type="button" aria-pressed={hangarFollowEnabled} onClick={() => { const camera = hangarFollowCameraRef.current!; const next = camera.toggleFollow(); setHangarFollowEnabled(next.follow); setHangarCameraPose(next.position); }}>{hangarFollowEnabled ? 'Follow avatar: on' : 'Follow avatar: off'}</button>}
@@ -573,13 +589,14 @@ export default function App({
                         }}
                         onSelect={sharedHangarAircraftSelectionHandler}
                         reducedMotion={hangarReducedMotion}
+                        walkRegionLabel="Data rack walk region"
                       />
                       <div aria-label="Reduced motion controls">
                         <button type="button" aria-pressed={hangarReducedMotion} onClick={() => setHangarMotionOverride(true)}>Enable reduced motion</button>
                         <button type="button" aria-pressed={!hangarReducedMotion} onClick={() => setHangarMotionOverride(false)}>Disable reduced motion</button>
                         <button type="button" onClick={clearHangarMotionOverride}>Use system preference</button>
                       </div>
-                      </div>
+                      </section>
                     </div>
                   )}
                   {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'

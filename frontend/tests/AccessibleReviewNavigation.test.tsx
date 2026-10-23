@@ -105,7 +105,7 @@ describe('accessible review navigation', () => {
     await screen.findByLabelText('Reason for decision');
 
     const focusOrder: string[] = [];
-    for (let step = 0; step < 6; step += 1) {
+    for (let step = 0; step < 9; step += 1) {
       await user.tab();
       const active = document.activeElement as HTMLElement;
       focusOrder.push(active.id === 'decision-reason'
@@ -113,7 +113,8 @@ describe('accessible review navigation', () => {
         : active.getAttribute('aria-label') ?? active.textContent?.trim() ?? '');
     }
     expect(focusOrder).toEqual([
-      'Sign out', 'Enter Hangar', 'Investigation trace', 'Reason for decision',
+      'Sign out', 'Enter Hangar', 'Case A, narrow-body', 'Case B, regional',
+      'Case C, wide-body', 'Investigation trace', 'Reason for decision',
       'Accept finding', 'Reject finding',
     ]);
     const lastDecision = screen.getByRole('button', { name: 'Reject finding' });

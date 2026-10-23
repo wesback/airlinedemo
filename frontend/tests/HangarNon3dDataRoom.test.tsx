@@ -1,8 +1,11 @@
+import { createElement, type ComponentType } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HangarNon3dDataRoom, { HangarNon3dDataRoomController, activateHangarDataRoomCase, scopedInitialEntries } from '../src/hangar/non3dDataRoom';
 import { HANGAR_SOURCE_IDS, SOURCE_UNAVAILABLE_TEXT } from '../src/hangar/sourceSummary';
+import App, { type HangarEntryAppProps } from '../src/App';
+import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
 
 const entries = [
   { caseId:'cp-case-a', name:'Case A', category:'narrow-body', unavailable:false, sources:HANGAR_SOURCE_IDS.map(sourceId=>({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`})) },
@@ -14,6 +17,27 @@ const rackTexts = entries.flatMap(entry => entry.unavailable ? [SOURCE_UNAVAILAB
 afterEach(cleanup);
 
 describe('HangarNon3dDataRoom', () => {
+  it('Hangar App non-3D Data Room parity', async () => {
+    stubCaseApi();
+    const selection = vi.fn();
+    render(createElement(App as ComponentType<HangarEntryAppProps>, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: () => { function Scene() { return createElement('canvas', { 'aria-label': '3D hangar scene' }); } return Scene; },
+      hangarAircraftSelectionHandler: selection,
+    }));
+    await signInAsReviewer();
+    expect(screen.getByRole('heading', { name: 'Data Room aircraft' })).toBeTruthy();
+    expect(screen.getAllByRole('listitem').map(item => item.getAttribute('data-case-id'))).toEqual(['cp-case-a', 'cp-case-b', 'cp-case-c']);
+    fireEvent.click(screen.getByRole('button', { name: 'Case A, narrow-body' }));
+    expect(selection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    expect(screen.getByRole('region', { name: 'Walk region' })).toBeTruthy();
+    expect(document.querySelector('[data-hangar-app-composition="true"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Open data rack' })).toBeTruthy();
+  });
+
   it('HangarNon3dDataRoom parity with rack menu', async () => {
     const reader = vi.fn(async (caseId:string) => ({ contractVersion:1, caseId, sources:HANGAR_SOURCE_IDS.map(sourceId=>({sourceId,mode:'available',coverage:true})) }));
     render(<HangarNon3dDataRoom caseList={[{caseId:'cp-case-a',name:'Case A',category:'narrow-body'},{caseId:'cp-case-b',name:'Case B',category:'regional'},{caseId:'cp-case-c',name:'Case C',category:'wide-body'}]} scope={['cp-case-a','cp-case-b','cp-case-c']} summaryReader={reader}/>);
