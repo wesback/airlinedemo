@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import HangarSelectionEvidence, { resolveHangarSelection, buildHangarSelectedObjectLabel } from '../src/hangar/selectionPanel';
 import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/hangar/HangarCanvasAdapter';
+import { buildHangarAircraftSceneGroups } from '../src/hangar/sceneBuilder';
+import hangarManifest from '../src/hangar/sceneManifest.json';
 
 const envelope=(overrides:Record<string,unknown>={})=>({contractVersion:1,case:{caseId:'cp-case-a',caseRevision:7,status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},objects:[{objectId:'SYN-CP-A-AIR-001',kind:'aircraft',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-ENG-001',kind:'engine',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-001',kind:'component',caseId:'cp-case-a',evidenceIds:['ref-1'],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-002',kind:'component',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'}],documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual',processingState:'accepted',retryable:false,usableAsEvidence:true}],evidence:[{witnessId:'wit-1',evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,page:3,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual'}],history:[],canResetBlockedVariant:false,allowedActions:[],...overrides});
 const manifest={objectIds:['SYN-CP-A-AIR-001','SYN-CP-A-ENG-001','SYN-CP-A-CMP-001','SYN-CP-A-CMP-002']};
@@ -11,6 +13,28 @@ const manifest={objectIds:['SYN-CP-A-AIR-001','SYN-CP-A-ENG-001','SYN-CP-A-CMP-0
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 
 describe('HangarSelectionEvidence',()=>{
+  it('Hangar pointer picking calls exact object IDs once',()=>{
+    const handler=vi.fn();
+    const sceneView={contractVersion:1,cases:[{caseId:'cp-case-a'},{caseId:'cp-case-b'},{caseId:'cp-case-c'}]};
+    const scene=buildHangarAircraftSceneGroups(hangarManifest,sceneView,handler)!;
+    const camera=createHangarOwnedPerspectiveCamera(); camera.aspect=800/600; camera.position.set(0,3*Math.sqrt(2650)*Math.sin(Math.PI/4),3*Math.sqrt(2650)*Math.sin(Math.PI/4)); camera.lookAt(0,0,0); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
+    const Canvas=(props:any)=>createElement('div',{...props,'data-testid':'hangar-canvas',style:{width:800,height:600}});
+    const rendered=render(createElement(HangarCanvasAdapter,{sceneGroup:scene,camera,canvasComponent:Canvas}));
+    const canvas=rendered.getByTestId('hangar-canvas'); vi.spyOn(canvas,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,width:800,height:600,right:800,bottom:600,toJSON(){}} as DOMRect);
+    for(const letter of ['A','B','C']){
+      for(const name of [`Aircraft${letter}Fuselage`,`Engine${letter}Visible`,`Component${letter}1Visible`,`Component${letter}2Visible`]){
+        const object=scene.getObjectByName(name)! as THREE.Mesh; const center=new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3()); center.project(camera);
+        const x=(center.x*.5+.5)*800,y=(-center.y*.5+.5)*600;
+        fireEvent.pointerDown(canvas,{clientX:x,clientY:y}); fireEvent.pointerUp(canvas,{clientX:x,clientY:y});
+        const id=object.userData.objectId;
+        expect(handler).toHaveBeenCalledWith(id,expect.any(THREE.Object3D));
+      }
+    }
+    expect(handler).toHaveBeenCalledTimes(12);
+    for(const call of handler.mock.calls) expect(call[0]).toMatch(/^SYN-CP-[ABC]-(AIR|ENG|CMP)-001|^SYN-CP-[ABC]-CMP-002$/);
+    fireEvent.pointerDown(canvas,{clientX:400,clientY:300}); fireEvent.pointerMove(canvas,{clientX:407,clientY:300}); fireEvent.pointerUp(canvas,{clientX:407,clientY:300}); expect(handler).toHaveBeenCalledTimes(12);
+    fireEvent.pointerDown(canvas,{clientX:799,clientY:599}); fireEvent.pointerUp(canvas,{clientX:799,clientY:599}); expect(handler).toHaveBeenCalledTimes(12);
+  });
   it('HangarSelectionEvidence only opens projected objects',()=>{
     const read=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="SYN-CP-A-AIR-001" reader={read}/>);
     expect(screen.getByRole('region',{name:'Selection SYN-CP-A-AIR-001'})).toBeTruthy();
