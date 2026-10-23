@@ -1,0 +1,264 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 592,
+  "branch": "ai-sdlc/issue-592",
+  "commitSha": "be67b819a18d5225254d235c1a8b0eaff7477a14",
+  "round": 2,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production scene now has an avatarTarget path, but the named tests still do not verify production mounting, production easing invalidation, or immediate avatar-target behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 98,
+          "message": "The named camera test still does not verify the production scene mounting contract or all listed camera cases. A broken loadHangarScene camera or builder-group connection can pass this test.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test creates its own camera and builder group, then renders HangarCanvasAdapter directly. It does not render the component returned by loadHangarScene or capture the production Canvas props.",
+            "failureScenario": "If loadHangarScene passes a different camera or group to Canvas, this test still passes. It also does not verify the listed Case B/C presets or invalid-radius inputs."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 129,
+          "message": "The named demand test still does not verify production easing or each listed input change independently, leaving the second acceptance criterion untested.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test calls createHangarDemandInvalidator directly and renders HangarCanvasAdapter with test-supplied props. Its idle ticks and easing assertions do not advance an animation-frame queue through the production scene, and its rerender changes several inputs together.",
+            "failureScenario": "If production easing stops invalidating, fails to stop within 0.05, or an individual camera, avatar, selection, route, or scene-data change stops invalidating, these assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 73,
+          "message": "The system-preference test still omits the avatar-target assertion required by the third acceptance criterion.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named system-preference test selects Case A and Overview but does not pass an avatarTarget prop or assert the resulting avatar state or scene position.",
+            "failureScenario": "If the production scene ignores avatarTarget while reduced motion is enabled, this test still passes, leaving the avatar-target behavior in the third acceptance criterion unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior production-path test findings remain unresolved. The camera and demand tests can pass even when the corresponding production scene wiring is broken.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 94,
+          "message": "The named camera test still does not verify production scene mounting or the identity of the camera and builder group required by the first acceptance criterion.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named camera test creates its own camera and builder group, then renders HangarCanvasAdapter directly. It does not render the component returned by loadHangarScene or verify that Canvas receives the production builder result and owned camera.",
+            "failureScenario": "If loadHangarScene passes a different camera or group to Canvas, this test still passes, leaving the first acceptance criterion unverified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 126,
+          "message": "The named demand test still does not exercise production easing invalidation or each listed input change independently, leaving the second acceptance criterion unverified.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named demand test calls createHangarDemandInvalidator directly and renders HangarCanvasAdapter with test-supplied props. It does not render loadHangarScene, capture its production invalidate callback, advance a controllable animation-frame queue, or change each listed input separately.",
+            "failureScenario": "If production easing fails to invalidate on animation frames, or a listed input change stops invalidating, these assertions still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is apparent in the reviewed change.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
