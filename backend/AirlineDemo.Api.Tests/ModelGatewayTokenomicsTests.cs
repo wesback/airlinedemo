@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using AirlineDemo.Api.Evaluation;
 using AirlineDemo.Api.Investigation;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -214,6 +215,71 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.Equal((caseId, 1), (fake.LastOptions!.AdditionalProperties!["gateway.case"], fake.Calls));
     }
 
+    private static string EvaluationFixture(string file, [CallerFilePath] string source = "") =>
+        Path.Combine(Path.GetDirectoryName(source)!, "Fixtures", "Evaluation", "v2", file);
+
+    [Fact]
+    public async Task Evaluation_run_through_gateway_keeps_logs_and_traces_free_of_case_content()
+    {
+        const string marker = "RESPONSE-9c1e";
+        var dir = Path.Combine(Path.GetTempPath(), "gateway-trace-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var options = new EvaluationRunOptions(Path.Combine(dir, "manifest.json"), Path.Combine(dir, "cases.jsonl"),
+                Path.Combine(dir, "b.json"), Path.Combine(dir, "c.json"));
+            File.Copy(EvaluationFixture("manifest.json"), options.SuiteManifestPath);
+            File.Copy(EvaluationFixture("cases.jsonl"), options.CasesPath);
+            File.WriteAllText(options.ArmBManifestPath, System.Text.Json.JsonSerializer.Serialize(FakeApprovedManifest.Approved()));
+            File.WriteAllText(options.ArmCManifestPath,
+                System.Text.Json.JsonSerializer.Serialize(FakeApprovedManifest.Approved() with { Model = "fixture-model-c" }));
+
+            var captured = new List<string>();
+            using var listener = new ActivityListener
+            {
+                ShouldListenTo = source => source.Name.StartsWith("AirlineDemo.Api", StringComparison.Ordinal),
+                Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                ActivityStopped = activity =>
+                {
+                    lock (captured)
+                    {
+                        captured.AddRange(activity.TagObjects.Select(t => $"{t.Key}={t.Value}"));
+                        captured.AddRange(activity.Events.SelectMany(e => e.Tags.Select(t => $"{t.Key}={t.Value}")));
+                        captured.AddRange(activity.Baggage.Select(b => $"{b.Key}={b.Value}"));
+                        captured.Add(activity.DisplayName);
+                    }
+                }
+            };
+            ActivitySource.AddActivityListener(listener);
+            var fake = new GatewayChatClient { Answer = marker };
+            var logger = new CapturingLogger();
+            using var host = Host(Private, fake, loggerProvider: new CapturingLoggerProvider(logger));
+
+            var result = await host.Services.GetRequiredService<FourArmEvaluationRunner>().RunAsync(options, TestContext.Current.CancellationToken);
+
+            Assert.Equal(40, result.Cases.Count);
+            Assert.Equal(120, fake.Calls);
+            string traces;
+            lock (captured) traces = string.Join("\n", captured);
+            var everything = traces + "\n" + logger.Text;
+            // The capture is live: runner logs and gateway activities were recorded.
+            Assert.Contains("Evaluation dispatch B", logger.Text, StringComparison.Ordinal);
+            Assert.Contains("gateway.case=EVAL-V2-01", traces, StringComparison.Ordinal);
+            Assert.DoesNotContain(marker, everything, StringComparison.Ordinal);
+            foreach (var prompt in fake.Prompts.Distinct())
+            {
+                Assert.DoesNotContain(prompt, everything, StringComparison.Ordinal);
+                Assert.DoesNotContain(prompt.Split('\n')[^1], everything, StringComparison.Ordinal);
+            }
+            // The only case-bearing values are the seven named correlation tags.
+            Assert.All(captured.Where(c => c.Contains("EVAL-V2-", StringComparison.Ordinal)), c => Assert.StartsWith("gateway.", c));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task Production_executor_replay_returns_original_result_without_second_dispatch()
     {
@@ -362,13 +428,17 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         public int? TotalTokenCount { get; set; } = 49;
         public ChatOptions? LastOptions { get; private set; }
         public IReadOnlyList<ChatMessage>? LastMessages { get; private set; }
+        public string Answer { get; set; } = "ok";
+        private readonly List<string> _prompts = [];
+        public IReadOnlyList<string> Prompts { get { lock (_prompts) return _prompts.ToList(); } }
         public ChatClientMetadata Metadata { get; } = new("gateway-test");
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             Calls++;
             LastOptions = options;
             LastMessages = messages.ToList();
-            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "ok"))
+            lock (_prompts) _prompts.Add(string.Join("\n", LastMessages.Select(m => m.Text)));
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, Answer))
             {
                 Usage = InputTokenCount is null && OutputTokenCount is null && TotalTokenCount is null ? null :
                     new UsageDetails { InputTokenCount = InputTokenCount, OutputTokenCount = OutputTokenCount, TotalTokenCount = TotalTokenCount }
