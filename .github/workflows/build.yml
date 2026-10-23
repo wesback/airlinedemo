@@ -76,7 +76,7 @@ jobs:
         # Backend-free Terraform checks: no Azure login, no credentials, and no backend access (init -backend=false).
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.8
+          terraform_version: 1.17.0
           terraform_wrapper: false
 
       - name: Terraform mock plan checks

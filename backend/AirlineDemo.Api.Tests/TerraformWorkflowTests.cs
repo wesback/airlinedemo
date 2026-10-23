@@ -17,7 +17,7 @@ public sealed class TerraformWorkflowTests
         var checks = StepBody(job, StepName);
 
         Assert.Contains("hashicorp/setup-terraform@", setup);
-        Assert.Contains("terraform_version: 1.9.8", setup);
+        Assert.Contains("terraform_version: 1.17.0", setup);
         Assert.Contains("working-directory: infra/terraform", checks);
 
         var commands = new[]
