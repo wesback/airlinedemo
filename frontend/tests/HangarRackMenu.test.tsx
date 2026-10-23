@@ -66,6 +66,17 @@ describe('HangarRackMenu',()=>{
    expect(screen.getByRole('alert').textContent).toBe(HANGAR_MANIFEST_ERROR);
  });
 
+ it('HangarRackMenu confirmation closes menu and invokes close callback once',()=>{
+   const selection=vi.fn(); const closeMenu=vi.fn();
+   render(<HangarRackMenu entries={entries} onConfirm={selection} closeMenu={closeMenu}/>);
+   fireEvent.click(screen.getByRole('button',{name:HANGAR_RACK_MENU_OPEN_LABEL}));
+   fireEvent.click(screen.getByRole('menuitem',{name:'Case A'}));
+   expect(screen.queryByRole('menu',{name:'Data rack menu'})).toBeNull();
+   expect(selection).toHaveBeenCalledTimes(1);
+   expect(selection).toHaveBeenCalledWith('cp-case-a');
+   expect(closeMenu).toHaveBeenCalledTimes(1);
+ });
+
  it('HangarRackMenu transport isolation',()=>{
    const transport=vi.fn(); const selection=vi.fn(); const controller=new HangarRackMenuController(entries,{transport,onConfirm:selection});
    controller.open(); controller.down(); controller.escape(); controller.open(); controller.confirmHighlighted();

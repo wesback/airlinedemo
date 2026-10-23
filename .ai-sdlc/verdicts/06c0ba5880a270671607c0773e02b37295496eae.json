@@ -1,0 +1,338 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 529,
+  "branch": "ai-sdlc/issue-529",
+  "commitSha": "06c0ba5880a270671607c0773e02b37295496eae",
+  "round": 1,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production scene now receives the shared selection handler, and the added App-path tests cover route confirmation and arrival. The previously reported production isolation and live-directions coverage gaps remain, and the AIR-X negative case bypasses the production Data Room.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 75,
+          "message": "The production-path isolation checks from the prior review remain missing: record request and diagnostics counts around each required activity, counting source-summary reads separately.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test checks transport on a standalone adapter, then exercises App without recording production request or diagnostics counts around the required activities.",
+            "failureScenario": "If production rack confirmation, walking, route recomputation, or guide display makes a network request or calls diagnostics, the test still passes because it observes neither count on that path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 26,
+          "message": "The production-path coverage requested in the prior review remains incomplete for live directions, Escape, and route replacement.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named live-directions and replacement test exercises those behaviors on a directly rendered adapter. The App-path test in the reduced-motion case checks the final Arrival text, but does not assert an exact direction and distance after a step, Escape clearing, or route replacement through App.",
+            "failureScenario": "If App stops updating directions after a production walk step or fails to clear or replace the production route, the standalone adapter assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 79,
+          "message": "The production confirmation test still does not prove its negative case: confirm AIR-X through the App Data Room and assert that no route is started and no selection call occurs.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The AIR-X negative case calls confirmHangarRackMenuEntry directly rather than confirming AIR-X through the production App Data Room. It asserts the helper rejects the ID and does not call selection, but leaves the AIR-1 route visible.",
+            "failureScenario": "If the production Data Room starts a route for AIR-X, this test still passes because the production confirmation path is never exercised."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production scene receives the shared selection handler, and the arrival path is covered. The previously reported production-path gaps for live directions, isolation counts, and the AIR-X negative case remain.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 25,
+          "message": "The production App path is still not tested for the live-directions and route-replacement criterion. Exercise accepted steps, Escape, and confirming a replacement entry through App, asserting the exact live direction and remaining distance.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named live-directions and replacement test renders HangarGuideLineAdapter directly. The App-path test in HangarEntry checks arrival text, but not an exact direction and remaining distance, Escape, or route replacement through App.",
+            "failureScenario": "If App stops wiring accepted walk steps or route replacement to the production guide, the adapter-level test still passes and the App arrival test does not detect the broken directions or replacement behavior."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 72,
+          "message": "The production-path isolation criterion remains untested. Record request and diagnostics-call counts around each required App activity, counting source-summary reads separately.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The transport spy is used on a standalone adapter render. The App interaction later in this test records neither request counts nor diagnostics-call counts around production rack confirmation, walking, recomputation, or guide display.",
+            "failureScenario": "If a production App activity starts making a network request or calling diagnostics, the test still passes because it observes neither count on the production path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 78,
+          "message": "The negative case still does not prove that production confirmation of AIR-X creates no route. Exercise the rejection through the production path and assert both no route and no selection call.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The AIR-X check calls confirmHangarRackMenuEntry directly with a fixture and then asserts that the previously rendered AIR-1 route remains visible. It does not send AIR-X through the production App confirmation path or assert that AIR-X creates no route.",
+            "failureScenario": "If the production adapter starts a route for an unknown AIR-X confirmation, this test still passes because the standalone helper rejects AIR-X and the existing AIR-1 route remains visible."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change adds the shared handler prop to the loaded scene and connects route arrival to that handler. The previously reported production-path test gaps for live directions, isolation counts, and unknown-ID confirmation remain.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 25,
+          "message": "The production-path test required by the live-directions and replacement criterion is still missing. Exercise accepted steps, Escape, and route replacement through App.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test checks live directions, Escape, and route replacement on a directly rendered HangarGuideLineAdapter. Its App integration checks reduced motion and selection, but does not walk, clear the route, or replace it.",
+            "failureScenario": "If the production App stops updating live directions after a walk step or fails to clear or replace its route, the adapter-only assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 72,
+          "message": "The production-path request and diagnostics counts required by the isolation criterion are still not tested. Record both around each listed activity, counting source-summary reads separately.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The transport spy and no-request assertions are attached to a directly rendered adapter. The App integration does not count requests or diagnostics calls around rack confirmation, walking, route recomputation, or guide display.",
+            "failureScenario": "If a production activity starts making a network request or calling diagnostics, the test still passes because it observes neither count on the production path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 78,
+          "message": "The production confirmation test still does not exercise its required AIR-X negative case through App. Confirm AIR-X through the production path and assert no route and no selection call.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test checks AIR-X by calling confirmHangarRackMenuEntry directly; it does not send the unknown identifier through the production App Data Room path.",
+            "failureScenario": "If the production confirmation path starts a route or invokes selection for AIR-X, this test can still pass because its helper call tests a separate path."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarEntry.test.ts",
+      "frontend/tests/HangarGuideLine.test.tsx",
+      "frontend/tests/HangarRackMenu.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

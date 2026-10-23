@@ -51,11 +51,11 @@ export function isHangarRackMenuEntry(entries:HangarRackMenuEntry[],identifier:u
 export function confirmHangarRackMenuEntry(entries: HangarRackMenuEntry[],identifier:unknown,handler?:HangarRackSelectionHandler):boolean {const entry=isHangarRackMenuEntry(entries,identifier);if(!entry)return false;if(typeof handler==='function')handler(entry.caseId);return true;}
 export { SOURCE_UNAVAILABLE_TEXT };
 
-export type HangarRackMenuProps={entries?:HangarRackMenuEntry[]|null;caseList?:unknown;scope?:unknown;summaryReader?:SourceSummaryReader;onSelect?:HangarRackSelectionHandler;onConfirm?:HangarRackSelectionHandler;transport?:((request:unknown)=>unknown);walkRegionLabel?:string;manifest?:unknown};
-export function HangarRackMenu({entries:initialEntries,caseList,scope=[],summaryReader,onSelect,onConfirm,transport,walkRegionLabel='Walk region',manifest=sceneManifest}:HangarRackMenuProps){
+export type HangarRackMenuProps={entries?:HangarRackMenuEntry[]|null;caseList?:unknown;scope?:unknown;summaryReader?:SourceSummaryReader;onSelect?:HangarRackSelectionHandler;onConfirm?:HangarRackSelectionHandler;onClose?:()=>unknown;closeMenu?:()=>unknown;onMenuClose?:()=>unknown;transport?:((request:unknown)=>unknown);walkRegionLabel?:string;manifest?:unknown};
+export function HangarRackMenu({entries:initialEntries,caseList,scope=[],summaryReader,onSelect,onConfirm,onClose,closeMenu,onMenuClose,transport,walkRegionLabel='Walk region',manifest=sceneManifest}:HangarRackMenuProps){
   const [entries,setEntries]=useState<HangarRackMenuEntry[]>(initialEntries??[]);const [loaded,setLoaded]=useState(initialEntries!==undefined);const menuRef=useRef<HTMLElement|null>(null);const walkRef=useRef<HTMLElement|null>(null);
   const controllerRef=useRef<HangarRackMenuController|null>(null);const [,render]=useState(0);const onSelection=onConfirm??onSelect;
-  if(!controllerRef.current)controllerRef.current=new HangarRackMenuController(entries,{onSelect:onSelection,onConfirm:onSelection,onFocusWalk:()=>walkRef.current?.focus?.(),manifest});const controller=controllerRef.current;
+  if(!controllerRef.current)controllerRef.current=new HangarRackMenuController(entries,{onSelect:onSelection,onConfirm:onSelection,onClose:()=>{(closeMenu??onMenuClose??onClose)?.()},onFocusWalk:()=>walkRef.current?.focus?.(),manifest});const controller=controllerRef.current;
   useEffect(()=>{controller.setEntries(entries);render(v=>v+1)},[entries]);
   useEffect(()=>{if(!loaded&&(Array.isArray(caseList)||(caseList&&typeof caseList==='object')))void projectHangarSourceSummary(caseList,scope,summaryReader).then(value=>{setEntries(value);setLoaded(true);});else if(!loaded)setLoaded(true);},[caseList,scope,summaryReader,loaded]);
   useEffect(()=>{const state=controller.getState();if(state.open)menuRef.current?.focus?.();else if(document.activeElement===menuRef.current||document.activeElement?.closest('[data-hangar-rack-menu]'))walkRef.current?.focus?.();},[controller.getState().open]);
