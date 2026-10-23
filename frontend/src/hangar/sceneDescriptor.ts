@@ -38,7 +38,7 @@ export function validateHangarAircraftDescriptor(input:unknown=manifestDefault):
   if(m.layout.aircraft?.length!==3||!m.layout.aircraft.every((row:any,i:number)=>row?.caseId===specs[i][0])) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
   for(let i=0;i<3;i++){
     const s=specs[i],model=m.aircraft.models[i],layout=m.layout.aircraft[i],p=s[2].toUpperCase(),caseId=s[0];
-    if(!model||model.caseId!==caseId||model.category!==s[1]||model.path!==`assets/hangar/aircraft-${s[2]}.glb`) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
+    if(!model||model.caseId!==caseId||model.category!==s[1]||model.path!==`assets/hangar/aircraft-${s[2]}.glb`||model.synthetic!==true||model.realAircraftType!==false||model.brandMarks!==false) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
     if(layout.centre?.x!==s[3]||layout.centre?.z!==s[4]||layout.dimensions?.length!==s[5]||layout.dimensions?.span!==s[6]||layout.dimensions?.height!==s[7]||layout.footprint?.minX!==s[8]||layout.footprint?.maxX!==s[9]||layout.footprint?.minZ!==s[10]||layout.footprint?.maxZ!==s[11]||layout.marker?.x!==s[12]||layout.marker?.z!==s[13]) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};
     const nodes=model.nodes,ids=[`SYN-CP-${p}-AIR-001`,`SYN-CP-${p}-ENG-001`,`SYN-CP-${p}-CMP-001`,`SYN-CP-${p}-CMP-002`],nodeNames=[`Aircraft${p}`,`Engine${p}`,`Component${p}1`,`Component${p}2`],keys=['aircraft','engine','component1','component2'],kinds=['aircraft','engine','component','component'];
     if(!nodes||!Array.isArray(nodes.objectIds)||nodes.objectIds.join('|')!==ids.join('|')) return {valid:false,error:HANGAR_DESCRIPTOR_ERROR};

@@ -25,6 +25,12 @@ describe('Hangar rack and avatar manifest', () => {
     expect(validateHangarRackAvatarManifest(brandMarks)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
     const missingSynthetic = clone(); delete missingSynthetic.avatar.synthetic;
     expect(validateHangarRackAvatarManifest(missingSynthetic)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    for (const field of ['synthetic', 'realAircraftType', 'brandMarks']) {
+      const missing = clone(); delete missing.aircraft.models[0][field];
+      expect(validateHangarRackAvatarManifest(missing)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+      const incorrect = clone(); incorrect.aircraft.models[0][field] = field === 'synthetic' ? false : true;
+      expect(validateHangarRackAvatarManifest(incorrect)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    }
     const originalLabelText = HANGAR_SCENE_THEME.labelText;
     const originalLabelMuted = HANGAR_SCENE_THEME.labelMuted;
     (HANGAR_SCENE_THEME as { labelText: string }).labelText = '#FFFFFF';

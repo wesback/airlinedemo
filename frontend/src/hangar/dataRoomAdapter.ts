@@ -35,6 +35,15 @@ export function validateHangarRackAvatarManifest(input: unknown = sceneManifest)
     seenNodes.add(row.node); seenSources.add(row.source); normalized.push({ node: row.node, source: row.source });
   }
   if (HANGAR_RACK_SOURCES.some(source => !seenSources.has(source))) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+  const aircraftModels = value.aircraft && typeof value.aircraft === 'object'
+    ? (value.aircraft as Record<string, unknown>).models
+    : undefined;
+  if (!Array.isArray(aircraftModels) || aircraftModels.length !== 3) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+  for (const model of aircraftModels) {
+    if (!model || typeof model !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+    const declaration = model as Record<string, unknown>;
+    if (declaration.synthetic !== true || declaration.realAircraftType !== false || declaration.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+  }
   const hardHat = avatarValue.hardHat;
   if (!hardHat || typeof hardHat !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   const hat = hardHat as Record<string, unknown>;

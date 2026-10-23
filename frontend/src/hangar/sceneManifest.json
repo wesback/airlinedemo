@@ -46,6 +46,9 @@
         "caseId": "cp-case-a",
         "path": "assets/hangar/aircraft-a.glb",
         "category": "narrow-body",
+        "synthetic": true,
+        "realAircraftType": false,
+        "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftA",
           "engine": "EngineA",
@@ -63,6 +66,9 @@
         "caseId": "cp-case-b",
         "path": "assets/hangar/aircraft-b.glb",
         "category": "regional",
+        "synthetic": true,
+        "realAircraftType": false,
+        "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftB",
           "engine": "EngineB",
@@ -80,6 +86,9 @@
         "caseId": "cp-case-c",
         "path": "assets/hangar/aircraft-c.glb",
         "category": "wide-body",
+        "synthetic": true,
+        "realAircraftType": false,
+        "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftC",
           "engine": "EngineC",
