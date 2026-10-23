@@ -33,7 +33,7 @@ External organization-provided prerequisites remain outside Terraform deployment
 - Protected Terraform state storage bootstrap by a separately authorized backend owner, including Entra authentication and blob lease locking.
 - Organization-provided Entra identities and grants for Terraform, SQL administration, application managed identity, release OIDC, private-network runner, and backend access.
 - Approved private endpoint/DNS and restricted egress connectivity; approved VNet and subnet CIDRs; presenter/reviewer CIDRs; model deployment and signing materials.
-- Terraform 1.9 or later, Azure CLI, Git, .NET 10 SDK, Node.js LTS/npm, and access to the repository's protected build and release workflows.
+- Terraform 1.17 or later, Azure CLI, Git, .NET 10 SDK, Node.js LTS/npm, and access to the repository's protected build and release workflows.
 - An approved model deployment and reviewed model manifest before investigation or scored evaluation.
 
 The deployment requires approved resource names from `infra/terraform/variables.tf`, including `resource_group_name`, SQL server/database names, storage account name, Key Vault name, model account/deployment names, Container Registry name, Container Apps environment/app names, subnet names and ACR configuration. CIDRs must be explicit and valid: `vnet_address_space`, `app_subnet_cidr`, `private_endpoint_subnet_cidr`, `presenter_reviewer_cidrs`, and `egress_allowed_destinations`. The Container Apps ingress allowlist uses only configured presenter/reviewer CIDRs. An empty allowlist produces a deny-all rule and denies all ingress.
