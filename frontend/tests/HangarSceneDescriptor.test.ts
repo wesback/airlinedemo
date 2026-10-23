@@ -52,6 +52,9 @@ describe('hangar scene manifest layout contract cases', () => {
       background:'#E8EDF2', floor:'#C3CBD4', floorMarking:'#F2F4F6', aircraftBody:'#F5F7F9', aircraftTrim:'#9AA5B1', partsStand:'#5A6573', component:'#B7C0CA', rack:'#2F3A47', rackUnit:'#4C5866', avatarBody:'#3D6E9E', groundShadow:'#000000', guideLine:'#0E7C66', selection:'#1F6FEB', labelBackground:'#FFFFFF', labelText:'#1B2430', labelMuted:'#4A5563'
     });
     expect(manifest.avatar.hardHat.color).toBe('#FFD400');
+    const statusIndependent = clone();
+    statusIndependent.status = 'blocked'; statusIndependent.owner = 'reviewer'; statusIndependent.nextAction = 'request'; statusIndependent.capabilityLabel = 'Permitted';
+    expect(validateHangarAircraftDescriptor(statusIndependent).valid).toBe(true);
     expect(hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelText)).toBeGreaterThanOrEqual(4.5);
     expect(hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelMuted)).toBeGreaterThanOrEqual(4.5);
   });

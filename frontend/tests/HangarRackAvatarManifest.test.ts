@@ -26,9 +26,13 @@ describe('Hangar rack and avatar manifest', () => {
     const missingSynthetic = clone(); delete missingSynthetic.avatar.synthetic;
     expect(validateHangarRackAvatarManifest(missingSynthetic)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
     const originalLabelText = HANGAR_SCENE_THEME.labelText;
+    const originalLabelMuted = HANGAR_SCENE_THEME.labelMuted;
     (HANGAR_SCENE_THEME as { labelText: string }).labelText = '#FFFFFF';
     expect(validateHangarRackAvatarManifest(manifest)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
     (HANGAR_SCENE_THEME as { labelText: string }).labelText = originalLabelText;
+    (HANGAR_SCENE_THEME as { labelMuted: string }).labelMuted = '#FFFFFF';
+    expect(validateHangarRackAvatarManifest(manifest)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    (HANGAR_SCENE_THEME as { labelMuted: string }).labelMuted = originalLabelMuted;
   });
 
   it('Hangar rack manifest exact five-unit mapping', () => {
