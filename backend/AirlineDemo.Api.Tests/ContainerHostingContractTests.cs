@@ -190,11 +190,24 @@ public class ContainerHostingContractTests
             "budget_amount", "budget_start_date", "budget_contact_emails",
             "terraform_state_backend", "image_digest", "demo_passcode_secret_uri",
         };
+        string[] optionalWithDerivedDefaults =
+        {
+            "resource_group_name", "vnet_address_space", "app_subnet_cidr", "private_endpoint_subnet_cidr",
+            "egress_allowed_destinations", "sql_server_name", "sql_database_name", "storage_account_name",
+            "key_vault_name", "model_account_name", "model_endpoint_subdomain", "acr_name",
+            "container_apps_environment_name", "container_app_name",
+        };
 
         foreach (var name in required)
         {
             var block = Block(variables, $"variable \"{name}\"");
             Assert.DoesNotMatch(@"(?m)^\s*default\s*=", block);
+        }
+
+        foreach (var name in optionalWithDerivedDefaults)
+        {
+            var block = Block(variables, $"variable \"{name}\"");
+            Assert.Matches(@"(?m)^\s*default\s*=", block);
         }
 
         var cidrs = Block(variables, "variable \"presenter_reviewer_cidrs\"");
