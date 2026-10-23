@@ -1,0 +1,264 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 584,
+  "branch": "ai-sdlc/issue-584",
+  "commitSha": "aff27a369cc4828ef4659a118330dc26bbf103c9",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The builder creates the expected scene structures, but the named tests leave gaps in two required behaviors: Case and parts-stand presence, and exclusive objectId assignment.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneBuilder.test.ts",
+          "line": 19,
+          "message": "The named behavior test does not verify that each Case group and parts stand exists.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test checks aircraft, engine, and component nodes, but never asserts the Case groups or parts-stand nodes.",
+            "failureScenario": "If the builder stops creating every parts stand or Case group, this test still passes, despite the first acceptance criterion requiring those nodes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneBuilder.test.ts",
+          "line": 39,
+          "message": "The selectable-ID test does not prove that only the intended meshes carry objectIds.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test compares the set of object IDs and its size, so repeated IDs on additional meshes do not change either assertion.",
+            "failureScenario": "If a stand or wing mesh receives an existing CP objectId, the set still contains the same 12 IDs and the test passes, despite the criterion forbidding IDs on those meshes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named tests cover important geometry, ID, material, and status behavior, but two acceptance criteria have gaps: the group test omits parts stands and exact group counts, and the ID test can miss an ID copied onto an unselectable mesh.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneBuilder.test.ts",
+          "line": 17,
+          "message": "The test named for the first acceptance criterion does not verify the parts stands or that there is exactly one aircraft group for each case.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named test traverses the scene to check aircraft, engine, and component names and aircraft bounds, but never checks for a parts-stand node or counts the case groups.",
+            "failureScenario": "If the builder stops adding a parts stand or adds a duplicate aircraft group, `builds exact three aircraft groups without WebGL` still passes, despite the first acceptance criterion requiring one group per case with a parts stand."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneBuilder.test.ts",
+          "line": 38,
+          "message": "The object ID test does not verify that prohibited meshes carry no objectId; assert the IDs on the intended engine and component meshes and that floor, stand, wing, and shadow meshes have none.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test collects object IDs from meshes, then compares the unique IDs with `manifest.objectIds` and checks that there are 12 unique IDs. It does not assert that unselectable meshes have no objectId.",
+            "failureScenario": "If the builder assigns an already-used objectId to a wing mesh, the set of unique IDs remains unchanged and the test passes, even though clicking that wing could select an aircraft and the second acceptance criterion forbids IDs on wings."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The builder creates materials and assigns IDs directly, with no security vulnerability evident in this diff. The added tests leave gaps in three acceptance criteria and can pass when those required behaviors are broken.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneBuilder.test.ts",
+          "line": 19,
+          "message": "The test does not prove the case-group structure or presence of parts stands required by the first acceptance criterion.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test finds aircraft, engines, and components by traversing the whole root, but does not assert their parent groups or check for parts-stand nodes.",
+            "failureScenario": "If the builder flattened those nodes under the root and omitted every parts stand, the named test would still pass, despite failing the criterion requiring one case group with its listed parts-stand node."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneBuilder.test.ts",
+          "line": 41,
+          "message": "The test can pass when a non-selectable mesh carries an objectId, so it does not prove the second acceptance criterion.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test compares the set of mesh object IDs with the manifest and checks the floor separately, but does not assert that each mesh carrying an ID is an allowed selectable mesh.",
+            "failureScenario": "If a wing or parts-stand mesh were given an already-used manifest object ID, the set would remain unchanged and the test would pass, contrary to the criterion forbidding IDs on those meshes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneBuilder.test.ts",
+          "line": 54,
+          "message": "The test does not cover all material texture slots required by the third acceptance criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The material assertion checks only the map texture slot for null.",
+            "failureScenario": "If a material receives a non-null normalMap, roughnessMap, or another texture slot while map remains null, this test still passes, despite the criterion requiring every texture slot to be null."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSceneBuilder.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
