@@ -57,6 +57,18 @@ afterEach(() => {
 
   it('Hangar App composes semantic controls evidence journey and presets', async () => {
     stubCaseApi();
+    const evidenceOriginal = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/cases/cp-case-a/scene' && (init?.method ?? 'GET') === 'GET') {
+        const envelope = await evidenceOriginal(input, init).then((response) => response.json());
+        envelope.objects[0].evidenceIds = ['EV-A-001'];
+        envelope.documentRefs = [{ evidenceRefId: 'EV-A-001', caseId: 'cp-case-a', documentId: 'DOC-A-001', documentVersion: 3, basisId: 'BASIS-A', basisVersion: 2, displayLabel: 'Airframe evidence', processingState: 'accepted', usableAsEvidence: true }];
+        envelope.evidence = [{ evidenceRefId: 'EV-A-001', caseId: 'cp-case-a', documentId: 'DOC-A-001', documentVersion: 3, basisId: 'BASIS-A', basisVersion: 2, witnessId: 'WIT-A-001', page: 4, displayLabel: 'Airframe witness' }];
+        return new Response(JSON.stringify(envelope), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return evidenceOriginal(input, init);
+    });
     render(createElement(HangarApp, {
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
@@ -76,6 +88,8 @@ afterEach(() => {
     fireEvent.click(objectButtons[0]);
     expect(screen.getByRole('region', { name: 'Selection SYN-CP-A-AIR-001' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'SYN-CP-A-AIR-001' })).toBeTruthy();
+    expect(screen.getByText('DOC-A-001 v3 / BASIS-A v2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Page witness 4' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
   });
 
@@ -150,6 +164,33 @@ afterEach(() => {
     });
     render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } }));
     await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'View Air Three' });
+    fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
+    expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes('reset-blocked-variant') && (init?.method ?? 'GET') === 'POST')).toHaveLength(0);
+
+    cleanup();
+    stubCaseApi();
+    const roleOriginal = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/auth/users') return new Response(JSON.stringify([{ id: 'operator-1', displayName: 'Morgan Operator', role: 'aircraft-operator' }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url === '/api/auth/sign-in') return new Response(JSON.stringify({ id: 'operator-1', displayName: 'Morgan Operator', role: 'aircraft-operator', caseScopes: ['case-001'], csrfToken: 'token' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url === '/api/v1/cases/cp-case-c/scene' && (init?.method ?? 'GET') === 'GET') {
+        const envelope = await roleOriginal(input, init).then((response) => response.json());
+        envelope.case.permission = true; envelope.canResetBlockedVariant = true; envelope.allowedActions = ['reset'];
+        return new Response(JSON.stringify(envelope), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return roleOriginal(input, init);
+    });
+    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } }));
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('radio', { name: 'Morgan Operator (aircraft-operator)' });
+    fireEvent.click(screen.getByRole('radio', { name: 'Morgan Operator (aircraft-operator)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Revision: 7');
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('button', { name: 'View Air Three' });
     fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));

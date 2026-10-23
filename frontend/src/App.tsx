@@ -423,7 +423,10 @@ export default function App({
   const hangarComposedScene = typeof hangarActiveEnvelope === 'object' && hangarActiveEnvelope !== null
     ? hangarActiveEnvelope
     : hangarSnapshot?.completeContent;
-  const hangarCaseResetEnvelope = hangarSceneEnvelopes['cp-case-c'] ?? hangarCaseSnapshots['cp-case-c']?.completeContent ?? hangarComposedScene;
+  const hangarCaseResetEnvelopeBase = hangarSceneEnvelopes['cp-case-c'] ?? hangarCaseSnapshots['cp-case-c']?.completeContent ?? hangarComposedScene;
+  const hangarCaseResetEnvelope = session?.role !== 'technical-reviewer'
+    ? { ...(typeof hangarCaseResetEnvelopeBase === 'object' && hangarCaseResetEnvelopeBase !== null ? hangarCaseResetEnvelopeBase as Record<string, unknown> : {}), canResetBlockedVariant: false, allowedActions: [] }
+    : hangarCaseResetEnvelopeBase;
   const hangarCompositionObjects = hangarEntries.flatMap((entry) => {
     const envelope = hangarSceneEnvelopes[entry.caseId];
     const root = typeof envelope === 'object' && envelope !== null ? envelope as Record<string, unknown> : {};
@@ -440,8 +443,11 @@ export default function App({
       return { ...object, label, accessibleName: label };
     });
   });
-  const selectedCaseEnvelope = hangarSceneEnvelopes[hangarSelectedCaseId]
+  const selectedCaseEnvelopeBase = hangarSceneEnvelopes[hangarSelectedCaseId]
     ?? (typeof hangarComposedScene === 'object' && hangarComposedScene !== null ? hangarComposedScene : {});
+  const selectedCaseEnvelope = session?.role !== 'technical-reviewer' && typeof selectedCaseEnvelopeBase === 'object' && selectedCaseEnvelopeBase !== null
+    ? { ...selectedCaseEnvelopeBase as Record<string, unknown>, canResetBlockedVariant: false, allowedActions: [], case: { ...((selectedCaseEnvelopeBase as Record<string, unknown>).case as Record<string, unknown> ?? {}), permission: false, allowedActions: [] } }
+    : selectedCaseEnvelopeBase;
   const selectedCaseRoot = typeof selectedCaseEnvelope === 'object' && selectedCaseEnvelope !== null
     ? selectedCaseEnvelope as Record<string, unknown> : {};
   const combinedHangarEnvelope = {
