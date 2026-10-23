@@ -46,6 +46,19 @@ run "names_and_ranges_derive_from_prefix" {
   }
 }
 
+run "null_model_deployment_name_uses_derived_name" {
+  command = plan
+
+  variables {
+    model_deployment_name = null
+  }
+
+  assert {
+    condition     = azurerm_cognitive_deployment.model.name == "gpt-demo1"
+    error_message = "A null model_deployment_name must use the gpt-<name_prefix> derived name without invoking trimspace on null."
+  }
+}
+
 run "explicit_values_override_derived_names" {
   command = plan
 

@@ -11,7 +11,7 @@ locals {
   key_vault_name                  = coalesce(var.key_vault_name, "kv-${local.name_prefix}-${local.name_suffix}")
   model_account_name              = coalesce(var.model_account_name, "aoai-${local.name_prefix}-${local.name_suffix}")
   model_endpoint_subdomain        = coalesce(var.model_endpoint_subdomain, "aoai-${local.name_prefix}-${local.name_suffix}")
-  model_deployment_name           = coalesce(var.model_deployment_name, "gpt-${local.name_prefix}")
+  model_deployment_name           = var.model_deployment_name != null ? var.model_deployment_name : "gpt-${local.name_prefix}"
   acr_name                        = coalesce(var.acr_name, "acr${local.name_prefix}${local.name_suffix}")
   container_apps_environment_name = coalesce(var.container_apps_environment_name, "cae-${local.name_prefix}")
   container_app_name              = coalesce(var.container_app_name, "ca-${local.name_prefix}")

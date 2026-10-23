@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+// @ts-ignore -- Vitest loads node:fs at runtime; this package intentionally has no Node declaration dependency.
+import { readFileSync, readdirSync } from 'node:fs';
+import { createElement } from 'react';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   HANGAR_ASSET_INVALID,
   HANGAR_MAX_TOTAL_BYTES,
@@ -8,6 +12,12 @@ import {
   validateHangarAssetRecord,
   validateHangarResourceResult,
 } from '../src/hangar/assetPolicy';
+import HangarAssetFallback from '../src/hangar/HangarAssetFallback';
+import { loadHangarAircraftAsset } from '../src/hangar/HangarCanvasAdapter';
+import sceneManifest from '../src/hangar/sceneManifest.json';
+
+const cloneManifest = () => JSON.parse(JSON.stringify(sceneManifest));
+afterEach(cleanup);
 
 // Uint8Array.from keeps the bytes in this realm; jsdom's TextEncoder returns a Node-realm array.
 const bytesOf = (text: string) => Uint8Array.from(new TextEncoder().encode(text));
@@ -15,7 +25,7 @@ const assetBytes = bytesOf('synthetic hangar asset');
 const otherBytes = bytesOf('different hangar asset');
 
 const grant = (overrides: Record<string, unknown> = {}) => ({
-  path: 'assets/hangar/aircraft.glb', source: 'Project design pack', author: 'Hangar team',
+  path: 'assets/hangar/synthetic-a.bin', source: 'Project design pack', author: 'Hangar team',
   rightsBasis: 'Project-authored', rightsDeclaration: 'Approved project-authored asset declaration',
   checksum: computeHangarAssetChecksum(assetBytes), assetBytes, synthetic: true, type: 'model', ...overrides,
 });
@@ -74,10 +84,39 @@ describe('Hangar asset policy', () => {
     }
   });
 
+  it('hangar release asset declarations contain no GLB or texture records', () => {
+    const dir = 'src/assets/hangar';
+    const files = readdirSync(dir);
+    expect(files.filter((file: string) => /\.(glb|gltf|ktx2|basis)$/i.test(file))).toEqual([]);
+    const provenance = JSON.parse(readFileSync(`${dir}/hangar-provenance.json`, 'utf8'));
+    expect(provenance.assets).toEqual([]);
+    const manifest = JSON.parse(readFileSync('src/hangar/sceneManifest.json', 'utf8'));
+    for (const model of manifest.aircraft.models) {
+      expect(model.path).toBeUndefined(); expect(model.type).toBeUndefined();
+      expect(model.synthetic).toBe(true); expect(model.realAircraftType).toBe(false); expect(model.realPerson).toBe(false); expect(model.brandMarks).toBe(false);
+    }
+
+    const invalidManifests = [cloneManifest(), cloneManifest(), cloneManifest()];
+    invalidManifests[0].aircraft.models[0].path = 'assets/hangar/aircraft-a.glb';
+    delete invalidManifests[1].aircraft.models[0].synthetic;
+    invalidManifests[2].aircraft.models[0].realPerson = true;
+    for (const invalidManifest of invalidManifests) {
+      const loader = vi.fn(); let reason: 'asset_invalid' | null = null;
+      const result = loadHangarAircraftAsset('aircraft-a', new Uint8Array([1]), {
+        loader, onFallback: value => { reason = value; }, aggregateBytes: 1, manifest: invalidManifest,
+      });
+      expect(result).toEqual({ loaded: false, reason: 'asset_invalid' });
+      expect(loader).not.toHaveBeenCalled();
+      render(createElement(HangarAssetFallback, { reason }));
+      expect(screen.getByRole('alert').textContent).toBe('Unable to display this hangar asset (asset_invalid).');
+      cleanup();
+    }
+  });
+
   it('rejects real identity and missing synthetic rack or avatar markers', () => {
-    const rack = (overrides: Record<string, unknown> = {}) => grant({ path: 'assets/hangar/rack.glb', rack: true, syntheticMarkerDeclaration: 'Synthetic rack; no brand', ...overrides });
+    const rack = (overrides: Record<string, unknown> = {}) => grant({ path: 'assets/hangar/rack.bin', rack: true, syntheticMarkerDeclaration: 'Synthetic rack; no brand', ...overrides });
     const avatar = (overrides: Record<string, unknown> = {}) => grant({
-      path: 'assets/hangar/avatar.glb', avatar: true, syntheticMarkerDeclaration: 'Synthetic avatar; no real person',
+      path: 'assets/hangar/avatar.bin', avatar: true, syntheticMarkerDeclaration: 'Synthetic avatar; no real person',
       hardHatNode: 'HardHat', manifestHardHatNode: 'HardHat', ...overrides,
     });
     expect(check(rack())).toEqual({ valid: true });

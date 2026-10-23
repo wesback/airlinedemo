@@ -2,6 +2,7 @@ import { createElement, useEffect, useState, type ComponentType } from 'react';
 import { createHangarCameraController } from './cameraController';
 import { createHangarAvatarController, HangarReducedMotion } from './reducedMotion';
 import { validateHangarRackAvatarManifest } from './dataRoomAdapter';
+import { HANGAR_SCENE_THEME } from './sceneTheme';
 
 export const SUPPORTED_HANGAR_CONTRACT_VERSION = 1;
 export const SUPPORTED_HANGAR_BROWSERS = ['Chrome', 'Edge'] as const;
@@ -163,12 +164,12 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
       createElement(
         Canvas,
         { shadows: true, camera: { position: [cameraState.radius / 10 * 4, 3, cameraState.radius / 10 * 6], fov: 45 } },
-        createElement('color', { attach: 'background', args: ['#dbe7f0'] }),
+        createElement('color', { attach: 'background', args: [HANGAR_SCENE_THEME.background] }),
         createElement('ambientLight', { intensity: 1 }),
         createElement('directionalLight', { position: [5, 8, 4], intensity: 2 }),
         createElement('mesh', { position: [avatarState.x, 0, avatarState.z], 'data-hangar-avatar-mesh-position': `${avatarState.x},${avatarState.z}` },
           createElement('boxGeometry', { args: [3, 1.5, 1.5] }),
-          createElement('meshStandardMaterial', { color: '#64748b', roughness: 0.65 }),
+          createElement('meshStandardMaterial', { color: HANGAR_SCENE_THEME.avatarBody, roughness: 0.65 }),
         ),
       ),
     );

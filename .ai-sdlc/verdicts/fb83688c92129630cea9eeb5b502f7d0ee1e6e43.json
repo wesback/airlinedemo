@@ -1,0 +1,208 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 591,
+  "branch": "ai-sdlc/issue-591",
+  "commitSha": "fb83688c92129630cea9eeb5b502f7d0ee1e6e43",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The asset files and provenance records are removed, and the adapters reject runtime model requests. The named test for criterion 1 does not verify the specified invalid-manifest fallback behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 78,
+          "message": "Criterion 1's named test does not exercise its negative case through the production path. Add a test that supplies an invalid declaration and asserts the visible fallback and zero loader calls.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test checks removed files and aircraft declarations, but never supplies a manifest with a GLB path, a missing synthetic marker, or a real-person declaration to the production validation and fallback path.",
+            "failureScenario": "If a future change lets one of those invalid declarations reach a loader, the named test still passes; the criterion's required `asset_invalid` fallback and zero loader calls are not verified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The zero-model declarations and adapter rejection have assertions, but the first criterion's invalid-manifest fallback behavior is not tied to a test that exercises that failure scenario.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAircraftAssets.test.ts",
+          "line": 15,
+          "message": "The test named for the first acceptance criterion checks declarations only; it does not prove the criterion's required rejection and fallback behavior for an invalid manifest.",
+          "confidence": 0.87,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The `version zero asset declarations` test inspects the static provenance and manifest fields. It does not pass a manifest with a forbidden model path or missing marker through the production validation and fallback path.",
+            "failureScenario": "If validation stops rejecting a manifest with a `.glb` path, or stops calling the fallback for a missing synthetic marker, this named test can still pass. The criterion requires that state to produce `asset_invalid` and zero loader calls."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed adapters reject asset loads, and I found no concrete security vulnerability in the diff. The named test for the first acceptance criterion does not verify the fallback behavior that criterion requires.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarAssetPolicy.test.ts",
+          "line": 20,
+          "message": "The test named for the first acceptance criterion does not exercise its required rejection behavior. Add a test that supplies the invalid manifest state and asserts asset_invalid, zero loader calls, and the visible fallback.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test checks asset files, provenance, and manifest declarations; it does not call the asset adapter or assert its fallback and loader behavior.",
+            "failureScenario": "If an adapter began loading an asset after a manifest model path was added, this test would still pass, so it does not prove the criterion's required asset_invalid fallback and zero loader calls."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarAircraftAssets.test.ts",
+      "frontend/tests/HangarAssetPolicy.test.ts",
+      "frontend/tests/HangarRackAvatarAssets.test.ts",
+      "frontend/tests/HangarResourcePolicy.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
