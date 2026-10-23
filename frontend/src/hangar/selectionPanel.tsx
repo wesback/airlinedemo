@@ -12,12 +12,10 @@ export function buildHangarAircraftLabelText(source:unknown,caseId:string):strin
   const root=isObject(source)?source:{}; const list=Array.isArray(root.cases)?root.cases:Array.isArray(root.caseList)?root.caseList:null;
   const c=(list&&Array.isArray(list)?list.find((v)=>isObject(v)&&(v.caseId===caseId||v.id===caseId)):null)||(isObject(root.case)&&root.case.caseId===caseId?root.case:null);
   if(!c||!isObject(c))return null;
-  const fallbackNames:Record<string,string>={'cp-case-a':'Case A','cp-case-b':'Case B','cp-case-c':'Case C'};
-  const fallbackCategories:Record<string,string>={'cp-case-a':'narrow-body','cp-case-b':'regional','cp-case-c':'wide-body'};
-  const name=exactText(c.name??c.caseName??c.displayName)??fallbackNames[caseId]; const category=exactText(c.category??c.aircraftCategory)??fallbackCategories[caseId];
-  const capability=exactText(c.capabilityLabel)??'Unknown'; const rawAction=c.nextAction;
-  const action=capability==='Unknown'? 'No next action':rawAction===null||rawAction===undefined?'No next action':isObject(rawAction)?exactText(rawAction.text)??'No next action':exactText(rawAction)??'No next action';
+  const name=exactText(c.name??c.caseName??c.displayName); const category=exactText(c.category??c.aircraftCategory);
   if(!name||!category)return null;
+  const capability=exactText(c.capabilityLabel)??'Unknown'; const rawAction=c.nextAction;
+  const action=capability==='Unknown'?'No next action':rawAction===null||rawAction===undefined?'No next action':isObject(rawAction)?exactText(rawAction.text)??'No next action':exactText(rawAction)??'No next action';
   return `${name}\n${category}\n${capability}\n${action}`;
 }
 export function buildHangarSelectedObjectLabel(source:unknown,objectId:unknown):string|null {

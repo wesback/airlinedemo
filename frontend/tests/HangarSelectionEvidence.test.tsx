@@ -1,6 +1,9 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as THREE from 'three';
 import HangarSelectionEvidence, { resolveHangarSelection, buildHangarSelectedObjectLabel } from '../src/hangar/selectionPanel';
+import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/hangar/HangarCanvasAdapter';
 
 const envelope=(overrides:Record<string,unknown>={})=>({contractVersion:1,case:{caseId:'cp-case-a',caseRevision:7,status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},objects:[{objectId:'SYN-CP-A-AIR-001',kind:'aircraft',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-ENG-001',kind:'engine',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-001',kind:'component',caseId:'cp-case-a',evidenceIds:['ref-1'],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-002',kind:'component',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'}],documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual',processingState:'accepted',retryable:false,usableAsEvidence:true}],evidence:[{witnessId:'wit-1',evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,page:3,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual'}],history:[],canResetBlockedVariant:false,allowedActions:[],...overrides});
 const manifest={objectIds:['SYN-CP-A-AIR-001','SYN-CP-A-ENG-001','SYN-CP-A-CMP-001','SYN-CP-A-CMP-002']};
@@ -56,8 +59,28 @@ describe('HangarSelectionEvidence',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Open content'}));
     expect(encodedRead).toHaveBeenCalledWith('case-a/manual%20%3Fdraft.txt?version=2&basis=basis%26beta%3Devil&basisVersion=2');
   });
-  it('Hangar labels use projected server text',()=>{const source=Object.assign(envelope(),{cases:[{caseId:'cp-case-a',name:'Case Alpha',category:'narrow-body',nextAction:{text:'Review evidence'},capabilityLabel:'Rules-based'},{caseId:'cp-case-b',name:'Case Beta',category:'regional',nextAction:{text:'Request evidence'},capabilityLabel:'AI agent'},{caseId:'cp-case-c',name:'Case Gamma',category:'wide-body',nextAction:null,capabilityLabel:'Unknown'}],objects:[...envelope().objects.map((o,index)=>({...o,displayName:index===1?'Left engine':index===2?'Main component':index===3?'Backup component':undefined}))]});expect((source as any).cases).toHaveLength(3);expect(resolveHangarSelection(source,'SYN-CP-A-AIR-001',manifest)?.nextAction).toBe('Review evidence');});
-  it('Hangar labels hide and render as text only',()=>{expect(resolveHangarSelection(envelope(), 'DOES-NOT-EXIST',manifest)).toBeNull();const markup=buildHangarSelectedObjectLabel(envelope({objects:[{objectId:'SYN-CP-A-ENG-001',kind:'engine',caseId:'cp-case-a',displayName:'<b>Left engine</b>'}]}),'SYN-CP-A-ENG-001');expect(markup).toBe('<b>Left engine</b>');});
+  it('Hangar labels use projected server text',()=>{
+    const scene=new THREE.Group(); for(const [letter,x] of [['A',-28],['B',-4],['C',25]] as const){const node=new THREE.Group();node.name=`Aircraft${letter}`;node.position.set(x,3.5,0);scene.add(node);}
+    const engine=new THREE.Group();engine.name='EngineA';engine.userData.objectId='SYN-CP-A-ENG-001';engine.position.set(-28,3,0);scene.add(engine);
+    const source={cases:[{caseId:'cp-case-a',name:'Case Alpha',category:'narrow-body',nextAction:{text:'Review evidence'},capabilityLabel:'Rules-based'},{caseId:'cp-case-b',name:'Case Beta',category:'regional',nextAction:{text:'Request evidence'},capabilityLabel:'AI agent'},{caseId:'cp-case-c',name:'Case Gamma',category:'wide-body',nextAction:null,capabilityLabel:'Unknown'}],objects:[{objectId:'SYN-CP-A-ENG-001',kind:'engine',displayName:'Left engine'},{objectId:'SYN-CP-A-CMP-001',kind:'component',displayName:'Main component'}]};
+    const camera=createHangarOwnedPerspectiveCamera();camera.position.set(0,30,50);camera.lookAt(0,0,0);camera.updateProjectionMatrix();
+    const Canvas=()=>createElement('div',{'data-canvas':'true'});
+    render(createElement(HangarCanvasAdapter,{sceneGroup:scene,camera,sceneData:source,selection:'SYN-CP-A-ENG-001',canvasComponent:Canvas}));
+    expect(document.querySelectorAll('[data-hangar-label]')).toHaveLength(4);
+    expect(document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.textContent).toBe('Case Alpha\nnarrow-body\nRules-based\nReview evidence');
+    expect(document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.getAttribute('role')).toBeNull();
+    expect(document.querySelector('[data-hangar-label="SYN-CP-A-ENG-001"]')?.textContent).toBe('Left engine');
+    expect(document.querySelector('[data-hangar-label="SYN-CP-C-AIR-001"]')?.textContent).toBe('Case Gamma\nwide-body\nUnknown\nNo next action');
+  });
+  it('Hangar labels hide and render as text only',async ()=>{
+    const scene=new THREE.Group();const engine=new THREE.Group();engine.name='EngineA';engine.userData.objectId='SYN-CP-A-ENG-001';engine.position.set(0,3,0);scene.add(engine);
+    const camera=createHangarOwnedPerspectiveCamera();camera.position.set(0,30,50);camera.lookAt(0,3,0);camera.updateProjectionMatrix();
+    const source={objects:[{objectId:'SYN-CP-A-ENG-001',kind:'engine',displayName:'<b>Left engine</b>'}]};const Canvas=()=>createElement('div',{'data-canvas':'true'});
+    const {container}=render(createElement(HangarCanvasAdapter,{sceneGroup:scene,camera,sceneData:source,selection:'SYN-CP-A-ENG-001',canvasComponent:Canvas}));
+    const label=container.querySelector('[data-hangar-label="SYN-CP-A-ENG-001"]') as HTMLElement|null;expect(label?.textContent).toBe('<b>Left engine</b>');expect(container.querySelector('b')).toBeNull();expect(label?.getAttribute('aria-hidden')).toBe('true');expect(label?.querySelector('button')).toBeNull();
+    camera.position.set(0,30,-50);camera.lookAt(0,3,-100);camera.updateProjectionMatrix();await waitFor(()=>expect(label?.style.display).toBe('none'));expect(resolveHangarSelection(envelope(), 'DOES-NOT-EXIST',manifest)).toBeNull();
+  });
   it('HangarSelectionEvidence blocks witnesses and renders markup as text',()=>{
     const read=vi.fn(); const blocked=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,basisId:'basis-v1',basisVersion:1,displayLabel:'<img src=x onerror=alert(1)>',processingState:'rejected-retryable',retryable:true,usableAsEvidence:false}],evidence:[{witnessId:'secret',evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,page:9,basisId:'basis-v1',basisVersion:1,displayLabel:'SECRET-WITNESS'}]});
     const {container}=render(<HangarSelectionEvidence envelope={blocked} manifest={manifest} identifier="SYN-CP-A-CMP-001" onContentOpen={read}/>);
