@@ -6,7 +6,7 @@ version: "0.9.2"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-12"
-last_updated: "2026-10-16"
+last_updated: "2026-10-23"
 product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003", "GOAL-004"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Return Readiness Demonstrator
 
-> **aircraft-return-readiness** | Status: Draft | Version: 0.9.2 | Last Updated: 2026-10-16
+> **aircraft-return-readiness** | Status: Draft | Version: 0.9.2 | Last Updated: 2026-10-23
 
 ## Executive Summary
 
@@ -481,6 +481,45 @@ This addendum changes no requirement, acceptance criterion, or identifier in thi
 - The content security policy in DD-028 may be extended only by the directives named in the Security Notes of the Aircraft Hangar 3D PRD (`img-src blob:` and `worker-src 'self'`), once that PRD is approved.
 - Delivery uses three staged PRD merges: this amendment first; CP only after its ARR prerequisites are implemented and tested on the default branch; HG only after the full CP behavior and fixture review are delivered. Drafts can be reviewed together but are not merged together, because each merged PRD independently starts automatic planning. A named person approves each PRD pull request and verifies prerequisite code/tests, not just closed issue numbers.
 - Replanning this amended ARR PRD reuses its existing core stories. This addendum creates no CP or HG implementation stories in the ARR plan; those requirements belong to their later PRD plans. The ARR pull request states that no new core behavior is requested by this scope clarification.
+
+## Addendum (2026-10-23): Foundry AI Gateway and token governance
+
+This addendum adds the architecture, exact requirements, gateway configuration and token limits that story #549 (pull request #567) implements. It changes no existing FR, NFR or AC and keeps the document version at 0.9.2, because the companion PRDs pin that version. The product owner approves it by merging the pull request that carries it.
+
+**Architecture.** Every model call of Arms B, C and D goes through a private API Management gateway. The application keeps authority over case state and actions; the gateway only authenticates the caller, pins the deployment and API version, forwards, and meters tokens. A direct Azure OpenAI endpoint is refused.
+
+| ID | Requirement | Source |
+| --- | --- | --- |
+| GW-1 | The gateway is internal (virtual network type `Internal`, public network access disabled) and requires no subscription key. The cognitive account accepts Entra identities only; the gateway authenticates to it with its system-assigned managed identity (role `Cognitive Services OpenAI User`). | Architectural decision |
+| GW-2 | The gateway policy validates the caller JWT: audience equal to the recorded audience, and claim `oid` equal to the recorded application identity. A token that fails either check gets HTTP 401 and is not forwarded. | Architectural decision |
+| GW-3 | The gateway accepts one operation, `POST deployments/<gateway_model_deployment>/chat/completions?api-version=<gateway_api_version>`, rewritten to the configured deployment and version. A request naming another deployment is forwarded only to the configured deployment. | Architectural decision |
+| GW-4 | The application requests tokens for the scope `<audience>/.default`. Whatever scope the Azure OpenAI client asks for, the credential is rescoped to that value, so the issued token audience equals the policy audience. | Architectural decision |
+| GW-5 | The application sends exactly seven correlation fields on each dispatch: `Arm`, `Run`, `Package`, `Case`, `ModelConfiguration`, `SuiteVersion`, `CallIdentity`. Each matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. A field is refused when it contains `bearer `, `authorization:`, `__host-`, `aspnetcore.cookies`, `pass`, `passcode`, `cookie`, `secret`, an access-key, connection-string, raw-prompt, prompt-text, model-response or document-text marker, an `@` address, or a hyphenated three-two-four digit group (`123-45-6789`); `Case` is also refused when it holds a run of 13 to 19 digits. Refusal message: `correlation fields refused: <field names>`, and no model call is made. | Privacy (NFR privacy) |
+| GW-6 | With usage in the response the application records input, output and total tokens, model-call count, retries, latency, throttling, model configuration and estimated cost. Without usage the status is `unavailable` and token values and cost are null, never zero. | Architectural decision |
+| GW-7 | Gateway and application traces contain no raw prompt, extracted document text, passcode, cookie, personal identifier, secret, access key, connection string or model response text. | Privacy (NFR privacy) |
+| GW-8 | The same call identity (arm, run, package, case, model configuration, suite version, call identity) returns the stored result without a second dispatch. A changed model configuration with the other six fields unchanged is refused with `gateway replay rejected: model configuration changed`. | Architectural decision |
+
+**Recorded configuration.**
+
+| Item | Recorded value |
+| --- | --- |
+| Approved caller identity | The Entra object ID (GUID) of the deployed API's managed identity, supplied as Terraform variable `gateway_approved_application_identity`. The default in `variables.tf` is a test fixture value and is not a production identity. |
+| Token audience (policy) | `api://airline-demo-model-gateway`, variable `gateway_audience` and application setting `ModelGateway:Audience` (same value). |
+| Client token scope | `api://airline-demo-model-gateway/.default` |
+| Gateway endpoint | Application setting `ModelGateway:Endpoint`, an `https` address that is not an `*.openai.azure.com` host. |
+| Deployment and API version | Variables `gateway_model_deployment` (default `gpt-demo-test`) and `gateway_api_version` (default `2024-02-01`). |
+| Rate schedule (scenario assumption) | Input 2 and output 3 cost units per million tokens, settings `ModelGateway:InputCostPerMillionTokens` and `ModelGateway:OutputCostPerMillionTokens`. |
+
+**Token limits.**
+
+| Arm | Input tokens per call | Output tokens per call | Total tokens per evaluation | Model calls | Tool calls | Retries | Elapsed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| B, C | 10000 | 2000 | 24000 | 2 | 20 | 1 | 30 seconds |
+| D | 100000 | 4096 | 208192 | 2 | 20 | 1 | 30 seconds |
+
+Input tokens are estimated as the UTF-8 byte count of the messages before the call; a call over the limit by one is denied before dispatch (`gateway quota exceeded by one unit: input-tokens`). Output and evaluation totals are checked on the response (`...: output-tokens`, `...: total-tokens`). A denied result is never returned as successful and reports the usage accumulated before denial.
+
+**Replanning.** This addendum needs no new stories beyond #549.
 
 ## Document Metadata
 
