@@ -48,6 +48,13 @@ Keep non-secret Terraform inputs in a reviewed file outside tracked paths and pa
 
 ## Setup and deployment
 
+Run `scripts/prebootstrap-deployment.sh` before the operator bootstrap to
+verify tools, Azure identity, external variable/backend files, provider
+registration, and Terraform formatting. Use
+`scripts/prebootstrap-deployment.sh --register-providers` only when provider
+registration is explicitly approved. The pre-bootstrap script does not create
+resources, initialize Terraform, create a plan, or apply infrastructure.
+
 Use `scripts/bootstrap-deployment.sh` for operator bootstrap. It requires `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `RESOURCE_GROUP_NAME`, `TFVARS_FILE`, and `BACKEND_CONFIG_FILE`, verifies Azure CLI and Terraform availability, verifies logged-in tenant and subscription, runs Terraform initialization, creates and displays one saved plan, then applies exactly that plan only after explicit `yes` confirmation. It does not build, sign, push, or deploy an image.
 
 1. Check out the approved repository revision and record `git rev-parse HEAD`; use a clean worktree and retain the revision with the evidence.
