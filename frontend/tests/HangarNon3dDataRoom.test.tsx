@@ -30,7 +30,7 @@ describe('HangarNon3dDataRoom', () => {
     expect(screen.getByRole('heading', { name: 'Data Room aircraft' })).toBeTruthy();
     expect(screen.getAllByRole('listitem').map(item => item.getAttribute('data-case-id'))).toEqual(['cp-case-a', 'cp-case-b', 'cp-case-c']);
     fireEvent.click(screen.getByRole('button', { name: 'Case A, narrow-body' }));
-    expect(selection).not.toHaveBeenCalled();
+    expect(selection.mock.calls.map(([caseId]) => caseId)).toEqual(['AIR-1']);
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
     expect(screen.getByRole('region', { name: 'Walk region' })).toBeTruthy();

@@ -8,7 +8,7 @@ import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
 import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
-import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
+import { refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
 import HangarSemanticControls from './hangar/semanticControls';
 import HangarSelectionEvidence from './hangar/selectionPanel';
 import HangarGuidedJourney from './hangar/guidedJourney';
@@ -114,10 +114,12 @@ export default function App({
   }
   const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = Object.fromEntries(hangarEntries.map((entry, index) => [entry.caseId, index === 0 ? { x: 4, z: -4 } : index === 1 ? { x: -4, z: 4 } : { x: 0, z: 6 }]));
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
-    if (!canAdmitHangarCommands(hangarSnapshot)) return;
-    const serverIndex = hangarEntries.findIndex((entry) => entry.caseId === aircraftId);
-    const selectionId = serverIndex >= 0 ? `AIR-${serverIndex + 1}` : aircraftId;
-    hangarAircraftSelectionHandler?.(selectionId);
+    let serverIndex = hangarEntries.findIndex((entry) => entry.caseId === aircraftId);
+    if (/^AIR-[1-9]\d*$/.test(aircraftId)) {
+      serverIndex = Number(aircraftId.slice(4)) - 1;
+    }
+    if (!hangarEntries[serverIndex]) return;
+    hangarAircraftSelectionHandler?.(`AIR-${serverIndex + 1}`);
   };
 
   function setHangarMotionOverride(enabled: boolean) {
