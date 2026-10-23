@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import manifest from '../src/hangar/sceneManifest.json';
+import { HANGAR_SCENE_THEME } from '../src/hangar/sceneTheme';
 import { createHangarRackMenuController } from '../src/hangar/rackMenu';
 import {
   HANGAR_MANIFEST_ERROR,
@@ -13,6 +14,35 @@ import {
 const clone = () => JSON.parse(JSON.stringify(manifest));
 
 describe('Hangar rack and avatar manifest', () => {
+  it('hangar label contrast and synthetic declaration contract', () => {
+    const result = validateHangarRackAvatarManifest(manifest);
+    expect(result.valid).toBe(true);
+    const lowText = clone(); lowText.avatar.synthetic = false;
+    expect(validateHangarRackAvatarManifest(lowText)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    const realPerson = clone(); realPerson.avatar.realPerson = true;
+    expect(validateHangarRackAvatarManifest(realPerson)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    const brandMarks = clone(); brandMarks.avatar.brandMarks = true;
+    expect(validateHangarRackAvatarManifest(brandMarks)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    const missingSynthetic = clone(); delete missingSynthetic.avatar.synthetic;
+    expect(validateHangarRackAvatarManifest(missingSynthetic)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    for (let modelIndex = 0; modelIndex < 3; modelIndex += 1) {
+      for (const field of ['synthetic', 'realAircraftType', 'brandMarks']) {
+        const missing = clone(); delete missing.aircraft.models[modelIndex][field];
+        expect(validateHangarRackAvatarManifest(missing)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+        const incorrect = clone(); incorrect.aircraft.models[modelIndex][field] = field === 'synthetic' ? false : true;
+        expect(validateHangarRackAvatarManifest(incorrect)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+      }
+    }
+    const originalLabelText = HANGAR_SCENE_THEME.labelText;
+    const originalLabelMuted = HANGAR_SCENE_THEME.labelMuted;
+    (HANGAR_SCENE_THEME as { labelText: string }).labelText = '#FFFFFF';
+    expect(validateHangarRackAvatarManifest(manifest)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    (HANGAR_SCENE_THEME as { labelText: string }).labelText = originalLabelText;
+    (HANGAR_SCENE_THEME as { labelMuted: string }).labelMuted = '#FFFFFF';
+    expect(validateHangarRackAvatarManifest(manifest)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    (HANGAR_SCENE_THEME as { labelMuted: string }).labelMuted = originalLabelMuted;
+  });
+
   it('Hangar rack manifest exact five-unit mapping', () => {
     const result = validateHangarRackAvatarManifest(manifest);
     expect(result.valid).toBe(true);

@@ -1,6 +1,6 @@
 {
   "contractVersion": 1,
-  "packVersion": "hangar-aircraft-rack-avatar-v1",
+  "packVersion": "0.4.0",
   "rack": {
     "path": "assets/hangar/rack.glb",
     "type": "model",
@@ -46,6 +46,9 @@
         "caseId": "cp-case-a",
         "path": "assets/hangar/aircraft-a.glb",
         "category": "narrow-body",
+        "synthetic": true,
+        "realAircraftType": false,
+        "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftA",
           "engine": "EngineA",
@@ -63,6 +66,9 @@
         "caseId": "cp-case-b",
         "path": "assets/hangar/aircraft-b.glb",
         "category": "regional",
+        "synthetic": true,
+        "realAircraftType": false,
+        "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftB",
           "engine": "EngineB",
@@ -80,6 +86,9 @@
         "caseId": "cp-case-c",
         "path": "assets/hangar/aircraft-c.glb",
         "category": "wide-body",
+        "synthetic": true,
+        "realAircraftType": false,
+        "brandMarks": false,
         "nodes": {
           "aircraft": "AircraftC",
           "engine": "EngineC",
@@ -108,5 +117,128 @@
     "SYN-CP-C-ENG-001",
     "SYN-CP-C-CMP-001",
     "SYN-CP-C-CMP-002"
-  ]
+  ],
+  "layout": {
+    "floorPolygon": [
+      {
+        "x": -45,
+        "z": -25
+      },
+      {
+        "x": 45,
+        "z": -25
+      },
+      {
+        "x": 45,
+        "z": 25
+      },
+      {
+        "x": -45,
+        "z": 25
+      }
+    ],
+    "floorSlab": {
+      "width": 90,
+      "height": 0.2,
+      "depth": 50,
+      "topY": 0
+    },
+    "aircraft": [
+      {
+        "caseId": "cp-case-a",
+        "centre": {
+          "x": -28,
+          "z": 0
+        },
+        "dimensions": {
+          "length": 24,
+          "span": 22,
+          "height": 7
+        },
+        "footprint": {
+          "minX": -39,
+          "maxX": -17,
+          "minZ": -12,
+          "maxZ": 12
+        },
+        "marker": {
+          "x": -28,
+          "z": 14
+        }
+      },
+      {
+        "caseId": "cp-case-b",
+        "centre": {
+          "x": -4,
+          "z": -2
+        },
+        "dimensions": {
+          "length": 18,
+          "span": 17,
+          "height": 6
+        },
+        "footprint": {
+          "minX": -12.5,
+          "maxX": 4.5,
+          "minZ": -11,
+          "maxZ": 7
+        },
+        "marker": {
+          "x": -4,
+          "z": 9
+        }
+      },
+      {
+        "caseId": "cp-case-c",
+        "centre": {
+          "x": 25,
+          "z": 0
+        },
+        "dimensions": {
+          "length": 32,
+          "span": 30,
+          "height": 10
+        },
+        "footprint": {
+          "minX": 10,
+          "maxX": 40,
+          "minZ": -16,
+          "maxZ": 16
+        },
+        "marker": {
+          "x": 25,
+          "z": 18
+        }
+      }
+    ],
+    "rack": {
+      "footprint": {
+        "minX": -5,
+        "maxX": -3,
+        "minZ": -22,
+        "maxZ": -21
+      },
+      "height": 2.2,
+      "frontZ": -21
+    },
+    "interactionCircle": {
+      "centre": {
+        "x": -4,
+        "z": -19.5
+      },
+      "radius": 1.5
+    },
+    "avatarStart": {
+      "x": -4,
+      "z": 20
+    },
+    "cameraBox": {
+      "minX": -60,
+      "maxX": 60,
+      "minY": 0.5,
+      "maxY": 40,
+      "minZ": -45,
+      "maxZ": 45
+    }
+  }
 }
