@@ -304,6 +304,9 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
     <base />
     <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="gateway caller identity rejected">
       <openid-config url="https://login.microsoftonline.com/${var.tenant_id}/v2.0/.well-known/openid-configuration" />
+      <audiences>
+        <audience>${var.gateway_audience}</audience>
+      </audiences>
       <required-claims>
         <claim name="oid" match="any">
           <value>${var.gateway_approved_application_identity}</value>

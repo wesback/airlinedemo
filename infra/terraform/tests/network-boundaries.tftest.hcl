@@ -101,7 +101,7 @@ run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct
     error_message = "Gateway calls must require no subscription key and direct model public or key access must be disabled."
   }
   assert {
-    condition     = azurerm_api_management_api_operation.gateway_chat_completions.url_template == "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" && can(regex("validate-jwt", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_approved_application_identity, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("authentication-managed-identity", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.url_template == "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" && can(regex("validate-jwt", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_approved_application_identity, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_audience, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("authentication-managed-identity", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
     error_message = "The operation and policy must pin deployment/API version and validate the approved caller before managed-identity backend forwarding."
   }
   assert {

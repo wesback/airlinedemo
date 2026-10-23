@@ -1,11 +1,78 @@
 using AirlineDemo.Api.Evaluation;
+using AirlineDemo.Api.Investigation;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AirlineDemo.Api.Tests;
 
 public sealed class ModelGatewayTokenomicsTests
 {
     private static GatewayCorrelation Correlation(string model = "model-v1") => new("B", "run-1", "package-1", "case-1", model, "suite-v1", "call-1");
+
+    [Fact]
+    public async Task Production_executor_routes_to_gateway_and_records_correlation_usage_and_cost()
+    {
+        var fake = new GatewayChatClient();
+        var services = new ServiceCollection();
+        services.AddSingleton<Func<ApprovedModelManifest, IChatClient>>(_ => _ => fake);
+        services.AddSingleton(new GatewayTokenRateSchedule(2m, 3m));
+        Program.RegisterProductionEvaluationExecutors(services);
+        using var provider = services.BuildServiceProvider();
+        var executor = provider.GetServices<IEvaluationArmExecutor>().Single(e => e.Arm == EvaluationArm.B);
+        var request = new EvaluationArmRequest(EvaluationArm.B, EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection,
+            new EvaluationCase("case-1", "synthetic", "{\"inputs\":{\"status\":\"approved\"}}", "sha-1"),
+            FakeApprovedManifest.Approved(), new EvaluationCallRecorder());
+
+        var result = await executor.ExecuteAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(49, result.TokenUsage);
+        Assert.Equal(1, result.ModelCallCount);
+        Assert.Equal(1, fake.Calls);
+        Assert.Equal("fixture-deployment-fixture-model-2025-01-01-swedencentral", fake.LastOptions?.ModelId);
+    }
+
+    [Fact]
+    public async Task Production_executor_enforces_quota_boundary_and_denies_over_limit_result()
+    {
+        var fake = new GatewayChatClient { InputTokenCount = 101 };
+        var governor = new GatewayQuotaGovernor(new GatewayQuota(100, 50, 140, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        Assert.Equal("gateway quota exceeded by one unit: input-tokens", governor.BeforeCall(101));
+        Assert.Equal(0, fake.Calls);
+        var governed = new GatewayGovernedChatClient(fake, Correlation(), new GatewayQuota(100, 50, 140, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => governed.GetResponseAsync([new ChatMessage(ChatRole.User, new string('x', 101))]));
+        Assert.Equal(0, fake.Calls);
+    }
+
+    [Fact]
+    public async Task Production_executor_rejects_sensitive_correlation_and_keeps_trace_content_private()
+    {
+        var fake = new GatewayChatClient();
+        var governed = new GatewayGovernedChatClient(fake, new GatewayCorrelation("B", "run-1", "package-1", "raw prompt text", "model-v1", "suite-v1", "call-1"), new GatewayQuota(1000, 1000, 2000, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        await Assert.ThrowsAsync<ArgumentException>(() => governed.GetResponseAsync([new ChatMessage(ChatRole.User, "approved case")], new ChatOptions()));
+        Assert.Equal(0, fake.Calls);
+    }
+
+    [Fact]
+    public async Task Production_executor_replay_returns_original_result_without_second_dispatch()
+    {
+        var fake = new GatewayChatClient();
+        var services = new ServiceCollection();
+        services.AddSingleton<Func<ApprovedModelManifest, IChatClient>>(_ => _ => fake);
+        Program.RegisterProductionEvaluationExecutors(services);
+        using var provider = services.BuildServiceProvider();
+        var executor = provider.GetServices<IEvaluationArmExecutor>().Single(e => e.Arm == EvaluationArm.B);
+        var evaluationCase = new EvaluationCase("case-1", "synthetic", "{\"inputs\":{\"status\":\"approved\"}}", "sha-1");
+        var request = new EvaluationArmRequest(EvaluationArm.B, EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection,
+            evaluationCase, FakeApprovedManifest.Approved(), new EvaluationCallRecorder());
+
+        var first = await executor.ExecuteAsync(request, TestContext.Current.CancellationToken);
+        fake.InputTokenCount = 999; fake.OutputTokenCount = 999;
+        var replay = await executor.ExecuteAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(first.Answer, replay.Answer);
+        Assert.Equal(first.TokenUsage, replay.TokenUsage);
+        Assert.Equal(1, fake.Calls);
+    }
 
     [Fact]
     public async Task Production_adapter_routes_to_gateway_and_records_available_or_unavailable_usage()
@@ -85,13 +152,19 @@ public sealed class ModelGatewayTokenomicsTests
     private sealed class GatewayChatClient : IChatClient
     {
         public int Calls { get; private set; }
+        public int? InputTokenCount { get; set; } = 42;
+        public int? OutputTokenCount { get; set; } = 7;
+        public int? TotalTokenCount { get; set; } = 49;
+        public ChatOptions? LastOptions { get; private set; }
         public ChatClientMetadata Metadata { get; } = new("gateway-test");
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             Calls++;
+            LastOptions = options;
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "ok"))
             {
-                Usage = new UsageDetails { InputTokenCount = 42, OutputTokenCount = 7, TotalTokenCount = 49 }
+                Usage = InputTokenCount is null && OutputTokenCount is null && TotalTokenCount is null ? null :
+                    new UsageDetails { InputTokenCount = InputTokenCount, OutputTokenCount = OutputTokenCount, TotalTokenCount = TotalTokenCount }
             });
         }
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)

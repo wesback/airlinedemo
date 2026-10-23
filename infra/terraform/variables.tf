@@ -128,6 +128,17 @@ variable "gateway_model_deployment" {
   }
 }
 
+variable "gateway_audience" {
+  description = "Expected JWT audience for the application calling the private model gateway."
+  type        = string
+  default     = "api://airline-demo-model-gateway"
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.gateway_audience)) > 0
+    error_message = "gateway_audience must not be empty or whitespace."
+  }
+}
+
 variable "gateway_approved_application_identity" {
   description = "Entra object identity approved to call the private model gateway."
   type        = string
