@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import manifest from '../src/hangar/sceneManifest.json';
-import { buildHangarAircraftSceneGroups } from '../src/hangar/sceneBuilder';
+import { buildHangarAircraftSceneGroups, HANGAR_ROUTE_ERROR } from '../src/hangar/sceneBuilder';
 import { HANGAR_SCENE_THEME } from '../src/hangar/sceneTheme';
 
 const view = { contractVersion: 1, cases: [
@@ -74,6 +74,71 @@ describe('Hangar scene builder', () => {
     expect(buildHangarAircraftSceneGroups(unknown, view, handler)).toBeNull(); expect(handler).not.toHaveBeenCalled();
   });
 
+  it('builds floor rack avatar and hard hat', () => {
+    const root = buildHangarAircraftSceneGroups(manifest, view)!;
+    const floor = traverse(root, 'Floor')! as THREE.Mesh;
+    expect(floor.geometry).toBeInstanceOf(THREE.BoxGeometry);
+    expect((floor.geometry as THREE.BoxGeometry).parameters.width).toBe(90);
+    expect((floor.geometry as THREE.BoxGeometry).parameters.height).toBe(0.2);
+    expect((floor.geometry as THREE.BoxGeometry).parameters.depth).toBe(50);
+    const rackUnits: THREE.Object3D[] = []; root.traverse(o => { if (manifest.rack.units.some(u => u.node === o.name)) rackUnits.push(o); });
+    expect(rackUnits.map(o => o.name)).toEqual(manifest.rack.units.map(u => u.node));
+    expect(rackUnits).toHaveLength(5);
+    const avatar = traverse(root, 'Avatar')!;
+    expect(avatar.position.toArray()).toEqual([-4, 0, 20]);
+    const body = traverse(root, 'AvatarBody')! as THREE.Mesh;
+    expect(body.geometry).toBeInstanceOf(THREE.CapsuleGeometry);
+    const capsuleBounds = new THREE.Box3().setFromObject(body);
+    expect(capsuleBounds.getSize(new THREE.Vector3()).y).toBeCloseTo(1.7, 2);
+    const head = traverse(root, 'AvatarHead')! as THREE.Mesh;
+    expect(head.geometry).toBeInstanceOf(THREE.SphereGeometry);
+    const hat = traverse(root, 'HardHat')! as THREE.Mesh;
+    expect(hat).toBeInstanceOf(THREE.Mesh);
+    expect((hat.material as THREE.MeshStandardMaterial).color.getHexString().toUpperCase()).toBe('FFD400');
+    const missing = clone(); missing.rack.units.pop();
+    const extra = clone(); extra.rack.units.push({ node: 'RackUnitExtra', source: 'extra' });
+    expect(buildHangarAircraftSceneGroups(missing, view)).toBeNull();
+    expect(buildHangarAircraftSceneGroups(extra, view)).toBeNull();
+  });
+
+  it('builds shadows route and selection ring', () => {
+    const routeView = { ...view, route: [{ x: -4, z: 20 }, { x: -4, z: 15 }, { x: -4, z: 9 }], selectedObjectId: manifest.objectIds[0] };
+    const root = buildHangarAircraftSceneGroups(manifest, routeView)!;
+    for (const letter of ['A', 'B', 'C']) {
+      const shadow = traverse(root, `GroundShadow${letter}`)! as THREE.Mesh;
+      expect(shadow.position.y).toBe(0.01);
+      const layout = manifest.layout.aircraft.find(row => row.caseId.endsWith(letter.toLowerCase())) ?? manifest.layout.aircraft.find(row => row.caseId === `cp-case-${letter.toLowerCase()}`)!;
+      expect(shadow.scale.x).toBe(layout.dimensions.span / 2);
+      expect(shadow.scale.y).toBe(layout.dimensions.length / 2);
+    }
+    const guide = traverse(root, 'GuideLine')! as THREE.Mesh;
+    expect(guide.geometry).toBeInstanceOf(THREE.TubeGeometry);
+    expect((guide.geometry.parameters.path as THREE.Curve<THREE.Vector3>).getPoint(0).y).toBe(0.05);
+    expect(traverse(root, 'SelectionRing')).toBeInstanceOf(THREE.Mesh);
+    expect((traverse(root, 'SelectionRing') as THREE.Mesh).geometry).toBeInstanceOf(THREE.TorusGeometry);
+    const badRoute = { ...view, route: [{ x: -4, z: 20 }, { x: 100, z: 100 }] };
+    expect(() => buildHangarAircraftSceneGroups(manifest, badRoute)).toThrow(HANGAR_ROUTE_ERROR);
+    const oversizedRoute = { ...view, route: Array.from({ length: 65 }, (_, i) => ({ x: -40 + i, z: 20 })) };
+    expect(() => buildHangarAircraftSceneGroups(manifest, oversizedRoute)).toThrow(HANGAR_ROUTE_ERROR);
+    const authoritativeRoute = { ...view, route: [{ x: -4, z: 20 }, { x: -4, z: 15, objectId: manifest.objectIds[0] }] };
+    expect(() => buildHangarAircraftSceneGroups(manifest, authoritativeRoute)).toThrow(HANGAR_ROUTE_ERROR);
+  });
+
+  it('keeps non-selectable scene nodes without authority', () => {
+    const root = buildHangarAircraftSceneGroups(manifest, view)!;
+    root.traverse(object => {
+      if (['Avatar','AvatarBody','AvatarHead','HardHat','Floor','Rack','GuideLine','SelectionRing'].includes(object.name) || object.name.startsWith('RackUnit') || object.name.startsWith('GroundShadow') || object.name.startsWith('FloorMarking')) {
+        expect(object.userData.objectId).toBeUndefined();
+      }
+    });
+    const hat = traverse(root, 'HardHat')!;
+    expect(hat.userData).not.toHaveProperty('status');
+    expect(hat.userData).not.toHaveProperty('role');
+    expect(hat.userData).not.toHaveProperty('permission');
+    const bad = clone(); bad.rack.units[0].objectId = bad.objectIds[0];
+    expect(buildHangarAircraftSceneGroups(bad, view)).toBeNull();
+  });
+
   it('builds status-independent untextured aircraft materials', () => {
     const first = buildHangarAircraftSceneGroups(manifest, view)!;
     const changed = structuredClone(view); changed.cases[0].status.assessment = 'blocked'; changed.cases[0].owner = 'Other'; changed.cases[0].nextAction = { text: 'Request' }; changed.cases[0].capabilityLabel = 'Simulated';
@@ -86,7 +151,8 @@ describe('Hangar scene builder', () => {
       for (const slot of ['map','alphaMap','aoMap','bumpMap','displacementMap','emissiveMap','envMap','metalnessMap','normalMap','roughnessMap','clearcoatMap','clearcoatNormalMap','clearcoatRoughnessMap','iridescenceMap','iridescenceThicknessMap','sheenColorMap','sheenRoughnessMap','thicknessMap','transmissionMap','specularIntensityMap','specularColorMap','lightMap']) expect((material as any)[slot]).toBeNull();
       const color = (material as any).color;
       if (color) {
-        expect(Object.values(HANGAR_SCENE_THEME).map(v => v.toUpperCase())).toContain(`#${color.getHexString().toUpperCase()}`);
+        const approvedColors = [...Object.values(HANGAR_SCENE_THEME).map(v => v.toUpperCase()), '#FFD400'];
+        expect(approvedColors).toContain(`#${color.getHexString().toUpperCase()}`);
       }
     } });
   });
