@@ -8,7 +8,7 @@ import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
 import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
-import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
+import { buildHangarServerSceneView, canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -61,6 +61,7 @@ export default function App({
     { caseId: 'cp-case-c', name: 'Case C', category: 'wide-body', unavailable: false, sources: null },
   ]);
   const [hangarSnapshot, setHangarSnapshot] = useState<ServerSceneSnapshot|null>(null);
+  const [hangarServerScene, setHangarServerScene] = useState<unknown|null>(null);
   const [hangarCaseSnapshots, setHangarCaseSnapshots] = useState<Record<string, ServerSceneSnapshot>>({});
   const hangarSnapshotRef = useRef<ServerSceneSnapshot|null>(null);
   const hangarCaseSnapshotsRef = useRef<Record<string, ServerSceneSnapshot>>({});
@@ -147,6 +148,7 @@ export default function App({
       try {
         const cases = hangarEntries;
         const nextCaseSnapshots = { ...hangarCaseSnapshotsRef.current };
+        const nextScenes: Record<string, unknown> = {};
         let nextSnapshot = hangarSnapshotRef.current;
         for (const entry of cases) {
           const response = await fetch(`/api/v1/cases/${encodeURIComponent(entry.caseId)}/scene`);
@@ -158,6 +160,7 @@ export default function App({
           const result = await refreshHangarScene(() => envelope, nextCaseSnapshots[entry.caseId] ?? hangarSnapshotRef.current);
           if (!result.valid || !result.snapshot) throw new Error('refresh_failed');
           nextCaseSnapshots[entry.caseId] = result.snapshot;
+          nextScenes[entry.caseId] = envelope;
           if (!nextSnapshot?.revision || (result.snapshot.revision ?? -1) >= (nextSnapshot.revision ?? -1)) nextSnapshot = result.snapshot;
         }
         if (!cases.length) throw new Error('refresh_failed');
@@ -167,6 +170,16 @@ export default function App({
         hangarSnapshotRef.current = recoveredSnapshot;
         setHangarCaseSnapshots(recoveredCaseSnapshots);
         setHangarSnapshot(recoveredSnapshot);
+        const serverCases = cases.map((entry) => {
+          const scene = nextScenes[entry.caseId] as Record<string, unknown> | undefined;
+          const value = scene?.case;
+          return value && typeof value === 'object' ? value as Record<string, unknown> : null;
+        }).filter((value): value is Record<string, unknown> => value !== null);
+        const sceneEnvelopes = cases.map((entry) => nextScenes[entry.caseId]).filter((value) => typeof value === 'object' && value !== null);
+        const mergedObjects = sceneEnvelopes.flatMap((value) => Array.isArray((value as Record<string, unknown>).objects) ? (value as Record<string, unknown>).objects as unknown[] : []);
+        const mergedDocumentRefs = sceneEnvelopes.flatMap((value) => Array.isArray((value as Record<string, unknown>).documentRefs) ? (value as Record<string, unknown>).documentRefs as unknown[] : []);
+        const mergedEvidence = sceneEnvelopes.flatMap((value) => Array.isArray((value as Record<string, unknown>).evidence) ? (value as Record<string, unknown>).evidence as unknown[] : []);
+        setHangarServerScene({ contractVersion: 1, case: serverCases[0] ?? null, cases: serverCases, objects: mergedObjects, documentRefs: mergedDocumentRefs, evidence: mergedEvidence, allowedActions: recoveredSnapshot?.permissions && typeof recoveredSnapshot.permissions === 'object' ? (recoveredSnapshot.permissions as Record<string, unknown>).allowedActions ?? [] : [] });
         setHangarStale(false);
         setHangarView('3d');
         setHangarSceneLoaded(true);
@@ -248,6 +261,7 @@ export default function App({
       }
       hangarCaseSnapshotsRef.current = initialCaseSnapshots;
       hangarSnapshotRef.current = latestSnapshot;
+      setHangarServerScene({ contractVersion: 1, case: (envelopes[0] as Record<string, unknown>)?.case ?? null, cases: envelopes.map((value) => (value as Record<string, unknown>)?.case).filter((value) => typeof value === 'object' && value !== null), objects: envelopes.flatMap((value) => Array.isArray((value as Record<string, unknown>).objects) ? (value as Record<string, unknown>).objects as unknown[] : []), documentRefs: envelopes.flatMap((value) => Array.isArray((value as Record<string, unknown>).documentRefs) ? (value as Record<string, unknown>).documentRefs as unknown[] : []), evidence: envelopes.flatMap((value) => Array.isArray((value as Record<string, unknown>).evidence) ? (value as Record<string, unknown>).evidence as unknown[] : []), allowedActions: latestSnapshot?.permissions && typeof latestSnapshot.permissions === 'object' ? (latestSnapshot.permissions as Record<string, unknown>).allowedActions ?? [] : [] });
       setHangarCaseSnapshots(initialCaseSnapshots);
       if (latestSnapshot) setHangarSnapshot(latestSnapshot);
       setHangarStale(false);
@@ -430,7 +444,7 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
-                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} refreshReader={async ()=>{const first=hangarEntries[0]?.caseId;if(!first)throw new Error('refresh_failed');const response=await fetch(`/api/v1/cases/${encodeURIComponent(first)}/scene`);if(!response.ok)throw new Error('refresh_failed');return response.json();}} externalRefresh={true} snapshot={hangarSnapshot} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
+                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} sceneData={hangarServerScene} refreshReader={async ()=>{const first=hangarEntries[0]?.caseId;if(!first)throw new Error('refresh_failed');const response=await fetch(`/api/v1/cases/${encodeURIComponent(first)}/scene`);if(!response.ok)throw new Error('refresh_failed');return response.json();}} externalRefresh={true} snapshot={hangarSnapshot} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
                       <HangarGuideLineAdapter
                         entries={hangarEntries}
                         markers={hangarDataRoomMarkers}
