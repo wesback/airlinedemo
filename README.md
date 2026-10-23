@@ -39,6 +39,24 @@ python3 scripts/tests/test_deployment_scripts.py
 
 Use committed synthetic fixtures only. Local development must not ingest live records or connect to a production service.
 
+## Quick deploy
+
+For a demonstration environment, sign in with `az login` and run one command. Everything Azure CLI already knows (tenant, subscription, your object id, name and email) is read from the sign-in, every resource name and network range derives from `--prefix`, and the protected Terraform state backend is created for you (Entra-only, no shared keys, versioned).
+
+```sh
+az login --tenant <tenant-id>
+scripts/deploy.sh --prefix demo1 --location swedencentral \
+  --model-name <approved model> --model-version <approved version> \
+  --ops-group-id <Entra group object id> --ops-group-name <group name> \
+  --budget-amount 250 --image-digest sha256:<64 hex> \
+  --passcode-secret-uri https://<vault>.vault.azure.net/secrets/<name> \
+  --allow-my-ip --register-providers
+```
+
+The script writes the Terraform variable and backend files to `~/.local/state/airlinedemo/<prefix>/` (outside the repository, mode 600), runs the pre-bootstrap checks, shows one saved plan and applies it only after you type `yes`. `--prepare-only` writes the files and changes nothing in Azure. `--existing-backend <storage account>` uses a state backend an owner already created instead. `scripts/deploy.sh --help` lists every option. The image is still built, signed and released through the protected `release` workflow.
+
+The rest of this file describes the controlled path for organization deployments, where each input is approved and supplied separately.
+
 ## Azure prerequisites
 
 Use an organization-approved Azure subscription, tenant, Entra identity, region, model availability, private connectivity, resource names, quota, budget owner, and deployment window. A platform owner must bootstrap and protect the remote Terraform state backend before deployment initialization. State access requires Entra authentication and blob lease locking; the backend remains outside the Terraform deployment inventory.
@@ -66,7 +84,18 @@ REHEARSAL_EXPECTED_ORIGIN=<approved independently verified origin>
 
 The operator supplies subscription, tenant, resource-group, file-path, network, deployment, and origin values through protected environment variables or reviewed external files. The passcode value is supplied from Key Vault and never stored in the repository. Configuration contains names or secret URIs, not secret values. State files, plans, tokens, connection strings, real customer records, and private-network addresses must remain outside tracked paths.
 
+For compatibility with the legacy demo scripts, the pre-bootstrap gate also
+accepts `AIRLINEDEMO_SUBSCRIPTION_ID` and `AIRLINEDEMO_TENANT_ID` when the
+matching `AZURE_*` variables are unset. The deployment script itself uses the
+documented `AZURE_*` names.
+
 ## Deploy and release
+
+Run `scripts/prebootstrap-deployment.sh` before deployment to verify tools,
+Azure authentication, subscription and tenant selection, external Terraform
+files, provider registration, and Terraform formatting. It does not plan or
+apply infrastructure. Provider registration requires the explicit
+`--register-providers` flag.
 
 Use `scripts/bootstrap-deployment.sh` for operator bootstrap. The script initializes protected Terraform state, creates and displays one saved plan, and applies that exact plan only after explicit confirmation. It does not build, sign, push, or deploy an image.
 

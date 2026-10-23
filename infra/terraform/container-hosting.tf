@@ -1,6 +1,6 @@
 # Private hosting for the application image. Ingress and egress are enforced by the app subnet NSG in main.tf.
 resource "azurerm_container_registry" "acr" {
-  name                          = var.acr_name
+  name                          = local.acr_name
   resource_group_name           = azurerm_resource_group.demo.name
   location                      = azurerm_resource_group.demo.location
   sku                           = "Premium"
@@ -16,7 +16,7 @@ resource "azurerm_role_assignment" "app_acr_pull" {
 }
 
 resource "azurerm_container_app_environment" "demo" {
-  name                           = var.container_apps_environment_name
+  name                           = local.container_apps_environment_name
   resource_group_name            = azurerm_resource_group.demo.name
   location                       = azurerm_resource_group.demo.location
   infrastructure_subnet_id       = azurerm_subnet.app.id
@@ -24,7 +24,7 @@ resource "azurerm_container_app_environment" "demo" {
 }
 
 resource "azurerm_container_app" "app" {
-  name                         = var.container_app_name
+  name                         = local.container_app_name
   resource_group_name          = azurerm_resource_group.demo.name
   container_app_environment_id = azurerm_container_app_environment.demo.id
   revision_mode                = "Single"
@@ -97,7 +97,7 @@ resource "azurerm_container_app" "app" {
 
       env {
         name  = "ConnectionStrings__CaseState"
-        value = "Server=tcp:${var.sql_server_name}.database.windows.net,1433;Database=${var.sql_database_name};Authentication=Active Directory Managed Identity;User Id=${azurerm_user_assigned_identity.app.client_id};Encrypt=True;TrustServerCertificate=False;"
+        value = "Server=tcp:${local.sql_server_name}.database.windows.net,1433;Database=${local.sql_database_name};Authentication=Active Directory Managed Identity;User Id=${azurerm_user_assigned_identity.app.client_id};Encrypt=True;TrustServerCertificate=False;"
       }
 
       env {

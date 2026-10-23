@@ -54,7 +54,7 @@ run "private_acr_dns_and_container_apps_wiring" {
     error_message = "The ACR private DNS zone and its VNet link must use the private ACR zone."
   }
   assert {
-    condition     = azurerm_container_app_environment.demo.internal_load_balancer_enabled == false && can(regex("(?s)resource \"azurerm_container_app_environment\" \"demo\" \\{.*infrastructure_subnet_id\\s*=\\s*azurerm_subnet\\.app\\.id", file("container-hosting.tf"))) && can(regex("(?s)resource \"azurerm_container_app\" \"app\" \\{\\s*name\\s*=\\s*var\\.container_app_name\\s*resource_group_name\\s*=\\s*azurerm_resource_group\\.demo\\.name\\s*container_app_environment_id\\s*=\\s*azurerm_container_app_environment\\.demo\\.id", file("container-hosting.tf")))
+    condition     = azurerm_container_app_environment.demo.internal_load_balancer_enabled == false && can(regex("(?s)resource \"azurerm_container_app_environment\" \"demo\" \\{.*infrastructure_subnet_id\\s*=\\s*azurerm_subnet\\.app\\.id", file("container-hosting.tf"))) && can(regex("(?s)resource \"azurerm_container_app\" \"app\" \\{\\s*name\\s*=\\s*local\\.container_app_name\\s*resource_group_name\\s*=\\s*azurerm_resource_group\\.demo\\.name\\s*container_app_environment_id\\s*=\\s*azurerm_container_app_environment\\.demo\\.id", file("container-hosting.tf")))
     error_message = "The Container Apps environment must use the app subnet, and the app must reference that environment."
   }
   assert {

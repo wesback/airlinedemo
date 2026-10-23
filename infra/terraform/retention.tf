@@ -4,7 +4,7 @@
 # Point-in-time restore window for the SQL database. Audit rows are never expired or overwritten by policy:
 # app grants in identity-and-telemetry.tf keep audit.case_events append-only.
 resource "azurerm_mssql_database" "airline" {
-  name      = var.sql_database_name
+  name      = local.sql_database_name
   server_id = azurerm_mssql_server.sql.id
 
   short_term_retention_policy {

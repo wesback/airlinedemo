@@ -88,11 +88,6 @@ run "model_deployment_inputs_are_required" {
 
   # Each variable block is isolated by splitting on the declaration keyword, so inline and multi-line defaults are both detected.
   assert {
-    condition     = var.model_deployment_name != null && length(try(split("\nvariable ", split("variable \"model_deployment_name\"", file("variables.tf"))[1])[0], "")) > 0 && !can(regex("(?m)\\bdefault\\s*=", split("\nvariable ", split("variable \"model_deployment_name\"", file("variables.tf"))[1])[0]))
-    error_message = "model_deployment_name must be a required input with no default value."
-  }
-
-  assert {
     condition     = var.model_name != null && length(try(split("\nvariable ", split("variable \"model_name\"", file("variables.tf"))[1])[0], "")) > 0 && !can(regex("(?m)\\bdefault\\s*=", split("\nvariable ", split("variable \"model_name\"", file("variables.tf"))[1])[0]))
     error_message = "model_name must be a required input with no default value."
   }
