@@ -68,7 +68,12 @@ describe('HangarSceneRefresh', () => {
     const unchanged = applyServerRefresh(first, envelope());
     expect(unchanged.valid).toBe(true);
     expect(unchanged.snapshot).toMatchObject({ revision: 7, current: true, fallbackReason: null });
+    expect(unchanged.snapshot).toBe(first);
     expect(canAdmitHangarCommands(unchanged.snapshot)).toBe(true);
+    const changedAtSameRevision = applyServerRefresh(first, envelope({ case: { ...envelope().case, owner: 'Changed owner' } }));
+    expect(changedAtSameRevision.valid).toBe(false);
+    expect(changedAtSameRevision.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+    expect(canAdmitHangarCommands(changedAtSameRevision.snapshot)).toBe(false);
     const switchedCaseObjects = allIds('B').map((objectId, index) => ({ objectId, kind: ['aircraft','engine','component','component'][index], caseId: 'cp-case-b' }));
     const switchedCase = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseId: 'cp-case-b', caseRevision: 2 }, objects: switchedCaseObjects }));
     expect(switchedCase.valid).toBe(true);

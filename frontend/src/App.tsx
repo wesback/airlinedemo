@@ -419,8 +419,13 @@ export default function App({
                   )}
                   {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'
                     ? 'Your browser is not supported. Use the current or previous major version of Chrome or Edge.'
-                    : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
-                  {hangarView === 'contract-error' && <p role="alert">Unsupported hangar contract version {String(hangarContractVersion)}. <a href="#non-3d-list">Use the supported contract version in the non-3D list.</a></p>}
+                    : hangarFallback === 'refresh_failed'
+                      ? 'Hangar refresh failed. Use the non-3D list.'
+                      : 'WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.'}</p>}
+                  {hangarView === 'contract-error' && <p role="alert">Invalid hangar scene contract. <a href="#non-3d-list">Use the supported contract version in the non-3D list.</a></p>}
+                  {(hangarView === 'fallback' || hangarView === 'contract-error') && (
+                    hangarView === 'fallback' && <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
+                  )}
                   {(hangarView === 'fallback' || hangarView === 'contract-error') && (
                     <section id="non-3d-list" aria-labelledby="non-3d-heading">
                       <h3 id="non-3d-heading">Non-3D hangar</h3>
