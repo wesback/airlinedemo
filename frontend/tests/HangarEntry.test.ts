@@ -100,6 +100,26 @@ afterEach(() => {
       cleanup(); vi.unstubAllGlobals();
     }
 
+    for (const sceneCase of [
+      { label: 'absent envelope', body: null },
+      { label: 'unsupported envelope', body: { contractVersion: 2 } },
+    ]) {
+      stubCaseApi();
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/v1/cases') return new Response(JSON.stringify({ contractVersion: 1, cases: [{ caseId: 'cp-case-a' }] }), { status: 200 });
+        if (url === '/api/v1/cases/cp-case-a/scene') return new Response(sceneCase.body === null ? null : JSON.stringify(sceneCase.body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return original(input, init);
+      });
+      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
+      await signInAsReviewer();
+      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      await screen.findByText(/Invalid hangar scene contract/);
+      expect(document.querySelectorAll('canvas')).toHaveLength(0);
+      cleanup(); vi.unstubAllGlobals();
+    }
+
     for (const status of [403, 500]) {
       stubCaseApi();
       const original = vi.mocked(fetch).getMockImplementation()!;
@@ -151,6 +171,9 @@ afterEach(() => {
     await waitFor(() => expect(sceneCalls).toBe(2));
     resolveExplicit(makeEnvelope(7));
     await screen.findByText(/Hangar refresh failed/);
+    expect(screen.getByLabelText('Hangar retained snapshot').textContent).toBe('Revision: 8; Labels: Technical reviewer; Rules-based');
+    expect(document.querySelectorAll('canvas')).toHaveLength(0);
+    expect(screen.getAllByRole('button').some((button) => button.getAttribute('name') === null)).toBe(true);
     fireEvent.click(await screen.findByRole('button', { name: 'Select case' }));
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
     expect(selection).not.toHaveBeenCalled();

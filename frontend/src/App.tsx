@@ -133,22 +133,31 @@ export default function App({
           const result = await refreshHangarScene(() => envelope, nextCaseSnapshots[entry.caseId] ?? hangarSnapshotRef.current);
           if (!result.valid || !result.snapshot) throw new Error('refresh_failed');
           nextCaseSnapshots[entry.caseId] = result.snapshot;
-          nextSnapshot = result.snapshot;
+          hangarCaseSnapshotsRef.current = { ...hangarCaseSnapshotsRef.current, [entry.caseId]: result.snapshot };
+          setHangarCaseSnapshots(hangarCaseSnapshotsRef.current);
+          hangarSnapshotRef.current = result.snapshot;
+          setHangarSnapshot(result.snapshot);
+          if (!nextSnapshot?.revision || (result.snapshot.revision ?? -1) >= (nextSnapshot.revision ?? -1)) nextSnapshot = result.snapshot;
         }
-        hangarCaseSnapshotsRef.current = nextCaseSnapshots;
-        hangarSnapshotRef.current = nextSnapshot;
-        setHangarCaseSnapshots(nextCaseSnapshots);
-        setHangarSnapshot(nextSnapshot);
+        if (!cases.length) throw new Error('refresh_failed');
+        const recoveredCaseSnapshots = Object.fromEntries(Object.entries(nextCaseSnapshots).map(([caseId, snapshot]) => [caseId,{...snapshot,current:true,fallbackReason:null}]));
+        const recoveredSnapshot = recoveredCaseSnapshots[cases[cases.length-1].caseId] ?? nextSnapshot;
+        hangarCaseSnapshotsRef.current = recoveredCaseSnapshots;
+        hangarSnapshotRef.current = recoveredSnapshot;
+        setHangarCaseSnapshots(recoveredCaseSnapshots);
+        setHangarSnapshot(recoveredSnapshot);
         setHangarStale(false);
         setHangarView('3d');
         setHangarSceneLoaded(true);
       } catch {
         const staleCases: Record<string, ServerSceneSnapshot> = Object.fromEntries(Object.entries(hangarCaseSnapshotsRef.current).map(([caseId, snapshot]) => [caseId, {...snapshot,current:false,fallbackReason:'refresh_failed' as const}]));
         const result = await refreshHangarScene(() => { throw new Error('refresh_failed'); }, hangarSnapshotRef.current);
+        const retained = Object.values(staleCases).reduce<ServerSceneSnapshot|null>((highest, snapshot) => !highest || (snapshot.revision ?? -1) >= (highest.revision ?? -1) ? snapshot : highest, hangarSnapshotRef.current);
+        const retainedStale = retained ? {...retained,current:false,fallbackReason:'refresh_failed' as const} : null;
         hangarCaseSnapshotsRef.current = staleCases;
-        hangarSnapshotRef.current = result.snapshot;
+        hangarSnapshotRef.current = retainedStale;
         setHangarCaseSnapshots(staleCases);
-        setHangarSnapshot(result.snapshot);
+        setHangarSnapshot(retainedStale);
         setHangarStale(true);
         setHangarView('fallback');
         setHangarFallback('refresh_failed');
@@ -182,7 +191,9 @@ export default function App({
         const sceneResponse = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}/scene`);
         if (sceneResponse.status === 403 || sceneResponse.status === 500) throw {fallback:'refresh_failed'};
         if (!sceneResponse.ok) throw {fallback:'refresh_failed'};
-        envelopes.push(await sceneResponse.json());
+        let envelope: unknown;
+        try { envelope = await sceneResponse.json(); } catch { throw {fallback:'contract_invalid'}; }
+        envelopes.push(envelope);
       }
       for (const envelope of envelopes) {
         const validated = validateHangarSceneEnvelope(envelope);
@@ -388,6 +399,7 @@ export default function App({
               {hangarView !== 'regular' && hangarView !== 'loading' && (
                 <section aria-labelledby="hangar-heading">
                   <h2 id="hangar-heading">Hangar</h2>
+                  {hangarSnapshot && <p aria-label="Hangar retained snapshot">Revision: {hangarSnapshot.revision}; Labels: {String(hangarSnapshot.owner)}; {String(hangarSnapshot.capabilityLabel)}</p>}
                   <HangarLocalDiagnostics
                     session={session}
                     {...hangarDiagnostics}

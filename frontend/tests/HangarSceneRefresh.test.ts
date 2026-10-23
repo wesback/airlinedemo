@@ -70,6 +70,12 @@ describe('HangarSceneRefresh', () => {
     expect(unchanged.snapshot).toMatchObject({ revision: 7, current: true, fallbackReason: null });
     expect(unchanged.snapshot).toBe(first);
     expect(canAdmitHangarCommands(unchanged.snapshot)).toBe(true);
+    const staleSnapshot = markRefreshStale(first).snapshot;
+    const staleIdentical = applyServerRefresh(staleSnapshot, envelope());
+    expect(staleIdentical.valid).toBe(true);
+    expect(staleIdentical.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
+    expect(staleIdentical.snapshot).toBe(staleSnapshot);
+    expect(canAdmitHangarCommands(staleIdentical.snapshot)).toBe(false);
     const changedAtSameRevision = applyServerRefresh(first, envelope({ case: { ...envelope().case, owner: 'Changed owner' } }));
     expect(changedAtSameRevision.valid).toBe(false);
     expect(changedAtSameRevision.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });

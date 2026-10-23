@@ -41,7 +41,7 @@ export function replaceWithServerSnapshot(previous: ServerSceneSnapshot|null, en
       return {snapshot:staleSnapshot,scene:null,valid:false,stale:true,error:'Stale scene revision'};
     }
     if(snapshot.revision === previous.revision) {
-      if(equalContent(previous.completeContent, envelope)) return {snapshot:previous,scene:null,valid:true,stale:false,error:null};
+      if(equalContent(previous.completeContent, envelope)) return {snapshot:previous,scene:null,valid:true,stale:previous.current===false,error:null};
       const staleSnapshot: ServerSceneSnapshot={...previous,current:false,fallbackReason:'refresh_failed'};
       return {snapshot:staleSnapshot,scene:null,valid:false,stale:true,error:'Changed content at retained scene revision'};
     }
