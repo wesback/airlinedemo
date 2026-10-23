@@ -8,6 +8,15 @@ export type ServerSceneSnapshot = {
 };
 export type RefreshResult = { snapshot: ServerSceneSnapshot|null; scene: unknown|null; valid:boolean; stale:boolean; error:string|null };
 const isObj=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
+function equalContent(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) && Array.isArray(right)) return left.length===right.length && left.every((value,index)=>equalContent(value,right[index]));
+  if (isObj(left) && isObj(right)) {
+    const leftKeys=Object.keys(left).sort(); const rightKeys=Object.keys(right).sort();
+    return leftKeys.length===rightKeys.length && leftKeys.every((key,index)=>key===rightKeys[index] && equalContent(left[key],right[key]));
+  }
+  return false;
+}
 export function snapshotFromServer(envelope: unknown, injected?: unknown): ServerSceneSnapshot|null {
   const projected=validateHangarSceneEnvelope(envelope);
   if(!projected.valid||!isObj(envelope)||!isObj(envelope.case)) return null;
@@ -21,14 +30,21 @@ export function snapshotFromServer(envelope: unknown, injected?: unknown): Serve
   const permission=c.permission ?? c.permissions ?? {canResetBlockedVariant:envelope.canResetBlockedVariant,allowedActions:[...(envelope.allowedActions as unknown[])]};
   return {revision:rawRevision as number,status:c.status,owner:c.owner??null,nextAction:resolvedAction,
     capabilityLabel:label,permissions:permission,
-    current:true,fallbackReason:null,caseId:c.caseId};
+    current:true,fallbackReason:null,caseId:c.caseId,completeContent:envelope};
 }
 export function replaceWithServerSnapshot(previous: ServerSceneSnapshot|null, envelope: unknown, injected?: unknown): RefreshResult {
   const snapshot=snapshotFromServer(envelope,injected);
   if(!snapshot)return {snapshot:previous?{...previous,current:false,fallbackReason:'refresh_failed'}:null,scene:null,valid:false,stale:true,error:'Unsupported or malformed scene refresh'};
-  if(previous && previous.caseId===snapshot.caseId && previous.revision!==null && snapshot.revision!==null && snapshot.revision < previous.revision) {
-    const staleSnapshot: ServerSceneSnapshot={...previous,current:false,fallbackReason:'refresh_failed'};
-    return {snapshot:staleSnapshot,scene:null,valid:false,stale:true,error:'Stale scene revision'};
+  if(previous && previous.caseId===snapshot.caseId && previous.revision!==null && snapshot.revision!==null) {
+    if(snapshot.revision < previous.revision) {
+      const staleSnapshot: ServerSceneSnapshot={...previous,current:false,fallbackReason:'refresh_failed'};
+      return {snapshot:staleSnapshot,scene:null,valid:false,stale:true,error:'Stale scene revision'};
+    }
+    if(snapshot.revision === previous.revision) {
+      if(equalContent(previous.completeContent, envelope)) return {snapshot:previous,scene:null,valid:true,stale:previous.current===false,error:null};
+      const staleSnapshot: ServerSceneSnapshot={...previous,current:false,fallbackReason:'refresh_failed'};
+      return {snapshot:staleSnapshot,scene:null,valid:false,stale:true,error:'Changed content at retained scene revision'};
+    }
   }
   return {snapshot,scene:envelope,valid:true,stale:false,error:null};
 }

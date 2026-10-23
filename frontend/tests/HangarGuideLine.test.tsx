@@ -126,8 +126,15 @@ describe('Hangar guide line',()=>{
     const diagnosticsCalls=()=>beacon.mock.calls.length+consoleSpies.reduce((sum,spy)=>sum+spy.mock.calls.length,0);
     const requestsBeforeEnter=vi.mocked(fetch).mock.calls.length;
     fireEvent.click(screen.getByRole('button',{name:'Enter Hangar'}));
+    await screen.findByRole('button',{name:'Refresh Hangar scene'});
     const requestsAfterEnter=vi.mocked(fetch).mock.calls.length;
-    expect(requestsAfterEnter).toBe(requestsBeforeEnter);
+    expect(requestsAfterEnter).toBe(requestsBeforeEnter + 4);
+    expect(vi.mocked(fetch).mock.calls.slice(requestsBeforeEnter).map(([input]) => String(input))).toEqual([
+      '/api/v1/cases',
+      '/api/v1/cases/cp-case-a/scene',
+      '/api/v1/cases/cp-case-b/scene',
+      '/api/v1/cases/cp-case-c/scene',
+    ]);
     const requestsBeforeRack=requestsAfterEnter;
     const diagnosticsBeforeRack=diagnosticsCalls();
     fireEvent.click(await screen.findByRole('button',{name:'Open data rack'}));
