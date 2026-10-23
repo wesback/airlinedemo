@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildHangarSceneDescriptor, projectHangarScene, validateHangarSceneEnvelope } from '../src/hangar/sceneProjection';
-import { applyServerRefresh, canAdmitHangarCommands, refreshHangarScene, markRefreshStale } from '../src/hangar/sceneRefresh';
+import { applyServerRefresh, canAdmitHangarCommands, refreshHangarScene, markRefreshStale, buildHangarServerSceneView } from '../src/hangar/sceneRefresh';
 
 const envelope = (overrides: Record<string, unknown> = {}) => ({
   contractVersion: 1, packVersion: '1.0.2', case: {
@@ -35,6 +35,21 @@ describe('HangarSceneRefresh', () => {
     expect(result.snapshot).toMatchObject({ revision: 7, status: envelope().case.status, owner: 'Technical reviewer', capabilityLabel: 'Rules-based', current: true, fallbackReason: null });
     expect(result.snapshot?.nextAction).toEqual({ actionId: 'review', text: 'Review evidence' });
     expect(applyServerRefresh(null, envelope({ case: { ...envelope().case, capabilityLabel: 'unresolved', nextAction: { actionId: 'fake', text: 'fake' } } })).valid).toBe(false);
+  });
+
+  it('Hangar refresh rebuilds label and panel text from server snapshot', async () => {
+    const injected={revision:1,status:'client',owner:'Injected owner',nextAction:{text:'fake'},capabilityLabel:'Unknown'};
+    const first=applyServerRefresh(injected as never,envelope()).snapshot!;
+    const higher=envelope({case:{...envelope().case,caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'}}});
+    const result=await refreshHangarScene(()=>higher,first);
+    expect(result.valid).toBe(true); expect(result.snapshot?.revision).toBe(8); expect(result.snapshot?.nextAction).toEqual({actionId:'approve',text:'Approve server evidence'});
+    expect(result.scene).toBe(higher);
+    const view=buildHangarServerSceneView(result.scene);
+    expect(view).not.toBeNull(); expect((view as any).cases[0].nextAction.text).toBe('Approve server evidence');
+    const stale=applyServerRefresh(first,envelope({case:{...envelope().case,caseRevision:6,nextAction:{text:'stale'}}}));
+    expect(stale.valid).toBe(false); expect(stale.snapshot?.nextAction).toEqual({actionId:'review',text:'Review evidence'});
+    expect(stale.snapshot?.revision).toBe(7); expect(canAdmitHangarCommands(stale.snapshot)).toBe(false);
+    expect(buildHangarServerSceneView({contractVersion:99,case:{}})).toBeNull();
   });
 
   it('HangarSceneRefresh preserves stale state and command admission', async () => {
