@@ -1,0 +1,201 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 586,
+  "branch": "ai-sdlc/issue-586",
+  "commitSha": "b70bb26e940098d62cdc4c244c2c9506213d4d41",
+  "round": 1,
+  "pipelineVersion": "d128747",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous case-ID mismatch is fixed, and explicit refresh is now wired and exercised. However, a lower revision can go undetected when refresh processes multiple cases because it compares each response only with the immediately preceding case's snapshot.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 178,
+          "message": "Preserving the server case IDs makes the multi-case refresh path reachable, but its single rolling snapshot loses each case's prior revision before that case is checked. Track revisions per case or otherwise reject a lower revision for any refreshed case.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Entry now keeps server case IDs in hangarEntries. Refresh processes those cases in list order, passing each result into refreshHangarScene as the previous snapshot. That helper only detects a lower revision when the previous snapshot has the same case ID.",
+            "failureScenario": "If the previous snapshot is for case C and case A's refresh returns a lower revision, the case ID mismatch accepts A. Processing B then replaces that snapshot, and processing C compares against B rather than the previous C snapshot. The refresh therefore succeeds and admits commands despite case C returning a lower revision."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Server case IDs are now preserved and entry request order is tested. The newly wired explicit refresh fails when the listed cases retain their current revisions.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 367,
+          "message": "A normal refresh with unchanged server revisions falls back: the multi-case loop reaches the current last case with the same revision, which is rejected as stale. Handle unchanged revisions without failing the refresh and assert the resulting state.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The Refresh Hangar scene button calls refreshHangarSnapshot, which applies each case envelope in list order, starting from the snapshot for the last case. refreshHangarScene rejects an envelope whose revision is less than or equal to the previous revision for the same case.",
+            "failureScenario": "With the harness’s unchanged revision 7 for all three cases, entry stores case C at revision 7. Refresh accepts cases A and B, then rejects case C at revision 7, marks the snapshot stale, and switches to fallback. The refresh test checks only that six scene requests occurred, so it passes despite the failed refresh."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round 2 changes preserve server case IDs for refresh, add an explicit refresh action and test its requests, and add the missing ordered entry test. I found no remaining prior-round finding or concrete security vulnerability in the in-scope changes.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarEntry.test.ts",
+      "frontend/tests/HangarGuideLine.test.tsx",
+      "frontend/tests/HangarSceneRefresh.test.ts",
+      "frontend/tests/hangarAppHarness.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
