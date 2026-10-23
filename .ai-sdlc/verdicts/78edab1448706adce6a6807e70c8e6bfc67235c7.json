@@ -1,0 +1,199 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 591,
+  "branch": "ai-sdlc/issue-591",
+  "commitSha": "78edab1448706adce6a6807e70c8e6bfc67235c7",
+  "round": 1,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-2 changes cover the prior finding: invalid manifest declarations are passed through the production validator and adapter, and the test asserts `asset_invalid`, zero loader calls, and the visible fallback. I found no new defect in the changed lines.",
+      "findingList": []
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior round’s invalid-manifest fallback finding is addressed with production-path assertions. The aircraft declarations still do not meet criterion 1’s required realPerson: false state.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneDescriptor.ts",
+          "line": 41,
+          "message": "Require realPerson to be false on aircraft declarations. The current check accepts missing values, and the manifest does not include the required declaration.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "validateHangarAircraftDescriptor rejects an aircraft declaration only when realPerson is true; it accepts a missing value. The current scene manifest omits realPerson on all three aircraft declarations.",
+            "failureScenario": "With realPerson missing from an aircraft declaration, validation returns valid, although criterion 1 requires each code-built aircraft declaration to set realPerson to false."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round 2 changes add production-path checks for invalid manifest declarations, zero loader calls, and the visible fallback. I found no security vulnerability in the reviewed changes.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 1,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarAircraftAssets.test.ts",
+      "frontend/tests/HangarAssetPolicy.test.ts",
+      "frontend/tests/HangarRackAvatarAssets.test.ts",
+      "frontend/tests/HangarResourcePolicy.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

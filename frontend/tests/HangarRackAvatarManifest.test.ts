@@ -26,7 +26,7 @@ describe('Hangar rack and avatar manifest', () => {
     const missingSynthetic = clone(); delete missingSynthetic.avatar.synthetic;
     expect(validateHangarRackAvatarManifest(missingSynthetic)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
     for (let modelIndex = 0; modelIndex < 3; modelIndex += 1) {
-      for (const field of ['synthetic', 'realAircraftType', 'brandMarks']) {
+      for (const field of ['synthetic', 'realAircraftType', 'realPerson', 'brandMarks']) {
         const missing = clone(); delete missing.aircraft.models[modelIndex][field];
         expect(validateHangarRackAvatarManifest(missing)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
         const incorrect = clone(); incorrect.aircraft.models[modelIndex][field] = field === 'synthetic' ? false : true;
