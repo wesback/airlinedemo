@@ -96,6 +96,11 @@ public sealed class BoundedInvestigator(
         // Evidence passed to the model is authorized before each call; all model inputs, including tool results, are token-estimated.
         var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+        var investigationCorrelation = new GatewayCorrelation(
+            "investigation", traceId, "evidence-investigation", caseId,
+            $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
+            "investigation-v1", "call-1");
+        ModelGatewayTokenomics.ValidateCorrelation(investigationCorrelation);
         var evidence = new List<string>(documents);
         // The model chooses tool names, so only the declared tools are recorded by name; anything else is one fixed label.
         var knownTools = new HashSet<string>(StringComparer.Ordinal);
