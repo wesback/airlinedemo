@@ -38,6 +38,7 @@ describe('hangar scene manifest layout contract cases', () => {
       (() => { const x = clone(); delete x.layout.aircraft[0].footprint; return x; })(),
       (() => { const x = clone(); x.rack.units[1].node = x.rack.units[0].node; return x; })(),
       (() => { const x = clone(); x.rack.units[1].node = 'ArbitraryRackNode'; return x; })(),
+      (() => { const x = clone(); x.rack.units[1].source = 'telemetry'; return x; })(),
       (() => { const x = clone(); x.packVersion = '0.3.0'; return x; })(),
       (() => { const x = clone(); const a = x.layout.aircraft[0].dimensions; x.layout.aircraft[0].dimensions = x.layout.aircraft[2].dimensions; x.layout.aircraft[2].dimensions = a; return x; })(),
     ]) {
