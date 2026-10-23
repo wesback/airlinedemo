@@ -59,7 +59,8 @@ public sealed class EvaluationInputException(string message) : Exception(message
 /// <summary>Executes a frozen evaluation arm without writing evaluation output to application state.</summary>
 public sealed class ProductionEvaluationArmExecutor(
     EvaluationArm arm,
-    Func<ApprovedModelManifest, IChatClient> chatClientFactory) : IEvaluationArmExecutor
+    Func<ApprovedModelManifest, IChatClient> chatClientFactory,
+    GatewayTokenRateSchedule? tokenRates = null) : IEvaluationArmExecutor
 {
     private const int MaximumOutputTokens = 4096;
     private const int MaximumBoundedInputTokens = 10_000;
@@ -107,9 +108,11 @@ public sealed class ProductionEvaluationArmExecutor(
         if (request.Mode == EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection &&
             _replay.TryReplay(correlation, out var replayed)) return replayed!;
         var modelClient = _chatClient ??= chatClientFactory(manifest);
+        var gatewayMaxInputTokens = arm == EvaluationArm.D ? 100_000 : MaximumBoundedInputTokens;
+        var gatewayMaxOutputTokens = arm == EvaluationArm.D ? MaximumOutputTokens : MaximumBoundedOutputTokens;
         var gatewayClient = new GatewayGovernedChatClient(modelClient, correlation, new GatewayQuota(
-            MaximumBoundedInputTokens, MaximumBoundedOutputTokens, MaximumBoundedModelCalls * (MaximumBoundedInputTokens + MaximumBoundedOutputTokens),
-            MaximumBoundedModelCalls, MaximumBoundedToolCalls, 1, TimeSpan.FromSeconds(30)));
+            gatewayMaxInputTokens, gatewayMaxOutputTokens, MaximumBoundedModelCalls * (gatewayMaxInputTokens + gatewayMaxOutputTokens),
+            MaximumBoundedModelCalls, MaximumBoundedToolCalls, 1, TimeSpan.FromSeconds(30)), tokenRates);
         if (request.Mode == EvaluationExecutionMode.BoundedAgent)
         {
             var bounded = await ExecuteBoundedAgentAsync(request, gatewayClient, cancellationToken);

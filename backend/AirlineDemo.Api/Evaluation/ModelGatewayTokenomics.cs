@@ -12,6 +12,8 @@ public sealed record GatewayUsage(long? InputTokens, long? OutputTokens, long? T
     public static GatewayUsage Unavailable() => new(null, null, null, "unavailable");
 }
 
+public sealed record GatewayTokenRateSchedule(decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens);
+
 public sealed record GatewayTokenMetrics(long? InputTokens, long? OutputTokens, long? TotalTokens, int ModelCallCount,
     int RetryCount, long LatencyMilliseconds, bool Throttled, string ModelConfiguration, decimal? EstimatedCost,
     GatewayUsage Usage);
@@ -24,7 +26,7 @@ public sealed record GatewayCorrelation(string Arm, string Run, string Package, 
     {
         var values = new (string Name, string Value)[] { (nameof(Arm), Arm), (nameof(Run), Run), (nameof(Package), Package),
             (nameof(Case), Case), (nameof(ModelConfiguration), ModelConfiguration), (nameof(SuiteVersion), SuiteVersion), (nameof(CallIdentity), CallIdentity) };
-        var forbiddenShape = new Regex("bearer\\s|authorization:|__host-|aspnetcore\\.cookies|pass(?:code)?|cookie|secret|access[_ -]?key|connection[_ -]?string|@[^\\s]+\\.[^\\s]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var forbiddenShape = new Regex("bearer\\s|authorization:|__host-|aspnetcore\\.cookies|pass(?:code)?|cookie|secret|access[_ -]?key|connection[_ -]?string|@[^\\s]+\\.[^\\s]+|raw[_ -]?prompt|prompt[_ -]?text|model[_ -]?response|document[_ -]?text", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         return values.Where(v => string.IsNullOrWhiteSpace(v.Value) || !Identifier.IsMatch(v.Value) || forbiddenShape.IsMatch(v.Value)).Select(v => v.Name).ToArray();
     }
     public string ReplayIdentity() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', Arm, Run, Package, Case, ModelConfiguration, SuiteVersion, CallIdentity)))).ToLowerInvariant();
@@ -98,6 +100,14 @@ public static class ModelGatewayTokenomics
         if (invalid.Count > 0) throw new ArgumentException("correlation fields refused: " + string.Join(",", invalid));
     }
 
+    public static decimal? EstimateCost(GatewayUsage usage, GatewayTokenRateSchedule rates)
+    {
+        if (usage.Status == MissingUsage || !usage.InputTokens.HasValue || !usage.OutputTokens.HasValue) return null;
+        return Math.Round((usage.InputTokens.Value * rates.InputCostPerMillionTokens +
+                           usage.OutputTokens.Value * rates.OutputCostPerMillionTokens) / 1_000_000m, 6,
+            MidpointRounding.AwayFromZero);
+    }
+
     public static GatewayUsage Usage(long? input, long? output, long? total)
     {
         if (!input.HasValue && !output.HasValue && !total.HasValue) return GatewayUsage.Unavailable();
@@ -107,7 +117,8 @@ public static class ModelGatewayTokenomics
     }
 }
 
-public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelation correlation, GatewayQuota quota) : DelegatingChatClient(inner)
+public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelation correlation, GatewayQuota quota,
+    GatewayTokenRateSchedule? rates = null) : DelegatingChatClient(inner)
 {
     private readonly GatewayQuotaGovernor _governor = new(quota);
     private int _modelCallCount;
@@ -149,8 +160,9 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
         if (denialAfter is not null) throw new InvalidOperationException(denialAfter);
         var throttled = response.AdditionalProperties?.TryGetValue("gateway.throttled", out var throttle) == true &&
                         bool.TryParse(throttle?.ToString(), out var isThrottled) && isThrottled;
+        var estimatedCost = rates is null ? null : ModelGatewayTokenomics.EstimateCost(usage, rates);
         Metrics = new GatewayTokenMetrics(usage.InputTokens, usage.OutputTokens, usage.TotalTokens,
-            _modelCallCount, _retryCount, _latencyMilliseconds, throttled, correlation.ModelConfiguration, null, usage);
+            _modelCallCount, _retryCount, _latencyMilliseconds, throttled, correlation.ModelConfiguration, estimatedCost, usage);
         return response;
     }
 

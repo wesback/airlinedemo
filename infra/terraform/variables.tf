@@ -128,6 +128,17 @@ variable "gateway_model_deployment" {
   }
 }
 
+variable "gateway_approved_application_identity" {
+  description = "Entra object identity approved to call the private model gateway."
+  type        = string
+  default     = "55555555-5555-5555-5555-555555555555"
+  nullable    = false
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.gateway_approved_application_identity))
+    error_message = "gateway_approved_application_identity must be an Entra object ID (GUID)."
+  }
+}
+
 variable "model_deployment_name" {
   description = "Name of the Azure OpenAI deployment. Required; empty or whitespace is rejected."
   type        = string

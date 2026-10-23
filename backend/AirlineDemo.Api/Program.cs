@@ -58,6 +58,9 @@ builder.Services.AddSingleton<WorkloadAdmissionLimits>();
 builder.Services.AddTransient<FourArmEvaluationRunner>();
 builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
 builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
+builder.Services.AddSingleton(new GatewayTokenRateSchedule(
+    decimal.TryParse(builder.Configuration["ModelGateway:InputCostPerMillionTokens"], out var inputRate) ? inputRate : 2m,
+    decimal.TryParse(builder.Configuration["ModelGateway:OutputCostPerMillionTokens"], out var outputRate) ? outputRate : 3m));
 builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>(sp => manifest =>
 {
     var configuredEndpoint = builder.Configuration["ModelGateway:Endpoint"];
@@ -144,7 +147,8 @@ public partial class Program
         foreach (var arm in Enum.GetValues<EvaluationArm>())
         {
             services.AddTransient<IEvaluationArmExecutor>(sp => new ProductionEvaluationArmExecutor(
-                arm, sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>()));
+                arm, sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>(),
+                sp.GetService<GatewayTokenRateSchedule>()));
         }
     }
 

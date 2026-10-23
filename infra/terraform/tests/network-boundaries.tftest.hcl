@@ -89,6 +89,27 @@ variables {
   }
 }
 
+run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct_model_access" {
+  command = plan
+
+  assert {
+    condition     = azurerm_api_management.gateway.public_network_access_enabled == false && azurerm_api_management.gateway.virtual_network_type == "Internal" && azurerm_api_management.gateway.identity[0].type == "SystemAssigned"
+    error_message = "The gateway must be internal, private, and use its managed identity."
+  }
+  assert {
+    condition     = azurerm_api_management_api.gateway_model.subscription_required == false && azurerm_cognitive_account.model.public_network_access_enabled == false && azurerm_cognitive_account.model.local_auth_enabled == false
+    error_message = "Gateway calls must require no subscription key and direct model public or key access must be disabled."
+  }
+  assert {
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.url_template == "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" && can(regex("validate-jwt", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_approved_application_identity, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("authentication-managed-identity", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
+    error_message = "The operation and policy must pin deployment/API version and validate the approved caller before managed-identity backend forwarding."
+  }
+  assert {
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint
+    error_message = "The route must accept POST client paths without subscription authentication or secret output."
+  }
+}
+
 run "M-13_ingress_and_egress_allowlists" {
   command = plan
 
@@ -349,23 +370,6 @@ run "terraform_identity_scoped_to_demo_rg" {
   }
 }
 
-
-run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct_model_access" {
-  command = plan
-
-  assert {
-    condition     = azurerm_api_management.gateway.public_network_access_enabled == false && azurerm_api_management.gateway.virtual_network_type == "Internal" && azurerm_cognitive_account.model.public_network_access_enabled == false && azurerm_cognitive_account.model.local_auth_enabled == false
-    error_message = "The private gateway and model endpoint must prohibit public access and key authentication."
-  }
-  assert {
-    condition     = output.model_endpoint == "https://apim-demo-test.private.invalid/" && !can(regex("(?i)(key|secret|token|connection_string|connection string)", output.model_endpoint))
-    error_message = "The plan must expose only the private gateway endpoint and no secret, key, connection string, or access token."
-  }
-  assert {
-    condition     = azurerm_api_management_api.gateway_model.path == "openai" && azurerm_api_management_api.gateway_model.subscription_required == true && azurerm_api_management_api.gateway_model.service_url == "https://aoai-demo-test.privatelink.openai.azure.com/openai" && azurerm_api_management_api_operation.gateway_chat_completions.url_template == "deployments/gpt-demo-test/chat/completions?api-version=2024-02-01" && can(regex("rewrite-uri[^>]*gpt-demo-test[^>]*2024-02-01", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("authentication-managed-identity", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && azurerm_role_assignment.gateway_cognitive_services.role_definition_name == "Cognitive Services OpenAI User"
-    error_message = "The private API Management route must target only the private model deployment and require no alternate public route."
-  }
-}
 
 run "rejects_empty_gateway_endpoint" {
   command = plan

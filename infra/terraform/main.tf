@@ -279,7 +279,7 @@ resource "azurerm_api_management_api" "gateway_model" {
   display_name        = "Foundry private model gateway"
   path                = "openai"
   protocols           = ["https"]
-  subscription_required = true
+  subscription_required = false
   service_url         = "https://${var.model_endpoint_subdomain}.privatelink.openai.azure.com/openai"
 }
 
@@ -302,6 +302,14 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
 <policies>
   <inbound>
     <base />
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="gateway caller identity rejected">
+      <openid-config url="https://login.microsoftonline.com/${var.tenant_id}/v2.0/.well-known/openid-configuration" />
+      <required-claims>
+        <claim name="oid" match="any">
+          <value>${var.gateway_approved_application_identity}</value>
+        </claim>
+      </required-claims>
+    </validate-jwt>
     <rewrite-uri template="/openai/deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" copy-unmatched-params="false" />
     <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
   </inbound>

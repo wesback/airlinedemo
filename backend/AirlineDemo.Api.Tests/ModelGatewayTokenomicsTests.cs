@@ -21,7 +21,7 @@ public sealed class ModelGatewayTokenomicsTests
         Assert.Equal((null, null, null, "unavailable"), (unavailable.InputTokens, unavailable.OutputTokens, unavailable.TotalTokens, unavailable.Status));
 
         var fake = new GatewayChatClient();
-        var governed = new GatewayGovernedChatClient(fake, Correlation(), new GatewayQuota(1000, 1000, 2000, 2, 3, 1, TimeSpan.FromSeconds(30)));
+        var governed = new GatewayGovernedChatClient(fake, Correlation(), new GatewayQuota(1000, 1000, 2000, 2, 3, 1, TimeSpan.FromSeconds(30)), new GatewayTokenRateSchedule(2, 3));
         var response = await governed.GetResponseAsync([new ChatMessage(ChatRole.User, "approved case")]);
         Assert.Equal("ok", response.Text);
         Assert.Equal(1, fake.Calls);
@@ -31,6 +31,7 @@ public sealed class ModelGatewayTokenomicsTests
         Assert.False(governed.Metrics.Throttled);
         Assert.True(governed.Metrics.LatencyMilliseconds >= 0);
         Assert.Equal("available", governed.Metrics.Usage.Status);
+        Assert.Equal(0.000105m, governed.Metrics.EstimatedCost);
     }
 
     [Fact]
