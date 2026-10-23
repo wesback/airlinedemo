@@ -64,7 +64,7 @@ variables {
   model_version                   = "0000-00-00"
   gateway_endpoint                = "https://apim-demo-test.private.invalid/"
   gateway_region                  = "swedencentral"
-  gateway_api_version             = "2024-02-01"
+  gateway_api_version             = "2024-10-21"
   gateway_api_management_tier     = "Developer"
   gateway_model_deployment        = "gpt-demo-test"
   terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"

@@ -37,6 +37,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
             }));
             builder.ConfigureTestServices(services =>
             {
+                services.AddSingleton(FakeApprovedManifest.Approved());
                 if (fake is not null) services.AddSingleton<Func<ApprovedModelManifest, IChatClient>>(_ => _ => fake);
                 if (credential is not null) services.AddSingleton(credential);
                 if (handler is not null) services.AddSingleton(handler);
@@ -103,6 +104,44 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.Equal([expectedScope], scopes.Distinct());
         Assert.Equal(1, Volatile.Read(ref requests));
     }
+
+    [Fact]
+    public async Task Production_client_sends_correlation_headers_and_the_pinned_api_version()
+    {
+        Uri? uri = null;
+        System.Net.Http.Headers.HttpRequestHeaders? headers = null;
+        using var host = Host(Private, credential: () => new RecordingCredential([]),
+            handler: new CountingHandler(request => { uri = request.RequestUri; headers = request.Headers; }));
+
+        await Assert.ThrowsAnyAsync<Exception>(() => Executor(host).ExecuteAsync(Request(), TestContext.Current.CancellationToken));
+
+        Assert.Equal("2024-10-21", System.Web.HttpUtility.ParseQueryString(uri!.Query)["api-version"]);
+        Assert.Equal(
+            ["B", "frozen-v2", "aircraft-return-readiness", "case-1", ModelConfiguration, FourArmEvaluationRunner.FrozenV2Sha256, "b-sha-1"],
+            GatewayCorrelationHeadersPolicy.HeaderNames.Select(name => Assert.Single(headers!.GetValues(name))).ToArray());
+        // The Terraform gateway operation matches this api-version; the two must not drift apart.
+        var variables = File.ReadAllText(Path.Combine(RepositoryRoot(), "infra", "terraform", "variables.tf"));
+        var block = variables[variables.IndexOf("variable \"gateway_api_version\"", StringComparison.Ordinal)..];
+        Assert.Contains("default  = \"2024-10-21\"", block[..block.IndexOf("\nvariable ", 1, StringComparison.Ordinal)], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Production_client_sends_no_correlation_headers_outside_an_evaluation_dispatch()
+    {
+        System.Net.Http.Headers.HttpRequestHeaders? headers = null;
+        using var host = Host(Private, credential: () => new RecordingCredential([]),
+            handler: new CountingHandler(request => headers = request.Headers));
+        var chat = host.Services.GetRequiredService<IChatClient>();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => chat.GetResponseAsync([new ChatMessage(ChatRole.User, "ping")],
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.NotNull(headers);
+        Assert.All(GatewayCorrelationHeadersPolicy.HeaderNames, name => Assert.False(headers!.Contains(name)));
+    }
+
+    private static string RepositoryRoot([CallerFilePath] string source = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", ".."));
 
     [Fact]
     public async Task Production_executor_rejects_direct_openai_endpoint_before_dispatch()
@@ -479,11 +518,13 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         }
     }
 
-    private sealed class CountingHandler(Action onRequest) : HttpMessageHandler
+    private sealed class CountingHandler(Action<HttpRequestMessage> onRequest) : HttpMessageHandler
     {
+        public CountingHandler(Action onRequest) : this(_ => onRequest()) { }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            onRequest();
+            onRequest(request);
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest)
             {
                 Content = new StringContent("{\"error\":{\"code\":\"fake\",\"message\":\"fake transport\"}}", System.Text.Encoding.UTF8, "application/json"),

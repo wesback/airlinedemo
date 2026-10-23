@@ -135,7 +135,7 @@ variable "gateway_region" {
 
 variable "gateway_api_version" {
   type     = string
-  default  = "2024-02-01"
+  default  = "2024-10-21"
   nullable = false
   validation {
     condition     = length(trimspace(var.gateway_api_version)) > 0

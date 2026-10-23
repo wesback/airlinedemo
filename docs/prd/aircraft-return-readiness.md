@@ -507,7 +507,7 @@ This addendum adds the architecture, exact requirements, gateway configuration a
 | Token audience (policy) | `api://airline-demo-model-gateway`, variable `gateway_audience` and application setting `ModelGateway:Audience` (same value). |
 | Client token scope | `api://airline-demo-model-gateway/.default` |
 | Gateway endpoint | Application setting `ModelGateway:Endpoint`, an `https` address that is not an `*.openai.azure.com` host. |
-| Deployment and API version | Variables `gateway_model_deployment` (default `gpt-demo-test`) and `gateway_api_version` (default `2024-02-01`). |
+| Deployment and API version | Variables `gateway_model_deployment` (default `gpt-demo-test`) and `gateway_api_version` (default `2024-10-21`). |
 | Rate schedule (scenario assumption) | Input 2 and output 3 cost units per million tokens, settings `ModelGateway:InputCostPerMillionTokens` and `ModelGateway:OutputCostPerMillionTokens`. |
 
 **Token limits.**

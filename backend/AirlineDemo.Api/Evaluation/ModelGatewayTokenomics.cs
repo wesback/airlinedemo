@@ -94,6 +94,9 @@ public static class ModelGatewayTokenomics
     public const string PrivateEndpointRequired = "model route rejected: direct Azure OpenAI endpoints are forbidden";
     public const string MissingUsage = "unavailable";
     public const string DefaultAudience = "api://airline-demo-model-gateway";
+    /// <summary>The api-version the client sends; it must equal the Terraform default of gateway_api_version.</summary>
+    public const Azure.AI.OpenAI.AzureOpenAIClientOptions.ServiceVersion ApiServiceVersion =
+        Azure.AI.OpenAI.AzureOpenAIClientOptions.ServiceVersion.V2024_10_21;
     public const string OverLimit = "gateway quota exceeded by one unit: {0}";
 
     public static Uri RequirePrivateGatewayEndpoint(string? configured)
@@ -136,6 +139,57 @@ public static class ModelGatewayTokenomics
         var i = input ?? 0; var o = output ?? 0; var t = total ?? i + o;
         if (i < 0 || o < 0 || t < 0) throw new ArgumentOutOfRangeException(nameof(total), "token usage cannot be negative");
         return new GatewayUsage(i, o, t, "available");
+    }
+}
+
+/// <summary>The correlation of the model call in flight on this async flow; read by <see cref="GatewayCorrelationHeadersPolicy"/>.</summary>
+public static class GatewayCorrelationContext
+{
+    private static readonly AsyncLocal<GatewayCorrelation?> Slot = new();
+    public static GatewayCorrelation? Current => Slot.Value;
+    public static IDisposable Begin(GatewayCorrelation correlation)
+    {
+        var previous = Slot.Value;
+        Slot.Value = correlation;
+        return new Restore(previous);
+    }
+    private sealed class Restore(GatewayCorrelation? previous) : IDisposable
+    {
+        public void Dispose() => Slot.Value = previous;
+    }
+}
+
+/// <summary>Sends the seven validated correlation fields to the gateway as request headers.</summary>
+public sealed class GatewayCorrelationHeadersPolicy : System.ClientModel.Primitives.PipelinePolicy
+{
+    public static readonly IReadOnlyList<string> HeaderNames =
+    [
+        "x-gateway-arm", "x-gateway-run", "x-gateway-package", "x-gateway-case", "x-gateway-model-configuration",
+        "x-gateway-suite-version", "x-gateway-call-identity"
+    ];
+
+    public override void Process(System.ClientModel.Primitives.PipelineMessage message,
+        IReadOnlyList<System.ClientModel.Primitives.PipelinePolicy> pipeline, int currentIndex)
+    {
+        Apply(message);
+        ProcessNext(message, pipeline, currentIndex);
+    }
+
+    public override async ValueTask ProcessAsync(System.ClientModel.Primitives.PipelineMessage message,
+        IReadOnlyList<System.ClientModel.Primitives.PipelinePolicy> pipeline, int currentIndex)
+    {
+        Apply(message);
+        await ProcessNextAsync(message, pipeline, currentIndex);
+    }
+
+    private static void Apply(System.ClientModel.Primitives.PipelineMessage message)
+    {
+        // Calls outside an evaluation dispatch (the evidence investigator) carry no correlation and add no headers.
+        if (GatewayCorrelationContext.Current is not { } correlation) return;
+        ModelGatewayTokenomics.ValidateCorrelation(correlation);
+        string[] values = [correlation.Arm, correlation.Run, correlation.Package, correlation.Case,
+            correlation.ModelConfiguration, correlation.SuiteVersion, correlation.CallIdentity];
+        for (var i = 0; i < HeaderNames.Count; i++) message.Request.Headers.Set(HeaderNames[i], values[i]);
     }
 }
 
@@ -205,7 +259,9 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
         activity?.SetTag("gateway.modelconfiguration", correlation.ModelConfiguration);
         activity?.SetTag("gateway.suiteversion", correlation.SuiteVersion);
         activity?.SetTag("gateway.callidentity", correlation.CallIdentity);
-        var response = await base.GetResponseAsync(messages, options, cancellationToken);
+        ChatResponse response;
+        using (GatewayCorrelationContext.Begin(correlation))
+            response = await base.GetResponseAsync(messages, options, cancellationToken);
         _latencyMilliseconds = (long)(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         var usage = ModelGatewayTokenomics.Usage(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount,
             response.Usage?.TotalTokenCount);

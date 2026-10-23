@@ -70,7 +70,9 @@ builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.A
     var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
     var credential = new GatewayScopedTokenCredential(new LazyTokenCredential(createCredential),
         ModelGatewayTokenomics.TokenScope(builder.Configuration["ModelGateway:Audience"]));
-    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions();
+    // The gateway operation matches this exact api-version (Terraform gateway_api_version); never follow the SDK default.
+    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions(ModelGatewayTokenomics.ApiServiceVersion);
+    options.AddPolicy(new GatewayCorrelationHeadersPolicy(), System.ClientModel.Primitives.PipelinePosition.PerCall);
     var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
     if (handler is not null)
     {
