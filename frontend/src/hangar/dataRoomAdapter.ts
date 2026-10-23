@@ -16,7 +16,7 @@ export function validateHangarRackAvatarManifest(input: unknown = sceneManifest)
   const rack = value.rack;
   const avatar = value.avatar;
   if (!rack || typeof rack !== 'object' || !avatar || typeof avatar !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
-  if (value.contractVersion !== 1 || typeof value.packVersion !== 'string' || value.packVersion.length === 0) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+  if (value.contractVersion !== 1 || value.packVersion !== '0.4.0') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   const rackValue = rack as Record<string, unknown>;
   if (rackValue.path !== 'assets/hangar/rack.glb' || rackValue.type !== 'model') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   const avatarValue = avatar as Record<string, unknown>;
@@ -39,6 +39,8 @@ export function validateHangarRackAvatarManifest(input: unknown = sceneManifest)
   const hat = hardHat as Record<string, unknown>;
   if (hat.node !== HANGAR_AVATAR_HARD_HAT || hat.color !== HANGAR_HARD_HAT_COLOR) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   if (avatarValue.synthetic !== true || avatarValue.realPerson !== false || avatarValue.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+  const contrast = (foreground: string, background: string) => { const lum=(hex:string)=>{const v=hex.replace('#','');const rgb=[0,2,4].map(i=>parseInt(v.slice(i,i+2),16)/255).map(n=>n<=0.04045?n/12.92:((n+0.055)/1.055)**2.4);return 0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2];};const a=lum(foreground),b=lum(background);return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);};
+  if (contrast('#1B2430','#FFFFFF') < 4.5 || contrast('#4A5563','#FFFFFF') < 4.5) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   return { valid: true, units: normalized };
 }
 export const validateSceneManifest = validateHangarRackAvatarManifest;

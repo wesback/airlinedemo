@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import manifest from '../src/hangar/sceneManifest.json';
 import { activateHangarSceneObject, validateHangarAircraftDescriptor } from '../src/hangar/sceneDescriptor';
+import { HANGAR_SCENE_THEME, hangarLabelContrastRatio } from '../src/hangar/sceneTheme';
 const clone=()=>JSON.parse(JSON.stringify(manifest));
 describe('Hangar scene descriptor',()=>{
  it('Hangar descriptor exact 12-object wiring',()=>{
@@ -27,4 +28,29 @@ describe('Hangar scene descriptor',()=>{
    const selection=vi.fn();expect(validateHangarAircraftDescriptor(bad).valid).toBe(false);expect(activateHangarSceneObject(bad,'SYN-CP-A-AIR-001',selection)).toEqual(expect.objectContaining({activated:false}));expect(selection).not.toHaveBeenCalled();
   }
  });
+});
+
+
+describe('hangar scene manifest layout contract cases', () => {
+  it('accepts exact 0.4.0 layout and rejects malformed contracts', () => {
+    expect(validateHangarAircraftDescriptor(manifest)).toEqual(expect.objectContaining({ valid: true }));
+    for (const bad of [
+      (() => { const x = clone(); delete x.layout.aircraft[0].footprint; return x; })(),
+      (() => { const x = clone(); x.rack.units[1].node = x.rack.units[0].node; return x; })(),
+      (() => { const x = clone(); x.packVersion = '0.3.0'; return x; })(),
+      (() => { const x = clone(); const a = x.layout.aircraft[0].dimensions; x.layout.aircraft[0].dimensions = x.layout.aircraft[2].dimensions; x.layout.aircraft[2].dimensions = a; return x; })(),
+    ]) {
+      expect(validateHangarAircraftDescriptor(bad)).toEqual({ valid: false, error: 'Visible mapping error' });
+    }
+  });
+
+  it('hangar scene palette remains status independent', () => {
+    expect(Object.keys(HANGAR_SCENE_THEME)).toHaveLength(16);
+    expect(HANGAR_SCENE_THEME).toEqual({
+      background:'#E8EDF2', floor:'#C3CBD4', floorMarking:'#F2F4F6', aircraftBody:'#F5F7F9', aircraftTrim:'#9AA5B1', partsStand:'#5A6573', component:'#B7C0CA', rack:'#2F3A47', rackUnit:'#4C5866', avatarBody:'#3D6E9E', groundShadow:'#000000', guideLine:'#0E7C66', selection:'#1F6FEB', labelBackground:'#FFFFFF', labelText:'#1B2430', labelMuted:'#4A5563'
+    });
+    expect(manifest.avatar.hardHat.color).toBe('#FFD400');
+    expect(hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelText)).toBeGreaterThanOrEqual(4.5);
+    expect(hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelMuted)).toBeGreaterThanOrEqual(4.5);
+  });
 });

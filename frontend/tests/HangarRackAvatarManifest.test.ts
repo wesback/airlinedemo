@@ -13,6 +13,17 @@ import {
 const clone = () => JSON.parse(JSON.stringify(manifest));
 
 describe('Hangar rack and avatar manifest', () => {
+  it('hangar label contrast and synthetic declaration contract', () => {
+    const result = validateHangarRackAvatarManifest(manifest);
+    expect(result.valid).toBe(true);
+    const lowText = clone(); lowText.avatar.synthetic = false;
+    expect(validateHangarRackAvatarManifest(lowText)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    const realPerson = clone(); realPerson.avatar.realPerson = true;
+    expect(validateHangarRackAvatarManifest(realPerson)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+    const brandMarks = clone(); brandMarks.avatar.brandMarks = true;
+    expect(validateHangarRackAvatarManifest(brandMarks)).toEqual({ valid: false, reason: HANGAR_MANIFEST_ERROR });
+  });
+
   it('Hangar rack manifest exact five-unit mapping', () => {
     const result = validateHangarRackAvatarManifest(manifest);
     expect(result.valid).toBe(true);
