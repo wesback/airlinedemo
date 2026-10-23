@@ -16,7 +16,7 @@ export const HANGAR_LOCAL_FALLBACK_CODES: readonly HangarLocalFallbackReason[] =
 const objectOf = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 export function isHangarPresenter(input: unknown): boolean {
   const role = typeof input === 'string' ? input : objectOf(input) ? input.role : undefined;
-  return typeof role === 'string' && role.trim().toLowerCase() === 'presenter';
+  return typeof role === 'string' && ['presenter', 'technical-reviewer'].includes(role.trim().toLowerCase());
 }
 export function isHangarLocalFallbackReason(value: unknown): value is HangarLocalFallbackReason {
   return typeof value === 'string' && (HANGAR_LOCAL_FALLBACK_CODES as readonly string[]).includes(value);
