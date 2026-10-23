@@ -102,6 +102,7 @@ builder.Services.AddSingleton<ISourceSystem<RecordsPayload>, RecordsSource>();
 builder.Services.AddSingleton<ISourceSystem<ContractsPayload>, ContractsSource>();
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();
+TransportSecurity.ValidateDeploymentConfiguration(builder.Configuration, builder.Environment);
 await using var app = builder.Build();
 SourceFixtureLoader.LoadPinned(
     System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
@@ -132,6 +133,7 @@ app.MapSourceReadEndpoints();
 app.MapSourceSummaryEndpoints();
 app.MapStaticClient();
 
+TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
 app.Run();
 
 public partial class Program

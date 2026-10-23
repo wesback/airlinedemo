@@ -275,7 +275,7 @@ run "M-14_M-18_encryption_transport_and_no_key_outputs" {
     error_message = "SQL must require TLS 1.2 and Entra-only auth."
   }
   assert {
-    condition     = output.model_endpoint == "aoai-demo-test.openai.azure.com/"
+    condition     = output.model_endpoint == "https://apim-demo-test.private.invalid/"
     error_message = "Model endpoint must be the approved subdomain host."
   }
   assert {
@@ -360,6 +360,10 @@ run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct
   assert {
     condition     = output.model_endpoint == "https://apim-demo-test.private.invalid/" && !can(regex("(?i)(key|secret|token|connection_string|connection string)", output.model_endpoint))
     error_message = "The plan must expose only the private gateway endpoint and no secret, key, connection string, or access token."
+  }
+  assert {
+    condition     = azurerm_api_management_api.gateway_model.path == "openai" && azurerm_api_management_api.gateway_model.subscription_required == false && azurerm_api_management_api.gateway_model.service_url == "https://aoai-demo-test.privatelink.openai.azure.com/openai/deployments/gpt-demo-test"
+    error_message = "The private API Management route must target only the private model deployment and require no alternate public route."
   }
 }
 

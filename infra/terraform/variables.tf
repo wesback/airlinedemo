@@ -80,6 +80,7 @@ variable "model_endpoint_subdomain" {
 
 variable "gateway_endpoint" {
   type     = string
+  default  = "https://apim-demo-test.private.invalid/"
   nullable = false
   validation {
     condition     = length(trimspace(var.gateway_endpoint)) > 0 && can(regex("^https://", lower(trimspace(var.gateway_endpoint))))
@@ -89,6 +90,7 @@ variable "gateway_endpoint" {
 
 variable "gateway_region" {
   type     = string
+  default  = "swedencentral"
   nullable = false
   validation {
     condition     = length(trimspace(var.gateway_region)) > 0
@@ -98,6 +100,7 @@ variable "gateway_region" {
 
 variable "gateway_api_version" {
   type     = string
+  default  = "2024-02-01"
   nullable = false
   validation {
     condition     = length(trimspace(var.gateway_api_version)) > 0
@@ -107,6 +110,7 @@ variable "gateway_api_version" {
 
 variable "gateway_api_management_tier" {
   type     = string
+  default  = "Developer"
   nullable = false
   validation {
     condition     = length(trimspace(var.gateway_api_management_tier)) > 0
@@ -116,6 +120,7 @@ variable "gateway_api_management_tier" {
 
 variable "gateway_model_deployment" {
   type     = string
+  default  = "gpt-demo-test"
   nullable = false
   validation {
     condition     = length(trimspace(var.gateway_model_deployment)) > 0

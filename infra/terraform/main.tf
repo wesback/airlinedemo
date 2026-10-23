@@ -261,6 +261,25 @@ resource "azurerm_api_management" "gateway" {
   }
 }
 
+resource "azurerm_api_management_api" "gateway_model" {
+  name                = "foundry-model-gateway"
+  resource_group_name = azurerm_resource_group.demo.name
+  api_management_name = azurerm_api_management.gateway.name
+  revision            = "1"
+  display_name        = "Foundry private model gateway"
+  path                = "openai"
+  protocols           = ["https"]
+  subscription_required = false
+  service_url         = "https://${var.model_endpoint_subdomain}.privatelink.openai.azure.com/openai/deployments/${var.gateway_model_deployment}"
+
+  import {
+    content_format = "openapi"
+    content_value  = <<EOF
+{"openapi":"3.0.1","info":{"title":"Foundry private model gateway","version":"${var.gateway_api_version}"},"paths":{"/chat/completions":{"post":{"responses":{"200":{"description":"accepted"}}}}}}
+EOF
+  }
+}
+
 resource "azurerm_cognitive_deployment" "model" {
   name                 = var.model_deployment_name
   cognitive_account_id = azurerm_cognitive_account.model.id

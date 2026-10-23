@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 
 namespace AirlineDemo.Api.Evaluation;
 
@@ -9,7 +10,7 @@ public sealed record GatewayUsage(long? InputTokens, long? OutputTokens, long? T
     public static GatewayUsage Unavailable() => new(null, null, null, "unavailable");
 }
 
-public sealed record GatewayTokenMetrics(long InputTokens, long OutputTokens, long TotalTokens, int ModelCallCount,
+public sealed record GatewayTokenMetrics(long? InputTokens, long? OutputTokens, long? TotalTokens, int ModelCallCount,
     int RetryCount, long LatencyMilliseconds, bool Throttled, string ModelConfiguration, decimal? EstimatedCost,
     GatewayUsage Usage);
 
@@ -21,7 +22,8 @@ public sealed record GatewayCorrelation(string Arm, string Run, string Package, 
     {
         var values = new (string Name, string Value)[] { (nameof(Arm), Arm), (nameof(Run), Run), (nameof(Package), Package),
             (nameof(Case), Case), (nameof(ModelConfiguration), ModelConfiguration), (nameof(SuiteVersion), SuiteVersion), (nameof(CallIdentity), CallIdentity) };
-        return values.Where(v => string.IsNullOrWhiteSpace(v.Value) || !Identifier.IsMatch(v.Value)).Select(v => v.Name).ToArray();
+        var forbiddenShape = new Regex("bearer\\s|authorization:|__host-|aspnetcore\\.cookies|pass(?:code)?|cookie|secret|access[_ -]?key|connection[_ -]?string|@[^\\s]+\\.[^\\s]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return values.Where(v => string.IsNullOrWhiteSpace(v.Value) || !Identifier.IsMatch(v.Value) || forbiddenShape.IsMatch(v.Value)).Select(v => v.Name).ToArray();
     }
     public string ReplayIdentity() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', Arm, Run, Package, Case, ModelConfiguration, SuiteVersion, CallIdentity)))).ToLowerInvariant();
 }
@@ -105,8 +107,10 @@ public static class ModelGatewayTokenomics
 
 public sealed class GatewayReplayStore<T>
 {
-    private readonly Dictionary<string, T> _results = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> _results = new(StringComparer.Ordinal);
     private readonly HashSet<string> _baseIdentity = new(StringComparer.Ordinal);
+    private static readonly JsonSerializerOptions SnapshotOptions = new(JsonSerializerDefaults.Web);
+
     public bool TryReplay(GatewayCorrelation correlation, out T? result)
     {
         ModelGatewayTokenomics.ValidateCorrelation(correlation);
@@ -114,13 +118,16 @@ public sealed class GatewayReplayStore<T>
             correlation.SuiteVersion, correlation.CallIdentity);
         if (_baseIdentity.Contains(baseKey) && !_results.ContainsKey(correlation.ReplayIdentity()))
             throw new InvalidOperationException("gateway replay rejected: model configuration changed");
-        return _results.TryGetValue(correlation.ReplayIdentity(), out result);
+        if (!_results.TryGetValue(correlation.ReplayIdentity(), out var snapshot)) { result = default; return false; }
+        result = JsonSerializer.Deserialize<T>(snapshot, SnapshotOptions);
+        return true;
     }
     public void Store(GatewayCorrelation correlation, T result)
     {
         ModelGatewayTokenomics.ValidateCorrelation(correlation);
+        ArgumentNullException.ThrowIfNull(result);
         _baseIdentity.Add(string.Join('|', correlation.Arm, correlation.Run, correlation.Package, correlation.Case,
             correlation.SuiteVersion, correlation.CallIdentity));
-        _results[correlation.ReplayIdentity()] = result;
+        _results[correlation.ReplayIdentity()] = JsonSerializer.SerializeToUtf8Bytes(result, SnapshotOptions);
     }
 }
