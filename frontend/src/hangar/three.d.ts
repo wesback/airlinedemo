@@ -7,10 +7,14 @@ declare module 'three' {
   export class Material { type:string; map:any; visible:boolean; }
   export class MeshStandardMaterial extends Material { constructor(options?:Record<string,any>); color:{getHexString():string}; roughness:number; metalness:number; transparent:boolean; opacity:number; }
   export class MeshBasicMaterial extends Material { constructor(options?:Record<string,any>); color?:{getHexString():string}; transparent:boolean; opacity:number; }
-  export class BoxGeometry { constructor(width:number,height:number,depth:number); }
+  export class BoxGeometry { constructor(width:number,height:number,depth:number); parameters:{width:number;height:number;depth:number}; }
   export class CapsuleGeometry { constructor(radius:number,length:number,capSegments:number,radialSegments:number); boundingSphere?:{radius:number}; }
   export class CylinderGeometry { constructor(radiusTop:number,radiusBottom:number,height:number,radialSegments:number); }
-  export class SphereGeometry { constructor(radius:number,widthSegments:number,heightSegments:number); }
+  export class SphereGeometry { constructor(radius:number,widthSegments?:number,heightSegments?:number,phiStart?:number,phiLength?:number,thetaStart?:number,thetaLength?:number); }
   export class CircleGeometry { constructor(radius:number,segments:number); }
-  export class Box3 { setFromObject(object:Object3D):this; getSize(target:Vector3):Vector3; min:{y:number}; }
+  export class Curve<T> { getPoint(t:number,target?:T):T; }
+  export class CatmullRomCurve3 extends Curve<Vector3> { constructor(points:Vector3[],closed?:boolean,curveType?:string,tension?:number); }
+  export class TubeGeometry { constructor(curve:Curve<Vector3>,tubularSegments?:number,radius?:number,radialSegments?:number,closed?:boolean); parameters:{path:Curve<Vector3>; tubularSegments:number; radius:number; radialSegments:number; closed:boolean}; }
+  export class TorusGeometry { constructor(radius:number,tube:number,radialSegments:number,tubularSegments:number,arc?:number); parameters:{radius:number;tube:number;radialSegments:number;tubularSegments:number;arc:number}; }
+  export class Box3 { setFromObject(object:Object3D):this; getSize(target:Vector3):Vector3; getCenter(target:Vector3):Vector3; min:{y:number}; }
 }

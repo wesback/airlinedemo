@@ -5,6 +5,7 @@ import { HANGAR_SCENE_THEME } from './sceneTheme';
 
 export const HANGAR_SCENE_BUILDER_ERROR = 'Visible mapping error';
 export const HANGAR_ROUTE_ERROR = 'Visible route error';
+export const HANGAR_MAX_ROUTE_POINTS = 64;
 export type HangarSceneView = unknown;
 export type HangarSelectionHandler = (objectId: string, object: THREE.Object3D) => unknown;
 
@@ -59,9 +60,17 @@ function sceneRoute(view: unknown): Array<{x:number;z:number}> | null {
   const value = view as any;
   const raw = value.route?.points ?? value.route?.route ?? value.guideLine?.points ?? value.guideLine?.route ?? value.route ?? value.points;
   if (!Array.isArray(raw) || raw.length === 0) return null;
+  if (raw.length > HANGAR_MAX_ROUTE_POINTS) return null;
   if (raw.some((point: any) => point && (point.objectId != null || point.selectionHandler != null))) return null;
-  const points = raw.map((point: any) => typeof point === 'object' && point ? {x:point.x,z:point.z} : null);
-  return points.every((point: {x:number;z:number}|null) => point && Number.isFinite(point.x) && Number.isFinite(point.z)) ? points : null;
+  const points: Array<{x:number;z:number} | null> = raw.map((point: any) => typeof point === 'object' && point && typeof point.x === 'number' && typeof point.z === 'number' ? {x:point.x,z:point.z} : null);
+  return points.every((point): point is {x:number;z:number} => point !== null && Number.isFinite(point.x) && Number.isFinite(point.z)) ? points : null;
+}
+
+function sceneRouteCandidate(view: unknown): boolean {
+  if (!view || typeof view !== 'object') return false;
+  const value = view as any;
+  const raw = value.route?.points ?? value.route?.route ?? value.guideLine?.points ?? value.guideLine?.route ?? value.route ?? value.points;
+  return Array.isArray(raw) && raw.length > 0;
 }
 
 function pointInsideFloor(x: number, z: number, m: any): boolean {
@@ -211,6 +220,7 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
   }
 
   const route = sceneRoute(sceneView);
+  if (sceneRouteCandidate(sceneView) && (!route || route.length < 2)) return null;
   if (route && route.length >= 2) {
     if (!route.every(point => pointInsideFloor(point.x, point.z, m) && Number.isFinite(point.x) && Number.isFinite(point.z))) return null;
     const curve = new THREE.CatmullRomCurve3(route.map(point => new THREE.Vector3(point.x, 0.05, point.z)));

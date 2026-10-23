@@ -118,6 +118,10 @@ describe('Hangar scene builder', () => {
     expect((traverse(root, 'SelectionRing') as THREE.Mesh).geometry).toBeInstanceOf(THREE.TorusGeometry);
     const badRoute = { ...view, route: [{ x: -4, z: 20 }, { x: 100, z: 100 }] };
     expect(buildHangarAircraftSceneGroups(manifest, badRoute)).toBeNull();
+    const oversizedRoute = { ...view, route: Array.from({ length: 65 }, (_, i) => ({ x: -40 + i, z: 20 })) };
+    expect(buildHangarAircraftSceneGroups(manifest, oversizedRoute)).toBeNull();
+    const authoritativeRoute = { ...view, route: [{ x: -4, z: 20 }, { x: -4, z: 15, objectId: manifest.objectIds[0] }] };
+    expect(buildHangarAircraftSceneGroups(manifest, authoritativeRoute)).toBeNull();
   });
 
   it('keeps non-selectable scene nodes without authority', () => {
