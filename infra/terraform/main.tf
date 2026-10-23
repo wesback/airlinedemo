@@ -246,6 +246,80 @@ resource "azurerm_cognitive_account" "model" {
   }
 }
 
+resource "azurerm_api_management" "gateway" {
+  name                          = "apim-foundry-${local.resource_group_name}"
+  location                      = var.gateway_region
+  resource_group_name           = azurerm_resource_group.demo.name
+  publisher_name                = "Airline Demo"
+  publisher_email               = "owner@example.invalid"
+  sku_name                      = "${var.gateway_api_management_tier}_1"
+  public_network_access_enabled = false
+  virtual_network_type          = "Internal"
+
+  virtual_network_configuration {
+    subnet_id = azurerm_subnet.private_endpoints.id
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+resource "azurerm_role_assignment" "gateway_cognitive_services" {
+  scope                = azurerm_cognitive_account.model.id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = azurerm_api_management.gateway.identity[0].principal_id
+}
+
+resource "azurerm_api_management_api" "gateway_model" {
+  name                  = "foundry-model-gateway"
+  resource_group_name   = azurerm_resource_group.demo.name
+  api_management_name   = azurerm_api_management.gateway.name
+  revision              = "1"
+  display_name          = "Foundry private model gateway"
+  path                  = "openai"
+  protocols             = ["https"]
+  subscription_required = false
+  service_url           = "https://${local.model_endpoint_subdomain}.privatelink.openai.azure.com/openai"
+}
+
+resource "azurerm_api_management_api_operation" "gateway_chat_completions" {
+  operation_id        = "chat-completions"
+  api_name            = azurerm_api_management_api.gateway_model.name
+  api_management_name = azurerm_api_management.gateway.name
+  resource_group_name = azurerm_resource_group.demo.name
+  display_name        = "Private chat completions"
+  method              = "POST"
+  url_template        = "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}"
+}
+
+resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions" {
+  api_name            = azurerm_api_management_api.gateway_model.name
+  api_management_name = azurerm_api_management.gateway.name
+  resource_group_name = azurerm_resource_group.demo.name
+  operation_id        = azurerm_api_management_api_operation.gateway_chat_completions.operation_id
+  xml_content         = <<XML
+<policies>
+  <inbound>
+    <base />
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="gateway caller identity rejected">
+      <openid-config url="https://login.microsoftonline.com/${var.tenant_id}/v2.0/.well-known/openid-configuration" />
+      <audiences>
+        <audience>${var.gateway_audience}</audience>
+      </audiences>
+      <required-claims>
+        <claim name="oid" match="any">
+          <value>${var.gateway_approved_application_identity}</value>
+        </claim>
+      </required-claims>
+    </validate-jwt>
+    <rewrite-uri template="/openai/deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" copy-unmatched-params="false" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+  </inbound>
+</policies>
+XML
+}
+
 resource "azurerm_cognitive_deployment" "model" {
   name                 = local.model_deployment_name
   cognitive_account_id = azurerm_cognitive_account.model.id
@@ -328,6 +402,6 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
 }
 
 output "model_endpoint" {
-  description = "Model endpoint host and path, reachable only through the private endpoint."
-  value       = "${local.model_endpoint_subdomain}.openai.azure.com/"
+  description = "Private Foundry AI Gateway endpoint; secrets and model keys are never output."
+  value       = var.gateway_endpoint
 }

@@ -58,23 +58,30 @@ builder.Services.AddSingleton<WorkloadAdmissionLimits>();
 builder.Services.AddTransient<FourArmEvaluationRunner>();
 builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
 builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
+builder.Services.AddSingleton(new GatewayTokenRateSchedule(
+    decimal.TryParse(builder.Configuration["ModelGateway:InputCostPerMillionTokens"], out var inputRate) ? inputRate : 2m,
+    decimal.TryParse(builder.Configuration["ModelGateway:OutputCostPerMillionTokens"], out var outputRate) ? outputRate : 3m));
 builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>(sp => manifest =>
 {
-    var endpoint = builder.Configuration["AzureOpenAI:Endpoint"]
-        ?? throw new InvalidOperationException("AzureOpenAI:Endpoint is not configured; accepted evidence cannot be investigated.");
+    var configuredEndpoint = builder.Configuration["ModelGateway:Endpoint"];
+    var endpoint = ModelGatewayTokenomics.RequirePrivateGatewayEndpoint(configuredEndpoint);
     var deployment = manifest.DeploymentName
         ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
     var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
-    var credential = new LazyTokenCredential(createCredential);
-    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions();
+    var credential = new GatewayScopedTokenCredential(new LazyTokenCredential(createCredential),
+        ModelGatewayTokenomics.TokenScope(builder.Configuration["ModelGateway:Audience"]));
+    // The gateway operation matches this exact api-version (Terraform gateway_api_version); never follow the SDK default.
+    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions(ModelGatewayTokenomics.ApiServiceVersion);
+    options.AddPolicy(new GatewayCorrelationHeadersPolicy(), System.ClientModel.Primitives.PipelinePosition.PerCall);
     var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
     if (handler is not null)
     {
         options.Transport = new System.ClientModel.Primitives.HttpClientPipelineTransport(new System.Net.Http.HttpClient(handler));
     }
-    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential, options)
+    Microsoft.Extensions.AI.IChatClient client = new Azure.AI.OpenAI.AzureOpenAIClient(endpoint, credential, options)
         .GetChatClient(deployment)
         .AsIChatClient();
+    return client;
 });
 var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
 if (!string.IsNullOrEmpty(approvedModelManifestPath))
@@ -101,6 +108,7 @@ builder.Services.AddSingleton<ISourceSystem<RecordsPayload>, RecordsSource>();
 builder.Services.AddSingleton<ISourceSystem<ContractsPayload>, ContractsSource>();
 builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();
+TransportSecurity.ValidateDeploymentConfiguration(builder.Configuration, builder.Environment);
 await using var app = builder.Build();
 SourceFixtureLoader.LoadPinned(
     System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
@@ -131,6 +139,7 @@ app.MapSourceReadEndpoints();
 app.MapSourceSummaryEndpoints();
 app.MapStaticClient();
 
+TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
 app.Run();
 
 public partial class Program
@@ -141,7 +150,8 @@ public partial class Program
         foreach (var arm in Enum.GetValues<EvaluationArm>())
         {
             services.AddTransient<IEvaluationArmExecutor>(sp => new ProductionEvaluationArmExecutor(
-                arm, sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>()));
+                arm, sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>(),
+                sp.GetService<GatewayTokenRateSchedule>()));
         }
     }
 

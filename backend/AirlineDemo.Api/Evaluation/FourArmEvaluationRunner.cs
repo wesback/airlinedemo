@@ -59,7 +59,8 @@ public sealed class EvaluationInputException(string message) : Exception(message
 /// <summary>Executes a frozen evaluation arm without writing evaluation output to application state.</summary>
 public sealed class ProductionEvaluationArmExecutor(
     EvaluationArm arm,
-    Func<ApprovedModelManifest, IChatClient> chatClientFactory) : IEvaluationArmExecutor
+    Func<ApprovedModelManifest, IChatClient> chatClientFactory,
+    GatewayTokenRateSchedule? tokenRates = null) : IEvaluationArmExecutor
 {
     private const int MaximumOutputTokens = 4096;
     private const int MaximumBoundedInputTokens = 10_000;
@@ -79,9 +80,13 @@ public sealed class ProductionEvaluationArmExecutor(
         """;
 
     private IChatClient? _chatClient;
+    private readonly GatewayReplayStore<EvaluationArmExecution> _replay = new();
     private bool _disposed;
 
     public EvaluationArm Arm => arm;
+
+    /// <summary>Gateway token metrics of the latest dispatched call; null before any dispatch.</summary>
+    public GatewayTokenMetrics? LastGatewayMetrics { get; private set; }
 
     public long MaximumTokenUsage(EvaluationCase input) => arm switch
     {
@@ -96,16 +101,45 @@ public sealed class ProductionEvaluationArmExecutor(
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (request.Arm != arm) throw new ArgumentException("executor received a request for another arm", nameof(request));
         if (arm == EvaluationArm.A) return new(EvaluateRules(request.Case), 0, 0, 0, 0);
+
+        var manifest = request.Manifest?.RequireUsable() ?? throw new EvaluationInputException("model arm has no approved manifest");
+        var correlation = new GatewayCorrelation(
+            arm.ToString(), "frozen-v2", "aircraft-return-readiness", request.Case.CaseId,
+            $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
+            FourArmEvaluationRunner.FrozenV2Sha256,
+            $"{arm.ToString().ToLowerInvariant()}-{request.Case.Sha256}");
+        ModelGatewayTokenomics.ValidateCorrelation(correlation);
+        if (request.Mode == EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection &&
+            _replay.TryReplay(correlation, out var replayed)) return replayed!;
+        var modelClient = _chatClient ??= chatClientFactory(manifest);
+        var gatewayMaxInputTokens = arm == EvaluationArm.D ? 100_000 : MaximumBoundedInputTokens;
+        var gatewayMaxOutputTokens = arm == EvaluationArm.D ? MaximumOutputTokens : MaximumBoundedOutputTokens;
+        var gatewayClient = new GatewayGovernedChatClient(modelClient, correlation, new GatewayQuota(
+            gatewayMaxInputTokens, gatewayMaxOutputTokens, MaximumBoundedModelCalls * (gatewayMaxInputTokens + gatewayMaxOutputTokens),
+            MaximumBoundedModelCalls, MaximumBoundedToolCalls, 1, TimeSpan.FromSeconds(30)), tokenRates);
         if (request.Mode == EvaluationExecutionMode.BoundedAgent)
         {
-            return await ExecuteBoundedAgentAsync(request, cancellationToken);
+            try
+            {
+                var bounded = await ExecuteBoundedAgentAsync(request, gatewayClient, cancellationToken);
+                LastGatewayMetrics = gatewayClient.Metrics;
+                _replay.Store(correlation, bounded);
+                return bounded;
+            }
+            catch
+            {
+                LastGatewayMetrics = gatewayClient.Metrics ?? new GatewayTokenMetrics(
+                    gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.InputTokens : null,
+                    gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.OutputTokens : null,
+                    gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.TotalTokens : null,
+                    0, 0, 0, false, correlation.ModelConfiguration, null, gatewayClient.Usage);
+                throw;
+            }
         }
         if (request.Mode != EvaluationExecutionMode.SingleCallWithoutToolsOrCitationReflection)
             throw new ArgumentException("model arm received an unsupported execution mode", nameof(request));
 
-        var manifest = request.Manifest?.RequireUsable()
-            ?? throw new EvaluationInputException("model arm has no approved manifest");
-        var client = _chatClient ??= chatClientFactory(manifest);
+        var client = gatewayClient;
         using var document = JsonDocument.Parse(request.Case.Content);
         var caseInputs = document.RootElement.GetProperty("inputs").GetRawText();
         var userPrompt = $"Case ID: {request.Case.CaseId}\nCase inputs:\n{caseInputs}";
@@ -127,21 +161,29 @@ public sealed class ProductionEvaluationArmExecutor(
                 ? (long)inputTokens + outputTokens
                 : Encoding.UTF8.GetByteCount(prompt) +
                   Math.Min(MaximumOutputTokens, Encoding.UTF8.GetByteCount(answer));
-            return new(answer, usage, 1, 0, 0);
+            var execution = new EvaluationArmExecution(answer, usage, 1, 0, 0);
+            LastGatewayMetrics = gatewayClient.Metrics;
+            _replay.Store(correlation, execution);
+            return execution;
         }
         catch (Exception ex)
         {
+            LastGatewayMetrics = gatewayClient.Metrics ?? new GatewayTokenMetrics(
+                gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.InputTokens : null,
+                gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.OutputTokens : null,
+                gatewayClient.Usage.Status == "available" ? gatewayClient.Usage.TotalTokens : null,
+                0, 0, 0, false, correlation.ModelConfiguration, null, gatewayClient.Usage);
             request.Calls.RecordFailure(prompt, ex.Message);
             throw;
         }
     }
 
     private async Task<EvaluationArmExecution> ExecuteBoundedAgentAsync(
-        EvaluationArmRequest request, CancellationToken cancellationToken)
+        EvaluationArmRequest request, GatewayGovernedChatClient gatewayClient, CancellationToken cancellationToken)
     {
         var manifest = request.Manifest?.RequireUsable()
             ?? throw new EvaluationInputException("model arm has no approved manifest");
-        var client = _chatClient ??= chatClientFactory(manifest);
+        var client = gatewayClient;
         using var limits = new InvestigationLimits(new InvestigationLimitOptions
         {
             MaxModelCalls = MaximumBoundedModelCalls,
@@ -395,8 +437,7 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
                     var started = _timeProvider.GetTimestamp();
                     using var activity = ActivitySource.StartActivity("evaluation.arm");
                     activity?.SetTag("evaluation.arm", arm.ToString());
-                    activity?.SetTag("evaluation.case_id", input.CaseId);
-                    _logger?.LogInformation("Evaluation dispatch {Arm} {CaseId}", arm, input.CaseId);
+                    _logger?.LogInformation("Evaluation dispatch {Arm}", arm);
                     try
                     {
                         var execution = await executor.ExecuteAsync(
@@ -418,8 +459,8 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
-                        _logger?.LogWarning("Evaluation dispatch failed for {Arm} {CaseId}: {ErrorType}",
-                            arm, input.CaseId, ex.GetType().FullName ?? ex.GetType().Name);
+                        _logger?.LogWarning("Evaluation dispatch failed for {Arm}: {ErrorType}",
+                            arm, ex.GetType().FullName ?? ex.GetType().Name);
                         dispatches.Add(new EvaluationDispatch(arm, null, 0, calls.Snapshot(),
                             new EvaluationArmFailure(arm.ToString(), input.CaseId, ex.GetType().FullName ?? ex.GetType().Name))
                         {

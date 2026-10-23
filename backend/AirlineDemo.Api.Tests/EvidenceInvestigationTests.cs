@@ -362,7 +362,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
                 {
                     ["Demo:Passcode"] = Passcode,
                     ["CaseState:Path"] = _statePath,
-                    ["AzureOpenAI:Endpoint"] = "https://fake-openai.invalid/",
+                    ["ModelGateway:Endpoint"] = "https://gateway-demo.private.invalid/",
                 }));
             // Counts every credential the host creates through its only production factory.
             builder.ConfigureTestServices(services =>

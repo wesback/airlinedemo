@@ -1,0 +1,297 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 549,
+  "branch": "ai-sdlc/issue-549",
+  "commitSha": "5dc3101a82e469bac7ca3017836eb5cce50ccf07",
+  "round": 1,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The nine-digit identifier filter and the newly added gateway activity-count assertions address the prior findings. Exact accumulated usage remains incomplete for multi-call quota denials, and the privacy test still does not observe application traces or logs.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 212,
+          "message": "The quota-denial usage finding remains for multi-call evaluations: metrics record only the response that crosses the limit, not usage accumulated across earlier calls.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "On a multi-call bounded evaluation, the governor accumulates usage across responses, but this metrics assignment uses only the current response's usage. A quota denial then throws, leaving the executor without the accumulated usage.",
+            "failureScenario": "The first bounded call uses 100 input and 100 output tokens; a later call exceeds its output limit with 42 input and 2001 output tokens. The denial metrics report only 42 and 2001 instead of the accumulated 142 and 2101, so the denied result loses the exact usage required by the criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 173,
+          "message": "The privacy test still does not verify application traces or logs, as required by the criterion; sensitive content added to the application trace path would go undetected.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The privacy test's ActivityListener accepts only the `AirlineDemo.Api.ModelGateway` source, and the test invokes the executor directly rather than exercising the evaluation runner or capturing application logs.",
+            "failureScenario": "If application tracing or logging includes a sensitive case value, this test still passes because it observes only gateway activities and asserts that those activities are empty."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds checks for SSN-shaped correlation values, quota-denial usage, missing quota limits, and duplicate replay traces. The privacy test still omits application traces, and the replay test does not assert usage remains unchanged.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 164,
+          "message": "The privacy criterion remains unproved for application traces. Capture the production runner’s logs or traces and assert they contain none of the sensitive inputs.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The privacy test captures activities from AirlineDemo.Api.ModelGateway and asserts none are emitted when correlation validation rejects the request. It does not capture application logs or traces from the production evaluation runner.",
+            "failureScenario": "If the runner logs a sensitive Case value during a rejected evaluation, this test still passes because it invokes the executor directly and captures only gateway activities."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 219,
+          "message": "The replay test still does not verify the criterion’s unchanged usage requirement. Assert a usage or charge counter remains unchanged across replay.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The replay test asserts one fake dispatch, the original result, and one activity, but does not observe or assert usage charges.",
+            "failureScenario": "If replay increments a usage charge without dispatching another request or emitting another activity, the test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No security vulnerability is reachable through the changed code. The prior privacy-filter bypass is closed by rejecting nine-digit identifiers, and the quota, privacy-trace, replay-trace, and quota-limit test gaps have been addressed.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+      "backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 202,
+      "total": 206,
+      "percent": 98.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/FourArmEvaluationRunner.cs",
+          "covered": 35,
+          "total": 35,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "covered": 154,
+          "total": 158,
+          "missed": [
+            42,
+            100,
+            143,
+            218
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 13,
+          "total": 13,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

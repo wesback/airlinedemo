@@ -1,0 +1,310 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 549,
+  "branch": "ai-sdlc/issue-549",
+  "commitSha": "ef1ef710f22657d9e503aa628f572a85178495a7",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The configured APIM audience does not match the production client's token audience, which prevents model requests from reaching the backend. Several acceptance criteria also lack tests that would detect regressions in production executor wiring.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/variables.tf",
+          "line": 133,
+          "message": "The policy audience is not aligned with the production client's token audience, so production model calls are rejected.",
+          "confidence": 0.95,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The APIM policy requires the configured gateway_audience, which defaults to api://airline-demo-model-gateway. Program.cs creates the production AzureOpenAIClient with the configured TokenCredential but does not request a token for that audience; the client uses its Azure OpenAI token scope.",
+            "failureScenario": "With the default configuration, the production client sends a token whose audience differs from the APIM policy audience. APIM rejects the request with HTTP 401 before forwarding it. OWASP A07:2025 (Authentication Failures)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 28,
+          "message": "The quota, sensitive-correlation, and exact correlation-field criteria are not proved through the production executor path required by the issue.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Production_executor_enforces_quota_boundary_and_denies_over_limit_result constructs GatewayQuotaGovernor and GatewayGovernedChatClient directly instead of resolving and invoking ProductionEvaluationArmExecutor through production registrations. The sensitive-correlation test does the same. The routing test invokes the executor but does not assert the seven dispatched correlation fields.",
+            "failureScenario": "If ProductionEvaluationArmExecutor stops applying quota checks or correlation validation, the direct-wrapper tests still pass; if it stops attaching correlation metadata, the routing test still passes because it only checks ModelId and usage."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production client requests a token audience that does not match the gateway policy, making the configured route reject calls. The quota, privacy, and telemetry tests also leave required production executor behaviors unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Program.cs",
+          "line": 77,
+          "message": "The production client does not request the token audience required by the gateway policy, so production calls are rejected. Configure the client credential scope to match the approved gateway audience. The named production test also does not assert the requested scope or issued token audience.",
+          "confidence": 0.96,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The production factory passes the default TokenCredential directly to AzureOpenAIClient. It does not request the gateway audience configured by Terraform, whose default is api://airline-demo-model-gateway.",
+            "failureScenario": "With the configured default audience, the client requests a token for the Azure Cognitive Services resource while APIM requires api://airline-demo-model-gateway. APIM rejects the production model call with HTTP 401. OWASP A07:2025 (Authentication Failures)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 28,
+          "message": "The named quota and sensitive-correlation tests do not exercise the production executor as their criteria require. Add production-path tests for the quota boundaries, elapsed-time denial, and sensitive correlation rejection.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The quota test calls GatewayQuotaGovernor.BeforeCall directly and constructs GatewayGovernedChatClient itself. The sensitive-correlation test also constructs GatewayGovernedChatClient directly. Neither resolves or invokes ProductionEvaluationArmExecutor through production startup registrations.",
+            "failureScenario": "If ProductionEvaluationArmExecutor stops applying quota checks or correlation validation, these tests still pass because they exercise manually constructed helpers rather than the production executor. The named production quota and privacy criteria therefore are not proved."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 11,
+          "message": "The named production routing and telemetry test does not verify the criterion’s exact correlation fields, token audience, and required metric values through the executor. Add those assertions and cover unavailable usage on the production path.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The production executor test asserts the result token count, call count, and fake client model ID, but does not inspect LastOptions.AdditionalProperties or assert the seven correlation fields, token scope, token audience, or all required metric values. It also does not exercise the unavailable-usage case through the production executor.",
+            "failureScenario": "If production wiring omits correlation metadata or reports incorrect retries, throttling, latency, or unavailable usage values, the named test can still pass because it does not assert those outputs."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Correlation validation does not reject common personal identifier formats, allowing sensitive case data into gateway metadata.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 21,
+          "message": "A09:2025: Correlation validation accepts common personal identifier formats such as a hyphenated SSN, which can then be sent in gateway metadata.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "GatewayCorrelation.Validate checks a general identifier pattern and a list of sensitive-content shapes, but the list does not detect common personal identifiers such as a hyphenated SSN. GatewayGovernedChatClient then adds the accepted Case value to gateway.case metadata.",
+            "failureScenario": "An evaluation uses a case identifier such as 123-45-6789. It passes validation and is sent as gateway.case, exposing a personal identifier to gateway metadata or traces despite the privacy requirement. OWASP A09:2025 (Security Logging and Alerting Failures)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+      "backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 158,
+      "total": 162,
+      "percent": 97.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/FourArmEvaluationRunner.cs",
+          "covered": 25,
+          "total": 25,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "covered": 122,
+          "total": 126,
+          "missed": [
+            38,
+            88,
+            127,
+            169
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 11,
+          "total": 11,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

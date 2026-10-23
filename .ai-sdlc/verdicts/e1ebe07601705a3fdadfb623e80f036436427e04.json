@@ -1,0 +1,268 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 549,
+  "branch": "ai-sdlc/issue-549",
+  "commitSha": "e1ebe07601705a3fdadfb623e80f036436427e04",
+  "round": 2,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The replay store is given a different identity from the one used for lookup, breaking replay for single-call executions. The gateway route also accepts arbitrary deployment names, and the named adapter test still does not exercise production routing or telemetry.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/FourArmEvaluationRunner.cs",
+          "line": 144,
+          "message": "The stored replay identity differs from the lookup identity, so repeated single-call requests are rejected instead of returning the original result.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ExecuteAsync builds the lookup correlation with a hyphen-separated ModelConfiguration at lines 102–106, but stores the result with a pipe-separated value at lines 144–148. GatewayReplayStore includes ModelConfiguration in ReplayIdentity.",
+            "failureScenario": "After a successful single-call execution, repeating the same call identity looks up the hyphen-based key, while the result is stored under the pipe-based key. The store treats it as a changed model configuration and rejects it instead of replaying the original result."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 293,
+          "message": "A01:2025 (Broken Access Control): the private gateway accepts arbitrary deployment names instead of limiting requests to the configured deployment.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The API operation accepts any value for the deployment path parameter, and the managed-identity policy forwards requests using the gateway identity. The configured gateway_model_deployment input is not used to constrain this operation.",
+            "failureScenario": "A caller with access to the private gateway changes the deployment path to another deployment in the cognitive account. The gateway forwards the request using its account-level model permission, allowing access to a deployment outside the configured model route."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 9,
+          "message": "The production adapter and telemetry behavior remain untested as previously reported: the named test does not exercise a model request or verify the required correlation and tokenomics fields.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named production adapter test still checks endpoint validation and Usage directly; it does not call GatewayGovernedChatClient or exercise the production executor with a fake gateway. The remaining tests likewise do not assert correlation transmission or production call and replay behavior.",
+            "failureScenario": "If the production path omits correlation metadata or fails to report call count, retries, latency, throttling, and estimated cost, the named tests still pass because they only test helper methods and token usage."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes add production wrapper wiring and gateway authentication, but replay identity construction differs between lookup and storage, and the production path still omits correlation metadata and several required telemetry fields. The named tests do not exercise these production behaviors.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/FourArmEvaluationRunner.cs",
+          "line": 146,
+          "message": "The single-call replay lookup and store construct different model configuration identities, so an otherwise identical replay is rejected. Use the same identity construction for both.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ExecuteAsync looks up replay using a model configuration joined with hyphens at lines 104–107, but stores the single-call result using the same fields joined with pipes at lines 144–148. GatewayReplayStore includes ModelConfiguration in ReplayIdentity.",
+            "failureScenario": "Repeating a successful single-call request with the same identity misses the stored result; because the base identity matches but the replay identity differs, TryReplay rejects it as a model configuration change instead of returning the original result."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 117,
+          "message": "The production path still does not include correlation data in dispatched model calls, and the named production adapter test does not exercise or detect that omission.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "GatewayGovernedChatClient validates its stored correlation but does not add it to ChatOptions, request metadata, or headers. The named adapter test still calls helper methods directly and does not send a request through the production client.",
+            "failureScenario": "A model call passes correlation validation but is dispatched without a correlation identifier; the named test passes because it never checks the outgoing gateway request."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 123,
+          "message": "The production wrapper still omits required tokenomics telemetry for call count, retries, latency, throttling, and estimated cost.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The new wrapper records token counts and can reject a response after usage is returned, but it does not record model-call count, retries, latency, throttling, or estimated cost. GatewayTokenMetrics is not populated on this production path.",
+            "failureScenario": "A production model call succeeds, but the required telemetry fields beyond token usage are not recorded; the named helper-only test passes without detecting the missing telemetry."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new gateway route can be called directly by any client that can reach its private endpoint. It lacks caller authentication and deployment restriction, allowing those callers to bypass application-side governance.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 293,
+          "message": "LLM10:2025 (Unbounded Consumption): the private gateway exposes an unauthenticated model route to network-reachable callers and allows them to choose a deployment, bypassing application governance.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The API accepts a caller-supplied deployment path, has subscription_required set to false, and the inbound policy adds managed identity authentication only for the gateway-to-model request. It does not authenticate callers or restrict the deployment to var.gateway_model_deployment.",
+            "failureScenario": "A compromised workload with access to the private network can call the gateway directly, select another deployment, and make model requests without passing through the application's quota and approval controls, consuming model resources under the gateway identity."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

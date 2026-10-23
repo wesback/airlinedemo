@@ -113,6 +113,78 @@ variable "model_endpoint_subdomain" {
   default     = null
 }
 
+variable "gateway_endpoint" {
+  type     = string
+  default  = "https://apim-demo-test.private.invalid/"
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_endpoint)) > 0 && can(regex("^https://", lower(trimspace(var.gateway_endpoint))))
+    error_message = "gateway_endpoint must not be empty or whitespace."
+  }
+}
+
+variable "gateway_region" {
+  type     = string
+  default  = "swedencentral"
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_region)) > 0
+    error_message = "gateway_region must not be empty or whitespace."
+  }
+}
+
+variable "gateway_api_version" {
+  type     = string
+  default  = "2024-10-21"
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_api_version)) > 0
+    error_message = "gateway_api_version must not be empty or whitespace."
+  }
+}
+
+variable "gateway_api_management_tier" {
+  type     = string
+  default  = "Developer"
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_api_management_tier)) > 0
+    error_message = "gateway_api_management_tier must not be empty or whitespace."
+  }
+}
+
+variable "gateway_model_deployment" {
+  type     = string
+  default  = "gpt-demo-test"
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_model_deployment)) > 0
+    error_message = "gateway_model_deployment must not be empty or whitespace."
+  }
+}
+
+variable "gateway_audience" {
+  description = "Expected JWT audience for the application calling the private model gateway."
+  type        = string
+  default     = "api://airline-demo-model-gateway"
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.gateway_audience)) > 0
+    error_message = "gateway_audience must not be empty or whitespace."
+  }
+}
+
+variable "gateway_approved_application_identity" {
+  description = "Entra object identity approved to call the private model gateway."
+  type        = string
+  default     = "55555555-5555-5555-5555-555555555555"
+  nullable    = false
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.gateway_approved_application_identity))
+    error_message = "gateway_approved_application_identity must be an Entra object ID (GUID)."
+  }
+}
+
 variable "model_deployment_name" {
   description = "Name of the Azure OpenAI deployment. Optional; defaults to gpt-<name_prefix>. Empty or whitespace is rejected."
   type        = string

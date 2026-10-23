@@ -62,6 +62,11 @@ variables {
   model_deployment_name           = "gpt-demo-test"
   model_name                      = "gpt-demo-model"
   model_version                   = "0000-00-00"
+  gateway_endpoint                = "https://apim-demo-test.private.invalid/"
+  gateway_region                  = "swedencentral"
+  gateway_api_version             = "2024-10-21"
+  gateway_api_management_tier     = "Developer"
+  gateway_model_deployment        = "gpt-demo-test"
   terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
   budget_amount                   = 100
   budget_start_date               = "2026-11-01T00:00:00Z"
@@ -81,6 +86,27 @@ variables {
     key                  = "demo.tfstate"
     use_azuread_auth     = true
     locking_enabled      = true
+  }
+}
+
+run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct_model_access" {
+  command = plan
+
+  assert {
+    condition     = azurerm_api_management.gateway.public_network_access_enabled == false && azurerm_api_management.gateway.virtual_network_type == "Internal" && azurerm_api_management.gateway.identity[0].type == "SystemAssigned"
+    error_message = "The gateway must be internal, private, and use its managed identity."
+  }
+  assert {
+    condition     = azurerm_api_management_api.gateway_model.subscription_required == false && azurerm_cognitive_account.model.public_network_access_enabled == false && azurerm_cognitive_account.model.local_auth_enabled == false
+    error_message = "Gateway calls must require no subscription key and direct model public or key access must be disabled."
+  }
+  assert {
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.url_template == "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" && can(regex("validate-jwt", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_approved_application_identity, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_audience, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("authentication-managed-identity", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
+    error_message = "The operation and policy must pin deployment/API version and validate the approved caller before managed-identity backend forwarding."
+  }
+  assert {
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint
+    error_message = "The route must accept POST client paths without subscription authentication or secret output."
   }
 }
 
@@ -270,7 +296,7 @@ run "M-14_M-18_encryption_transport_and_no_key_outputs" {
     error_message = "SQL must require TLS 1.2 and Entra-only auth."
   }
   assert {
-    condition     = output.model_endpoint == "aoai-demo-test.openai.azure.com/"
+    condition     = output.model_endpoint == "https://apim-demo-test.private.invalid/"
     error_message = "Model endpoint must be the approved subdomain host."
   }
   assert {
@@ -344,3 +370,33 @@ run "terraform_identity_scoped_to_demo_rg" {
   }
 }
 
+
+run "rejects_empty_gateway_endpoint" {
+  command = plan
+  variables { gateway_endpoint = " " }
+  expect_failures = [var.gateway_endpoint]
+}
+
+run "rejects_empty_gateway_region" {
+  command = plan
+  variables { gateway_region = " " }
+  expect_failures = [var.gateway_region]
+}
+
+run "rejects_empty_gateway_api_version" {
+  command = plan
+  variables { gateway_api_version = " " }
+  expect_failures = [var.gateway_api_version]
+}
+
+run "rejects_empty_gateway_api_management_tier" {
+  command = plan
+  variables { gateway_api_management_tier = " " }
+  expect_failures = [var.gateway_api_management_tier]
+}
+
+run "rejects_empty_gateway_model_deployment" {
+  command = plan
+  variables { gateway_model_deployment = " " }
+  expect_failures = [var.gateway_model_deployment]
+}

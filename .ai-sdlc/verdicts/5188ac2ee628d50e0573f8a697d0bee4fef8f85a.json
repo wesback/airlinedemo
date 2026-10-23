@@ -1,0 +1,299 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 549,
+  "branch": "ai-sdlc/issue-549",
+  "commitSha": "5188ac2ee628d50e0573f8a697d0bee4fef8f85a",
+  "round": 3,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The API Management subscription requirement blocks the production client, and tokenomics telemetry still omits required values. The tests also continue to exercise helpers instead of proving the named production behaviors.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 282,
+          "message": "Requiring an APIM subscription key makes the configured production route reject calls: the client has no subscription key configured.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The API now requires an API Management subscription, but the production client is created with an Azure credential and does not configure an APIM subscription key. The Terraform change also creates no subscription for that client.",
+            "failureScenario": "When the production client sends a model request to the gateway, APIM rejects it for a missing subscription key before the route can forward it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 153,
+          "message": "Required tokenomics telemetry remains incomplete: estimated cost is always null, and retries are not recorded.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The governed client constructs `GatewayTokenMetrics` with `EstimatedCost` set to null; `RecordRetry` is also not called by this client. The modified test checks neither cost nor retry behavior through the production adapter.",
+            "failureScenario": "When a model response includes token usage, telemetry still reports no estimated cost; if the call is retried, the retry count remains zero."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 23,
+          "message": "The named behavior test still does not prove production routing or replay behavior, as raised in the previous round.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed test constructs `GatewayGovernedChatClient` directly around a fake. It does not invoke the production adapter or evaluation executor, and the replay test stores and retrieves directly from `GatewayReplayStore` without checking dispatch count, usage charge, or traces.",
+            "failureScenario": "If production routing, correlation propagation, or replay dispatch is broken, these helper-level tests still pass because those production paths are never exercised."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new subscription requirement blocks the production client from reaching the gateway. The named adapter test still does not exercise the production route or verify outgoing correlation metadata, and available usage still produces no estimated cost.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 282,
+          "message": "The gateway route requires a subscription key that the production client does not provide, so application model calls cannot use this route.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The API requires an API Management subscription, while the production client is created with an Azure credential and the adapter setup shown does not supply an APIM subscription key.",
+            "failureScenario": "The application sends a model request to the configured gateway without an APIM subscription key; API Management rejects it before the request reaches the model."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 11,
+          "message": "The named production adapter test still does not prove production routing or that correlation fields reach the gateway.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`Production_adapter_routes_to_gateway_and_records_available_or_unavailable_usage` constructs `GatewayGovernedChatClient` directly around a fake. The fake does not inspect `ChatOptions`, and the test does not construct the production adapter or exercise its configured endpoint.",
+            "failureScenario": "If production routing omits correlation metadata or the production adapter sends requests to the wrong endpoint, this test still passes because it checks only the helper and wrapper result."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 153,
+          "message": "The production metrics still omit estimated cost when usage is available, and the named test does not catch it.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The wrapper creates `GatewayTokenMetrics` with `EstimatedCost` set to `null` even when usage is available. The named adapter test does not assert estimated cost.",
+            "failureScenario": "A successful model response includes token usage, but the resulting metrics report no estimated cost; the named test passes without detecting the missing criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed gateway now requires a subscription key that the production client does not send, so production model calls will be rejected. The telemetry still omits estimated cost, and the named adapter test does not exercise production wiring.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 282,
+          "message": "The newly required APIM subscription key is not supplied by the production client, making the gateway route unusable.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The API now requires an APIM subscription, while the production AzureOpenAIClient is constructed with only the endpoint and token credential; the adapter does not supply an APIM subscription key.",
+            "failureScenario": "When the production adapter sends a model request, APIM rejects it for a missing subscription key, so the model call cannot reach the configured deployment."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 153,
+          "message": "Estimated cost is never reported: the production metrics constructor always receives null even when usage is available.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "GatewayTokenMetrics is populated with a null EstimatedCost value for every response, including responses with available token usage.",
+            "failureScenario": "A successful model response includes token usage, but the resulting metrics still report no estimated cost, contrary to the telemetry criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 24,
+          "message": "The named test still does not prove production routing or correlation transmission; the production-path test gap reported in the previous round remains.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named production adapter test constructs GatewayGovernedChatClient directly around a fake. It does not invoke the production executor or adapter factory, and it does not assert that the fake received the correlation metadata.",
+            "failureScenario": "If production wiring bypasses the governed client or omits correlation metadata, this test still passes because it tests only a manually constructed wrapper and checks its local metrics."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+      "backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

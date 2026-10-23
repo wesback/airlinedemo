@@ -32,6 +32,7 @@ public sealed class ReleaseIdentityContractTests
                 "app_openai_user",
                 "app_telemetry",
                 "build_acr_push",
+                "gateway_cognitive_services",
                 "migration_sql",
                 "release_acr_push",
                 "release_container_app",
