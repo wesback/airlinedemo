@@ -55,6 +55,7 @@ function HangarDemandFrame({invalidate,camera,target,radius,azimuthDegrees,polar
       camera.lookAt(target?.x??0,target?.y??0,target?.z??0);
       camera.updateProjectionMatrix();
       requestInvalidate?.();
+      if(camera.position.distanceTo(desired)<=0.05){camera.position.copy(desired);camera.lookAt(target?.x??0,target?.y??0,target?.z??0);camera.updateProjectionMatrix();return;}
       if(typeof requestAnimationFrame==='function')requestAnimationFrame(tick);
     };
     if(typeof requestAnimationFrame==='function')requestAnimationFrame(tick);
@@ -75,6 +76,7 @@ export function HangarCanvasAdapter({sceneGroup,camera,invalidate,invalidationCa
     if(avatarNode){avatarNode.position.x=position.x; avatarNode.position.z=position.z;}
   },[sceneGroup,avatar,reducedMotion]);
   useEffect(()=>{invalidate?.()},[invalidate,sceneData,avatar,selection,route,ownedCamera,sceneGroup,radius,target?.x,target?.y,target?.z,azimuthDegrees,polarDegrees]);
+  useEffect(()=>{invalidate?.()},[selection]);
   if (!canvasComponent) return createElement('canvas',{'aria-label':'3D hangar scene','data-hangar-visible-fallback':'true'});
   const frame=createElement(HangarDemandFrame,{camera:ownedCamera,invalidate,target,radius,azimuthDegrees,polarDegrees,reducedMotion});
   const capture=invalidationCapture?createElement(invalidationCapture):null;

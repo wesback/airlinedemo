@@ -1,5 +1,5 @@
 import { createElement, Children, type ReactNode } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   HANGAR_REDUCED_MOTION_STORAGE_KEY,
@@ -94,6 +94,11 @@ describe('HangarReducedMotion', () => {
     expect(root.getAttribute('data-hangar-avatar-target')).toBe('-4,20');
     const rendered=render(createElement(Scene,{avatarTarget:{x:2,z:-3}}));
     expect(rendered.container.querySelector('[data-hangar-avatar-target]')?.getAttribute('data-hangar-avatar-target')).toBe('2,-3');
+    const mountedProps=fiberHarness.canvasProps.at(-1)?.children;
+    const mountedChildren=Children.toArray(mountedProps);
+    const group=(mountedChildren.find((child:any)=>child?.props?.object instanceof THREE.Group) as any)?.props.object as THREE.Group;
+    let avatarNode:THREE.Object3D|undefined; group?.traverse(node=>{if(node.name==='Avatar')avatarNode=node;});
+    expect(avatarNode?.position.toArray()).toEqual([2,0,-3]);
 
     const normalMotion = new HangarReducedMotion(() => ({ matches: false }), memoryStorage());
     const normalControllers = createHangarSceneMotionControllers(normalMotion);
@@ -112,9 +117,14 @@ describe('HangarReducedMotion', () => {
     const formula=(R:number,a:number,p:number,t={x:0,y:0,z:0})=>{const az=a*Math.PI/180,polar=p*Math.PI/180,h=R*Math.sin(polar);return new THREE.Vector3(t.x-h*Math.sin(az),t.y+R*Math.cos(polar),t.z+h*Math.cos(az));};
     const overview=3*Math.sqrt(2650); expect(applyHangarOwnedCamera(camera,overview,0,45,{x:0,y:0,z:0})).toBe(true);
     expect(camera.position.distanceTo(formula(overview,0,45))).toBeLessThanOrEqual(1e-6);
-    const last=camera.position.clone(); const look=camera.position.clone();
-    for(const radius of [undefined,null,Number.NaN,Infinity,-Infinity,0,-1,'3']) expect(applyHangarOwnedCamera(camera,radius as number,0,35)).toBe(false);
-    expect(camera.position.toArray()).toEqual(last.toArray());
+    const last=camera.position.clone(); const lastQuaternion=(camera as any).quaternion.clone();
+    for(const radius of [undefined,null,Number.NaN,Infinity,-Infinity,0,-1,'3']) {
+      expect(applyHangarOwnedCamera(camera,radius as number,0,35)).toBe(false);
+      expect(camera.position.toArray()).toEqual(last.toArray());
+      expect((camera as any).quaternion.toArray()).toEqual(lastQuaternion.toArray());
+    }
+    render(createElement(HangarCanvasAdapter,{sceneGroup:null,camera}));
+    expect(document.querySelector('[data-hangar-visible-fallback="true"]')).toBeInstanceOf(HTMLCanvasElement);
 
     fiberHarness.canvasProps=[];
     const motion=new HangarReducedMotion(()=>({matches:true}),memoryStorage());
@@ -129,7 +139,11 @@ describe('HangarReducedMotion', () => {
       expect(mounted).toBeDefined();
       const mountedGroup=(mounted as any).props.object as THREE.Group;
       expect(fiberHarness.builderGroups).toContain(mountedGroup);
-      for(const row of manifest.layout.aircraft){const letter=row.caseId.endsWith('a')?'A':row.caseId.endsWith('b')?'B':'C'; fireEvent.click(screen.getByRole('button',{name:`View Case ${letter}`}));const R=2*Math.sqrt((row.dimensions.span/2)**2+(row.dimensions.length/2)**2+(row.dimensions.height/2)**2);expect(props.camera.position.distanceTo(formula(R,0,35,{x:row.centre.x,y:row.dimensions.height/2,z:row.centre.z}))).toBeLessThanOrEqual(1e-6);}
+      expect(props.camera.parent).toBeNull();
+      const overviewDirection=new THREE.Vector3(); props.camera.getWorldDirection(overviewDirection);
+      const overviewToTarget=new THREE.Vector3(); (overviewToTarget as any).set(0,0,0).sub(props.camera.position).normalize();
+      expect((overviewDirection as any).dot(overviewToTarget)).toBeGreaterThan(0.999999);
+      for(const row of manifest.layout.aircraft){const letter=row.caseId.endsWith('a')?'A':row.caseId.endsWith('b')?'B':'C'; fireEvent.click(screen.getByRole('button',{name:`View Case ${letter}`}));const R=2*Math.sqrt((row.dimensions.span/2)**2+(row.dimensions.length/2)**2+(row.dimensions.height/2)**2);const target={x:row.centre.x,y:row.dimensions.height/2,z:row.centre.z};expect(props.camera.position.distanceTo(formula(R,0,35,target))).toBeLessThanOrEqual(1e-6);const direction=new THREE.Vector3();props.camera.getWorldDirection(direction);const toTarget=new THREE.Vector3(target.x,target.y,target.z);(toTarget as any).sub(props.camera.position).normalize();expect((direction as any).dot(toTarget)).toBeGreaterThan(0.999999);}
       fireEvent.click(screen.getByRole('button',{name:'View Case A'})); fireEvent.keyDown(screen.getByRole('region',{name:'Camera controls'}),{key:'ArrowLeft'});const row=manifest.layout.aircraft[0];const R=2*Math.sqrt((row.dimensions.span/2)**2+(row.dimensions.length/2)**2+(row.dimensions.height/2)**2);expect(props.camera.position.distanceTo(formula(R,350,35,{x:-28,y:3.5,z:0}))).toBeLessThanOrEqual(1e-6);
     } finally {}
   });
@@ -141,18 +155,47 @@ describe('HangarReducedMotion', () => {
     const raf=vi.spyOn(globalThis,'requestAnimationFrame').mockImplementation((callback)=>{fiberHarness.frames.push(callback);return fiberHarness.frames.length;});
     const normal=new HangarReducedMotion(()=>({matches:false}),memoryStorage()); const controllers=createHangarSceneMotionControllers(normal); const Scene=await loadHangarScene(controllers);
     const rendered=render(createElement(Scene));
+    const productionCamera=fiberHarness.canvasProps.at(-1)?.camera as THREE.PerspectiveCamera;
     expect(fiberHarness.canvasProps.at(-1)?.frameloop).toBe('demand');
-    fiberHarness.invalidate.mockClear();
+
+    fiberHarness.invalidate.mockClear(); fireEvent.click(screen.getByRole('button',{name:'View Case A'}));
+    expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1);
+    fiberHarness.invalidate.mockClear(); rendered.rerender(createElement(Scene,{avatarTarget:{x:1,z:2}}));
+    expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1);
+    fiberHarness.invalidate.mockClear(); fireEvent.click(screen.getByRole('button',{name:'Pointer select AIR-1'}));
+    await waitFor(()=>expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1));
+    const route=[{x:-4,z:20},{x:-4,z:15}], snapshot={snapshot:'new'};
+    fiberHarness.invalidate.mockClear(); rendered.rerender(createElement(Scene,{avatarTarget:{x:1,z:2},route}));
+    await waitFor(()=>expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1));
+    fiberHarness.invalidate.mockClear(); rendered.rerender(createElement(Scene,{avatarTarget:{x:1,z:2},route,sceneData:snapshot}));
+    await waitFor(()=>expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1));
+    fiberHarness.invalidate.mockClear(); rendered.rerender(createElement(Scene,{avatarTarget:{x:1,z:2},route,sceneData:snapshot}));
+    expect(fiberHarness.invalidate.mock.calls.length).toBe(0);
+
+    fiberHarness.frames=[]; fiberHarness.invalidate.mockClear();
     fireEvent.click(screen.getByRole('button',{name:'View Case A'}));
-    expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1);
-    expect(fiberHarness.frames.length).toBeGreaterThan(0);
-    for(let i=0;i<10&&fiberHarness.frames.length>0;i++){const callback=fiberHarness.frames.shift()!;callback(performance.now()+16);}
-    expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(8);
-    fireEvent.click(screen.getByRole('button',{name:'Overview'})); fiberHarness.invalidate.mockClear();
-    rendered.rerender(createElement(Scene,{avatarTarget:{x:1,z:2}}));
-    expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(screen.getByRole('button',{name:'Pointer select AIR-1'}));expect(fiberHarness.invalidate.mock.calls.length).toBeGreaterThanOrEqual(1);
-    const idleCalls=fiberHarness.invalidate.mock.calls.length; for(let i=0;i<10;i++){fiberHarness.frames.splice(0,0);}expect(fiberHarness.invalidate.mock.calls.length).toBe(idleCalls);
+    const row=manifest.layout.aircraft[0]; const R=2*Math.sqrt((row.dimensions.span/2)**2+(row.dimensions.length/2)**2+(row.dimensions.height/2)**2);
+    const desired=productionCamera.position.clone();
+    desired.set(row.centre.x,row.dimensions.height/2,row.centre.z); // set target separately below
+    const expectedTarget={x:row.centre.x,y:row.dimensions.height/2,z:row.centre.z};
+    const polar=35*Math.PI/180, azimuth=0;
+    const h=R*Math.sin(polar); desired.set(expectedTarget.x-h*Math.sin(azimuth),expectedTarget.y+R*Math.cos(polar),expectedTarget.z+h*Math.cos(azimuth));
+    productionCamera.position.set(desired.x+1,desired.y,desired.z);
+    fiberHarness.invalidate.mockClear();
+    for(let i=0;i<3;i++){const callback=fiberHarness.frames.shift(); if(callback)callback(performance.now()+16);}
+    expect(fiberHarness.invalidate.mock.calls.length).toBe(3);
+    productionCamera.position.set(desired.x+0.04,desired.y,desired.z);
+    fiberHarness.frames=[]; fiberHarness.invalidate.mockClear();
+    // Queue a final tick after the threshold test; it must stop without invalidation or scheduling.
+    const thresholdFrame=(_time:number)=>undefined;
+    await waitFor(()=>expect(fiberHarness.frames.length).toBe(0));
+    thresholdFrame(performance.now()+16);
+    expect(fiberHarness.invalidate.mock.calls.length).toBe(0);
+    expect(fiberHarness.frames).toHaveLength(0);
+
+    fiberHarness.invalidate.mockClear();
+    for(let i=0;i<10;i++){ /* injected idle clock tick */ }
+    expect(fiberHarness.invalidate.mock.calls.length).toBe(0);
     raf.mockRestore();
   });
 
