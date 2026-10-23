@@ -81,6 +81,14 @@ afterEach(() => {
     expect(unknownConfirmed).toBe(false);
     expect(selection).not.toHaveBeenCalled();
     expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+
+    const walk = screen.getByRole('region', { name: 'Walk region' });
+    fireEvent.keyDown(walk, { key: 'Escape' });
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open data rack' }));
+    expect(confirmHangarRackMenuEntry(hangarDataRoomEntriesForTest(), 'AIR-X', selection)).toBe(false);
+    expect(selection).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
   });
 
   function hangarDataRoomEntriesForTest() {

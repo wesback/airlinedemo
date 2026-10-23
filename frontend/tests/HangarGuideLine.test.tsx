@@ -26,7 +26,7 @@ describe('Hangar guide line',()=>{
     expect(selection).toHaveBeenCalledTimes(1);
   });
 
-  it('Hangar guide line live directions and replacement',()=>{
+  it('Hangar guide line live directions and replacement',async()=>{
     const selection=vi.fn(); const closeMenu=vi.fn();
     const rendered=render(<HangarGuideLineAdapter config={config} marker={{x:4,z:-4}} aircraftId="AIR-1" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
     expect(closeMenu).toHaveBeenCalledTimes(1);
@@ -45,6 +45,32 @@ describe('Hangar guide line',()=>{
     rendered.rerender(<HangarGuideLineAdapter config={config} marker={{x:-4,z:4}} aircraftId="AIR-2" avatar={{x:-4,z:-4}} onSelect={selection} closeMenu={closeMenu}/>);
     expect(closeMenu).toHaveBeenCalledTimes(3);
 
+    cleanup();
+    stubCaseApi();
+    render(createElement(App as ComponentType<HangarEntryAppProps>,{
+      hangarBrowserSupported:true,
+      hangarWebGl2Probe:{webgl2:true},
+      hangarAircraftSelectionHandler:selection,
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button',{name:'Enter Hangar'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Open data rack'}));
+    fireEvent.click(screen.getByRole('menuitem',{name:'Air One'}));
+    const appWalk=screen.getByRole('region',{name:'Walk region'});
+    fireEvent.keyDown(appWalk,{key:'ArrowRight'});
+    expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('right, 5.32 metres');
+    fireEvent.keyDown(appWalk,{key:'Escape'});
+    expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('');
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'Open data rack'}));
+    fireEvent.click(screen.getByRole('menuitem',{name:'Air Two'}));
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+    expect(document.querySelector('polyline')?.getAttribute('points')?.trim().split(/\s+/).at(-1)).toBe('-4,4');
+    for(let i=0;i<20;i+=1)fireEvent.keyDown(appWalk,{key:'ArrowLeft'});
+    expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('');
+    expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
+
+    cleanup();
     const guide=new HangarGuideLineController(config);
     const first=guide.confirm({x:4,z:-4},'AIR-1',{x:-4,z:-4});
     expect(first.liveText).toBe('right, 8.00 metres');
@@ -93,17 +119,34 @@ describe('Hangar guide line',()=>{
       hangarAircraftSelectionHandler:productionSelection,
     }));
     await signInAsReviewer();
+    const requestsBeforeEnter=vi.mocked(fetch).mock.calls.length;
     fireEvent.click(screen.getByRole('button',{name:'Enter Hangar'}));
+    const requestsAfterEnter=vi.mocked(fetch).mock.calls.length;
+    expect(requestsAfterEnter).toBe(requestsBeforeEnter);
+    const requestsBeforeRack=requestsAfterEnter;
     fireEvent.click(await screen.findByRole('button',{name:'Open data rack'}));
     fireEvent.click(screen.getByRole('menuitem',{name:'Air One'}));
+    expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeRack);
+    const requestsBeforeReduced=vi.mocked(fetch).mock.calls.length;
     fireEvent.click(screen.getByRole('button',{name:'Enable reduced motion'}));
+    expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeReduced);
     expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).not.toBeNull();
     expect(document.querySelector('[data-static-line="true"]')).not.toBeNull();
+    const fetchBeforeGuide=vi.mocked(fetch).mock.calls.length;
     fireEvent.click(screen.getByRole('button',{name:'Pointer select AIR-1'}));
+    expect(vi.mocked(fetch).mock.calls.length).toBe(fetchBeforeGuide);
     expect(productionSelection).toHaveBeenCalledTimes(1);
     expect(productionSelection).toHaveBeenCalledWith('AIR-1');
     fireEvent.keyDown(screen.getByRole('button',{name:'Keyboard select AIR-2'}),{key:'Enter'});
+    expect(vi.mocked(fetch).mock.calls.length).toBe(fetchBeforeGuide);
     expect(productionSelection).toHaveBeenCalledTimes(2);
     expect(productionSelection).toHaveBeenLastCalledWith('AIR-2');
+    const requestsBeforeWalk=vi.mocked(fetch).mock.calls.length;
+    const productionWalk=screen.getByRole('region',{name:'Walk region'});
+    fireEvent.keyDown(productionWalk,{key:'ArrowRight'});
+    expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeWalk);
+    fireEvent.keyDown(productionWalk,{key:'Escape'});
+    expect(vi.mocked(fetch).mock.calls.length).toBe(requestsBeforeWalk);
+    expect(document.querySelector('[data-hangar-guide-live]')?.textContent).toBe('');
   });
 });
