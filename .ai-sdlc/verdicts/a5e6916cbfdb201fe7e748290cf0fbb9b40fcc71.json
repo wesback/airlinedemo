@@ -1,0 +1,283 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 530,
+  "branch": "ai-sdlc/issue-530",
+  "commitSha": "a5e6916cbfdb201fe7e748290cf0fbb9b40fcc71",
+  "round": 1,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds missing-metadata rejection coverage and rejects null attribution, but the fallback still misses some manifest dependencies and can misclassify emitted Hangar assets. The wiring test’s source-pattern checks do not establish the required runtime lazy-loading behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 63,
+          "message": "The fallback misses Hangar-only dependencies reachable through static manifest imports, allowing their JavaScript or model assets to escape the budget totals.",
+          "confidence": 0.9,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fallback follows only dynamicImports when collecting Hangar files and assets; it does not visit manifest imports.",
+            "failureScenario": "A Hangar entry statically imports a Hangar-only JavaScript chunk or a module carrying a model asset. That dependency is omitted from Hangar attribution, so an over-budget build can pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 83,
+          "message": "The fallback can still classify emitted Hangar model or texture files as shared because it does not associate their output paths with manifest entries by file.",
+          "confidence": 0.88,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Asset attribution searches value.assets and value.src for the emitted relative path, but does not match manifest entries by value.file.",
+            "failureScenario": "A Hangar model is emitted as assets/aircraft-hash.glb, with a manifest entry whose file is that path and whose source key is under src/hangar. If no visited chunk lists it in assets, the source path does not contain the emitted path; the model is marked shared and excluded from the Hangar total."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarBuildBudgetWiring.test.mjs",
+          "line": 19,
+          "message": "The wiring test still does not exercise regular-mode startup or observe model requests, so it can pass when a helper eagerly loads Hangar models before selection.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named wiring test scans App.tsx for selected literal patterns and checks that entryController contains the dynamic import, but it does not execute regular-mode startup or observe model requests.",
+            "failureScenario": "If App.tsx invokes a helper that eagerly requests a model before Hangar selection, while the helper constructs its URL without a matching literal in App.tsx, the test passes despite violating the lazy-entry criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fixes add missing-metadata coverage and reject null attribution, but the fallback checker can still undercount Hangar chunks and assets. The wiring test also still does not exercise the no-request-before-selection behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 63,
+          "message": "The fallback still omits Hangar-only dependency chunks: traverse each Hangar manifest entry's static imports as well as dynamic imports so their emitted chunks count toward the budget.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fallback marks Hangar entry files and follows their dynamic imports, but does not follow the manifest's static imports. The chunk scan counts a file only when it is in hangarFiles or is itself a Hangar entry.",
+            "failureScenario": "A Hangar entry statically imports a dependency emitted as assets/vendor.js. If that chunk pushes Hangar-only gzip JavaScript over 1,572,864 bytes, it is classified as shared and excluded, so the build passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 87,
+          "message": "The fallback still relies on path and manifest-name heuristics to attribute model and texture files, so Hangar assets without those markers are excluded from the budget.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fallback classifies a model or texture as Hangar-owned only if its output path contains `/hangar/`, it appears in hangarAssets, or a matching manifest asset has a Hangar key. Other discovered model and texture files receive `hangarOnly: false`, and validate excludes their bytes from the asset total.",
+            "failureScenario": "A Hangar model emitted from a public path such as `models/aircraft.glb` is absent from the manifest and has no `/hangar/` path segment. If its size exceeds 15,728,640 bytes, it is treated as shared and the build passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarBuildBudgetWiring.test.mjs",
+          "line": 19,
+          "message": "The named wiring test still does not verify at runtime that regular mode makes no Hangar model requests before selection; its source checks can pass when an imported helper eagerly requests a model.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named wiring test reads App.tsx and searches for a few strings and same-line URL patterns; it does not run regular-mode startup or observe model-file requests.",
+            "failureScenario": "If App.tsx calls an imported helper that eagerly fetches a Hangar model before selection, the helper call contains no model extension and the new regex passes, leaving the acceptance criterion untested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fallback attribution fix still misses statically imported Hangar dependencies, and the updated wiring test can pass when an indirect model request happens before selection.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 63,
+          "message": "The fallback still omits Hangar-only dependency chunks reachable through manifest static imports. Traverse the manifest imports when attributing Hangar chunks.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The manifest traversal follows dynamicImports but does not follow imports. The later chunk scan marks only Hangar entry files and files reached by this traversal as Hangar-only.",
+            "failureScenario": "A Hangar entry statically imports a Hangar-only dependency emitted as assets/vendor-hash.js, with a manifest key that does not contain 'hangar'. Its key is not reached by dynamicImports, so its gzip bytes are classified as shared and omitted; the build can pass over the JavaScript budget."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarBuildBudgetWiring.test.mjs",
+          "line": 19,
+          "message": "The named wiring test still does not prove that regular-mode startup makes no Hangar model requests before selection. Exercise the production startup path with an observable request spy or equivalent runtime assertion.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test scans App.tsx for direct asset URL patterns, but does not execute regular-mode startup or observe requests made through an imported helper.",
+            "failureScenario": "If App.tsx invokes an imported helper that requests Hangar models before selection, while the helper holds the asset paths and the call in App.tsx contains no matching extension, this test still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarBuildBudgetWiring.test.mjs",
+      "frontend/tests/HangarBuildBudgets.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

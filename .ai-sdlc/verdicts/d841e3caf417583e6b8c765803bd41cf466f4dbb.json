@@ -1,0 +1,252 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 530,
+  "branch": "ai-sdlc/issue-530",
+  "commitSha": "d841e3caf417583e6b8c765803bd41cf466f4dbb",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fallback build checker can omit Hangar model and texture assets based on their filenames, allowing an over-budget build to pass. The required missing-metadata rejection is also not covered by the named test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 69,
+          "message": "The fallback omits model and texture assets whose filenames do not contain 'hangar'. Include Hangar assets through reliable attribution or reject missing attribution instead of silently excluding them.",
+          "confidence": 0.93,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When hangar-build-budget.json is absent, the checker walks the build output and filters discovered model and texture assets by whether their paths contain 'hangar' or '.vite/'.",
+            "failureScenario": "A Hangar model such as aircraft.glb is emitted under dist/assets/aircraft-<hash>.glb. Its path contains neither string, so it is omitted from the aggregate and the build can pass even when Hangar assets exceed 15,728,640 bytes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarBuildBudgets.test.ts",
+          "line": 25,
+          "message": "The second acceptance criterion also requires rejection of missing build metadata, but the named test covers only chunk aggregation and overflow. Add a missing-metadata case to this test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named 'Hangar build budgets sum all classified chunks' test checks aggregation and overflow, but never supplies missing build metadata or asserts its rejection.",
+            "failureScenario": "If validateHangarBuildBudgets stops rejecting input without required metadata, both assertions in this test can still pass; the acceptance criterion's missing-metadata behavior has no test that would fail."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The budget validator has an attribution bypass, and the build-output checker can undercount both Hangar-only JavaScript chunks and model or texture assets. The wiring test also does not cover the model-file lazy-loading behavior named in its acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/buildBudgets.ts",
+          "line": 22,
+          "message": "Null dependency mappings bypass the required attribution check.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Dependency mapping values pass through attributed(), which treats null as false, meaning shared.",
+            "failureScenario": "If dependencyChunkMappings contains {\"dependency.js\": null}, validation accepts it as classified shared even though it has no Hangar-only attribution."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 60,
+          "message": "The fallback checker infers chunk ownership from names and can omit Hangar-only dependency chunks.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fallback build scan attributes a JavaScript chunk as Hangar-only only when its source path or output filename contains \"hangar\"; other chunks are excluded from the JavaScript total.",
+            "failureScenario": "A Hangar-only dependency emitted as assets/vendor-hash.js from a source path without \"hangar\" is classified as shared, so its gzip bytes do not count toward the release budget."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/scripts/check-hangar-budgets.mjs",
+          "line": 69,
+          "message": "The fallback asset scan can omit model and texture files whose paths lack \"hangar\" or \".vite/\".",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The fallback scan collects model and texture extensions, then filters assets to paths containing \"hangar\" or \".vite/\" before validation.",
+            "failureScenario": "If public/models/aircraft.glb is 15,728,641 bytes and its path contains neither string, the checker validates an empty asset list and the build passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarBuildBudgetWiring.test.mjs",
+          "line": 17,
+          "message": "The named wiring test does not verify that regular mode avoids requesting Hangar model files until selection.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The wiring test checks for a dynamic entry import and rejects a static @react-three/fiber import, but it does not exercise regular-mode startup or check model-file requests.",
+            "failureScenario": "If App.tsx eagerly fetches a model file before Hangar selection while retaining the tested strings and avoiding the fiber import, this test passes despite violating the criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is reachable through the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarBuildBudgetWiring.test.mjs",
+      "frontend/tests/HangarBuildBudgets.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
