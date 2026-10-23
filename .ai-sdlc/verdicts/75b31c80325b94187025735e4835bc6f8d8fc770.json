@@ -1,0 +1,247 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 588,
+  "branch": "ai-sdlc/issue-588",
+  "commitSha": "75b31c80325b94187025735e4835bc6f8d8fc770",
+  "round": 1,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two changes add App composition coverage and exercise permission denial and render fallback. The named tests still do not verify selected-object evidence or denial for another role.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 77,
+          "message": "The selection and evidence criterion remains unproven: the test identifies the selected object but does not assert its exact evidence.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The composition test activates the aircraft and checks its selection region and heading, but stubCaseApi supplies empty documentRefs and evidence arrays; the test never asserts evidence content for the selected object.",
+            "failureScenario": "If the selection panel omits the selected object's evidence or displays evidence for a different object, the empty fixture and current assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 144,
+          "message": "The reset criterion's other-role case remains untested. Add an App-host case using another role with Case C permission true and assert that the reset control is absent.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The reset test signs in through signInAsReviewer for both permission-allowed and permission-denied cases. It never supplies another role while Case C permission is true.",
+            "failureScenario": "If another role sees the reset control when Case C permission is true, the test still passes because it only checks denial when permission is false."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new App-host tests address much of the prior feedback, including denied permission and render-error fallback. They still do not exercise populated evidence or verify reset denial for another role.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 75,
+          "message": "The first acceptance criterion remains unproven: add a fixture with evidence for the activated object and assert the exact evidence shown by the App-host composition test.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The composition test activates the first object and asserts its selection heading and the journey region. Its shared case fixture supplies empty evidence and documentRefs, so it never exercises evidence resolution or display.",
+            "failureScenario": "If App stops passing the selected object's evidence into the panel, this test still passes because its fixture has no evidence to display; the first acceptance criterion's exact selection and evidence behavior is not proven."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 102,
+          "message": "The second acceptance criterion remains unproven for another role. Add an App-host case using a non-reviewer role and assert that the reset control is absent and no reset request is sent.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The reset composition test signs in only as a reviewer, grants that case permission, and later tests a false permission value. It does not exercise a different role with permission granted.",
+            "failureScenario": "If the App exposes reset to another role when the response grants permission, the test still passes because every reset-control assertion uses the reviewer role; the acceptance criterion's other-role denial is not tested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover false permission and canvas error fallback, but do not exercise reset denial for another role as AC-2 requires. I found no concrete injection, credential exposure, or authorization bypass in the changed production code.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 141,
+          "message": "AC-2 still lacks the required other-role denial case. The test denies reset through the envelope for the technical reviewer only; add an App-host case with another role and assert no reset control or mutation request.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The denial case keeps the signed-in user created by signInAsReviewer() and changes only the Case C permission fields to false; it never varies the role.",
+            "failureScenario": "If a different role receives the reset control despite lacking permission, this test still passes, so the AC-2 guarantee that another role sees no reset control remains unproven."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/HangarEntry.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
