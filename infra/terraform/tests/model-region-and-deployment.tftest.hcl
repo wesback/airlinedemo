@@ -98,6 +98,30 @@ run "model_deployment_inputs_are_required" {
   }
 }
 
+run "accepts_null_model_deployment_name" {
+  command = plan
+
+  variables {
+    name_prefix           = "demo"
+    model_deployment_name = null
+  }
+
+  assert {
+    condition     = var.model_deployment_name == null
+    error_message = "model_deployment_name must remain null when explicitly set to null."
+  }
+
+  assert {
+    condition     = local.model_deployment_name == "gpt-demo"
+    error_message = "A null model_deployment_name must derive the deployment name as gpt-demo."
+  }
+
+  assert {
+    condition     = azurerm_cognitive_deployment.model.name == "gpt-demo"
+    error_message = "The deployment resource must use the derived gpt-demo name."
+  }
+}
+
 run "rejects_empty_model_deployment_name" {
   command = plan
 
