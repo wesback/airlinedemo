@@ -9,6 +9,12 @@ import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
 import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
 import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
+import HangarSemanticControls from './hangar/semanticControls';
+import HangarSelectionEvidence from './hangar/selectionPanel';
+import HangarGuidedJourney from './hangar/guidedJourney';
+import HangarCaseReset from './hangar/caseReset';
+import HangarErrorBoundary, { HangarFallbackPanel } from './hangar/errorBoundary';
+import hangarManifest from './hangar/sceneManifest.json';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -62,6 +68,9 @@ export default function App({
   ]);
   const [hangarSnapshot, setHangarSnapshot] = useState<ServerSceneSnapshot|null>(null);
   const [hangarCaseSnapshots, setHangarCaseSnapshots] = useState<Record<string, ServerSceneSnapshot>>({});
+  const [hangarSceneEnvelopes, setHangarSceneEnvelopes] = useState<Record<string, unknown>>({});
+  const [hangarSelectedObjectId, setHangarSelectedObjectId] = useState<string | null>(null);
+  const [hangarSelectedCaseId, setHangarSelectedCaseId] = useState<string>('cp-case-a');
   const hangarSnapshotRef = useRef<ServerSceneSnapshot|null>(null);
   const hangarCaseSnapshotsRef = useRef<Record<string, ServerSceneSnapshot>>({});
   const hangarRefreshQueue = useRef<Promise<void>>(Promise.resolve());
@@ -147,6 +156,7 @@ export default function App({
       try {
         const cases = hangarEntries;
         const nextCaseSnapshots = { ...hangarCaseSnapshotsRef.current };
+        const nextSceneEnvelopes = { ...hangarSceneEnvelopes };
         let nextSnapshot = hangarSnapshotRef.current;
         for (const entry of cases) {
           const response = await fetch(`/api/v1/cases/${encodeURIComponent(entry.caseId)}/scene`);
@@ -158,6 +168,7 @@ export default function App({
           const result = await refreshHangarScene(() => envelope, nextCaseSnapshots[entry.caseId] ?? hangarSnapshotRef.current);
           if (!result.valid || !result.snapshot) throw new Error('refresh_failed');
           nextCaseSnapshots[entry.caseId] = result.snapshot;
+          nextSceneEnvelopes[entry.caseId] = envelope;
           if (!nextSnapshot?.revision || (result.snapshot.revision ?? -1) >= (nextSnapshot.revision ?? -1)) nextSnapshot = result.snapshot;
         }
         if (!cases.length) throw new Error('refresh_failed');
@@ -165,6 +176,7 @@ export default function App({
         const recoveredSnapshot = Object.values(recoveredCaseSnapshots).reduce<ServerSceneSnapshot|null>((highest, snapshot) => !highest || (snapshot.revision ?? -1) > (highest.revision ?? -1) ? snapshot : highest, nextSnapshot);
         hangarCaseSnapshotsRef.current = recoveredCaseSnapshots;
         hangarSnapshotRef.current = recoveredSnapshot;
+        setHangarSceneEnvelopes(nextSceneEnvelopes);
         setHangarCaseSnapshots(recoveredCaseSnapshots);
         setHangarSnapshot(recoveredSnapshot);
         setHangarStale(false);
@@ -246,6 +258,12 @@ export default function App({
         initialCaseSnapshots[caseId] = snapshot;
         latestSnapshot = snapshot;
       }
+      const sceneEnvelopes: Record<string, unknown> = {};
+      for (let index = 0; index < envelopes.length; index += 1) {
+        const caseId = typeof cases[index]?.caseId === 'string' ? cases[index].caseId as string : '';
+        if (caseId) sceneEnvelopes[caseId] = envelopes[index];
+      }
+      setHangarSceneEnvelopes(sceneEnvelopes);
       hangarCaseSnapshotsRef.current = initialCaseSnapshots;
       hangarSnapshotRef.current = latestSnapshot;
       setHangarCaseSnapshots(initialCaseSnapshots);
@@ -401,6 +419,35 @@ export default function App({
   }[apiState];
 
   const LoadedHangarScene = HangarSceneRef.current;
+  const hangarActiveEnvelope = hangarSceneEnvelopes[hangarSelectedCaseId] ?? hangarSnapshot?.completeContent;
+  const hangarComposedScene = typeof hangarActiveEnvelope === 'object' && hangarActiveEnvelope !== null
+    ? hangarActiveEnvelope
+    : hangarSnapshot?.completeContent;
+  const hangarCaseResetEnvelope = hangarSceneEnvelopes['cp-case-c'] ?? hangarCaseSnapshots['cp-case-c']?.completeContent ?? hangarComposedScene;
+  const hangarCompositionObjects = hangarEntries.flatMap((entry) => {
+    const envelope = hangarSceneEnvelopes[entry.caseId];
+    const root = typeof envelope === 'object' && envelope !== null ? envelope as Record<string, unknown> : {};
+    const objects = Array.isArray(root.objects) ? root.objects as Record<string, unknown>[] : [];
+    return objects.map((object) => {
+      const objectId = String(object.objectId ?? '');
+      const caseName = entry.name;
+      const label = String(object.accessibleName ?? object.label ?? object.displayName ?? (
+        objectId.endsWith('-AIR-001') ? `${caseName} aircraft`
+          : objectId.endsWith('-ENG-001') ? `${caseName} engine`
+            : objectId.endsWith('-CMP-001') ? `${caseName} component 1`
+              : objectId.endsWith('-CMP-002') ? `${caseName} component 2` : objectId
+      ));
+      return { ...object, label, accessibleName: label };
+    });
+  });
+  const selectedCaseEnvelope = hangarSceneEnvelopes[hangarSelectedCaseId]
+    ?? (typeof hangarComposedScene === 'object' && hangarComposedScene !== null ? hangarComposedScene : {});
+  const selectedCaseRoot = typeof selectedCaseEnvelope === 'object' && selectedCaseEnvelope !== null
+    ? selectedCaseEnvelope as Record<string, unknown> : {};
+  const combinedHangarEnvelope = {
+    ...selectedCaseRoot,
+    objects: hangarCompositionObjects,
+  };
   return (
     <main>
       <h1>Airline asset review</h1>
@@ -430,7 +477,44 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
-                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
+                      <HangarErrorBoundary snapshot={hangarSnapshot} lastSnapshot={hangarSnapshot}>
+                        {LoadedHangarScene ? <LoadedHangarScene onSelect={(aircraftId) => {
+                          sharedHangarAircraftSelectionHandler(aircraftId);
+                          const match = aircraftId.match(/([ABC])-/);
+                          if (match) setHangarSelectedCaseId(`cp-case-${match[1].toLowerCase()}`);
+                        }} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
+                      </HangarErrorBoundary>
+                      <div aria-label="Hangar view presets">
+                        <button type="button" onClick={() => setHangarSelectedCaseId(hangarEntries[0]?.caseId ?? 'cp-case-a')}>Overview</button>
+                        {hangarEntries.map((entry) => <button key={entry.caseId} type="button" aria-label={`View ${entry.name}`} onClick={() => setHangarSelectedCaseId(entry.caseId)}>View {entry.name}</button>)}
+                      </div>
+                      <HangarSemanticControls
+                        scene={combinedHangarEnvelope}
+                        manifest={hangarManifest}
+                        onActivate={(control, source) => {
+                          const objectId = typeof control === 'string' ? control : control.id;
+                          setHangarSelectedObjectId(objectId);
+                          if (typeof source === 'object' && source !== null && typeof (source as Record<string, unknown>).caseId === 'string') {
+                            setHangarSelectedCaseId(String((source as Record<string, unknown>).caseId));
+                          } else {
+                            const letter = objectId.match(/-CP-([ABC])-/)?.[1];
+                            if (letter) setHangarSelectedCaseId(`cp-case-${letter.toLowerCase()}`);
+                          }
+                        }}
+                      />
+                      {hangarSelectedObjectId && (() => {
+                        const letter = hangarSelectedObjectId.match(/-CP-([ABC])-/)?.[1]?.toLowerCase();
+                        const selectionEnvelope = letter ? hangarSceneEnvelopes[`cp-case-${letter}`] : selectedCaseEnvelope;
+                        return <HangarSelectionEvidence scene={selectionEnvelope} manifest={hangarManifest.objectIds} identifier={hangarSelectedObjectId} />;
+                      })()}
+                      <HangarGuidedJourney scene={selectedCaseEnvelope} />
+                      <HangarCaseReset
+                        envelope={hangarCaseResetEnvelope}
+                        csrfToken={session.csrfToken}
+                        transport={(url, init) => fetch(url, init)}
+                        refetch={() => refreshHangarSnapshot()}
+                        confirmReset={() => true}
+                      />
                       <HangarGuideLineAdapter
                         entries={hangarEntries}
                         markers={hangarDataRoomMarkers}
