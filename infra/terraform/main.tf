@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.17.0"
+  required_version = ">= 1.16.0"
 
   required_providers {
     azurerm = {
@@ -313,6 +313,17 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
         </claim>
       </required-claims>
     </validate-jwt>
+    <choose>
+      <when condition="@{
+        var headers = new[] { &quot;x-gateway-arm&quot;, &quot;x-gateway-run&quot;, &quot;x-gateway-package&quot;, &quot;x-gateway-case&quot;, &quot;x-gateway-model-configuration&quot;, &quot;x-gateway-suite-version&quot;, &quot;x-gateway-call-identity&quot; };
+        return headers.Any(name => !context.Request.Headers.ContainsKey(name) || !System.Text.RegularExpressions.Regex.IsMatch(context.Request.Headers.GetValueOrDefault(name, &quot;&quot;), &quot;^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$&quot;));
+      }">
+        <return-response>
+          <set-status code="400" reason="Bad Request" />
+          <set-body>gateway correlation rejected</set-body>
+        </return-response>
+      </when>
+    </choose>
     <rewrite-uri template="/openai/deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" copy-unmatched-params="false" />
     <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
   </inbound>
