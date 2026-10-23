@@ -221,8 +221,8 @@ run "egress_and_config_no_environment_defaults" {
   command = plan
 
   assert {
-    condition     = var.subscription_id != "" && alltrue([for n in ["subscription_id", "tenant_id", "vnet_address_space", "app_subnet_cidr", "private_endpoint_subnet_cidr", "presenter_reviewer_cidrs", "egress_allowed_destinations", "budget_amount", "budget_start_date", "budget_contact_emails", "terraform_state_backend", "location", "resource_group_name"] : !anytrue([for p in split("variable \"", file("variables.tf")) : startswith(p, "${n}\"") && can(regex("(?m)^\\s*default\\s*=", p))])])
-    error_message = "Subscription, tenant, CIDR, egress, budget, and state-backend inputs must not have Terraform defaults."
+    condition     = var.subscription_id != "" && alltrue([for n in ["subscription_id", "tenant_id", "presenter_reviewer_cidrs", "budget_amount", "budget_start_date", "budget_contact_emails", "terraform_state_backend", "location"] : !anytrue([for p in split("variable \"", file("variables.tf")) : startswith(p, "${n}\"") && can(regex("(?m)^\\s*default\\s*=", p))])])
+    error_message = "Subscription, tenant, location, presenter/reviewer CIDR, budget, and state-backend inputs must not have Terraform defaults. The vnet, subnet, egress and resource-group inputs default or derive from name_prefix (see names.tftest.hcl)."
   }
 }
 

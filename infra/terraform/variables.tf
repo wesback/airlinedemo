@@ -1,3 +1,16 @@
+variable "name_prefix" {
+  description = "Short lowercase prefix (3-10 letters or digits) from which every unset resource name is derived. Required unless every derived name is set."
+  type        = string
+  default     = null
+  validation {
+    condition = (var.name_prefix == null ? false : can(regex("^[a-z][a-z0-9]{2,9}$", var.name_prefix))) || alltrue([
+      for v in [var.resource_group_name, var.sql_server_name, var.storage_account_name, var.key_vault_name, var.model_account_name,
+      var.model_endpoint_subdomain, var.model_deployment_name, var.acr_name, var.container_apps_environment_name, var.container_app_name] : v != null
+    ])
+    error_message = "name_prefix must be 3-10 lowercase letters or digits starting with a letter, unless every derived resource name is set explicitly."
+  }
+}
+
 variable "subscription_id" {
   type     = string
   nullable = false
@@ -13,19 +26,27 @@ variable "location" {
 }
 
 variable "resource_group_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "vnet_address_space" {
-  type = list(string)
+  description = "Virtual network range. Both subnets default to /24 slices of the first entry."
+  type        = list(string)
+  default     = ["10.20.0.0/16"]
 }
 
 variable "app_subnet_cidr" {
-  type = string
+  description = "Optional. Defaults to the second /24 of the first vnet_address_space entry."
+  type        = string
+  default     = null
 }
 
 variable "private_endpoint_subnet_cidr" {
-  type = string
+  description = "Optional. Defaults to the third /24 of the first vnet_address_space entry."
+  type        = string
+  default     = null
 }
 
 variable "presenter_reviewer_cidrs" {
@@ -38,8 +59,10 @@ variable "presenter_reviewer_cidrs" {
 }
 
 variable "egress_allowed_destinations" {
-  type     = list(string)
-  nullable = false
+  description = "Allowed egress CIDRs. Empty (the default) allows none."
+  type        = list(string)
+  default     = []
+  nullable    = false
   validation {
     condition     = alltrue([for c in var.egress_allowed_destinations : can(cidrnetmask(c))])
     error_message = "egress_allowed_destinations entries must be CIDR blocks."
@@ -47,11 +70,15 @@ variable "egress_allowed_destinations" {
 }
 
 variable "sql_database_name" {
-  type = string
+  description = "SQL database name."
+  type        = string
+  default     = "airlinedemo"
 }
 
 variable "sql_server_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "sql_admin_group_name" {
@@ -63,27 +90,35 @@ variable "sql_admin_group_object_id" {
 }
 
 variable "storage_account_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "key_vault_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "model_account_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "model_endpoint_subdomain" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "model_deployment_name" {
-  description = "Name of the Azure OpenAI deployment. Required; empty or whitespace is rejected."
+  description = "Name of the Azure OpenAI deployment. Optional; defaults to gpt-<name_prefix>. Empty or whitespace is rejected."
   type        = string
-  nullable    = false
+  default     = null
   validation {
-    condition     = length(trimspace(var.model_deployment_name)) > 0
+    condition     = var.model_deployment_name == null || length(trimspace(var.model_deployment_name)) > 0
     error_message = "model_deployment_name must not be empty or whitespace."
   }
 }
@@ -156,6 +191,12 @@ variable "security_alert_settings" {
     window_minutes               = number
     evaluation_frequency_minutes = number
   })
+  default = {
+    enabled                      = true
+    failure_threshold            = 5
+    window_minutes               = 15
+    evaluation_frequency_minutes = 5
+  }
   nullable = false
   validation {
     condition     = var.security_alert_settings.enabled == true && var.security_alert_settings.failure_threshold >= 1 && var.security_alert_settings.evaluation_frequency_minutes >= 5 && var.security_alert_settings.window_minutes >= var.security_alert_settings.evaluation_frequency_minutes
@@ -166,10 +207,10 @@ variable "security_alert_settings" {
 variable "terraform_state_backend" {
   type = object({
     storage_account_name = string
-    container_name       = string
-    key                  = string
-    use_azuread_auth     = bool
-    locking_enabled      = bool
+    container_name       = optional(string, "tfstate")
+    key                  = optional(string, "demo.tfstate")
+    use_azuread_auth     = optional(bool, true)
+    locking_enabled      = optional(bool, true)
   })
   nullable = false
   validation {
@@ -179,15 +220,21 @@ variable "terraform_state_backend" {
 }
 
 variable "acr_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "container_apps_environment_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "container_app_name" {
-  type = string
+  description = "Optional. Derived from name_prefix when not set."
+  type        = string
+  default     = null
 }
 
 variable "image_digest" {
