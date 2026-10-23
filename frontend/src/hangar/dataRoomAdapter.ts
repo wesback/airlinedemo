@@ -42,7 +42,7 @@ export function validateHangarRackAvatarManifest(input: unknown = sceneManifest)
   for (const model of aircraftModels) {
     if (!model || typeof model !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
     const declaration = model as Record<string, unknown>;
-    if (declaration.path !== undefined || declaration.type !== undefined || declaration.synthetic !== true || declaration.realAircraftType !== false || declaration.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
+    if (declaration.path !== undefined || declaration.type !== undefined || declaration.synthetic !== true || declaration.realAircraftType !== false || declaration.realPerson === true || declaration.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   }
   const hardHat = avatarValue.hardHat;
   if (!hardHat || typeof hardHat !== 'object') return { valid: false, reason: HANGAR_MANIFEST_ERROR };
