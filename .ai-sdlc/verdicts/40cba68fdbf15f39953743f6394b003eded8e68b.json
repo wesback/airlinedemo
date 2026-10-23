@@ -1,0 +1,327 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 586,
+  "branch": "ai-sdlc/issue-586",
+  "commitSha": "40cba68fdbf15f39953743f6394b003eded8e68b",
+  "round": 1,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Three findings from the previous review remain unresolved: refresh can partially commit before a later case fails, the overlap test does not assert serialization, and the mismatched case ID fallback is untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 136,
+          "message": "Keep refreshed snapshots temporary until all listed cases succeed. A later failure currently leaves earlier cases committed, so the failed refresh does not retain the last labelled snapshot.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The refresh loop writes each successful response to the snapshot refs before fetching the remaining cases. If a later case fails, the catch builds staleCases from those already-updated refs.",
+            "failureScenario": "Case A advances from revision 7 to 8, then case B's request fails. The fallback retains case A at revision 8 instead of the last fully labelled snapshot at revision 7."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 165,
+          "message": "The overlap test still does not prove the required serialization. Assert that only the focus scene GET has started before resolving it, then assert the explicit scene GET starts after focus refresh finishes.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test dispatches focus, clicks explicit refresh, and resolves both responses without asserting the number or order of started scene requests.",
+            "failureScenario": "If refresh serialization is removed, both requests can start before the focus response resolves. The test can still pass because it does not check that the explicit request waited."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 103,
+          "message": "Add the missing mismatched-case test: return case B's valid envelope for the case A scene request and assert `contract_invalid` with zero canvas mounts.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The invalid-contract tests cover absent or unsupported envelopes, and the scene-read tests cover 403 and 500 responses. No App-host test returns case B's valid envelope for the case A scene request.",
+            "failureScenario": "If entry accepts a valid envelope whose case ID differs from the listed case requested, the changed tests still pass instead of verifying the required contract_invalid fallback and zero canvas mounts."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The refresh can still partially commit before a later case fails, and the overlap and mismatched-case behaviors remain insufficiently tested against the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 138,
+          "message": "Keep refreshed snapshots temporary until every listed case succeeds. A failed multi-case refresh currently partially commits earlier cases, so it does not retain the last labelled snapshot.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The refresh loop writes each successful case into the snapshot refs and React state before processing the remaining cases. If a later case fails, the catch marks the already-updated snapshots stale without restoring the snapshots from before the refresh.",
+            "failureScenario": "Case A advances from revision 7 to 8, then case B's request fails. The fallback retains case A at revision 8 instead of the last labelled snapshot at revision 7."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 166,
+          "message": "The named overlap test still does not prove serialization. Assert that only the focus scene GET has started before resolving it, then assert that the explicit scene GET starts after the focus refresh finishes.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The overlap test dispatches focus and clicks explicit refresh, then resolves both deferred responses without checking how many scene GETs have started or that the explicit GET starts only after focus finishes.",
+            "failureScenario": "If refresh serialization is removed, both requests can start before focus resolves. The test does not assert that ordering, so it can pass without the required queue behavior."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 81,
+          "message": "Add the specified mismatched-case test: return case B's valid envelope for the case A scene request and assert `contract_invalid` with zero canvas mounts.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The invalid-contract test covers absent or unsupported envelopes and failed scene reads, but does not return a valid envelope for a different case ID than the requested listed case.",
+            "failureScenario": "If the case ID equality check is removed, a request for case A can accept case B's valid envelope while all changed tests still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The refreshed snapshots are still committed before the full refresh succeeds, and the required serialization and mismatched-case tests remain unverified. I found no additional concrete security vulnerability in the reviewed changes.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 138,
+          "message": "Keep refreshed snapshots temporary until every listed case succeeds; a later failure currently commits earlier cases instead of retaining the last labelled snapshot.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The refresh loop writes each successful case into the snapshot refs and state before processing the remaining cases. If a later request or validation fails, the catch marks those already-updated snapshots stale instead of restoring the snapshots from before the refresh.",
+            "failureScenario": "Case A advances from revision 7 to 8, then case B's request fails. The fallback retains A at revision 8, although the last labelled snapshot before the failed refresh was revision 7."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 166,
+          "message": "The named overlap test still does not prove serialization. Assert that exactly one scene GET has started before resolving focus, then that the explicit refresh GET starts only after the focus refresh finishes.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The overlap test dispatches focus and triggers explicit refresh, then resolves both deferred responses without asserting that only the focus request has started or that the explicit request starts after focus finishes.",
+            "failureScenario": "If the queue is removed, both scene GETs can start before either response resolves; the test does not check this and can pass without proving the required serialization."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarEntry.test.ts",
+          "line": 81,
+          "message": "Add the missing App-host mismatch case: return case B's valid envelope for the case A request and assert `contract_invalid` with zero canvas mounts.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The entry failure tests cover absent or unsupported contracts and failed scene reads, but do not return case B's valid envelope for the case A scene request.",
+            "failureScenario": "If the App accepts a valid envelope for the wrong listed case, the changed tests still pass; the criterion requires `contract_invalid` and zero canvas mounts for this mismatch."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarEntry.test.ts",
+      "frontend/tests/HangarGuideLine.test.tsx",
+      "frontend/tests/HangarSceneRefresh.test.ts",
+      "frontend/tests/hangarAppHarness.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
