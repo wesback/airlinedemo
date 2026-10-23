@@ -220,9 +220,11 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
   }
 
   const route = sceneRoute(sceneView);
-  if (sceneRouteCandidate(sceneView) && (!route || route.length < 2)) return null;
+  if (sceneRouteCandidate(sceneView)) {
+    if (!route || route.length < 2) throw new Error(HANGAR_ROUTE_ERROR);
+    if (!route.every(point => pointInsideFloor(point.x, point.z, m) && Number.isFinite(point.x) && Number.isFinite(point.z))) throw new Error(HANGAR_ROUTE_ERROR);
+  }
   if (route && route.length >= 2) {
-    if (!route.every(point => pointInsideFloor(point.x, point.z, m) && Number.isFinite(point.x) && Number.isFinite(point.z))) return null;
     const curve = new THREE.CatmullRomCurve3(route.map(point => new THREE.Vector3(point.x, 0.05, point.z)));
     const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(2, route.length * 12), 0.08, 8, false), material(HANGAR_SCENE_THEME.guideLine));
     tube.name = 'GuideLine'; tube.userData.routePoints = route.map(point => ({x: point.x, y: 0.05, z: point.z})); root.add(tube);

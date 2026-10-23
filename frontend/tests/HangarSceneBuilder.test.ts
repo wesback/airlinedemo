@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import manifest from '../src/hangar/sceneManifest.json';
-import { buildHangarAircraftSceneGroups } from '../src/hangar/sceneBuilder';
+import { buildHangarAircraftSceneGroups, HANGAR_ROUTE_ERROR } from '../src/hangar/sceneBuilder';
 import { HANGAR_SCENE_THEME } from '../src/hangar/sceneTheme';
 
 const view = { contractVersion: 1, cases: [
@@ -117,11 +117,11 @@ describe('Hangar scene builder', () => {
     expect(traverse(root, 'SelectionRing')).toBeInstanceOf(THREE.Mesh);
     expect((traverse(root, 'SelectionRing') as THREE.Mesh).geometry).toBeInstanceOf(THREE.TorusGeometry);
     const badRoute = { ...view, route: [{ x: -4, z: 20 }, { x: 100, z: 100 }] };
-    expect(buildHangarAircraftSceneGroups(manifest, badRoute)).toBeNull();
+    expect(() => buildHangarAircraftSceneGroups(manifest, badRoute)).toThrow(HANGAR_ROUTE_ERROR);
     const oversizedRoute = { ...view, route: Array.from({ length: 65 }, (_, i) => ({ x: -40 + i, z: 20 })) };
-    expect(buildHangarAircraftSceneGroups(manifest, oversizedRoute)).toBeNull();
+    expect(() => buildHangarAircraftSceneGroups(manifest, oversizedRoute)).toThrow(HANGAR_ROUTE_ERROR);
     const authoritativeRoute = { ...view, route: [{ x: -4, z: 20 }, { x: -4, z: 15, objectId: manifest.objectIds[0] }] };
-    expect(buildHangarAircraftSceneGroups(manifest, authoritativeRoute)).toBeNull();
+    expect(() => buildHangarAircraftSceneGroups(manifest, authoritativeRoute)).toThrow(HANGAR_ROUTE_ERROR);
   });
 
   it('keeps non-selectable scene nodes without authority', () => {
