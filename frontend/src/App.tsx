@@ -8,7 +8,7 @@ import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
 import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
-import { canAdmitHangarCommands, refreshHangarScene, type ServerSceneSnapshot } from './hangar/sceneRefresh';
+import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -59,6 +59,7 @@ export default function App({
     { caseId: 'cp-case-c', name: 'Case C', category: 'wide-body', unavailable: false, sources: null },
   ]);
   const [hangarSnapshot, setHangarSnapshot] = useState<ServerSceneSnapshot|null>(null);
+  const [hangarCaseSnapshots, setHangarCaseSnapshots] = useState<Record<string, ServerSceneSnapshot>>({});
   const [hangarStale, setHangarStale] = useState(false);
   const HangarSceneRef = useRef<ComponentType<HangarSceneProps> | null>(null);
   const [hangarActionMessage, setHangarActionMessage] = useState('');
@@ -116,19 +117,28 @@ export default function App({
     setHangarStale(false);
     try {
       const cases = hangarEntries;
+      const nextCaseSnapshots = { ...hangarCaseSnapshots };
       let nextSnapshot = hangarSnapshot;
       for (const entry of cases) {
         const response = await fetch(`/api/v1/cases/${encodeURIComponent(entry.caseId)}/scene`);
         if (!response.ok) throw new Error('refresh_failed');
         const envelope = await response.json();
-        const result = await refreshHangarScene(() => envelope, nextSnapshot);
+        const envelopeCase = typeof envelope === 'object' && envelope !== null ? (envelope as Record<string, unknown>).case : null;
+        const envelopeCaseId = typeof envelopeCase === 'object' && envelopeCase !== null ? (envelopeCase as Record<string, unknown>).caseId : null;
+        if (envelopeCaseId !== entry.caseId) throw new Error('refresh_failed');
+        const result = await refreshHangarScene(() => envelope, nextCaseSnapshots[entry.caseId] ?? hangarSnapshot);
         if (!result.valid || !result.snapshot) throw new Error('refresh_failed');
+        nextCaseSnapshots[entry.caseId] = result.snapshot;
         nextSnapshot = result.snapshot;
       }
+      setHangarCaseSnapshots(nextCaseSnapshots);
       setHangarSnapshot(nextSnapshot);
       setHangarStale(false);
+      setHangarView('3d');
+      setHangarSceneLoaded(true);
     } catch {
       const result = await refreshHangarScene(() => { throw new Error('refresh_failed'); }, hangarSnapshot);
+      setHangarCaseSnapshots((current) => Object.fromEntries(Object.entries(current).map(([caseId, snapshot]) => [caseId, {...snapshot,current:false,fallbackReason:'refresh_failed'}])));
       setHangarSnapshot(result.snapshot);
       setHangarStale(true);
       setHangarView('fallback');
@@ -183,12 +193,18 @@ export default function App({
         };
       }).filter((entry) => entry.caseId && entry.name && entry.category);
       setHangarEntries(entries);
-      const latest = envelopes.at(-1);
-      if (latest && typeof latest === 'object') {
-        const firstResult = await refreshHangarScene(() => latest, hangarSnapshot);
-        if (firstResult.snapshot) setHangarSnapshot(firstResult.snapshot);
-        setHangarStale(firstResult.stale);
+      const initialCaseSnapshots: Record<string, ServerSceneSnapshot> = {};
+      let latestSnapshot: ServerSceneSnapshot | null = hangarSnapshot;
+      for (let index = 0; index < envelopes.length; index += 1) {
+        const snapshot = snapshotFromServer(envelopes[index]);
+        if (!snapshot) throw {fallback:'contract_invalid'};
+        const caseId = typeof cases[index]?.caseId === 'string' ? cases[index].caseId as string : '';
+        initialCaseSnapshots[caseId] = snapshot;
+        latestSnapshot = snapshot;
       }
+      setHangarCaseSnapshots(initialCaseSnapshots);
+      if (latestSnapshot) setHangarSnapshot(latestSnapshot);
+      setHangarStale(false);
     } catch (error) {
       const fallback = typeof error === 'object' && error !== null && 'fallback' in error
         ? String((error as {fallback:unknown}).fallback) : 'refresh_failed';
