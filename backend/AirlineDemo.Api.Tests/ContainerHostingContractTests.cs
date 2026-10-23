@@ -167,7 +167,7 @@ public class ContainerHostingContractTests
             if (Regex.IsMatch(ruleBlock, @"access\s*=\s*""Allow"""))
             {
                 Assert.DoesNotMatch(@"destination_address_prefixes\s*=", ruleBlock);
-                Assert.Matches(@"(?m)^\s*destination_address_prefix\s*=\s*(var\.app_subnet_cidr|var\.private_endpoint_subnet_cidr|each\.value)\s*$", ruleBlock);
+                Assert.Matches(@"(?m)^\s*destination_address_prefix\s*=\s*(local\.app_subnet_cidr|local\.private_endpoint_subnet_cidr|each\.value)\s*$", ruleBlock);
                 // each.value is only a safe destination when the rule iterates the configured egress allowlist.
                 if (Regex.IsMatch(ruleBlock, @"destination_address_prefix\s*=\s*each\.value"))
                 {
@@ -184,14 +184,18 @@ public class ContainerHostingContractTests
     public void NFR006_RejectsMissingHostingInputs()
     {
         var variables = Tf("variables.tf");
+        // Org-specific inputs stay required. Names, ranges and the egress list derive from name_prefix or default (names.tf).
         string[] required =
         {
-            "subscription_id", "tenant_id", "location", "resource_group_name", "vnet_address_space",
-            "app_subnet_cidr", "private_endpoint_subnet_cidr", "presenter_reviewer_cidrs",
-            "egress_allowed_destinations", "sql_server_name", "sql_database_name", "storage_account_name",
-            "key_vault_name", "model_account_name", "model_endpoint_subdomain", "budget_amount",
-            "budget_start_date", "budget_contact_emails", "terraform_state_backend", "acr_name",
-            "container_apps_environment_name", "container_app_name", "image_digest", "demo_passcode_secret_uri",
+            "subscription_id", "tenant_id", "location", "presenter_reviewer_cidrs", "budget_amount",
+            "budget_start_date", "budget_contact_emails", "terraform_state_backend", "image_digest",
+            "demo_passcode_secret_uri",
+        };
+        string[] derived =
+        {
+            "resource_group_name", "app_subnet_cidr", "private_endpoint_subnet_cidr", "sql_server_name",
+            "storage_account_name", "key_vault_name", "model_account_name", "model_endpoint_subdomain", "acr_name",
+            "container_apps_environment_name", "container_app_name",
         };
 
         foreach (var name in required)
@@ -199,6 +203,14 @@ public class ContainerHostingContractTests
             var block = Block(variables, $"variable \"{name}\"");
             Assert.DoesNotMatch(@"(?m)^\s*default\s*=", block);
         }
+
+        // A derived name has a null default, so an unset name falls back to name_prefix and is never an empty string.
+        foreach (var name in derived)
+        {
+            Assert.Matches(@"(?m)^\s*default\s*=\s*null\s*$", Block(variables, $"variable \"{name}\""));
+            Assert.Matches($@"coalesce\(var\.{name},", Tf("names.tf"));
+        }
+        Assert.Matches(@"\^\[a-z\]\[a-z0-9\]\{2,9\}\$", Block(variables, "variable \"name_prefix\""));
 
         var cidrs = Block(variables, "variable \"presenter_reviewer_cidrs\"");
         Assert.Matches(@"cidrnetmask", cidrs);
