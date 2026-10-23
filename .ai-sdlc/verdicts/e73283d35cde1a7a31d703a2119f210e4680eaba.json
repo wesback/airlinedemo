@@ -1,0 +1,253 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 592,
+  "branch": "ai-sdlc/issue-592",
+  "commitSha": "e73283d35cde1a7a31d703a2119f210e4680eaba",
+  "round": 2,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The easing frame loop is present, but the production scene does not provide it an invalidation callback. The updated camera test also still does not prove that the real builder group is mounted.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/entryController.ts",
+          "line": 155,
+          "message": "The production scene still does not connect easing ticks to Canvas invalidation, leaving demand rendering unable to show the camera transition.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The production scene passes no `invalidate` callback to `HangarCanvasAdapter`. Its frame loop calls the optional callback after moving the camera, but the Canvas uses demand rendering.",
+            "failureScenario": "With normal motion enabled, the frame loop moves the camera toward a preset while `invalidate` is undefined. The demand-rendered Canvas receives no invalidation for those easing ticks, so the transition can stop rendering before reaching its target."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 120,
+          "message": "The named camera test still does not verify that the production scene mounts the group returned by the real builder.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test's `MountCanvas` creates the asserted marker itself, and the assertion never checks its children for the builder's group. It also renders `HangarCanvasAdapter` directly instead of the production `HangarScene`.",
+            "failureScenario": "If the production scene stops mounting the real builder group, this test still passes because its marker is unconditional and it does not inspect the mounted group."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added animation frame still lacks a production invalidation callback, leaving the demand-rendered follow transition unable to reliably redraw. The updated mounting test also uses an unconditional marker and does not verify the production scene wiring.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 56,
+          "message": "Follow easing still does not invalidate the production demand canvas: the frame component's invalidate prop is undefined in HangarScene, so its easing ticks cannot request renders.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "HangarDemandFrame calls invalidate only through the optional prop. The production HangarScene creates HangarCanvasAdapter without an invalidate prop, and the adapter does not obtain one from the Canvas context.",
+            "failureScenario": "During a follow transition in the production scene, the animation frame mutates the camera but calls no invalidate function. With frameloop set to demand, the canvas can stop displaying the camera's movement before it reaches the target."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 118,
+          "message": "The named camera test still does not verify production mounting of the real builder group and exactly one owned camera, as required by the first acceptance criterion.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named camera test renders HangarCanvasAdapter with a custom MountCanvas that hardcodes data-hangar-scene-mounted=\"true\". It never renders HangarScene or asserts that the Canvas receives the real builder group and exactly one owned camera.",
+            "failureScenario": "If production stops mounting the builder result or passes a different camera to Canvas, this test still passes because its mounted marker is unconditional."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The easing loop now updates camera pose, but its production invalidation callback is not wired, so demand rendering may stop during the transition. The named mounting test also still does not verify the mounted group’s identity.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/HangarCanvasAdapter.tsx",
+          "line": 56,
+          "message": "The easing animation still does not invalidate the production demand canvas: HangarScene does not supply an invalidate callback, so each easing tick's optional call is a no-op.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "HangarDemandFrame calls the optional invalidate prop, but the production HangarScene passes no invalidate prop to HangarCanvasAdapter. The canvas uses frameloop: \"demand\".",
+            "failureScenario": "During a follow transition, the animation frame updates the camera but invalidate is undefined, so the demand-rendered canvas receives no frame requests and can stop rendering before the camera reaches its target."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarReducedMotion.test.ts",
+          "line": 120,
+          "message": "The named camera test still does not verify that production mounting uses the exact group returned by the real scene builder.",
+          "confidence": 0.93,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test's MountCanvas adds a fixed data-hangar-scene-mounted marker and renders its children, but the assertion checks only that marker and the absence of a fallback. It never checks that the primitive's object is the exact group returned by buildHangarAircraftSceneGroups.",
+            "failureScenario": "If HangarCanvasAdapter mounts a different non-fallback group instead of the builder result, this test still passes, leaving the first acceptance criterion unverified."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarReducedMotion.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
