@@ -26,9 +26,6 @@ export function applyHangarOwnedCamera(camera:THREE.PerspectiveCamera|null|undef
 }
 export function getHangarDemandCanvasProps(camera:THREE.PerspectiveCamera, onCreated?: (state:any)=>unknown){ return {frameloop:'demand'as const,dpr:[1,2] as [number,number],gl:{antialias:true},camera,...(onCreated ? {onCreated} : {})}; }
 
-<<<<<<< HEAD
-export type HangarCanvasAdapterProps={sceneGroup?:THREE.Group|null;camera?:THREE.PerspectiveCamera;invalidate?:()=>unknown;invalidationCapture?:ComponentType<any>;sceneData?:unknown;avatar?:unknown;selection?:unknown;route?:unknown;target?:{x:number;y:number;z:number};radius?:number;azimuthDegrees?:number;polarDegrees?:number;reducedMotion?:boolean;canvasComponent?:ComponentType<any>;onCreated?: (state:any)=>unknown;onContextLost?:()=>unknown};
-=======
 export function raycastHangarSelection(sceneGroup:THREE.Group|null|undefined,camera:THREE.PerspectiveCamera|null|undefined,clientX:number,clientY:number,width:number,height:number):{objectId:string;object:THREE.Object3D}|null{
   if(!sceneGroup||!camera||width<=0||height<=0||!Number.isFinite(clientX)||!Number.isFinite(clientY))return null;
   const ndc=new THREE.Vector2((clientX/width)*2-1,-(clientY/height)*2+1);
@@ -55,8 +52,7 @@ export function raycastHangarSelection(sceneGroup:THREE.Group|null|undefined,cam
   return null;
 }
 
-export type HangarCanvasAdapterProps={sceneGroup?:THREE.Group|null;camera?:THREE.PerspectiveCamera;invalidate?:()=>unknown;invalidationCapture?:ComponentType<any>;sceneData?:unknown;avatar?:unknown;selection?:unknown;route?:unknown;target?:{x:number;y:number;z:number};radius?:number;azimuthDegrees?:number;polarDegrees?:number;reducedMotion?:boolean;canvasComponent?:ComponentType<any>};
->>>>>>> origin/main
+export type HangarCanvasAdapterProps={sceneGroup?:THREE.Group|null;camera?:THREE.PerspectiveCamera;invalidate?:()=>unknown;invalidationCapture?:ComponentType<any>;sceneData?:unknown;avatar?:unknown;selection?:unknown;route?:unknown;target?:{x:number;y:number;z:number};radius?:number;azimuthDegrees?:number;polarDegrees?:number;reducedMotion?:boolean;canvasComponent?:ComponentType<any>;onCreated?: (state:any)=>unknown;onContextLost?:()=>unknown};
 export function projectHangarLabelAnchor(camera:THREE.PerspectiveCamera|null|undefined,anchor:{x:number;y:number;z:number}|THREE.Vector3|null|undefined):{x:number;y:number;z:number;visible:boolean}|null{
   if(!camera||!anchor)return null;
   (camera as any).updateMatrixWorld(true);camera.updateProjectionMatrix();(camera as any).updateWorldMatrix(true,false);
@@ -131,7 +127,6 @@ export function HangarCanvasAdapter({sceneGroup,camera,invalidate,invalidationCa
   if (!canvasComponent) return createElement('canvas',{'aria-label':'3D hangar scene','data-hangar-visible-fallback':'true'});
   const frame=createElement(HangarDemandFrame,{camera:ownedCamera,invalidate,target,radius,azimuthDegrees,polarDegrees,reducedMotion});
   const capture=invalidationCapture?createElement(invalidationCapture):null;
-<<<<<<< HEAD
   const handleCreated=(state:any)=>{
     onCreated?.(state);
     const element=state?.gl?.domElement ?? state?.canvas;
@@ -139,10 +134,7 @@ export function HangarCanvasAdapter({sceneGroup,camera,invalidate,invalidationCa
       element.addEventListener('webglcontextlost',(event:any)=>{event.preventDefault?.();setContextLost(true);onContextLost?.();},{once:true});
     }
   };
-  const canvas=createElement(canvasComponent,{...getHangarDemandCanvasProps(ownedCamera,handleCreated)},sceneGroup?createElement('primitive',{object:sceneGroup}):createElement('group',{'data-hangar-visible-fallback':'true'}),capture,frame);
-=======
-  const canvas=createElement(canvasComponent,{...getHangarDemandCanvasProps(ownedCamera),...pointerProps},sceneGroup?createElement('primitive',{object:sceneGroup}):createElement('group',{'data-hangar-visible-fallback':'true'}),capture,frame);
->>>>>>> origin/main
+  const canvas=createElement(canvasComponent,{...getHangarDemandCanvasProps(ownedCamera,handleCreated),...pointerProps},sceneGroup?createElement('primitive',{object:sceneGroup}):createElement('group',{'data-hangar-visible-fallback':'true'}),capture,frame);
   return createElement(HangarLabelOverlay,{sceneGroup,camera:ownedCamera,sceneData,selection},canvas);
 }
 
