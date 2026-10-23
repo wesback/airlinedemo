@@ -81,7 +81,7 @@ export function getHangarEntryDecision(options: HangarEntryOptions = {}): Hangar
       : options.probe;
   const hasProbeInput = probeInput !== undefined;
   const probe = hasProbeInput ? probeWebGl2(probeInput) : probeWebGl2();
-  const contractValid = options.contractVersion === undefined || options.contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION;
+  const contractValid = options.contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION;
   let fallbackReason: HangarFallbackReason | null = null;
   if (!contractValid) fallbackReason = 'contract_invalid';
   else if (!validateHangarRackAvatarManifest().valid) fallbackReason = 'asset_invalid';
@@ -185,6 +185,6 @@ export const HANGAR_NON_3D_ACTIONS = ['selection', 'status', 'evidence', 'journe
 export function getHangarNon3dActions(): readonly string[] { return [...HANGAR_NON_3D_ACTIONS]; }
 export const isSupportedBrowser = isHangarBrowserSupported;
 export const probeWebGl2Capability = probeWebGl2;
-export function checkHangarContractEligibility(contractVersion: unknown): boolean { return contractVersion === undefined || contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION; }
+export function checkHangarContractEligibility(contractVersion: unknown): boolean { return contractVersion === SUPPORTED_HANGAR_CONTRACT_VERSION; }
 export function getHangarFallbackReason(options: HangarEntryOptions = {}): HangarFallbackReason | null { return getHangarEntryDecision(options).fallbackReason; }
 export const HANGAR_3D_ACTIONS = ['selection', 'status', 'evidence', 'journey', 'review'] as const;

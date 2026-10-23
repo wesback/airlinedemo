@@ -21,10 +21,10 @@ const HangarApp = App as ComponentType<HangarEntryAppProps>;
 
 describe('HangarEntry', () => {
   it('HangarEntry rejects unsupported browser and missing WebGL', () => {
-    expect(getHangarEntryDecision({ browserSupported: false, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
-    expect(getHangarEntryDecision({ browserSupported: true, webgl2: null }).fallbackReason).toBe('webgl_unavailable');
-    expect(getHangarEntryDecision({ browserSupported: false, webgl2: null })).toMatchObject({ mode: 'fallback', fallbackReason: 'unsupported_browser' });
-    expect(getHangarEntryDecision({ browserSupported: true, webgl2: { webgl2: true }, webgl2Probe: null }).fallbackReason).toBe('webgl_unavailable');
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: false, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: true, webgl2: null }).fallbackReason).toBe('webgl_unavailable');
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: false, webgl2: null })).toMatchObject({ mode: 'fallback', fallbackReason: 'unsupported_browser' });
+    expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: true, webgl2: { webgl2: true }, webgl2Probe: null }).fallbackReason).toBe('webgl_unavailable');
   });
 
   it('HangarEntry contract eligibility cases', async () => {
@@ -72,7 +72,7 @@ afterEach(() => {
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
     // App offers only its Data Room entries: an unmapped identifier such as AIR-X has no menu item to confirm.
-    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two', 'Air Three']);
     expect(screen.queryByRole('menuitem', { name: /AIR-X/ })).toBeNull();
     expect(document.querySelector('[data-hangar-guide-line-visible="true"]')).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Air One' }));
@@ -137,7 +137,7 @@ afterEach(() => {
     expect(HANGAR_NON_3D_ACTIONS).toEqual(requiredActions);
     expect(HANGAR_3D_ACTIONS).toEqual(requiredActions);
     expect(getHangarNon3dActions()).toEqual(requiredActions);
-    expect(getHangarFallbackReason({ browserSupported: false, webgl2: { webgl2: true } })).toBe('unsupported_browser');
+    expect(getHangarFallbackReason({ contractVersion: 1, browserSupported: false, webgl2: { webgl2: true } })).toBe('unsupported_browser');
 
     stubCaseApi();
     render(createElement(HangarApp, {
@@ -229,9 +229,9 @@ afterEach(() => {
 
   it('supported versions pass eligibility and unsupported versions reject', () => {
     for (const version of [120, 121, 139, 140]) {
-      expect(getHangarEntryDecision({ browser: { name: 'Chrome', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
-      expect(getHangarEntryDecision({ browser: { name: 'Edge', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
+      expect(getHangarEntryDecision({ contractVersion: 1, browser: { name: 'Chrome', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
+      expect(getHangarEntryDecision({ contractVersion: 1, browser: { name: 'Edge', version }, webgl2: { webgl2: true } }).mode).toBe('3d');
     }
-    expect(getHangarEntryDecision({ browser: { name: 'Firefox', version: 140 }, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
+    expect(getHangarEntryDecision({ contractVersion: 1, browser: { name: 'Firefox', version: 140 }, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
   });
 });

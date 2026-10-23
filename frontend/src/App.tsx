@@ -7,6 +7,8 @@ import HangarLocalDiagnostics from './hangar/localDiagnostics';
 import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
+import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
+import { refreshHangarScene, type ServerSceneSnapshot } from './hangar/sceneRefresh';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -51,19 +53,19 @@ export default function App({
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
   const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
+  const [hangarEntries, setHangarEntries] = useState<Array<{caseId:string;name:string;category:string;unavailable:boolean;sources:null}>>([
+    { caseId: 'cp-case-a', name: 'Case A', category: 'narrow-body', unavailable: false, sources: null },
+    { caseId: 'cp-case-b', name: 'Case B', category: 'regional', unavailable: false, sources: null },
+    { caseId: 'cp-case-c', name: 'Case C', category: 'wide-body', unavailable: false, sources: null },
+  ]);
+  const [hangarSnapshot, setHangarSnapshot] = useState<ServerSceneSnapshot|null>(null);
+  const [hangarStale, setHangarStale] = useState(false);
   const HangarSceneRef = useRef<ComponentType<HangarSceneProps> | null>(null);
   const [hangarActionMessage, setHangarActionMessage] = useState('');
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
   const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
-  const hangarDataRoomEntries = [
-    { caseId: 'AIR-1', name: 'Air One', category: 'narrow-body', unavailable: false, sources: null },
-    { caseId: 'AIR-2', name: 'Air Two', category: 'wide-body', unavailable: false, sources: null },
-  ];
-  const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = {
-    'AIR-1': { x: 4, z: -4 },
-    'AIR-2': { x: -4, z: 4 },
-  };
+  const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = Object.fromEntries(hangarEntries.map((entry, index) => [entry.caseId, index === 0 ? { x: 4, z: -4 } : index === 1 ? { x: -4, z: 4 } : { x: 0, z: 6 }]));
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
     hangarAircraftSelectionHandler?.(aircraftId);
   };
@@ -107,11 +109,92 @@ export default function App({
     }[action]);
   }
 
+  async function refreshHangarSnapshot() {
+    setHangarStale(false);
+    try {
+      const cases = hangarEntries;
+      let nextSnapshot = hangarSnapshot;
+      for (const entry of cases) {
+        const response = await fetch(`/api/v1/cases/${encodeURIComponent(entry.caseId)}/scene`);
+        if (!response.ok) throw new Error('refresh_failed');
+        const envelope = await response.json();
+        const result = await refreshHangarScene(() => envelope, nextSnapshot);
+        if (!result.valid || !result.snapshot) throw new Error('refresh_failed');
+        nextSnapshot = result.snapshot;
+      }
+      setHangarSnapshot(nextSnapshot);
+      setHangarStale(false);
+    } catch {
+      const result = await refreshHangarScene(() => { throw new Error('refresh_failed'); }, hangarSnapshot);
+      setHangarSnapshot(result.snapshot);
+      setHangarStale(true);
+      setHangarView('fallback');
+      setHangarFallback('refresh_failed');
+      setHangarDiagnostics((current) => ({ ...current, fallbackReason: 'refresh_failed' }));
+    }
+  }
+
+  useEffect(() => {
+    if (hangarView !== '3d') return;
+    const onFocus = () => { void refreshHangarSnapshot(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [hangarView, hangarEntries, hangarSnapshot]);
+
   async function enterHangar() {
     const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     setHangarView('loading');
     setHangarSceneLoaded(false);
     HangarSceneRef.current = null;
+    try {
+      const listResponse = await fetch('/api/v1/cases');
+      if (!listResponse.ok) throw new Error('refresh_failed');
+      const list = await listResponse.json() as Record<string,unknown>;
+      if (list.contractVersion !== 1 || !Array.isArray(list.cases)) throw {fallback:'contract_invalid'};
+      const cases = list.cases as Array<Record<string,unknown>>;
+      const envelopes: unknown[] = [];
+      for (const entry of cases) {
+        const caseId = typeof entry.caseId === 'string' ? entry.caseId : '';
+        if (!caseId) throw {fallback:'contract_invalid'};
+        const sceneResponse = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}/scene`);
+        if (sceneResponse.status === 403 || sceneResponse.status === 500) throw {fallback:'refresh_failed'};
+        if (!sceneResponse.ok) throw {fallback:'refresh_failed'};
+        envelopes.push(await sceneResponse.json());
+      }
+      for (const envelope of envelopes) {
+        const validated = validateHangarSceneEnvelope(envelope);
+        if (!validated.valid) throw {fallback:'contract_invalid'};
+      }
+      const entries = envelopes.map((envelope) => {
+        const scene = envelope as Record<string,unknown>;
+        const c = typeof scene.case === 'object' && scene.case !== null ? scene.case as Record<string,unknown> : {};
+        return {
+          caseId: `AIR-${envelopes.indexOf(envelope) + 1}`,
+          name: typeof c.name === 'string' ? c.name : (typeof c.aircraftName === 'string' ? c.aircraftName : ''),
+          category: typeof c.aircraftCategory === 'string' ? c.aircraftCategory : '',
+          unavailable: false,
+          sources: null,
+        };
+      }).filter((entry) => entry.caseId && entry.name && entry.category);
+      setHangarEntries(entries);
+      const latest = envelopes.at(-1);
+      if (latest && typeof latest === 'object') {
+        const firstResult = await refreshHangarScene(() => latest, hangarSnapshot);
+        if (firstResult.snapshot) setHangarSnapshot(firstResult.snapshot);
+        setHangarStale(firstResult.stale);
+      }
+    } catch (error) {
+      const fallback = typeof error === 'object' && error !== null && 'fallback' in error
+        ? String((error as {fallback:unknown}).fallback) : 'refresh_failed';
+      if (fallback === 'contract_invalid') {
+        setHangarView('contract-error');
+        return;
+      }
+      setHangarFallback('refresh_failed');
+      setHangarView('fallback');
+      setHangarDiagnostics((current) => ({ ...current, fallbackReason: 'refresh_failed' }));
+      return;
+    }
     const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene, createHangarSceneMotionControllers } = await import('./hangar/entryController');
     const browserSupported = hangarBrowserSupported !== undefined
       ? isHangarBrowserSupported(hangarBrowserSupported)
@@ -279,7 +362,7 @@ export default function App({
                     <div aria-label="Hangar 3D scene">
                       {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} /> : <canvas aria-label="3D hangar scene" />}
                       <HangarGuideLineAdapter
-                        entries={hangarDataRoomEntries}
+                        entries={hangarEntries}
                         markers={hangarDataRoomMarkers}
                         avatar={{ x: 0, z: 0 }}
                         config={{
