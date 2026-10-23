@@ -4,6 +4,7 @@ import { validateHangarAircraftDescriptor } from './sceneDescriptor';
 import { HANGAR_SCENE_THEME } from './sceneTheme';
 
 export const HANGAR_SCENE_BUILDER_ERROR = 'Visible mapping error';
+export const HANGAR_ROUTE_ERROR = 'Visible route error';
 export type HangarSceneView = unknown;
 export type HangarSelectionHandler = (objectId: string, object: THREE.Object3D) => unknown;
 
@@ -15,6 +16,7 @@ function viewIsValid(view: unknown): boolean {
   }
   if (typeof view === 'object') {
     const value = view as any;
+    if (Object.prototype.hasOwnProperty.call(value, 'route') || Object.prototype.hasOwnProperty.call(value, 'guideLine') || Object.prototype.hasOwnProperty.call(value, 'selectedObjectId') || Object.prototype.hasOwnProperty.call(value, 'selection')) return true;
     const list = Array.isArray(value.cases) ? value.cases : Array.isArray(value.caseList) ? value.caseList : null;
     if (list) return viewIsValid(list);
     const ids = Array.isArray(value.objects) ? value.objects.map((o: any) => o?.caseId).filter((v: unknown): v is string => typeof v === 'string') : [];
@@ -40,6 +42,37 @@ function material(color: string, basic = false, opacity = 1): THREE.MeshStandard
 function box(name: string, size: [number, number, number], position: [number, number, number], mat: THREE.Material, parent: THREE.Object3D) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), mat);
   mesh.name = name; mesh.position.set(...position); parent.add(mesh); return mesh;
+}
+
+function sceneSelection(view: unknown): string | null {
+  if (!view || typeof view !== 'object') return null;
+  const value = view as any;
+  const candidates = [value.selectedObjectId, value.selectionObjectId, value.selection?.objectId, value.selection?.id, value.selection?.selectedObjectId, value.selection?.selectedId, value.selected?.objectId, value.selected?.id, value.selectedObject?.objectId, value.selection, value.selectedObject];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string') return candidate;
+  }
+  return null;
+}
+
+function sceneRoute(view: unknown): Array<{x:number;z:number}> | null {
+  if (!view || typeof view !== 'object') return null;
+  const value = view as any;
+  const raw = value.route?.points ?? value.route?.route ?? value.guideLine?.points ?? value.guideLine?.route ?? value.route ?? value.points;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  if (raw.some((point: any) => point && (point.objectId != null || point.selectionHandler != null))) return null;
+  const points = raw.map((point: any) => typeof point === 'object' && point ? {x:point.x,z:point.z} : null);
+  return points.every((point: {x:number;z:number}|null) => point && Number.isFinite(point.x) && Number.isFinite(point.z)) ? points : null;
+}
+
+function pointInsideFloor(x: number, z: number, m: any): boolean {
+  const polygon = m.layout.floorPolygon;
+  if (!Array.isArray(polygon) || polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
+    if (((a.z > z) !== (b.z > z)) && x < (b.x - a.x) * (z - a.z) / (b.z - a.z || 1e-12) + a.x) inside = !inside;
+  }
+  return inside;
 }
 
 function buildAircraft(layout: any, model: any): THREE.Group {
@@ -101,6 +134,51 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
   const floor = new THREE.Mesh(new THREE.BoxGeometry(m.layout.floorSlab.width, m.layout.floorSlab.height, m.layout.floorSlab.depth), material(HANGAR_SCENE_THEME.floor));
   floor.name = 'Floor'; floor.position.y = -m.layout.floorSlab.height / 2; root.add(floor);
 
+  for (const layout of m.layout.aircraft) {
+    const footprint = layout.footprint;
+    if (!footprint || footprint.minX >= footprint.maxX || footprint.minZ >= footprint.maxZ) return null;
+    const outside = 1;
+    const minX = footprint.minX - outside, maxX = footprint.maxX + outside;
+    const minZ = footprint.minZ - outside, maxZ = footprint.maxZ + outside;
+    const markingMaterial = material(HANGAR_SCENE_THEME.floorMarking, true);
+    const letter = layout.caseId.slice(-1).toUpperCase();
+    const width = maxX - minX, depth = maxZ - minZ;
+    for (const [name, size, position] of [
+      [`FloorMarking${letter}North`, [width, 0.02, 0.12], [(minX + maxX) / 2, 0.025, maxZ]],
+      [`FloorMarking${letter}South`, [width, 0.02, 0.12], [(minX + maxX) / 2, 0.025, minZ]],
+      [`FloorMarking${letter}East`, [0.12, 0.02, depth], [maxX, 0.025, (minZ + maxZ) / 2]],
+      [`FloorMarking${letter}West`, [0.12, 0.02, depth], [minX, 0.025, (minZ + maxZ) / 2]],
+    ] as Array<[string, [number,number,number], [number,number,number]]>) {
+      box(name, size, position, markingMaterial, root);
+    }
+  }
+
+  const rackGroup = new THREE.Group(); rackGroup.name = 'Rack'; root.add(rackGroup);
+  const rackFootprint = m.layout.rack.footprint;
+  if (m.layout.avatarStart && ('objectId' in m.layout.avatarStart || 'selectionHandler' in m.layout.avatarStart)) return null;
+  if ('objectId' in m.avatar.hardHat || 'selectionHandler' in m.avatar.hardHat) return null;
+  if ('objectId' in m.layout.rack || 'selectionHandler' in m.layout.rack || m.rack.units?.some((unit: any) => unit?.objectId != null || unit?.selectionHandler != null)) return null;
+  if ('objectId' in m.layout.floorSlab || 'selectionHandler' in m.layout.floorSlab) return null;
+  box('RackFrame', [rackFootprint.maxX - rackFootprint.minX, m.layout.rack.height, rackFootprint.maxZ - rackFootprint.minZ], [
+    (rackFootprint.minX + rackFootprint.maxX) / 2, m.layout.rack.height / 2, (rackFootprint.minZ + rackFootprint.maxZ) / 2,
+  ], material(HANGAR_SCENE_THEME.rack), rackGroup);
+  if (!Array.isArray(m.rack?.units) || m.rack.units.length !== 5) return null;
+  for (let i = 0; i < m.rack.units.length; i++) {
+    const unit = m.rack.units[i];
+    const unitName = unit?.node;
+    if (!unitName || unitName !== ['RackUnitTechnical','RackUnitMaintenance','RackUnitFinance','RackUnitRecords','RackUnitContracts'][i]) return null;
+    const unitMesh = box(unitName, [0.34, 1.7, 0.78], [rackFootprint.minX + 0.5 + i * 0.0, 1.0, rackFootprint.maxZ - 0.39], material(HANGAR_SCENE_THEME.rackUnit), rackGroup);
+    unitMesh.position.x = rackFootprint.minX + (i + 0.5) * ((rackFootprint.maxX - rackFootprint.minX) / 5);
+  }
+
+  const avatarStart = m.layout.avatarStart;
+  const avatar = new THREE.Group(); avatar.name = 'Avatar'; avatar.position.set(avatarStart.x, 0, avatarStart.z); root.add(avatar);
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.425, 0.85, 8, 12), material(HANGAR_SCENE_THEME.avatarBody));  body.name = 'AvatarBody'; body.position.y = 0.85; avatar.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12), material(HANGAR_SCENE_THEME.avatarBody));
+  head.name = 'AvatarHead'; head.position.y = 1.56; avatar.add(head);
+  const hardHat = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), material(m.avatar.hardHat.color));
+  hardHat.name = m.avatar.hardHat.node; hardHat.position.y = 1.86; hardHat.scale.y = 0.55; avatar.add(hardHat);
+
   for (let i = 0; i < 3; i++) {
     const model = m.aircraft.models[i], layout = m.layout.aircraft[i];
     const caseGroup = new THREE.Group(); caseGroup.name = `Case${model.nodes.aircraft.slice(-1)}`; caseGroup.userData.caseId = layout.caseId;
@@ -130,6 +208,31 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 32), material(HANGAR_SCENE_THEME.groundShadow, true, 0.18));
     shadow.name = `GroundShadow${model.nodes.aircraft.slice(-1)}`; shadow.rotation.x = -Math.PI / 2; shadow.position.set(layout.centre.x, 0.01, layout.centre.z); shadow.scale.set(layout.dimensions.span / 2, layout.dimensions.length / 2, 1); caseGroup.add(shadow);
     root.add(caseGroup);
+  }
+
+  const route = sceneRoute(sceneView);
+  if (route && route.length >= 2) {
+    if (!route.every(point => pointInsideFloor(point.x, point.z, m) && Number.isFinite(point.x) && Number.isFinite(point.z))) return null;
+    const curve = new THREE.CatmullRomCurve3(route.map(point => new THREE.Vector3(point.x, 0.05, point.z)));
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(2, route.length * 12), 0.08, 8, false), material(HANGAR_SCENE_THEME.guideLine));
+    tube.name = 'GuideLine'; tube.userData.routePoints = route.map(point => ({x: point.x, y: 0.05, z: point.z})); root.add(tube);
+  }
+
+  const selectedId = sceneSelection(sceneView);
+  if (selectedId) {
+    let selected: THREE.Object3D | undefined;
+    root.traverse(object => { if (typeof object.userData.objectId === 'string' && object.userData.objectId === selectedId) selected = selected ?? object; });
+    if (!selected && /^SYN-CP-[ABC]-AIR-001$/.test(selectedId)) {
+      root.traverse(object => { if (object.name === `Aircraft${selectedId.slice(8,9)}`) selected = selected ?? object; });
+    }
+    if (selected) {
+      const bounds = new THREE.Box3().setFromObject(selected);
+      const size = bounds.getSize(new THREE.Vector3());
+      const centre = bounds.getCenter(new THREE.Vector3());
+      const radius = Math.max(size.x, size.z, 1) * 0.58;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.12, 8, 32), material(HANGAR_SCENE_THEME.selection));
+      ring.name = 'SelectionRing'; ring.rotation.x = Math.PI / 2; ring.position.set(centre.x, 0.05, centre.z); root.add(ring);
+    }
   }
 
   if (selectionHandler) root.traverse((object) => { if (typeof object.userData.objectId === 'string') object.userData.selectionHandler = selectionHandler; });
