@@ -78,6 +78,51 @@ variable "model_endpoint_subdomain" {
   type = string
 }
 
+variable "gateway_endpoint" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_endpoint)) > 0 && can(regex("^https://", lower(trimspace(var.gateway_endpoint))))
+    error_message = "gateway_endpoint must not be empty or whitespace."
+  }
+}
+
+variable "gateway_region" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_region)) > 0
+    error_message = "gateway_region must not be empty or whitespace."
+  }
+}
+
+variable "gateway_api_version" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_api_version)) > 0
+    error_message = "gateway_api_version must not be empty or whitespace."
+  }
+}
+
+variable "gateway_api_management_tier" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_api_management_tier)) > 0
+    error_message = "gateway_api_management_tier must not be empty or whitespace."
+  }
+}
+
+variable "gateway_model_deployment" {
+  type     = string
+  nullable = false
+  validation {
+    condition     = length(trimspace(var.gateway_model_deployment)) > 0
+    error_message = "gateway_model_deployment must not be empty or whitespace."
+  }
+}
+
 variable "model_deployment_name" {
   description = "Name of the Azure OpenAI deployment. Required; empty or whitespace is rejected."
   type        = string

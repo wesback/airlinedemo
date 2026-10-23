@@ -60,8 +60,8 @@ builder.Services.AddSingleton<EvidenceCaseReadSourceFactory>();
 builder.Services.AddSingleton(SyntheticContentRegistry.FromCommittedFixtures());
 builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>(sp => manifest =>
 {
-    var endpoint = builder.Configuration["AzureOpenAI:Endpoint"]
-        ?? throw new InvalidOperationException("AzureOpenAI:Endpoint is not configured; accepted evidence cannot be investigated.");
+    var configuredEndpoint = builder.Configuration["ModelGateway:Endpoint"];
+    var endpoint = ModelGatewayTokenomics.RequirePrivateGatewayEndpoint(configuredEndpoint);
     var deployment = manifest.DeploymentName
         ?? throw new InvalidOperationException("The approved model manifest has no deployment name.");
     var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
@@ -72,9 +72,10 @@ builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.A
     {
         options.Transport = new System.ClientModel.Primitives.HttpClientPipelineTransport(new System.Net.Http.HttpClient(handler));
     }
-    return new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(endpoint), credential, options)
+    Microsoft.Extensions.AI.IChatClient client = new Azure.AI.OpenAI.AzureOpenAIClient(endpoint, credential, options)
         .GetChatClient(deployment)
         .AsIChatClient();
+    return client;
 });
 var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
 if (!string.IsNullOrEmpty(approvedModelManifestPath))

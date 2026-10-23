@@ -62,6 +62,11 @@ variables {
   model_deployment_name           = "gpt-demo-test"
   model_name                      = "gpt-demo-model"
   model_version                   = "0000-00-00"
+  gateway_endpoint               = "https://apim-demo-test.private.invalid/"
+  gateway_region                 = "swedencentral"
+  gateway_api_version            = "2024-02-01"
+  gateway_api_management_tier    = "Developer"
+  gateway_model_deployment       = "gpt-demo-test"
   terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
   budget_amount                   = 100
   budget_start_date               = "2026-11-01T00:00:00Z"
@@ -344,3 +349,46 @@ run "terraform_identity_scoped_to_demo_rg" {
   }
 }
 
+
+run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct_model_access" {
+  command = plan
+
+  assert {
+    condition     = azurerm_api_management.gateway.public_network_access_enabled == false && azurerm_api_management.gateway.virtual_network_type == "Internal" && azurerm_cognitive_account.model.public_network_access_enabled == false && azurerm_cognitive_account.model.local_auth_enabled == false
+    error_message = "The private gateway and model endpoint must prohibit public access and key authentication."
+  }
+  assert {
+    condition     = output.model_endpoint == "https://apim-demo-test.private.invalid/" && !can(regex("(?i)(key|secret|token|connection_string|connection string)", output.model_endpoint))
+    error_message = "The plan must expose only the private gateway endpoint and no secret, key, connection string, or access token."
+  }
+}
+
+run "rejects_empty_gateway_endpoint" {
+  command = plan
+  variables { gateway_endpoint = " " }
+  expect_failures = [var.gateway_endpoint]
+}
+
+run "rejects_empty_gateway_region" {
+  command = plan
+  variables { gateway_region = " " }
+  expect_failures = [var.gateway_region]
+}
+
+run "rejects_empty_gateway_api_version" {
+  command = plan
+  variables { gateway_api_version = " " }
+  expect_failures = [var.gateway_api_version]
+}
+
+run "rejects_empty_gateway_api_management_tier" {
+  command = plan
+  variables { gateway_api_management_tier = " " }
+  expect_failures = [var.gateway_api_management_tier]
+}
+
+run "rejects_empty_gateway_model_deployment" {
+  command = plan
+  variables { gateway_model_deployment = " " }
+  expect_failures = [var.gateway_model_deployment]
+}

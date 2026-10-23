@@ -246,6 +246,21 @@ resource "azurerm_cognitive_account" "model" {
   }
 }
 
+resource "azurerm_api_management" "gateway" {
+  name                = "apim-foundry-${var.resource_group_name}"
+  location            = var.gateway_region
+  resource_group_name = azurerm_resource_group.demo.name
+  publisher_name      = "Airline Demo"
+  publisher_email     = "owner@example.invalid"
+  sku_name            = "${var.gateway_api_management_tier}_1"
+  public_network_access_enabled = false
+  virtual_network_type          = "Internal"
+
+  virtual_network_configuration {
+    subnet_id = azurerm_subnet.private_endpoints.id
+  }
+}
+
 resource "azurerm_cognitive_deployment" "model" {
   name                 = var.model_deployment_name
   cognitive_account_id = azurerm_cognitive_account.model.id
@@ -328,6 +343,6 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
 }
 
 output "model_endpoint" {
-  description = "Model endpoint host and path, reachable only through the private endpoint."
-  value       = "${var.model_endpoint_subdomain}.openai.azure.com/"
+  description = "Private Foundry AI Gateway endpoint; secrets and model keys are never output."
+  value       = var.gateway_endpoint
 }
