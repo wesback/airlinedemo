@@ -1,0 +1,180 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 579,
+  "branch": "ai-sdlc/issue-579",
+  "commitSha": "2c73c4617707dbac51a0c0879f2ced8a03c46883",
+  "round": 0,
+  "pipelineVersion": "8a97d37",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The investigator adds validated correlation context for each attempt, and the gateway policy places its check after JWT validation and before URI rewriting. The policy test can pass when the required identifier pattern is weakened.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/network-boundaries.tftest.hcl",
+          "line": 127,
+          "message": "The policy test does not prove the required exact identifier pattern. Assert the complete pattern so the CI job fails if it is weakened.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The build-and-gate job runs terraform test, but this assertion checks only for the substrings A-Za-z0-9 and 0,127 in the policy XML; it does not verify the required anchored pattern.",
+            "failureScenario": "If the policy pattern is changed to accept arbitrary trailing characters after a valid identifier prefix, those substrings remain and the test passes, while a header such as case followed by a space and extra text is accepted instead of rejected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No in-scope defects identified. The implementation adds validated correlation context to each investigator model attempt and checks the gateway headers before forwarding.",
+      "findingList": []
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no security defect in the changed code within the issue’s scope.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 1,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/BoundedInvestigatorTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

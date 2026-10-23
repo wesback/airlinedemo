@@ -1,4 +1,5 @@
 using System.Reflection;
+using AirlineDemo.Api.Evaluation;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.SourceSystems;
 using Microsoft.Extensions.AI;
@@ -49,8 +50,9 @@ public class BoundedInvestigatorTests
         ApprovedModelManifest? manifest = null,
         string region = Region,
         IInvestigationLimits? limits = null,
-        string role = "technical-reviewer") =>
-        new(CaseId, new MemorySource(), manifest ?? Approved(), SyntheticContentRegistry.FromCommittedFixtures(), region, "evidence-v1", model, limits,
+        string role = "technical-reviewer",
+        string caseId = CaseId) =>
+        new(caseId, new MemorySource(), manifest ?? Approved(), SyntheticContentRegistry.FromCommittedFixtures(), region, "evidence-v1", model, limits,
             role: role, sourceSystems: SourceSystems);
 
     private static readonly string[] Docs = [ReturnStatusText, InjectionText];
@@ -61,6 +63,7 @@ public class BoundedInvestigatorTests
         public List<IList<ChatMessage>> Requests { get; } = [];
 
         public List<ChatOptions?> Options { get; } = [];
+        public List<GatewayCorrelation?> Correlations { get; } = [];
 
         public ChatClientMetadata Metadata { get; } = new("scripted");
 
@@ -69,6 +72,7 @@ public class BoundedInvestigatorTests
             var list = messages.ToList();
             Requests.Add(list);
             Options.Add(options);
+            Correlations.Add(GatewayCorrelationContext.Current);
             return Task.FromResult(respond(list, options));
         }
 
@@ -119,6 +123,14 @@ public class BoundedInvestigatorTests
         public IReadOnlyList<string> SearchWithinBasis(string caseId, string query) => _inner.SearchWithinBasis(caseId, query);
 
         public string? GetProcessingStatus(string caseId) => _inner.GetProcessingStatus(caseId);
+    }
+
+    private sealed class RetryOnceLimits : IInvestigationLimits
+    {
+        public ValueTask BeforeToolCallAsync(CancellationToken cancellationToken) => default;
+        public ValueTask BeforeModelCallAsync(CancellationToken cancellationToken) => default;
+        public ValueTask<bool> TryBackoffAsync(int retriesUsed, CancellationToken cancellationToken) =>
+            new(retriesUsed == 0);
     }
 
     private sealed class CountingLimits : IInvestigationLimits
@@ -308,6 +320,8 @@ public class BoundedInvestigatorTests
             "evidence-v1",
             new List<string> { ReturnStatusText },
             NoInvestigationLimits.Instance,
+            "trace-0123456789abcdef",
+            CaseId,
             null)!;
 
         Assert.Throws<NotSupportedException>(() => gate.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, "x")]));
@@ -435,6 +449,37 @@ public class BoundedInvestigatorTests
         await Assert.ThrowsAsync<ModelGateException>(() => Investigator(model, region: "westeurope").InvestigateAsync(Docs));
 
         Assert.Empty(model.Requests);
+    }
+
+    [Fact]
+    public async Task Investigator_attempts_carry_validated_gateway_correlation()
+    {
+        var calls = 0;
+        var model = new ScriptedChatClient((_, _) => ++calls == 1
+            ? throw new HttpRequestException("transient")
+            : Reply(ClaimsJson));
+
+        await Investigator(model, limits: new RetryOnceLimits()).InvestigateAsync(Docs);
+
+        Assert.Equal(2, model.Correlations.Count);
+        Assert.All(model.Correlations, correlation =>
+        {
+            Assert.NotNull(correlation);
+            Assert.Equal("investigation", correlation!.Arm);
+            Assert.Matches("^trace-[0-9a-f]{16}$", correlation.Run);
+            Assert.Equal("evidence-investigation", correlation.Package);
+            Assert.Equal(CaseId, correlation.Case);
+            Assert.Equal("fixture-deployment-fixture-model-2025-01-01-swedencentral", correlation.ModelConfiguration);
+            Assert.Equal("investigation-v1", correlation.SuiteVersion);
+        });
+        Assert.Equal("call-1", model.Correlations[0]!.CallIdentity);
+        Assert.Equal("call-2", model.Correlations[1]!.CallIdentity);
+
+        var refused = new ScriptedChatClient((_, _) => Reply(ClaimsJson));
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+            Investigator(refused, caseId: "user@example.test").InvestigateAsync(Docs));
+        Assert.Equal("correlation fields refused: Case", exception.Message);
+        Assert.Empty(refused.Requests);
     }
 
     [Fact]
