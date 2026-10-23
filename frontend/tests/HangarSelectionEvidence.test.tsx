@@ -74,9 +74,12 @@ describe('HangarSelectionEvidence',()=>{
     expect(document.querySelector('[data-hangar-label="SYN-CP-C-AIR-001"]')?.textContent).toBe('Case Gamma\nwide-body\nUnknown\nNo next action');
 
     cleanup();
-    const unknownScene=new THREE.Group(); const unknownCanvas=()=>createElement('div',{'data-canvas':'true'});
+    const unknownScene=new THREE.Group();
+    for(const [letter,x] of [['A',-28],['B',-4],['C',25]] as const){const node=new THREE.Group();node.name=`Aircraft${letter}`;node.position.set(x,3.5,0);unknownScene.add(node);}
+    const unknownCanvas=()=>createElement('div',{'data-canvas':'true'});
     render(createElement(HangarCanvasAdapter,{sceneGroup:unknownScene,camera,sceneData:source,selection:'DOES-NOT-EXIST',canvasComponent:unknownCanvas}));
     expect(screen.getByRole('alert').textContent).toBe('Visible mapping error');
+    expect(document.querySelectorAll('[data-hangar-label]')).toHaveLength(3);
     expect(document.querySelector('[data-hangar-label="DOES-NOT-EXIST"]')).toBeNull();
     cleanup();
 
