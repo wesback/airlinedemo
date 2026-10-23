@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { refreshHangarScene, type RefreshResult, type ServerSceneSnapshot } from './sceneRefresh';
 import { HANGAR_ACTUAL_OBJECT_IDS } from './sceneProjection';
 
 const isObject=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
@@ -75,9 +76,17 @@ const buildContentRequest=(evidence:HangarEvidenceTuple,page?:number)=>{
   return `${encodeDocumentIdentifier(evidence.documentId)}?${query.toString()}`;
 };
 
-export type HangarSelectionEvidenceProps={envelope?:unknown;scene?:unknown;manifest?:unknown;objectId?:unknown;identifier?:unknown;browserIdentifier?:unknown;reader?:SelectionReader;onRead?:SelectionReader;evidenceReader?:SelectionReader;onContentOpen?:SelectionReader;snapshot?:unknown;stale?:boolean};
-export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identifier,browserIdentifier,reader,onRead,evidenceReader,onContentOpen,snapshot,stale=false}:HangarSelectionEvidenceProps){
-  const source=scene??envelope; const staleSnapshot=stale || (isObject(snapshot)&&snapshot.current===false); const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
+export type HangarSelectionEvidenceProps={envelope?:unknown;scene?:unknown;manifest?:unknown;objectId?:unknown;identifier?:unknown;browserIdentifier?:unknown;reader?:SelectionReader;onRead?:SelectionReader;evidenceReader?:SelectionReader;onContentOpen?:SelectionReader;snapshot?:unknown;stale?:boolean;refreshReader?:()=>Promise<unknown>|unknown;onRefresh?: (result:RefreshResult)=>unknown};
+export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identifier,browserIdentifier,reader,onRead,evidenceReader,onContentOpen,snapshot,stale=false,refreshReader,onRefresh}:HangarSelectionEvidenceProps){
+  const initialSource=scene??envelope;
+  const [source,setSource]=useState(initialSource);
+  const [refreshSnapshot,setRefreshSnapshot]=useState<ServerSceneSnapshot|null>(isObject(snapshot)?snapshot as ServerSceneSnapshot:null);
+  const refreshGeneration=useRef(0);
+  useEffect(()=>{setSource(initialSource);},[initialSource]);
+  useEffect(()=>{if(isObject(snapshot))setRefreshSnapshot(snapshot as ServerSceneSnapshot);},[snapshot]);
+  useEffect(()=>{if(!refreshReader)return;const onFocus=()=>{const generation=++refreshGeneration.current;void refreshHangarScene(refreshReader,refreshSnapshot).then(result=>{if(generation!==refreshGeneration.current)return;setRefreshSnapshot(result.snapshot);if(result.valid&&result.scene)setSource(result.scene);onRefresh?.(result);});};window.addEventListener('focus',onFocus);return ()=>window.removeEventListener('focus',onFocus);},[refreshReader,refreshSnapshot,onRefresh]);
+  const staleSnapshot=stale || (isObject(snapshot)&&snapshot.current===false) || (refreshSnapshot?.current===false && (!isObject(snapshot)||snapshot.current!==true));
+  const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
   const projected=useMemo(()=>isObject(source)&&Array.isArray(source.objects)?source.objects.map((o)=>isObject(o)?o:null).filter((o):o is Record<string,unknown>=>!!o):[],[source]);
   const selection=useMemo(()=>resolveHangarSelection(source,selectedId,manifest),[source,selectedId,manifest]);
   function activate(raw:unknown){if(staleSnapshot)return; if(typeof raw!=='string'||typeof selectedId==='string'&&raw!==selectedId&&selectedId!==null){} ; const result=resolveHangarSelection(source,raw,manifest); if(!result){setSelectedId(null);setIdentifierError('Unknown or out-of-scope identifier');setEvidenceError(null);return;} setSelectedId(result.objectId);setIdentifierError('');setEvidenceError(result.error); const read=reader??onRead??evidenceReader;if(typeof read==='function')void read(result.objectId);}

@@ -111,7 +111,7 @@ export function createHangarSceneMotionControllers(targetRadius: number | Hangar
   };
 }
 
-export type HangarSceneProps = { onSelect?: (aircraftId: string) => unknown; avatarTarget?: { x: number; z: number } | null; route?: unknown; sceneData?: unknown; onCreated?: (state:any)=>unknown; onContextLost?:()=>unknown };
+export type HangarSceneProps = { onSelect?: (aircraftId: string) => unknown; avatarTarget?: { x: number; z: number } | null; route?: unknown; sceneData?: unknown; refreshReader?:()=>Promise<unknown>|unknown; externalRefresh?:boolean; snapshot?:any; onCreated?: (state:any)=>unknown; onContextLost?:()=>unknown };
 
 export async function loadHangarScene(controllers = createHangarSceneMotionControllers()): Promise<ComponentType<HangarSceneProps>> {
   const fiber = await import('@react-three/fiber');
@@ -190,7 +190,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         createElement('button',{type:'button',onClick:()=>{navigateCamera('aircraft','C');onSelect?.('AIR-3');}},'Pointer select AIR-3'),
       ),
       createElement('section',{'aria-label':'Motion controls'},createElement('button',{type:'button',onClick:()=>setMotionOverride(true)},'Reduce motion'),createElement('button',{type:'button',onClick:()=>setMotionOverride(false)},'Allow motion')),
-      createElement(HangarCanvasAdapter,{camera:ownedCamera,sceneGroup,sceneData:sceneData ?? sceneView,selection:selected,avatar:avatarState,route:route ?? null,invalidate:canvasInvalidate,invalidationCapture:CaptureCanvasInvalidation,target:cameraTarget,radius:cameraState.radius,reducedMotion:reduced,azimuthDegrees:cameraState.azimuthDegrees,polarDegrees:cameraState.polarDegrees,canvasComponent:Canvas,onCreated:props?.onCreated,onContextLost:props?.onContextLost}),
+      createElement(HangarCanvasAdapter,{camera:ownedCamera,sceneGroup,sceneData:sceneData ?? sceneView,selection:selected,avatar:avatarState,route:route ?? null,invalidate:canvasInvalidate,invalidationCapture:CaptureCanvasInvalidation,target:cameraTarget,radius:cameraState.radius,reducedMotion:reduced,azimuthDegrees:cameraState.azimuthDegrees,polarDegrees:cameraState.polarDegrees,canvasComponent:Canvas,refreshReader:props?.refreshReader,externalRefresh:props?.externalRefresh,snapshot:props?.snapshot,onCreated:props?.onCreated,onContextLost:props?.onContextLost}),
     );
   };
   return HangarScene;

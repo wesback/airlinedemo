@@ -430,7 +430,7 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
-                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
+                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} refreshReader={async ()=>{const first=hangarEntries[0]?.caseId;if(!first)throw new Error('refresh_failed');const response=await fetch(`/api/v1/cases/${encodeURIComponent(first)}/scene`);if(!response.ok)throw new Error('refresh_failed');return response.json();}} externalRefresh={true} snapshot={hangarSnapshot} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
                       <HangarGuideLineAdapter
                         entries={hangarEntries}
                         markers={hangarDataRoomMarkers}

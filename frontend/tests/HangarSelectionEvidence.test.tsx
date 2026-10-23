@@ -148,20 +148,22 @@ describe('HangarSelectionEvidence',()=>{
     const label=container.querySelector('[data-hangar-label="SYN-CP-A-ENG-001"]') as HTMLElement|null;expect(label?.textContent).toBe('<b>Left engine</b>');expect(container.querySelector('b')).toBeNull();expect(label?.getAttribute('aria-hidden')).toBe('true');expect(label?.querySelector('button')).toBeNull();
     camera.position.set(0,30,-50);camera.lookAt(0,3,-100);camera.updateProjectionMatrix();await waitFor(()=>expect(label?.style.display).toBe('none'));expect(resolveHangarSelection(envelope(), 'DOES-NOT-EXIST',manifest)).toBeNull();
   });
-  it('Hangar stale refresh preserves evidence and disables commands',()=>{
+  it('Hangar stale refresh preserves evidence and disables commands',async ()=>{
     const mutation=vi.fn(); const reset=vi.fn(); const stale={revision:7,current:false,fallbackReason:'refresh_failed',caseId:'cp-case-a'};
-    const preserved=render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={stale} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
-    expect(screen.getByText('Stale server snapshot: evidence and commands are unavailable.')).toBeTruthy();
+    const preserved=render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={stale} refreshReader={()=>{throw new Error('network')}} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(()=>expect(screen.getByText('Stale server snapshot: evidence and commands are unavailable.')).toBeTruthy());
     expect((screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'}) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.queryByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.queryByRole('button',{name:'Page witness 3'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'Page witness 3'}) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'})); expect(reset).not.toHaveBeenCalled(); expect(mutation).not.toHaveBeenCalled();
 
-    const recovered=envelope({case:{...envelope().case,caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'},allowedActions:['evidence']},allowedActions:['evidence'],objects:envelope().objects.map((o)=>o.objectId==='SYN-CP-A-CMP-001'?{...o,nextAction:{actionId:'approve',text:'Approve server evidence'}}:o)});
-    preserved.rerender(<HangarSelectionEvidence envelope={recovered} manifest={manifest} snapshot={{revision:8,current:true,fallbackReason:null,caseId:'cp-case-a'}} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    const recovered=envelope({case:{...envelope().case,caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'},permission:{allowedActions:['evidence']}},allowedActions:['evidence'],objects:envelope().objects.map((o)=>o.objectId==='SYN-CP-A-CMP-001'?{...o,nextAction:{actionId:'approve',text:'Approve server evidence'}}:o)});
+    preserved.rerender(<HangarSelectionEvidence envelope={recovered} manifest={manifest} snapshot={{revision:8,current:true,fallbackReason:null,caseId:'cp-case-a'}} refreshReader={()=>recovered} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(()=>expect(screen.getByText('Next action: Approve server evidence')).toBeTruthy());
     expect(screen.queryByText('Stale server snapshot: evidence and commands are unavailable.')).toBeNull();
     expect((screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'}) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByText('Next action: Approve server evidence')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).toHaveBeenCalledTimes(1); expect(reset).not.toHaveBeenCalled();
   });
   it('HangarSelectionEvidence blocks witnesses and renders markup as text',()=>{
