@@ -1,0 +1,304 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 549,
+  "branch": "ai-sdlc/issue-549",
+  "commitSha": "0451c19bc184a097a7025f91098fc96e39028a52",
+  "round": 2,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The bounded execution path still loses accumulated quota metrics when a later call is denied. The privacy test adds log capture but still bypasses the evaluation runner, leaving its application trace and logging behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/FourArmEvaluationRunner.cs",
+          "line": 122,
+          "message": "Quota-denied bounded evaluations still do not expose their accumulated usage through the production executor: the post-await metrics assignment is skipped when ExecuteBoundedAgentAsync throws.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The bounded path awaits ExecuteBoundedAgentAsync before assigning gatewayClient.Metrics to LastGatewayMetrics. A quota denial throws from the chat client, so that assignment is skipped.",
+            "failureScenario": "A bounded evaluation makes one successful call and then exceeds a quota on a later call. The chat client now has accumulated usage metrics, but the executor leaves LastGatewayMetrics unset instead of exposing the usage accumulated before denial."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 185,
+          "message": "The privacy test still does not observe application traces and logs from the evaluation runner, so it cannot catch sensitive case data entering that path.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The privacy test invokes ProductionEvaluationArmExecutor directly. It captures activities and logs, but does not run FourArmEvaluationRunner, whose application trace and logging path is part of the privacy criterion.",
+            "failureScenario": "If the evaluation runner logs or tags a sensitive case value, this test still passes because that runner path is never executed."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior application-trace privacy test gap remains: the new listener and logger capture do not observe the evaluation runner because the test invokes the executor directly.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 172,
+          "message": "The privacy test still does not verify application traces or logs on the evaluation runner path. Exercise that path and assert captured traces and logs contain none of the sensitive inputs.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test listens for the application evaluation activity source and captures logs, but calls ProductionEvaluationArmExecutor directly. It rejects the correlation value before dispatch, then asserts no activities were emitted; it never exercises the evaluation runner’s activity or logging path.",
+            "failureScenario": "If an evaluation runner logs a sensitive case value or adds it to an application trace, this test still passes because the runner is not invoked and the test only observes the rejected pre-dispatch path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The `Case` correlation filter still allows a 10-digit phone number to reach gateway metadata and activity tags. This is a reachable sensitive information disclosure.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 34,
+          "message": "LLM02:2025: The `Case` filter accepts 10-digit phone numbers such as `5551234567`, allowing a personal identifier into gateway metadata and traces.",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "`GatewayCorrelation.Validate` applies `CardNumber` to `Case`, but the pattern accepts only 9-digit, hyphenated SSN, and 13–19 digit values. Accepted case values are attached to gateway metadata and gateway activity tags.",
+            "failureScenario": "A case uses `5551234567` as a person’s phone number. It passes the identifier and card-number checks, then is sent in gateway metadata and recorded as `gateway.case` in activity tags, exposing personal information. OWASP LLM02:2025 (Sensitive Information Disclosure)."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+      "backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 206,
+      "total": 210,
+      "percent": 98.1,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/FourArmEvaluationRunner.cs",
+          "covered": 35,
+          "total": 35,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "covered": 158,
+          "total": 162,
+          "missed": [
+            42,
+            100,
+            143,
+            222
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 13,
+          "total": 13,
+          "missed": []
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
