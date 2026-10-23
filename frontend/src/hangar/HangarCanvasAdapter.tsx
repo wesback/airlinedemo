@@ -115,9 +115,16 @@ export function HangarLabelOverlay({sceneGroup,camera,sceneData,selection,childr
       if(count===1&&text){entries.push({id:`SYN-CP-${letter}-AIR-001`,text,anchor:aircraft,kind:'aircraft'});}
     }
     if(typeof selection==='string'){
-      const selected=buildHangarSelectedObjectLabel(sceneData,selection); let anchor:any=null,count=0;
-      sceneGroup.traverse(o=>{if(typeof o.userData.objectId==='string'&&o.userData.objectId===selection){count++;if(!anchor)anchor=o;}});
-      if(!selected||count!==1||!anchor){mappingFailed=true;}else entries.push({id:selection,text:selected,anchor,kind:'selected'});
+      const aircraftSelection=/^SYN-CP-([ABC])-AIR-001$/.exec(selection);
+      if(aircraftSelection){
+        let count=0;
+        sceneGroup.traverse(o=>{if(o.name===`Aircraft${aircraftSelection[1]}`)count++;});
+        if(count!==1)mappingFailed=true;
+      }else{
+        const selected=buildHangarSelectedObjectLabel(sceneData,selection); let anchor:any=null,count=0;
+        sceneGroup.traverse(o=>{if(typeof o.userData.objectId==='string'&&o.userData.objectId===selection){count++;if(!anchor)anchor=o;}});
+        if(!selected||count!==1||!anchor){mappingFailed=true;}else entries.push({id:selection,text:selected,anchor,kind:'selected'});
+      }
     }
     return {entries,mappingFailed};
   },[sceneGroup,sceneData,selection]);

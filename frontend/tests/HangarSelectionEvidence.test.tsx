@@ -72,6 +72,24 @@ describe('HangarSelectionEvidence',()=>{
     expect(document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.getAttribute('role')).toBeNull();
     expect(document.querySelector('[data-hangar-label="SYN-CP-A-ENG-001"]')?.textContent).toBe('Left engine');
     expect(document.querySelector('[data-hangar-label="SYN-CP-C-AIR-001"]')?.textContent).toBe('Case Gamma\nwide-body\nUnknown\nNo next action');
+
+    cleanup();
+    const unknownScene=new THREE.Group(); const unknownCanvas=()=>createElement('div',{'data-canvas':'true'});
+    render(createElement(HangarCanvasAdapter,{sceneGroup:unknownScene,camera,sceneData:source,selection:'DOES-NOT-EXIST',canvasComponent:unknownCanvas}));
+    expect(screen.getByRole('alert').textContent).toBe('Visible mapping error');
+    expect(document.querySelector('[data-hangar-label="DOES-NOT-EXIST"]')).toBeNull();
+    cleanup();
+
+    const missingScene=new THREE.Group(); for(const [letter,x] of [['B',-4],['C',25]] as const){const node=new THREE.Group();node.name=`Aircraft${letter}`;node.position.set(x,3.5,0);missingScene.add(node);}
+    render(createElement(HangarCanvasAdapter,{sceneGroup:missingScene,camera,sceneData:source,selection:null,canvasComponent:Canvas}));
+    expect(screen.getByRole('alert').textContent).toBe('Visible mapping error');
+    expect(document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')).toBeNull();
+    cleanup();
+
+    const duplicateScene=new THREE.Group(); for(const [letter,x] of [['A',-28],['A',-28],['B',-4],['C',25]] as const){const node=new THREE.Group();node.name=`Aircraft${letter}`;node.position.set(x,3.5,0);duplicateScene.add(node);}
+    render(createElement(HangarCanvasAdapter,{sceneGroup:duplicateScene,camera,sceneData:source,selection:null,canvasComponent:Canvas}));
+    expect(screen.getByRole('alert').textContent).toBe('Visible mapping error');
+    expect(document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')).toBeNull();
   });
   it('Hangar labels hide and render as text only',async ()=>{
     const scene=new THREE.Group();const engine=new THREE.Group();engine.name='EngineA';engine.userData.objectId='SYN-CP-A-ENG-001';engine.position.set(0,3,0);scene.add(engine);
