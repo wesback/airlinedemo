@@ -186,28 +186,18 @@ public class ContainerHostingContractTests
         var variables = Tf("variables.tf");
         string[] required =
         {
-            "subscription_id", "tenant_id", "location", "presenter_reviewer_cidrs",
-            "budget_amount", "budget_start_date", "budget_contact_emails",
-            "terraform_state_backend", "image_digest", "demo_passcode_secret_uri",
-        };
-        string[] optionalWithDerivedDefaults =
-        {
-            "resource_group_name", "vnet_address_space", "app_subnet_cidr", "private_endpoint_subnet_cidr",
+            "subscription_id", "tenant_id", "location", "resource_group_name", "vnet_address_space",
+            "app_subnet_cidr", "private_endpoint_subnet_cidr", "presenter_reviewer_cidrs",
             "egress_allowed_destinations", "sql_server_name", "sql_database_name", "storage_account_name",
-            "key_vault_name", "model_account_name", "model_endpoint_subdomain", "acr_name",
-            "container_apps_environment_name", "container_app_name",
+            "key_vault_name", "model_account_name", "model_endpoint_subdomain", "budget_amount",
+            "budget_start_date", "budget_contact_emails", "terraform_state_backend", "acr_name",
+            "container_apps_environment_name", "container_app_name", "image_digest", "demo_passcode_secret_uri",
         };
 
         foreach (var name in required)
         {
             var block = Block(variables, $"variable \"{name}\"");
             Assert.DoesNotMatch(@"(?m)^\s*default\s*=", block);
-        }
-
-        foreach (var name in optionalWithDerivedDefaults)
-        {
-            var block = Block(variables, $"variable \"{name}\"");
-            Assert.Matches(@"(?m)^\s*default\s*=", block);
         }
 
         var cidrs = Block(variables, "variable \"presenter_reviewer_cidrs\"");

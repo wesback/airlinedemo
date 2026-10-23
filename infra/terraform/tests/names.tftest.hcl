@@ -20,6 +20,20 @@ variables {
   demo_passcode_secret_uri      = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
   security_response_owner       = { name = "Response Owner", email = "owner@example.invalid" }
   terraform_state_backend       = { storage_account_name = "stdemotfstate" }
+  resource_group_name               = null
+  vnet_address_space                = ["10.20.0.0/16"]
+  app_subnet_cidr                   = null
+  private_endpoint_subnet_cidr      = null
+  egress_allowed_destinations       = []
+  sql_server_name                   = null
+  sql_database_name                 = "airlinedemo"
+  key_vault_name                    = null
+  model_account_name                = null
+  model_endpoint_subdomain          = null
+  acr_name                          = null
+  container_apps_environment_name   = null
+  container_app_name                = null
+  storage_account_name              = null
 }
 
 run "names_and_ranges_derive_from_prefix" {

@@ -28,25 +28,21 @@ variable "location" {
 variable "resource_group_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "vnet_address_space" {
   description = "Virtual network range. Both subnets default to /24 slices of the first entry."
   type        = list(string)
-  default     = ["10.20.0.0/16"]
 }
 
 variable "app_subnet_cidr" {
   description = "Optional. Defaults to the second /24 of the first vnet_address_space entry."
   type        = string
-  default     = null
 }
 
 variable "private_endpoint_subnet_cidr" {
   description = "Optional. Defaults to the third /24 of the first vnet_address_space entry."
   type        = string
-  default     = null
 }
 
 variable "presenter_reviewer_cidrs" {
@@ -61,7 +57,6 @@ variable "presenter_reviewer_cidrs" {
 variable "egress_allowed_destinations" {
   description = "Allowed egress CIDRs. Empty (the default) allows none."
   type        = list(string)
-  default     = []
   nullable    = false
   validation {
     condition     = alltrue([for c in var.egress_allowed_destinations : can(cidrnetmask(c))])
@@ -72,13 +67,11 @@ variable "egress_allowed_destinations" {
 variable "sql_database_name" {
   description = "SQL database name."
   type        = string
-  default     = "airlinedemo"
 }
 
 variable "sql_server_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "sql_admin_group_name" {
@@ -92,25 +85,21 @@ variable "sql_admin_group_object_id" {
 variable "storage_account_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "key_vault_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "model_account_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "model_endpoint_subdomain" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "model_deployment_name" {
@@ -222,19 +211,16 @@ variable "terraform_state_backend" {
 variable "acr_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "container_apps_environment_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "container_app_name" {
   description = "Optional. Derived from name_prefix when not set."
   type        = string
-  default     = null
 }
 
 variable "image_digest" {
