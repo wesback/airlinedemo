@@ -1,6 +1,8 @@
+import { createElement } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HangarLocalDiagnostics, { buildHangarLocalDiagnostics, HANGAR_LOCAL_FALLBACK_CODES } from '../src/hangar/localDiagnostics';
+import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/hangar/HangarCanvasAdapter';
 
 afterEach(() => {
   cleanup();
@@ -9,7 +11,7 @@ afterEach(() => {
 
 describe('HangarLocalDiagnostics', () => {
   it('HangarLocalDiagnostics displays NFR-006 fields', () => {
-    expect(HANGAR_LOCAL_FALLBACK_CODES).toEqual(['unsupported_browser', 'webgl_unavailable', 'asset_invalid', 'asset_load_failed', 'render_failed', 'refresh_failed']);
+    expect(HANGAR_LOCAL_FALLBACK_CODES).toEqual(['unsupported_browser', 'webgl_unavailable', 'asset_invalid', 'asset_load_failed', 'render_failed', 'contract_invalid', 'refresh_failed']);
     const successView = render(<HangarLocalDiagnostics presenter role="presenter" sceneLoadDurationMs={125} webgl2Available browserSupported fallbackReason={null} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open local diagnostics' }));
     const panel = screen.getByRole('region', { name: 'Local diagnostics panel' });
@@ -21,7 +23,7 @@ describe('HangarLocalDiagnostics', () => {
       const view = render(<HangarLocalDiagnostics presenter={true} open={true} sceneLoadDurationMs={125} webgl2Available={false} browserSupported={false} fallbackReason={fallbackReason} />);
       const fallbackPanel = view.container.querySelector('[role="region"]');
       expect(fallbackPanel).not.toBeNull();
-      expect(Array.from(fallbackPanel!.querySelectorAll('dd')).map((node) => node.textContent)).toEqual(['125', 'false', 'false', fallbackReason]);
+      expect(Array.from(fallbackPanel!.querySelectorAll('dd')).map((node) => node.textContent)).toEqual(['null', 'false', 'false', fallbackReason]);
       view.unmount();
     }
 
@@ -32,6 +34,27 @@ describe('HangarLocalDiagnostics', () => {
     expect(buildHangarLocalDiagnostics({ presenter: false, sceneLoadDurationMs: 1, webgl2Available: true, browserSupported: true, fallbackReason: null })).toBeNull();
     render(<HangarLocalDiagnostics presenter={false} open={true} sceneLoadDurationMs={1} webgl2Available browserSupported fallbackReason={null} />);
     expect(screen.queryByRole('region', { name: 'Local diagnostics panel' })).toBeNull();
+  });
+
+  it('Hangar context loss falls back once without remount', () => {
+    const mutation = vi.fn(); const mountCanvas = vi.fn();
+    const snapshots = [{ revision: 7, owner: 'Technical reviewer', capabilityLabel: 'Rules-based' }];
+    const contextCanvas = document.createElement('canvas');
+    function CanvasStub(props: any) { mountCanvas(props.onCreated); return createElement('canvas', { 'aria-label': '3D hangar scene', ref: (node: HTMLCanvasElement | null) => { if (node && props.onCreated) props.onCreated({ gl: { domElement: contextCanvas } }); } }); }
+    const view = render(createElement(HangarCanvasAdapter, { camera: createHangarOwnedPerspectiveCamera(), canvasComponent: CanvasStub, onContextLost: () => { contextLostCount += 1; } }));
+    let contextLostCount = 0;
+    fireEvent(contextCanvas, new Event('webglcontextlost'));
+    expect(contextLostCount).toBe(1);
+    expect(view.container.querySelector('[aria-label="3D hangar scene"]')).toBeNull();
+    expect(mutation).not.toHaveBeenCalled();
+    expect(snapshots[0]).toMatchObject({ revision: 7 });
+    fireEvent(contextCanvas, new Event('webglcontextrestored')); view.unmount();
+  });
+
+  it('Hangar diagnostics exact load duration and fallback null', () => {
+    const now = vi.fn(() => 3400);
+    expect(buildHangarLocalDiagnostics({ presenter: true, clockStart: 1000, now, webgl2Available: true, browserSupported: true, fallbackReason: null })).toMatchObject({ sceneLoadDurationMs: 2400 });
+    expect(buildHangarLocalDiagnostics({ presenter: true, clockStart: 1000, now, webgl2Available: false, browserSupported: true, fallbackReason: 'render_failed' })).toMatchObject({ sceneLoadDurationMs: null });
   });
 
   it('HangarLocalDiagnostics sends zero transport calls', () => {

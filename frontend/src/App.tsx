@@ -29,6 +29,7 @@ export type HangarEntryAppProps = {
   hangarBrowserSupported?: unknown;
   hangarWebGl2Probe?: unknown;
   hangarLazyLoader?: () => unknown | Promise<unknown>;
+  hangarMonotonicClock?: () => number;
   hangarAircraftSelectionHandler?: (aircraftId: string) => unknown;
 };
 
@@ -37,6 +38,7 @@ export default function App({
   hangarBrowserSupported,
   hangarWebGl2Probe,
   hangarLazyLoader,
+  hangarMonotonicClock,
   hangarAircraftSelectionHandler,
 }: HangarEntryAppProps = {}) {
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
@@ -68,7 +70,8 @@ export default function App({
   const [hangarActionMessage, setHangarActionMessage] = useState('');
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
-  const [hangarDiagnostics, setHangarDiagnostics] = useState({ sceneLoadDurationMs: 0, webgl2Available: false, browserSupported: false, fallbackReason: null as 'unsupported_browser' | 'webgl_unavailable' | 'asset_invalid' | 'asset_load_failed' | 'render_failed' | 'refresh_failed' | null });
+  const [hangarDiagnostics, setHangarDiagnostics] = useState<{sceneLoadDurationMs:number|null;webgl2Available:boolean;browserSupported:boolean;fallbackReason:'unsupported_browser'|'webgl_unavailable'|'asset_invalid'|'asset_load_failed'|'render_failed'|'contract_invalid'|'refresh_failed'|null}>({ sceneLoadDurationMs: null, webgl2Available: false, browserSupported: false, fallbackReason: null });
+  const hangarEntryStartedAt = useRef<number|null>(null);
   const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = Object.fromEntries(hangarEntries.map((entry, index) => [entry.caseId, index === 0 ? { x: 4, z: -4 } : index === 1 ? { x: -4, z: 4 } : { x: 0, z: 6 }]));
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
     if (!canAdmitHangarCommands(hangarSnapshot)) return;
@@ -157,7 +160,7 @@ export default function App({
         setHangarStale(true);
         setHangarView('fallback');
         setHangarFallback('refresh_failed');
-        setHangarDiagnostics((current) => ({ ...current, fallbackReason: 'refresh_failed' }));
+        setHangarDiagnostics((current) => ({ ...current, sceneLoadDurationMs: null, fallbackReason: 'refresh_failed' }));
       }
     });
   }
@@ -170,7 +173,8 @@ export default function App({
   }, [hangarView, hangarEntries, hangarSnapshot]);
 
   async function enterHangar() {
-    const startedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+    const startedAt = hangarMonotonicClock ? hangarMonotonicClock() : (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+    hangarEntryStartedAt.current = startedAt;
     setHangarView('loading');
     setHangarSceneLoaded(false);
     HangarSceneRef.current = null;
@@ -229,11 +233,12 @@ export default function App({
         ? String((error as {fallback:unknown}).fallback) : 'refresh_failed';
       if (fallback === 'contract_invalid') {
         setHangarView('contract-error');
+        setHangarDiagnostics((current) => ({ ...current, sceneLoadDurationMs: null, fallbackReason: 'contract_invalid' }));
         return;
       }
       setHangarFallback('refresh_failed');
       setHangarView('fallback');
-      setHangarDiagnostics((current) => ({ ...current, fallbackReason: 'refresh_failed' }));
+      setHangarDiagnostics((current) => ({ ...current, sceneLoadDurationMs: null, fallbackReason: 'refresh_failed' }));
       return;
     }
     const { isHangarBrowserSupported, probeWebGl2Capability, selectHangarEntry, loadHangarScene, createHangarSceneMotionControllers } = await import('./hangar/entryController');
@@ -251,12 +256,11 @@ export default function App({
       contractVersion: hangarContractVersion,
       webgl2,
     }, hangarLazyLoader ?? (() => loadHangarScene(hangarMotionControllers)));
-    const endedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
     const fallbackReason = decision.fallbackReason && decision.fallbackReason !== 'contract_invalid'
       ? decision.fallbackReason as 'unsupported_browser' | 'webgl_unavailable'
       : null;
     const webgl2Available = webgl2 !== null && typeof webgl2 === 'object';
-    setHangarDiagnostics({ sceneLoadDurationMs: Math.max(0, Math.round(endedAt - startedAt)), webgl2Available, browserSupported, fallbackReason });
+    setHangarDiagnostics({ sceneLoadDurationMs: decision.mode === 'fallback' ? null : null, webgl2Available, browserSupported, fallbackReason });
     if (decision.mode === '3d') {
       if (typeof decision.loadedScene === 'function') HangarSceneRef.current = decision.loadedScene as ComponentType<HangarSceneProps>;
       setHangarSceneLoaded(true);
@@ -403,7 +407,7 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
-                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} /> : <canvas aria-label="3D hangar scene" />}
+                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} onCreated={(state:any)=>{const element=state?.gl?.domElement ?? state?.canvas;if(element&&typeof element.addEventListener==='function')element.addEventListener('webglcontextlost',()=>{setHangarView('fallback');setHangarFallback('render_failed');setHangarSceneLoaded(false);HangarSceneRef.current=null;setHangarDiagnostics((current)=>({...current,sceneLoadDurationMs:null,fallbackReason:'render_failed'}));},{once:true});const endedAt=hangarMonotonicClock?hangarMonotonicClock():(typeof performance!== 'undefined'&&typeof performance.now==='function'?performance.now():Date.now());const startedAt=hangarEntryStartedAt.current;if(startedAt!==null)setHangarDiagnostics((current)=>({...current,sceneLoadDurationMs:Math.max(0,Math.round(endedAt-startedAt)),fallbackReason:null}));}} onContextLost={()=>{setHangarView('fallback');setHangarFallback('render_failed');setHangarSceneLoaded(false);HangarSceneRef.current=null;setHangarDiagnostics((current)=>({...current,sceneLoadDurationMs:null,fallbackReason:'render_failed'}));}} /> : <canvas aria-label="3D hangar scene" />}
                       <HangarGuideLineAdapter
                         entries={hangarEntries}
                         markers={hangarDataRoomMarkers}
