@@ -165,7 +165,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
     const handleCameraKey=(key:string)=>{const result=controllers.camera.key(key);if(result.handled)setCameraState(result.state);};
     const sceneView={contractVersion:1,cases:[{caseId:'cp-case-a',status:{assessment:'ready'},owner:'A',nextAction:{text:'Review'},capabilityLabel:'Rules-based'},{caseId:'cp-case-b',status:{assessment:'ready'},owner:'B',nextAction:{text:'Review'},capabilityLabel:'Rules-based'},{caseId:'cp-case-c',status:{assessment:'ready'},owner:'C',nextAction:{text:'Review'},capabilityLabel:'Rules-based'}],selectedObjectId:selected};
     const sceneGroup=buildHangarAircraftSceneGroups(undefined,sceneView,(id)=>{setSelected(id);onSelect?.(id);});
-    return createElement('div',{'data-hangar-reduced-motion':reduced?'true':'false','data-hangar-camera-duration':String(controllers.camera.transitionDuration),'data-hangar-camera-position':`${cameraState.radius},${cameraState.azimuthDegrees},${cameraState.polarDegrees}`},
+    return createElement('div',{'data-hangar-reduced-motion':reduced?'true':'false','data-hangar-camera-duration':String(controllers.camera.transitionDuration),'data-hangar-camera-position':`${cameraState.radius},${cameraState.azimuthDegrees},${cameraState.polarDegrees}`,'data-hangar-avatar-target':`${avatarState.x},${avatarState.z}`},
       createElement('section',{'data-hangar-camera-region':true,'aria-label':'Camera controls',tabIndex:0,onKeyDown:(event:any)=>{if(event.key)handleCameraKey(event.key);}},
         createElement('button',{type:'button',onClick:()=>navigateCamera('overview')},'Overview'),
         createElement('button',{type:'button',onClick:()=>navigateCamera('aircraft','A')},'View Case A'),
