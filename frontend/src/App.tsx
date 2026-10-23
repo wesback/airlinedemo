@@ -141,7 +141,7 @@ export default function App({
         }
         if (!cases.length) throw new Error('refresh_failed');
         const recoveredCaseSnapshots = Object.fromEntries(Object.entries(nextCaseSnapshots).map(([caseId, snapshot]) => [caseId,{...snapshot,current:true,fallbackReason:null}]));
-        const recoveredSnapshot = recoveredCaseSnapshots[cases[cases.length-1].caseId] ?? nextSnapshot;
+        const recoveredSnapshot = Object.values(recoveredCaseSnapshots).reduce<ServerSceneSnapshot|null>((highest, snapshot) => !highest || (snapshot.revision ?? -1) > (highest.revision ?? -1) ? snapshot : highest, nextSnapshot);
         hangarCaseSnapshotsRef.current = recoveredCaseSnapshots;
         hangarSnapshotRef.current = recoveredSnapshot;
         setHangarCaseSnapshots(recoveredCaseSnapshots);
