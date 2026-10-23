@@ -1,0 +1,289 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 529,
+  "branch": "ai-sdlc/issue-529",
+  "commitSha": "637e5dadeb0473031328b78f6d06b32e605cbe09",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The guide adapter is mounted in App and its route behavior is tested in isolation, but the loaded scene does not receive the shared selection handler. The tests also do not exercise the required walk and isolation behaviors through the production App path.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 279,
+          "message": "Pass the shared selection handler into the loaded HangarScene and connect its pointer and keyboard selection paths to it. The added App buttons do not verify or provide that scene wiring.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "App renders HangarScene without passing a selection handler. The separate buttons and HangarGuideLineAdapter call sharedHangarAircraftSelectionHandler, but the loaded scene's pointer and keyboard selection paths are not connected to it.",
+            "failureScenario": "When a user selects an aircraft through the loaded scene's pointer or keyboard controls, that action does not invoke the supplied handler, so the scene actions and guide-line arrival do not use the same handler as required."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 26,
+          "message": "The named test does not exercise live directions, Escape, and route replacement through the production App path required by the criterion.",
+          "confidence": 0.9,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named live-directions and replacement test mounts HangarGuideLineAdapter directly. The App-level portion of the reduced-motion test confirms the line and static state, but does not walk, check production live directions, clear the route with Escape, or replace it.",
+            "failureScenario": "If App's production walk region stops forwarding accepted steps to the guide adapter, the direct adapter test still passes and the App test never walks, so the required production live directions and route updates can be broken without failing this test."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 72,
+          "message": "The isolation criterion requires production-path request and diagnostics counts around each activity; the named test only checks a transport mock on a standalone adapter and does not assert those production counts.",
+          "confidence": 0.92,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test checks the transport mock only while interacting with a directly rendered adapter. Its App-level portion checks reduced-motion and selection controls, but does not record production request counts or diagnostics-call counts around rack confirmation, walking, route recomputation, or guide display.",
+            "failureScenario": "If a production activity starts making a network request or invokes diagnostics, this named test still passes because it asserts neither production counter."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The production App mounts the guide adapter, but the scene's pointer and keyboard selection paths are not connected to its shared handler. The tests also do not verify live directions or request and diagnostics isolation through the production App path.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 279,
+          "message": "Pass the shared selection handler into the production HangarScene and test that scene's pointer and keyboard actions. The added standalone buttons and null test scene do not establish the required shared production selection path.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "App renders the loaded HangarScene without passing it sharedHangarAircraftSelectionHandler. The added buttons call that handler separately, while HangarGuideLineAdapter receives it directly. The HangarEntry tests use a ProductionScene that returns null.",
+            "failureScenario": "In the normal App, selecting an aircraft through the scene's pointer or keyboard path does not invoke the supplied handler, so scene selection and guide-line arrival do not use the same handler as required."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 25,
+          "message": "The production App path is not tested for the exact live direction and remaining distance after an accepted step, as required by the third acceptance criterion.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The live directions and replacement test renders HangarGuideLineAdapter directly and checks its direction text. The App integration in the reduced-motion test does not walk or assert a direction and remaining distance.",
+            "failureScenario": "If the production App path stops updating the live region after an accepted step, the standalone adapter test still passes and the production tests do not check the required direction and distance."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarGuideLine.test.tsx",
+          "line": 76,
+          "message": "The production-path test does not record request and diagnostics-call counts around rack confirmation, walking, route recomputation, and guide display, so it cannot prove the fourth acceptance criterion.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The transport spy is attached to a standalone adapter render. The later App render performs rack confirmation and reduced-motion interactions without recording network request or diagnostics-call counts.",
+            "failureScenario": "If a production App activity starts making a network request or calling diagnostics, this test still passes because neither count is observed on the production path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed production path uses static Data Room entries and markers, React-rendered content, and no network or unsafe deserialization path. I found no reachable security vulnerability in the diff.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarEntry.test.ts",
+      "frontend/tests/HangarGuideLine.test.tsx",
+      "frontend/tests/HangarRackMenu.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
