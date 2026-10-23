@@ -1,0 +1,217 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 585,
+  "branch": "ai-sdlc/issue-585",
+  "commitSha": "cbe51521f0245f78366661fc20f42b6fe964ba32",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The builder accepts arbitrarily large routes and can allocate oversized geometry. It also silently drops route data carrying selectable authority while returning the rest of the scene.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneBuilder.ts",
+          "line": 214,
+          "message": "The route has no length bound, so an oversized route can trigger an unbounded TubeGeometry allocation. Reject oversized routes before constructing the geometry.",
+          "confidence": 0.97,
+          "category": "performance",
+          "evidence": {
+            "codePathTraced": "sceneRoute accepts any non-empty points array whose points are inside the floor; the builder then sets TubeGeometry segments to route.length * 12.",
+            "failureScenario": "A route with a very large number of valid floor points passes validation and allocates a correspondingly large geometry instead of producing no tube and a route error."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneBuilder.ts",
+          "line": 64,
+          "message": "A route with selectable authority is silently omitted while the scene is still returned, contrary to the criterion requiring no group or action.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When a route point contains objectId or selectionHandler, sceneRoute returns null. The caller treats null as no route and continues returning the scene root.",
+            "failureScenario": "A route point carrying an objectId is rejected as route data, but the builder still returns a group rather than rejecting the scene with no group or action."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The scene additions are covered by tests for their basic geometry and several invalid inputs. Route validation still accepts arbitrarily large routes, contrary to the acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneBuilder.ts",
+          "line": 58,
+          "message": "The route validation has no bound on route length. The named `builds shadows route and selection ring` test checks an out-of-floor point, but not the criterion's unbounded-route rejection and exact visible route error.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "sceneRoute accepts any nonempty route array whose points are finite and inside the floor; the builder then creates TubeGeometry with segments proportional to route.length.",
+            "failureScenario": "A caller supplies an extremely large in-bounds route. The builder accepts it and allocates a correspondingly large geometry instead of rejecting the unbounded route with the specified visible route error."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "An unbounded route reaches geometry construction and can make rendering consume excessive memory or stall.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneBuilder.ts",
+          "line": 215,
+          "message": "[A06:2025] The route has no size limit, so an unbounded route can exhaust rendering resources. Reject routes above a fixed maximum before constructing TubeGeometry.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "Caller-supplied route points pass through sceneRoute without a length bound, then route.length determines TubeGeometry's segment count.",
+            "failureScenario": "A caller supplies a very large in-floor route; the builder allocates geometry for 12 segments per point and can exhaust browser memory or freeze rendering instead of returning a route error."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSceneBuilder.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
