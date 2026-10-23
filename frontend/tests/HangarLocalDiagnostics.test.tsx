@@ -53,9 +53,17 @@ describe('HangarLocalDiagnostics', () => {
     }));
     const contextCanvas = document.createElement('canvas');
     const mountCanvas = vi.fn();
-    function ProductionScene(props: { onCreated?: (state: unknown) => unknown }) {
+    function CanvasComponent(props: { onCreated?: (state: unknown) => unknown }) {
       useEffect(() => { mountCanvas(); props.onCreated?.({ gl: { domElement: contextCanvas } }); }, []);
       return createElement('canvas', { 'aria-label': '3D hangar scene' });
+    }
+    function ProductionScene(props: { onCreated?: (state: unknown) => unknown; onContextLost?: () => unknown }) {
+      return createElement(HangarCanvasAdapter, {
+        camera: createHangarOwnedPerspectiveCamera(),
+        canvasComponent: CanvasComponent,
+        onCreated: props.onCreated,
+        onContextLost: props.onContextLost,
+      });
     }
     const loader = vi.fn(() => ProductionScene);
     render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: loader }));
@@ -68,6 +76,8 @@ describe('HangarLocalDiagnostics', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(screen.queryByLabelText('Hangar 3D scene')).toBeNull();
     expect(screen.getByLabelText('Hangar retained snapshot').textContent).toBe('Revision: 7; Labels: Technical reviewer; Rules-based');
+    fireEvent.click(screen.getByLabelText('Open local diagnostics'));
+    expect(Array.from(screen.getByRole('region', { name: 'Local diagnostics panel' }).querySelectorAll('dd')).map((node) => node.textContent)).toEqual(['null', 'true', 'true', 'render_failed']);
     expect(mutationCalls).toEqual([]);
     expect(modelRequests).not.toHaveBeenCalled();
 
@@ -85,11 +95,14 @@ describe('HangarLocalDiagnostics', () => {
     const clock = vi.fn()
       .mockReturnValueOnce(1000)
       .mockReturnValueOnce(3400);
-    function ProductionScene(props: { onCreated?: (state: unknown) => unknown }) {
+    function CanvasComponent(props: { onCreated?: (state: unknown) => unknown }) {
       useEffect(() => { props.onCreated?.({ gl: { domElement: document.createElement('canvas') } }); }, []);
       return createElement('canvas', { 'aria-label': '3D hangar scene' });
     }
-    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => ProductionScene, hangarMonotonicClock: clock }));
+    function ProductionScene(props: { onCreated?: (state: unknown) => unknown; onContextLost?: () => unknown }) {
+      return createElement(HangarCanvasAdapter, { camera: createHangarOwnedPerspectiveCamera(), canvasComponent: CanvasComponent, onCreated: props.onCreated, onContextLost: props.onContextLost });
+    }
+    const successView = render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => ProductionScene, hangarMonotonicClock: clock }));
     await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByLabelText('Hangar 3D scene');
@@ -99,7 +112,19 @@ describe('HangarLocalDiagnostics', () => {
     expect(Array.from(panel.querySelectorAll('dt')).map((node) => node.textContent)).toEqual(['sceneLoadDurationMs', 'webgl2Available', 'browserSupported', 'fallbackReason']);
     expect(Array.from(panel.querySelectorAll('dd')).map((node) => node.textContent)).toEqual(['2400', 'true', 'true', 'null']);
 
-    expect(buildHangarLocalDiagnostics({ presenter: true, clockStart: 1000, now: vi.fn(() => 3400), webgl2Available: false, browserSupported: true, fallbackReason: 'render_failed' })).toMatchObject({ sceneLoadDurationMs: null });
+    expect(buildHangarLocalDiagnostics({ presenter: true, clockStart: 1000, now: vi.fn(() => 3400), webgl2Available: false, browserSupported: true, fallbackReason: 'render_failed' })).toEqual({ sceneLoadDurationMs: null, webgl2Available: false, browserSupported: true, fallbackReason: 'render_failed' });
+
+    successView.unmount();
+    const fallbackClock = vi.fn(() => 1000);
+    const fallbackView = render(createElement(HangarApp, { hangarBrowserSupported: false, hangarWebGl2Probe: { webgl2: false }, hangarLazyLoader: () => ProductionScene, hangarMonotonicClock: fallbackClock }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByLabelText('Open local diagnostics'));
+    const fallbackPanel = screen.getByRole('region', { name: 'Local diagnostics panel' });
+    expect(Array.from(fallbackPanel.querySelectorAll('dt')).map((node) => node.textContent)).toEqual(['sceneLoadDurationMs', 'webgl2Available', 'browserSupported', 'fallbackReason']);
+    expect(Array.from(fallbackPanel.querySelectorAll('dd')).map((node) => node.textContent)).toEqual(['null', 'false', 'false', 'unsupported_browser']);
+    fallbackView.unmount();
   });
 
   it('HangarLocalDiagnostics sends zero transport calls', () => {
