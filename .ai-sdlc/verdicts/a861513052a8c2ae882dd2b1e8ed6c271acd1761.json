@@ -1,0 +1,197 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 573,
+  "branch": "ai-sdlc/issue-573",
+  "commitSha": "a861513052a8c2ae882dd2b1e8ed6c271acd1761",
+  "round": 0,
+  "pipelineVersion": "1a93856",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The conditional expression addresses the reported null validation failure. The change does not add a test or assertion for the cause, as required by acceptance criterion 3.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/variables.tf",
+          "line": 121,
+          "message": "Acceptance criterion 3 requires a repository test or assertion for this cause, where one can. Add a Terraform test covering the null default and whitespace rejection.",
+          "confidence": 0.87,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The variable validation evaluates the expression when model_deployment_name is null; the previous logical-or expression could still evaluate trimspace(null).",
+            "failureScenario": "If the conditional fix is reverted, a Terraform test using the default null value can fail during validation. No test or assertion was added to pin null acceptance or the whitespace rejection."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The conditional change addresses the null validation failure, and the build workflow runs terraform test. The tests do not cover the null case, so they would not catch a regression to the failing expression.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/model-region-and-deployment.tftest.hcl",
+          "line": 101,
+          "message": "Acceptance criterion 3 asks for a test or assertion covering the cause where possible, but no test covers model_deployment_name being null. Add a Terraform test for the omitted or explicitly null optional value that would fail with the original validation expression.",
+          "confidence": 0.93,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The existing model deployment tests set model_deployment_name to a non-empty string, so none exercises the variable's null default.",
+            "failureScenario": "If the null-safe conditional in variables.tf is reverted to the original expression, terraform test can still pass because these tests supply a string. Omitting the optional variable then evaluates trimspace(null), reproducing the validation failure this change is meant to fix."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The validation change does not present an apparent security vulnerability. The change does not satisfy the acceptance criterion requiring a test or assertion for the cause.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/variables.tf",
+          "line": 121,
+          "message": "Acceptance criterion 3 requires a test or assertion covering the cause where possible. No test for the null `model_deployment_name` validation is included in this change.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The validation expression changes, but the diff adds no test or assertion for the null deployment name that this change handles.",
+            "failureScenario": "If a later edit restores the original expression, the repository has no test added here that asserts null is accepted, so the regression may go undetected."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "tdd-red",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 0,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": false,
+    "reason": "no test files added or changed in this branch"
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
