@@ -7,9 +7,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts/bootstrap-deployment.sh"
 DESTROY = ROOT / "scripts/destroy-deployment.sh"
+PREBOOTSTRAP = ROOT / "scripts/prebootstrap-deployment.sh"
 
 
 class LifecycleScriptTests(unittest.TestCase):
+    def test_prebootstrap_configuration_and_help(self):
+        help_result = subprocess.run([str(PREBOOTSTRAP), "--help"], cwd=ROOT,
+                                     text=True, capture_output=True)
+        self.assertEqual(0, help_result.returncode)
+        self.assertIn("--register-providers", help_result.stdout)
+
+        missing = subprocess.run([str(PREBOOTSTRAP)], cwd=ROOT,
+                                 env={"PATH": os.environ.get("PATH", "")},
+                                 text=True, capture_output=True)
+        self.assertNotEqual(0, missing.returncode)
+        for name in ("AZURE_SUBSCRIPTION_ID", "AZURE_TENANT_ID",
+                     "RESOURCE_GROUP_NAME", "TFVARS_FILE", "BACKEND_CONFIG_FILE"):
+            self.assertIn(f"required deployment environment variable {name}", missing.stderr)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.bin = Path(self.temp.name)

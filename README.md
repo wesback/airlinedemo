@@ -68,6 +68,12 @@ The operator supplies subscription, tenant, resource-group, file-path, network, 
 
 ## Deploy and release
 
+Run `scripts/prebootstrap-deployment.sh` before deployment to verify tools,
+Azure authentication, subscription and tenant selection, external Terraform
+files, provider registration, and Terraform formatting. It does not plan or
+apply infrastructure. Provider registration requires the explicit
+`--register-providers` flag.
+
 Use `scripts/bootstrap-deployment.sh` for operator bootstrap. The script initializes protected Terraform state, creates and displays one saved plan, and applies that exact plan only after explicit confirmation. It does not build, sign, push, or deploy an image.
 
 Protected CI builds provenance-backed images. An approved revision must use the existing protected `release` workflow with a successful build run ID and exact image digest. The workflow verifies provenance, requires product-owner approval, verifies and signs the digest, then deploys it through Azure Container Apps. It never accepts a mutable tag or deploys locally.
