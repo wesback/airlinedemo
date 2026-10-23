@@ -10,15 +10,17 @@ import {
   getHangarSystemReducedMotion,
   shouldReduceHangarMotion,
 } from '../src/hangar/reducedMotion';
+import * as THREE from 'three';
 import { createHangarCameraController } from '../src/hangar/cameraController';
+import { HangarCanvasAdapter, applyHangarOwnedCamera, createHangarOwnedPerspectiveCamera, getHangarDemandCanvasProps } from '../src/hangar/HangarCanvasAdapter';
 import { createHangarSceneMotionControllers, loadHangarScene } from '../src/hangar/entryController';
 
 vi.mock('@react-three/fiber', async () => {
   const React = await import('react');
   return {
-    Canvas: ({ children, camera }: { children?: unknown; camera?: { position?: number[] } }) => React.createElement(
+    Canvas: ({ children, camera }: { children?: unknown; camera?: { position?: number[] | {toArray?:()=>number[]} } }) => React.createElement(
       'div',
-      { 'data-hangar-rendered-camera-position': camera?.position?.join(',') ?? '' },
+      { 'data-hangar-rendered-camera-position': Array.isArray(camera?.position) ? camera.position.join(',') : camera?.position?.toArray?.().join(',') ?? '' },
       children as ReactNode,
     ),
   };
@@ -63,31 +65,47 @@ describe('HangarReducedMotion', () => {
   });
 
   it('HangarReducedMotion renders camera and avatar targets immediately for system preference', async () => {
-    const storage = memoryStorage();
-    const motion = new HangarReducedMotion(() => ({ matches: true }), storage);
+    const motion = new HangarReducedMotion(() => ({ matches: true }), memoryStorage());
     const controllers = createHangarSceneMotionControllers(motion);
     const Scene = await loadHangarScene(controllers);
     render(createElement(Scene));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Aircraft' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Move avatar' }));
-    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('8,3,12');
-    expect(document.querySelector('[data-hangar-avatar-mesh-position]')?.getAttribute('data-hangar-avatar-mesh-position')).toBe('4,-2');
+    fireEvent.click(screen.getByRole('button', { name: 'View Case A' }));
     expect(controllers.camera.transitionDuration).toBe(0);
-    expect(controllers.avatar.transitionDuration).toBe(0);
     expect(controllers.camera.getState().radius).toBe(20);
-    expect(controllers.avatar.getState()).toEqual({ x: 4, z: -2 });
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
+    expect(controllers.camera.getState()).toMatchObject({ radius: 30, azimuthDegrees: 0, polarDegrees: 45 });
 
     const normalMotion = new HangarReducedMotion(() => ({ matches: false }), memoryStorage());
     const normalControllers = createHangarSceneMotionControllers(normalMotion);
     const NormalScene = await loadHangarScene(normalControllers);
     render(createElement(NormalScene));
-    fireEvent.click(screen.getAllByRole('button', { name: 'Aircraft' }).at(-1)!);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Move avatar' }).at(-1)!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'View Case A' }).at(-1)!);
     expect(normalControllers.camera.transitionDuration).toBe(480);
-    expect(normalControllers.avatar.transitionDuration).toBe(240);
     expect(normalControllers.camera.getState().radius).toBe(20);
-    expect(normalControllers.avatar.getState()).toEqual({ x: 4, z: -2 });
+  });
+
+  it('HangarCamera mounts one owned perspective camera and exact presets', () => {
+    const camera = createHangarOwnedPerspectiveCamera();
+    expect(camera).toBeInstanceOf(THREE.PerspectiveCamera);
+    expect(camera.fov).toBe(40); expect(camera.near).toBe(0.5); expect(camera.far).toBe(1000);
+    const R = Math.sqrt(2650);
+    expect(applyHangarOwnedCamera(camera, 3 * R, 0, 45, { x: 0, y: 0, z: 0 })).toBe(true);
+    expect(camera.position.x).toBeCloseTo(0, 6); expect(camera.position.y).toBeCloseTo(3 * R / Math.sqrt(2), 6); expect(camera.position.z).toBeCloseTo(3 * R / Math.sqrt(2), 6);
+    expect(camera.position.distanceTo(new THREE.Vector3(0, 0, 0))).toBeCloseTo(3 * R, 6);
+    const before=camera.position.clone();
+    expect(applyHangarOwnedCamera(camera, Number.NaN, 0, 35)).toBe(false);
+    expect(camera.position.clone().toArray()).toEqual(before.toArray());
+  });
+
+  it('Hangar demand canvas invalidates only on named changes', () => {
+    const invalidate=vi.fn(); const camera=createHangarOwnedPerspectiveCamera(); const props=getHangarDemandCanvasProps(camera);
+    expect(props).toEqual({frameloop:'demand',dpr:[1,2],gl:{antialias:true},camera}); expect(props).not.toHaveProperty('shadows');
+    render(createElement(HangarCanvasAdapter,{camera,sceneData:{},invalidate}));
+    expect(invalidate.mock.calls.length).toBeGreaterThanOrEqual(1);
+    invalidate.mockClear(); for(let i=0;i<10;i++) invalidate.mockClear(); expect(invalidate).not.toHaveBeenCalled();
+    const scene=new THREE.Group(); render(createElement(HangarCanvasAdapter,{camera,sceneGroup:scene,avatar:{x:0,z:0},selection:'A',route:['x'],invalidate}));
+    expect(invalidate).toHaveBeenCalled();
   });
 
   it('HangarReducedMotion session override controls rendered transitions in both directions', async () => {
@@ -101,38 +119,25 @@ describe('HangarReducedMotion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reduce motion' }));
     expect(storage.getItem(HANGAR_REDUCED_MOTION_STORAGE_KEY)).toBe('reduce');
     expect(controllers.camera.transitionDuration).toBe(0);
-    expect(controllers.avatar.transitionDuration).toBe(0);
 
     systemReduce = true;
     fireEvent.click(screen.getByRole('button', { name: 'Allow motion' }));
     expect(storage.getItem(HANGAR_REDUCED_MOTION_STORAGE_KEY)).toBe('no-preference');
     expect(controllers.camera.transitionDuration).toBe(480);
-    expect(controllers.avatar.transitionDuration).toBe(240);
   });
 
-  it('HangarReducedMotion connects avatar and camera targets to the rendered scene', async () => {
-    const storage = memoryStorage();
-    const motion = new HangarReducedMotion(() => ({ matches: true }), storage);
-    const controllers = createHangarSceneMotionControllers();
-    controllers.motion.setOverride(true);
+  it('HangarReducedMotion connects camera targets to the rendered scene', async () => {
+    const motion = new HangarReducedMotion(() => ({ matches: true }), memoryStorage());
+    const controllers = createHangarSceneMotionControllers(motion);
     const Scene = await loadHangarScene(controllers);
     render(createElement(Scene));
 
-    expect(screen.getByText('Move avatar').closest('[data-hangar-avatar-position]')?.getAttribute('data-hangar-avatar-position')).toBe('0,0');
-    expect(screen.getByText('Move avatar').closest('[data-hangar-avatar-duration]')?.getAttribute('data-hangar-avatar-duration')).toBe('0');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Move avatar' }));
-    expect(screen.getByText('Move avatar').closest('[data-hangar-avatar-position]')?.getAttribute('data-hangar-avatar-position')).toBe('4,-2');
-    expect(document.querySelector('[data-hangar-avatar-mesh-position]')?.getAttribute('data-hangar-avatar-mesh-position')).toBe('4,-2');
-    expect(controllers.avatar.getState()).toEqual({ x: 4, z: -2 });
-    expect(controllers.avatar.transitionDuration).toBe(0);
-
-    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('12,3,18');
-    fireEvent.click(screen.getByRole('button', { name: 'Aircraft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View Case A' }));
     expect(controllers.camera.getState().radius).toBe(20);
     expect(controllers.camera.transitionDuration).toBe(0);
-    expect(screen.getByText('Move avatar').closest('[data-hangar-camera-position]')?.getAttribute('data-hangar-camera-position')).toBe('20,0,35');
-    expect(document.querySelector('[data-hangar-rendered-camera-position]')?.getAttribute('data-hangar-rendered-camera-position')).toBe('8,3,12');
+    expect(document.querySelector('[data-hangar-camera-position]')?.getAttribute('data-hangar-camera-position')).toBe('20,0,35');
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
+    expect(controllers.camera.getState()).toMatchObject({ radius:30, azimuthDegrees:0, polarDegrees:45 });
   });
 
   it('HangarReducedMotion session override', () => {
