@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Evaluation;
 using AirlineDemo.Api.SourceSystems;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -95,10 +96,15 @@ public sealed class BoundedInvestigator(
         // Evidence passed to the model is authorized before each call; all model inputs, including tool results, are token-estimated.
         var limits = _suppliedLimits ?? new InvestigationLimits();
         var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+        var investigationCorrelation = new GatewayCorrelation(
+            "investigation", traceId, "evidence-investigation", caseId,
+            $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
+            "investigation-v1", "call-1");
+        ModelGatewayTokenomics.ValidateCorrelation(investigationCorrelation);
         var evidence = new List<string>(documents);
         // The model chooses tool names, so only the declared tools are recorded by name; anything else is one fixed label.
         var knownTools = new HashSet<string>(StringComparer.Ordinal);
-        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits,
+        var gate = new GatedModelClient(modelClient, manifest, registry, dataRegion, evidenceVersion, evidence, limits, traceId, caseId,
             name => traceRecorder?.RecordToolCall(knownTools.Contains(name) ? name : InvestigationTraceRecorder.UnknownTool));
         IChatClient pipeline = new FunctionInvokingChatClient(gate);
         var tools = new CaseReadTools(caseId, source, limits, evidence.Add);
@@ -331,9 +337,12 @@ public sealed class BoundedInvestigator(
         string evidenceVersion,
         IReadOnlyList<string> evidence,
         IInvestigationLimits limits,
+        string traceId,
+        string caseId,
         Action<string>? onToolCall = null) : DelegatingChatClient(inner)
     {
         private readonly List<ModelCallTrace> _traces = [];
+        private int _attemptNumber;
         private readonly List<string> _toolsUsed = [];
 
         public IReadOnlyList<ModelCallTrace> Traces => _traces;
@@ -359,8 +368,15 @@ public sealed class BoundedInvestigator(
             for (var retriesUsed = 0; ; retriesUsed++)
             {
                 await limits.BeforeModelCallAsync(estimatedInputTokens, cancellationToken);
+                var attempt = ++_attemptNumber;
+                var correlation = new GatewayCorrelation(
+                    "investigation", traceId, "evidence-investigation", caseId,
+                    $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
+                    "investigation-v1", $"call-{attempt}");
+                ModelGatewayTokenomics.ValidateCorrelation(correlation);
                 try
                 {
+                    using var correlationScope = GatewayCorrelationContext.Begin(correlation);
                     var response = await base.GetResponseAsync(request, options, cancellationToken);
                     await limits.AfterModelCallAsync(response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, cancellationToken);
                     foreach (var call in response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>())
