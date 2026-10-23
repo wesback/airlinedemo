@@ -15,25 +15,39 @@ afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 describe('HangarSelectionEvidence',()=>{
   it('Hangar pointer picking calls exact object IDs once',()=>{
     const handler=vi.fn();
-    const sceneView={contractVersion:1,cases:[{caseId:'cp-case-a'},{caseId:'cp-case-b'},{caseId:'cp-case-c'}]};
+    const sceneView={contractVersion:1,cases:[{caseId:'cp-case-a'},{caseId:'cp-case-b'},{caseId:'cp-case-c'}],route:[{x:-4,z:20},{x:-4,z:15},{x:-4,z:9}],selectedObjectId:'SYN-CP-A-AIR-001'};
     const scene=buildHangarAircraftSceneGroups(hangarManifest,sceneView,handler)!;
     const camera=createHangarOwnedPerspectiveCamera(); camera.aspect=800/600; camera.position.set(0,3*Math.sqrt(2650)*Math.sin(Math.PI/4),3*Math.sqrt(2650)*Math.sin(Math.PI/4)); camera.lookAt(0,0,0); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
     const Canvas=(props:any)=>createElement('div',{...props,'data-testid':'hangar-canvas',style:{width:800,height:600}});
     const rendered=render(createElement(HangarCanvasAdapter,{sceneGroup:scene,camera,canvasComponent:Canvas}));
     const canvas=rendered.getByTestId('hangar-canvas'); vi.spyOn(canvas,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,width:800,height:600,right:800,bottom:600,toJSON(){}} as DOMRect);
+    let callCount=0;
     for(const letter of ['A','B','C']){
       for(const name of [`Aircraft${letter}Fuselage`,`Engine${letter}Visible`,`Component${letter}1Visible`,`Component${letter}2Visible`]){
         const object=scene.getObjectByName(name)! as THREE.Mesh; const center=new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3()); center.project(camera);
         const x=(center.x*.5+.5)*800,y=(-center.y*.5+.5)*600;
-        fireEvent.pointerDown(canvas,{clientX:x,clientY:y}); fireEvent.pointerUp(canvas,{clientX:x,clientY:y});
         const id=object.userData.objectId;
-        expect(handler).toHaveBeenCalledWith(id,expect.any(THREE.Object3D));
+        fireEvent.pointerDown(canvas,{clientX:x,clientY:y}); fireEvent.pointerUp(canvas,{clientX:x,clientY:y});
+        callCount++;
+        expect(handler).toHaveBeenCalledTimes(callCount);
+        expect(handler).toHaveBeenLastCalledWith(id,expect.any(THREE.Object3D));
       }
     }
     expect(handler).toHaveBeenCalledTimes(12);
     for(const call of handler.mock.calls) expect(call[0]).toMatch(/^SYN-CP-[ABC]-(AIR|ENG|CMP)-001|^SYN-CP-[ABC]-CMP-002$/);
     fireEvent.pointerDown(canvas,{clientX:400,clientY:300}); fireEvent.pointerMove(canvas,{clientX:407,clientY:300}); fireEvent.pointerUp(canvas,{clientX:407,clientY:300}); expect(handler).toHaveBeenCalledTimes(12);
     fireEvent.pointerDown(canvas,{clientX:799,clientY:599}); fireEvent.pointerUp(canvas,{clientX:799,clientY:599}); expect(handler).toHaveBeenCalledTimes(12);
+    for(const name of ['Floor','AvatarBody','AvatarHead','GuideLine','SelectionRing','HardHat','RackFrame']){
+      const target=scene.getObjectByName(name);
+      if(!target) continue;
+      const targetBox=new THREE.Box3().setFromObject(target);
+      const center=targetBox.getCenter(new THREE.Vector3()); center.project(camera);
+      const x=(center.x*.5+.5)*800,y=(-center.y*.5+.5)*600;
+      const before=handler.mock.calls.length;
+      fireEvent.pointerDown(canvas,{clientX:x,clientY:y}); fireEvent.pointerUp(canvas,{clientX:x,clientY:y});
+      expect(handler).toHaveBeenCalledTimes(before);
+    }
+    expect(handler).toHaveBeenCalledTimes(12);
   });
   it('HangarSelectionEvidence only opens projected objects',()=>{
     const read=vi.fn(); render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} identifier="SYN-CP-A-AIR-001" reader={read}/>);

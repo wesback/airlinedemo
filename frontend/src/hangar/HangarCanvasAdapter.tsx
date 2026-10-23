@@ -29,21 +29,23 @@ export function getHangarDemandCanvasProps(camera:THREE.PerspectiveCamera){ retu
 export function raycastHangarSelection(sceneGroup:THREE.Group|null|undefined,camera:THREE.PerspectiveCamera|null|undefined,clientX:number,clientY:number,width:number,height:number):{objectId:string;object:THREE.Object3D}|null{
   if(!sceneGroup||!camera||width<=0||height<=0||!Number.isFinite(clientX)||!Number.isFinite(clientY))return null;
   const ndc=new THREE.Vector2((clientX/width)*2-1,-(clientY/height)*2+1);
-  camera.updateMatrixWorld(true); camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true); camera.updateProjectionMatrix(); sceneGroup.updateMatrixWorld(true);
   const raycaster=new THREE.Raycaster(); raycaster.setFromCamera(ndc,camera);
-  const hits=raycaster.intersectObject(sceneGroup,true);
-  const ordered=[...hits.filter(hit=>typeof hit.object.userData.objectId==='string'&&hit.object.visible&&!(hit.object instanceof THREE.Mesh&&(hit.object.material as THREE.Material).visible===false)),...hits.filter(hit=>typeof hit.object.userData.pickObjectId==='string')];
-  for(const hit of ordered){let node:THREE.Object3D|null=hit.object;while(node){
-    const id=typeof node.userData.objectId==='string'?node.userData.objectId:typeof node.userData.pickObjectId==='string'?node.userData.pickObjectId:null;
-    if(id){
-      let selectable=node;
-      if(typeof node.userData.pickObjectId==='string'){
-        let match:THREE.Object3D|null=null;
-        sceneGroup.traverse(candidate=>{if(!match&&typeof candidate.userData.objectId==='string'&&candidate.userData.objectId===id)match=candidate;});
-        if(match)selectable=match;
+  const hits=raycaster.intersectObject(sceneGroup,true).sort((a,b)=>a.distance-b.distance);
+  if(!hits.length)return null;
+  if(/^(Floor|FloorMarking|Rack|RackUnit|Avatar|AvatarBody|AvatarHead|HardHat|GuideLine|SelectionRing|GroundShadow)/.test(hits[0].object.name))return null;
+  for(const hit of hits){
+    if(/^(Floor|FloorMarking|Rack|RackUnit|Avatar|AvatarBody|AvatarHead|HardHat|GuideLine|SelectionRing|GroundShadow)/.test(hit.object.name))continue;
+    let node:THREE.Object3D|null=hit.object;
+    while(node){
+      const visibleId=typeof node.userData.objectId==='string'&&node.visible&&!(node instanceof THREE.Mesh&&(node.material as THREE.Material).visible===false)?node.userData.objectId:null;
+      const pickId=typeof node.userData.pickObjectId==='string'?node.userData.pickObjectId:null;
+      const id=visibleId??pickId;
+      if(id){
+        let selectable=node;
+        if(pickId){let match:THREE.Object3D|null=null;sceneGroup.traverse(candidate=>{if(!match&&typeof candidate.userData.objectId==='string'&&candidate.userData.objectId===pickId)match=candidate;});if(match)selectable=match;}
+        return {objectId:id,object:selectable};
       }
-      return {objectId:id,object:selectable};
-    }
       node=node.parent;
     }
   }
