@@ -5,6 +5,28 @@ import App, { type HangarEntryAppProps } from '../src/App';
 import HangarLocalDiagnostics, { buildHangarLocalDiagnostics, HANGAR_LOCAL_FALLBACK_CODES } from '../src/hangar/localDiagnostics';
 import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/hangar/HangarCanvasAdapter';
 import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import { loadHangarScene } from '../src/hangar/entryController';
+
+const productionCanvasHarness = vi.hoisted(() => ({ mounts: vi.fn(), contextCanvas: null as HTMLCanvasElement | null }));
+vi.mock('@react-three/fiber', async () => {
+  const React = await import('react');
+  return {
+    Canvas: (props: any) => React.createElement(React.Fragment, null,
+      React.createElement('canvas', { 'aria-label': '3D hangar scene' }),
+      React.createElement(ProductionCanvasCreated, props)),
+    useThree: (selector: (state: { invalidate: () => void }) => unknown) => selector({ invalidate: vi.fn() }),
+    useFrame: () => undefined,
+  };
+  function ProductionCanvasCreated(props: any) {
+    React.useEffect(() => {
+      productionCanvasHarness.mounts();
+      const element = productionCanvasHarness.contextCanvas ?? document.createElement('canvas');
+      productionCanvasHarness.contextCanvas = element;
+      props.onCreated?.({ gl: { domElement: element } });
+    }, []);
+    return null;
+  }
+});
 
 const HangarApp = App as ComponentType<HangarEntryAppProps>;
 
@@ -51,21 +73,11 @@ describe('HangarLocalDiagnostics', () => {
       if (method !== 'GET') mutationCalls.push(`${method} ${url}`);
       return baseFetch(input, init);
     }));
-    const contextCanvas = document.createElement('canvas');
-    const mountCanvas = vi.fn();
-    function CanvasComponent(props: { onCreated?: (state: unknown) => unknown }) {
-      useEffect(() => { mountCanvas(); props.onCreated?.({ gl: { domElement: contextCanvas } }); }, []);
-      return createElement('canvas', { 'aria-label': '3D hangar scene' });
-    }
-    function ProductionScene(props: { onCreated?: (state: unknown) => unknown; onContextLost?: () => unknown }) {
-      return createElement(HangarCanvasAdapter, {
-        camera: createHangarOwnedPerspectiveCamera(),
-        canvasComponent: CanvasComponent,
-        onCreated: props.onCreated,
-        onContextLost: props.onContextLost,
-      });
-    }
-    const loader = vi.fn(() => ProductionScene);
+    productionCanvasHarness.mounts.mockClear();
+    productionCanvasHarness.contextCanvas = document.createElement('canvas');
+    const contextCanvas = productionCanvasHarness.contextCanvas;
+    const mountCanvas = productionCanvasHarness.mounts;
+    const loader = vi.fn(async () => loadHangarScene());
     render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: loader }));
     await signInAsReviewer();
     mutationCalls.length = 0;
@@ -95,14 +107,9 @@ describe('HangarLocalDiagnostics', () => {
     const clock = vi.fn()
       .mockReturnValueOnce(1000)
       .mockReturnValueOnce(3400);
-    function CanvasComponent(props: { onCreated?: (state: unknown) => unknown }) {
-      useEffect(() => { props.onCreated?.({ gl: { domElement: document.createElement('canvas') } }); }, []);
-      return createElement('canvas', { 'aria-label': '3D hangar scene' });
-    }
-    function ProductionScene(props: { onCreated?: (state: unknown) => unknown; onContextLost?: () => unknown }) {
-      return createElement(HangarCanvasAdapter, { camera: createHangarOwnedPerspectiveCamera(), canvasComponent: CanvasComponent, onCreated: props.onCreated, onContextLost: props.onContextLost });
-    }
-    const successView = render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => ProductionScene, hangarMonotonicClock: clock }));
+    productionCanvasHarness.contextCanvas = document.createElement('canvas');
+    productionCanvasHarness.mounts.mockClear();
+    const successView = render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => loadHangarScene(), hangarMonotonicClock: clock }));
     await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByLabelText('Hangar 3D scene');
@@ -116,7 +123,7 @@ describe('HangarLocalDiagnostics', () => {
 
     successView.unmount();
     const fallbackClock = vi.fn(() => 1000);
-    const fallbackView = render(createElement(HangarApp, { hangarBrowserSupported: false, hangarWebGl2Probe: { webgl2: false }, hangarLazyLoader: () => ProductionScene, hangarMonotonicClock: fallbackClock }));
+    const fallbackView = render(createElement(HangarApp, { hangarBrowserSupported: false, hangarWebGl2Probe: { webgl2: false }, hangarLazyLoader: () => loadHangarScene(), hangarMonotonicClock: fallbackClock }));
     await signInAsReviewer();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('alert');
