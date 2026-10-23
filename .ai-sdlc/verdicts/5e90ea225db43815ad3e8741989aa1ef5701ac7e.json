@@ -1,0 +1,323 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 549,
+  "branch": "ai-sdlc/issue-549",
+  "commitSha": "5e90ea225db43815ad3e8741989aa1ef5701ac7e",
+  "round": 0,
+  "pipelineVersion": "e01b5f0",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform route requires a subscription key the production client does not provide and lacks the required caller Entra validation. The production telemetry omits estimated cost, and the added tests do not exercise the required production executor behaviors.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 281,
+          "message": "The gateway requires an APIM subscription key, contrary to the criterion, and the production client does not send one. The production route therefore rejects model calls.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The APIM API sets subscription_required = true. The production client is created with an Azure credential, and the adapter does not configure an APIM subscription key.",
+            "failureScenario": "When the production client sends a model request, APIM rejects it for a missing subscription key before forwarding it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 302,
+          "message": "A01:2025 (Broken Access Control) and LLM10:2025 (Unbounded Consumption): the gateway authenticates to the model backend but does not validate callers against the approved application Entra identity, leaving a direct route around application governance.",
+          "confidence": 0.95,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The operation policy rewrites the request and authenticates the gateway to the cognitive account with managed identity, but contains no inbound policy validating the caller's approved Entra identity.",
+            "failureScenario": "A workload that can reach the private gateway calls it directly without the application's Entra identity. The gateway forwards the request using its managed identity, allowing the caller to bypass application-side governance and consume model resources."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 153,
+          "message": "Estimated cost is always null, even when token usage is available and the criterion specifies rates from which the cost must be calculated.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "GatewayGovernedChatClient builds GatewayTokenMetrics with EstimatedCost set to null for every response.",
+            "failureScenario": "A response with 42 input tokens and 7 output tokens produces no estimated cost, although the criterion's configured rates require 0.000105."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 11,
+          "message": "The named production executor behavior tests are missing or replaced by helper-level tests. The added test does not cover the production-path behavior required by the routing/telemetry, quota, privacy, and replay criteria.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added production_adapter_routes_to_gateway_and_records_available_or_unavailable_usage test calls endpoint and usage helpers, then manually wraps a fake client. It does not resolve or invoke ProductionEvaluationArmExecutor through production startup registrations. The other required Production_executor_* test cases are also absent.",
+            "failureScenario": "If production executor routing, quota enforcement, sensitive-correlation rejection, or replay is broken, these tests can still pass because they exercise helpers or a manually constructed wrapper instead of the required production path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 6,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The gateway requires a subscription key the production client does not provide, and it lacks the required caller identity validation. The cost telemetry is always null, and several named acceptance tests are absent or replaced by helper-level tests that do not exercise production wiring.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 281,
+          "message": "The gateway requires an APIM subscription key, contrary to the acceptance criterion, and the production client does not send one.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The gateway API sets subscription_required to true. The production adapter constructs an Azure OpenAI client with an Entra credential but does not supply an APIM subscription key.",
+            "failureScenario": "The production client sends a model request through the gateway without an APIM subscription key; APIM rejects it before forwarding."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 302,
+          "message": "The gateway does not validate callers against the approved application Entra identity, leaving the required caller access control unenforced.",
+          "confidence": 0.95,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The inbound policy adds managed identity authentication for the gateway-to-model request, but contains no caller identity validation. The API operation is reachable through the private gateway.",
+            "failureScenario": "A caller with private network access but without the approved application Entra identity invokes the gateway; no policy rejects the caller before forwarding."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Evaluation/ModelGatewayTokenomics.cs",
+          "line": 153,
+          "message": "The production call path never calculates estimated cost when usage is available, so it cannot meet the telemetry criterion.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "GatewayGovernedChatClient constructs GatewayTokenMetrics with EstimatedCost set to null for every response, including responses with available token usage.",
+            "failureScenario": "The fake returns 42 input tokens and 7 output tokens at the specified test rates; metrics report null instead of the required cost of 0.000105."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 1,
+          "message": "The quota acceptance criterion lacks its named production-executor test; the added helper-level quota test does not prove that the production path enforces the limits.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff adds helper and wrapper tests, but not the named Production_executor_enforces_quota_boundary_and_denies_over_limit_result test that exercises ProductionEvaluationArmExecutor.",
+            "failureScenario": "A regression that bypasses the executor’s quota checks can pass the added tests because they call GatewayQuotaGovernor directly rather than proving executor behavior and pre-call dispatch counts."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 1,
+          "message": "The production routing and telemetry criterion is not tested through the production executor and host registrations as required.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff does not include Production_executor_routes_to_gateway_and_records_correlation_usage_and_cost. Its existing Production_adapter_routes_to_gateway_and_records_available_or_unavailable_usage test constructs GatewayGovernedChatClient directly and does not resolve the executor through production startup registrations.",
+            "failureScenario": "If production executor wiring omits correlation fields or bypasses the governed client, the added direct-wrapper test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+          "line": 1,
+          "message": "The replay criterion lacks its named production-executor test, so the required no-second-dispatch, unchanged-usage, and single-trace behavior is unproven.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff does not include Production_executor_replay_returns_original_result_without_second_dispatch. The replay test stores and retrieves directly from GatewayReplayStore rather than calling the production executor twice or asserting dispatch, usage, and trace counts.",
+            "failureScenario": "If ProductionEvaluationArmExecutor dispatches a second request on replay or emits a duplicate trace, the direct store test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The gateway route is private and pinned to the configured deployment, but inbound caller authorization does not enforce the approved application identity.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/main.tf",
+          "line": 282,
+          "message": "A01:2025 / LLM10:2025: The gateway does not enforce the approved application Entra identity, so a private-network caller with an APIM subscription key can bypass application governance and consume model resources.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The API requires a subscription key, but the gateway policy does not validate the approved application's Entra identity. The managed identity policy authenticates only the gateway's request to the cognitive account.",
+            "failureScenario": "A caller that can reach the private gateway and has an APIM subscription key can call the pinned model route directly, bypassing application approval and quota controls and consuming model resources under the gateway identity."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/EvidenceInvestigationTests.cs",
+      "backend/AirlineDemo.Api.Tests/ModelGatewayTokenomicsTests.cs",
+      "backend/AirlineDemo.Api.Tests/ReleaseIdentityContractTests.cs",
+      "infra/terraform/tests/network-boundaries.tftest.hcl",
+      "infra/terraform/tests/release-identity.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
