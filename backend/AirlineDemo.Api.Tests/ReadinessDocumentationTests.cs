@@ -12,6 +12,7 @@ public sealed class ReadinessDocumentationTests
     {
         "Azure compute", "Azure SQL", "Azure Blob Storage", "Azure Container Registry",
         "Azure API Management", "Azure Monitor (Log Analytics and Application Insights)",
+        "Azure Key Vault", "Private endpoints and private DNS",
         "Model input tokens", "Model output tokens",
     };
 
@@ -85,6 +86,7 @@ public sealed class ReadinessDocumentationTests
         {
             "Azure compute", "Azure SQL", "Azure Blob storage", "Azure Container Registry",
             "Azure API Management", "Azure Monitor (Log Analytics and Application Insights)",
+            "Azure Key Vault", "Private endpoints and private DNS",
             "Model input tokens", "Model output tokens",
         })
         {
@@ -99,7 +101,7 @@ public sealed class ReadinessDocumentationTests
     public void Cost_model_lists_every_component_and_lifecycle_state()
     {
         var rows = CostRows(CostModel);
-        Assert.Equal(24, rows.Length);
+        Assert.Equal(30, rows.Length);
         foreach (var component in CostComponents)
         foreach (var lifecycle in LifecycleStates)
         {

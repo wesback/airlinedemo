@@ -115,6 +115,8 @@ No numeric estimate or spending cap is approved. The Terraform budget notificati
 | Azure Container Registry | STUB |
 | Azure API Management | STUB |
 | Azure Monitor (Log Analytics and Application Insights) | STUB |
+| Azure Key Vault | STUB |
+| Private endpoints and private DNS | STUB |
 | Model input tokens | STUB |
 | Model output tokens | STUB |
 
