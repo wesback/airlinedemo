@@ -1,3 +1,21 @@
+mock_provider "azuread" {
+  mock_data "azuread_client_config" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000d0"
+    }
+  }
+  mock_resource "azuread_application" {
+    defaults = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+  mock_resource "azuread_service_principal" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000b1"
+    }
+  }
+}
 mock_provider "azurerm" {}
 
 variables {
@@ -54,11 +72,11 @@ run "private_acr_dns_and_container_apps_wiring" {
     error_message = "The ACR private DNS zone and its VNet link must use the private ACR zone."
   }
   assert {
-    condition     = azurerm_container_app_environment.demo.internal_load_balancer_enabled == false && can(regex("(?s)resource \"azurerm_container_app_environment\" \"demo\" \\{.*infrastructure_subnet_id\\s*=\\s*azurerm_subnet\\.app\\.id", file("container-hosting.tf"))) && can(regex("(?s)resource \"azurerm_container_app\" \"app\" \\{\\s*name\\s*=\\s*local\\.container_app_name\\s*resource_group_name\\s*=\\s*azurerm_resource_group\\.demo\\.name\\s*container_app_environment_id\\s*=\\s*azurerm_container_app_environment\\.demo\\.id", file("container-hosting.tf")))
+    condition     = azurerm_container_app_environment.demo.internal_load_balancer_enabled == false && can(regex("(?s)resource \"azurerm_container_app_environment\" \"demo\" \\{.*infrastructure_subnet_id\\s*=\\s*azurerm_subnet\\.app\\.id", file("container-hosting.tf"))) && can(regex("(?s)resource \"azurerm_container_app\" \"app\" \\{\\s*(count\\s*=[^\\n]*\\s*)?name\\s*=\\s*local\\.container_app_name\\s*resource_group_name\\s*=\\s*azurerm_resource_group\\.demo\\.name\\s*container_app_environment_id\\s*=\\s*azurerm_container_app_environment\\.demo\\.id", file("container-hosting.tf")))
     error_message = "The Container Apps environment must use the app subnet, and the app must reference that environment."
   }
   assert {
-    condition     = azurerm_container_app.app.revision_mode == "Single" && can(regex("(?s)registry \\{\\s*server\\s*=\\s*azurerm_container_registry\\.acr\\.login_server", file("container-hosting.tf")))
+    condition     = azurerm_container_app.app[0].revision_mode == "Single" && can(regex("(?s)registry \\{\\s*server\\s*=\\s*azurerm_container_registry\\.acr\\.login_server", file("container-hosting.tf")))
     error_message = "The Container App registry must use the private ACR login server."
   }
 }
@@ -67,15 +85,15 @@ run "https_ingress_and_ingress_deny" {
   command = plan
 
   assert {
-    condition     = azurerm_container_app.app.ingress[0].external_enabled == true && azurerm_container_app.app.ingress[0].transport == "http" && azurerm_container_app.app.ingress[0].allow_insecure_connections == false
+    condition     = azurerm_container_app.app[0].ingress[0].external_enabled == true && azurerm_container_app.app[0].ingress[0].transport == "http" && azurerm_container_app.app[0].ingress[0].allow_insecure_connections == false
     error_message = "The app must expose external HTTP ingress while rejecting insecure connections."
   }
   assert {
-    condition     = toset([for restriction in azurerm_container_app.app.ingress[0].ip_security_restriction : restriction.ip_address_range if restriction.action == "Allow"]) == toset(var.presenter_reviewer_cidrs) && length(azurerm_container_app.app.ingress[0].ip_security_restriction) == length(var.presenter_reviewer_cidrs)
+    condition     = toset([for restriction in azurerm_container_app.app[0].ingress[0].ip_security_restriction : restriction.ip_address_range if restriction.action == "Allow"]) == toset(var.presenter_reviewer_cidrs) && length(azurerm_container_app.app[0].ingress[0].ip_security_restriction) == length(var.presenter_reviewer_cidrs)
     error_message = "Ingress must allow exactly the configured presenter/reviewer CIDRs and must not allow an unlisted CIDR."
   }
   assert {
-    condition     = !contains([for restriction in azurerm_container_app.app.ingress[0].ip_security_restriction : restriction.ip_address_range if restriction.action == "Allow"], "198.51.100.0/24")
+    condition     = !contains([for restriction in azurerm_container_app.app[0].ingress[0].ip_security_restriction : restriction.ip_address_range if restriction.action == "Allow"], "198.51.100.0/24")
     error_message = "An unlisted ingress CIDR must not receive an Allow rule."
   }
 }
@@ -157,7 +175,7 @@ run "valid_image_digest" {
     error_message = "The configured image digest must contain exactly 64 lowercase hexadecimal characters after sha256:."
   }
   assert {
-    condition     = azurerm_container_app.app.template[0].min_replicas == 1 && can(regex("(?s)image\\s*=\\s*\"\\$\\{azurerm_container_registry\\.acr\\.login_server\\}/airline-api@\\$\\{var\\.image_digest\\}\"", file("container-hosting.tf")))
+    condition     = azurerm_container_app.app[0].template[0].min_replicas == 1 && can(regex("(?s)image\\s*=\\s*\"\\$\\{azurerm_container_registry\\.acr\\.login_server\\}/airline-api@\\$\\{var\\.image_digest\\}\"", file("container-hosting.tf")))
     error_message = "The Container App image must use the configured immutable digest, not a tag."
   }
 }
@@ -186,7 +204,7 @@ run "demo_passcode_secret_is_referenced" {
   command = plan
 
   assert {
-    condition     = length([for secret in azurerm_container_app.app.secret : secret if secret.name == "demo-passcode" && secret.key_vault_secret_id == "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"]) == 1 && length(azurerm_container_app.app.secret) == 1
+    condition     = length([for secret in azurerm_container_app.app[0].secret : secret if secret.name == "demo-passcode" && secret.key_vault_secret_id == "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"]) == 1 && length(azurerm_container_app.app[0].secret) == 1
     error_message = "The Container App must reference the configured demo passcode Key Vault secret."
   }
 }

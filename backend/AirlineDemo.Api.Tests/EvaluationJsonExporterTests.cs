@@ -294,9 +294,9 @@ public sealed class EvaluationJsonExporterTests
         var configurations = new Dictionary<EvaluationArm, EvaluationEffectiveConfiguration?>
         {
             [EvaluationArm.A] = null,
-            [EvaluationArm.B] = new("v1", "B", deploymentName, "model-b", "2025-01", "west", "standard"),
-            [EvaluationArm.C] = new("v1", "C", "demo-c", "model-c", "2025-01", "west", "standard"),
-            [EvaluationArm.D] = new("v1", "D", "demo-b", "model-b", "2025-01", "west", "standard")
+            [EvaluationArm.B] = new("v1", "B", deploymentName, "model-b", "2026-09-22", "v1", "west", "standard"),
+            [EvaluationArm.C] = new("v1", "C", "demo-c", "model-c", "2026-09-22", "v1", "west", "standard"),
+            [EvaluationArm.D] = new("v1", "D", "demo-b", "model-b", "2026-09-22", "v1", "west", "standard")
         };
         EvaluationCaseResult Case(params EvaluationArm[] arms) =>
             new(caseId, arms.Select(arm => new EvaluationDispatch(arm, null, 1, [], null)).ToArray())

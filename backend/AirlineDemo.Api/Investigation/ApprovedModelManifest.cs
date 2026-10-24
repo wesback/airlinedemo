@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Globalization;
 using AirlineDemo.Api.Diagnostics;
 using Microsoft.Extensions.Logging;
 
@@ -19,6 +20,7 @@ public sealed record ApprovedModelManifest(
     string? Arm,
     string? DeploymentName,
     string? Model,
+    string? ModelVersion,
     string? ApiVersion,
     string? Region,
     string? ContentFilter)
@@ -40,7 +42,10 @@ public sealed record ApprovedModelManifest(
         new(@"^[A-Za-z0-9][A-Za-z0-9\-]{0,63}(\.[0-9][A-Za-z0-9\-]{0,15})?\z", RegexOptions.Compiled);
 
     private static readonly Regex ApiVersionPattern =
-        new(@"^\d{4}-\d{2}-\d{2}(-preview)?\z", RegexOptions.Compiled);
+        new(@"^v1\z", RegexOptions.Compiled);
+
+    private static readonly Regex ModelVersionPattern =
+        new(@"^\d{4}-\d{2}-\d{2}\z", RegexOptions.Compiled);
 
     // Region is fixed to the PRD's Sweden Central model boundary (DD-016, DD-025, DD-034); any other value is refused.
     private static readonly Regex RegionPattern =
@@ -104,7 +109,9 @@ public sealed record ApprovedModelManifest(
             {
                 errors.Add($"{name} is still a stub value");
             }
-            else if (!HasValidFormat(format, value))
+            else if (!HasValidFormat(format, value) ||
+                     (name == "modelVersion" &&
+                      !DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
             {
                 // Values are copied into every trace, so each must match its field's format (no secrets, names, URLs, or spaces).
                 errors.Add($"{name} is not a plain identifier");
@@ -136,11 +143,28 @@ public sealed record ApprovedModelManifest(
         return this;
     }
 
+    public void RequireConfigurationMatches(string? deploymentName, string? model, string? modelVersion)
+    {
+        if (!Approved)
+        {
+            return;
+        }
+
+        RequireUsable();
+        if (!string.Equals(DeploymentName, deploymentName, StringComparison.Ordinal) ||
+            !string.Equals(Model, model, StringComparison.Ordinal) ||
+            !string.Equals(ModelVersion, modelVersion, StringComparison.Ordinal))
+        {
+            throw new ModelGateException("model manifest does not match the configured model deployment");
+        }
+    }
+
     private IEnumerable<(string Name, string? Value, Regex Format)> Values() =>
     [
         ("arm", Arm, PlainIdentifierPattern),
         ("deploymentName", DeploymentName, DeploymentNamePattern),
         ("model", Model, DeploymentNamePattern),
+        ("modelVersion", ModelVersion, ModelVersionPattern),
         ("apiVersion", ApiVersion, ApiVersionPattern),
         ("region", Region, RegionPattern),
         ("contentFilter", ContentFilter, PlainIdentifierPattern),
@@ -222,6 +246,7 @@ public sealed record ModelCallTrace(
     string Arm,
     string DeploymentName,
     string Model,
+    string ModelVersion,
     string ApiVersion,
     string Region,
     string ContentFilter,
@@ -305,6 +330,7 @@ public static class ModelCallGate
             manifest.Arm!,
             manifest.DeploymentName!,
             manifest.Model!,
+            manifest.ModelVersion!,
             manifest.ApiVersion!,
             manifest.Region!,
             manifest.ContentFilter!,

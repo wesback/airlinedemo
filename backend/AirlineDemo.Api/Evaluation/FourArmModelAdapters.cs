@@ -122,7 +122,7 @@ public sealed class FourArmModelAdapters
     private static string[] Required(string json) { using var doc = JsonDocument.Parse(json); return doc.RootElement.GetProperty("requiredHistory").EnumerateArray().Select(x => x.GetString()!).ToArray(); }
     private static string Packet(EvaluationEvidenceBasis b) =>
         $"{{\"caseId\":{JsonSerializer.Serialize(b.CaseId)},\"evidenceBasisId\":{JsonSerializer.Serialize(b.EvidenceBasisId)},\"evidenceBasisVersion\":{b.Version},\"inputs\":{b.InputsJson},\"inputsSha256\":{JsonSerializer.Serialize(b.InputsSha256)}}}";
-    private static IEnumerable<string?> Fields(ApprovedModelManifest m) => [m.ManifestVersion, m.DeploymentName, m.Model, m.ApiVersion, m.Region, m.ContentFilter];
+    private static IEnumerable<string?> Fields(ApprovedModelManifest m) => [m.ManifestVersion, m.DeploymentName, m.Model, m.ModelVersion, m.ApiVersion, m.Region, m.ContentFilter];
     private static IReadOnlyList<EvaluationTypedClaim> ParseClaims(string json)
     {
         try { using var doc = JsonDocument.Parse(json); return doc.RootElement.EnumerateArray().Select(claim => new EvaluationTypedClaim(

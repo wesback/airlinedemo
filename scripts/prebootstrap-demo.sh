@@ -6,8 +6,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-TERRAFORM_ROOT="${AIRLINEDEMO_TERRAFORM_ROOT:-$REPOSITORY_ROOT/terraform}"
-CONFIG_FILE="${AIRLINEDEMO_CONFIG_FILE:-$TERRAFORM_ROOT/examples/demo.tfvars}"
+TERRAFORM_ROOT="${AIRLINEDEMO_TERRAFORM_ROOT:-$REPOSITORY_ROOT/infra/terraform}"
 OPERATOR_VARS_FILE="${AIRLINEDEMO_OPERATOR_VARS_FILE:-}"
 FIXTURE_ROOT="${AIRLINEDEMO_FIXTURE_ROOT:-$REPOSITORY_ROOT/.airlinedemo-fixtures}"
 RUN_ID="${AIRLINEDEMO_RUN_ID:-RUN-DEMO-001}"
@@ -33,6 +32,13 @@ active_var_is_configured() {
   local key="$1"
   local file="$2"
   local value
+  # scripts/deploy.sh writes JSON values; hand-written files use HCL.
+  if [[ "$file" == *.json ]]; then
+    jq -e --arg key "$key" \
+      '.[$key] | (type == "string" and length > 0) or (type == "array" and length > 0)' \
+      "$file" >/dev/null 2>&1
+    return
+  fi
   value="$(
     awk -v key="$key" '
       /^[[:space:]]*#/ { next }
@@ -123,10 +129,10 @@ elif [[ -n "$CURRENT_TENANT" &&
   issue "AIRLINEDEMO_TENANT_ID does not match the Azure CLI tenant"
 fi
 
-if [[ -f "$CONFIG_FILE" ]]; then
-  printf 'OK: checked-in Terraform config exists: %s\n' "$CONFIG_FILE"
+if [[ -f "$TERRAFORM_ROOT/main.tf" ]]; then
+  printf 'OK: Terraform root exists: %s\n' "$TERRAFORM_ROOT"
 else
-  issue "checked-in Terraform config is missing: $CONFIG_FILE"
+  issue "Terraform root is missing: $TERRAFORM_ROOT"
 fi
 
 if [[ -z "$OPERATOR_VARS_FILE" ]]; then
@@ -136,24 +142,28 @@ else
     printf 'OK: private Terraform values file exists: %s\n' "$OPERATOR_VARS_FILE"
 
     for required_var in \
-      azure_openai_model \
-      azure_openai_model_version \
-      sql_aad_admin_login \
-      sql_aad_admin_object_id \
-      container_allowed_source_ranges; do
+      model_name \
+      model_version \
+      sql_admin_group_name \
+      sql_admin_group_object_id \
+      presenter_reviewer_cidrs; do
       if ! active_var_is_configured "$required_var" "$OPERATOR_VARS_FILE"; then
         issue "private Terraform value '$required_var' is missing or empty"
       fi
     done
 
     if grep -Fq '203.0.113.10/32' "$OPERATOR_VARS_FILE"; then
-      issue "container_allowed_source_ranges still contains the documentation-only IP 203.0.113.10/32"
+      issue "presenter_reviewer_cidrs still contains the documentation-only IP 203.0.113.10/32"
     fi
     if grep -Eq 'private-[A-Za-z-]*admin|confirmed-model-name|confirmed-model-version|00000000-0000-0000-0000-000000000000' \
       "$OPERATOR_VARS_FILE"; then
       issue "private Terraform values contain an example placeholder"
     fi
-    if command -v terraform >/dev/null 2>&1 &&
+    if [[ "$OPERATOR_VARS_FILE" == *.json ]]; then
+      if command -v jq >/dev/null 2>&1 && ! jq -e . "$OPERATOR_VARS_FILE" >/dev/null 2>&1; then
+        issue "private Terraform values file is not valid JSON"
+      fi
+    elif command -v terraform >/dev/null 2>&1 &&
       ! terraform fmt -check -no-color "$OPERATOR_VARS_FILE" >/dev/null 2>&1; then
       issue "private Terraform values file has invalid Terraform syntax or formatting"
     fi
@@ -164,12 +174,16 @@ fi
 
 if command -v az >/dev/null 2>&1 && [[ -n "$CURRENT_SUBSCRIPTION" ]]; then
   required_providers=(
+    Microsoft.ApiManagement
     Microsoft.App
     Microsoft.Authorization
     Microsoft.CognitiveServices
+    Microsoft.Consumption
     Microsoft.ContainerRegistry
     Microsoft.Insights
+    Microsoft.KeyVault
     Microsoft.ManagedIdentity
+    Microsoft.Network
     Microsoft.OperationalInsights
     Microsoft.Resources
     Microsoft.Sql
@@ -203,20 +217,31 @@ if command -v az >/dev/null 2>&1 && [[ -n "$CURRENT_SUBSCRIPTION" ]]; then
     issue "Azure Container Apps CLI extension 'containerapp' is not installed"
   fi
 
-  if [[ -z "${AIRLINEDEMO_PREBOOTSTRAP_SKIP_BACKEND_CHECK:-}" ]]; then
+  backend_account="${AIRLINEDEMO_BACKEND_ACCOUNT:-}"
+  backend_container="tfstate"
+  if [[ -z "$backend_account" && -n "${BACKEND_CONFIG_FILE:-}" && -f "$BACKEND_CONFIG_FILE" ]]; then
+    backend_account="$(sed -n 's/^[[:space:]]*storage_account_name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$BACKEND_CONFIG_FILE" | head -n 1)"
+    backend_container="$(sed -n 's/^[[:space:]]*container_name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$BACKEND_CONFIG_FILE" | head -n 1)"
+    backend_container="${backend_container:-tfstate}"
+  fi
+  if [[ -n "${AIRLINEDEMO_PREBOOTSTRAP_SKIP_BACKEND_CHECK:-}" ]]; then
+    :
+  elif [[ -z "$backend_account" ]]; then
+    issue "Terraform backend is unknown; set AIRLINEDEMO_BACKEND_ACCOUNT or BACKEND_CONFIG_FILE"
+  else
     backend_name="$(
       az storage container show \
-        --account-name stairlinedemostate \
-        --name tfstate \
+        --account-name "$backend_account" \
+        --name "$backend_container" \
         --auth-mode login \
         --only-show-errors \
         --query name \
         --output tsv 2>/dev/null || true
     )"
-    if [[ "$backend_name" == "tfstate" ]]; then
+    if [[ "$backend_name" == "$backend_container" ]]; then
       printf 'OK: protected Terraform backend container is accessible\n'
     else
-      issue "protected Terraform backend container tfstate is not accessible"
+      issue "protected Terraform backend container $backend_account/$backend_container is not accessible"
     fi
   fi
 fi

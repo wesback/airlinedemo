@@ -36,8 +36,15 @@ if [ "$(printf '%s' "$logged_subscription" | tr '[:upper:]' '[:lower:]')" != "$(
   exit 3
 fi
 
+# terraform -chdir resolves relative paths against infra/terraform, so make them absolute first.
+case "$TFVARS_FILE" in /*) ;; *) TFVARS_FILE="$PWD/$TFVARS_FILE" ;; esac
+case "$BACKEND_CONFIG_FILE" in /*) ;; *) BACKEND_CONFIG_FILE="$PWD/$BACKEND_CONFIG_FILE" ;; esac
+cd "$(dirname "$0")/.."
 terraform -chdir=infra/terraform init -backend-config="$BACKEND_CONFIG_FILE"
-plan_file=$(mktemp /tmp/airline-deployment-XXXXXX.tfplan)
+# The X's must end the template for BSD (macOS) mktemp; the plan holds sensitive values, so it is removed on exit.
+plan_dir=$(mktemp -d /tmp/airline-deployment.XXXXXX)
+trap 'rm -rf "$plan_dir"' EXIT
+plan_file="$plan_dir/deployment.tfplan"
 terraform -chdir=infra/terraform plan -var-file="$TFVARS_FILE" -out="$plan_file"
 printf 'Saved Terraform plan: %s\n' "$plan_file"
 terraform -chdir=infra/terraform show "$plan_file"

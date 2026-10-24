@@ -15,7 +15,11 @@ locals {
   acr_name                        = coalesce(var.acr_name, "acr${local.name_prefix}${local.name_suffix}")
   container_apps_environment_name = coalesce(var.container_apps_environment_name, "cae-${local.name_prefix}")
   container_app_name              = coalesce(var.container_app_name, "ca-${local.name_prefix}")
+  # API Management names are global (<name>.azure-api.net), so the suffix is needed here too.
+  gateway_name = "apim-${local.name_prefix}-${local.name_suffix}"
 
   app_subnet_cidr              = coalesce(var.app_subnet_cidr, cidrsubnet(var.vnet_address_space[0], 8, 1))
   private_endpoint_subnet_cidr = coalesce(var.private_endpoint_subnet_cidr, cidrsubnet(var.vnet_address_space[0], 8, 2))
+  gateway_subnet_cidr          = coalesce(var.gateway_subnet_cidr, cidrsubnet(var.vnet_address_space[0], 8, 3))
+  build_runner_subnet_cidr     = coalesce(var.build_runner_subnet_cidr, cidrsubnet(var.vnet_address_space[0], 8, 4))
 }

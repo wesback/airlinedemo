@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -21,8 +22,23 @@ case "$*" in
   "ad signed-in-user show --query id"*) echo "$FAKE_PRINCIPAL" ;;
   "ad signed-in-user show --query displayName"*) echo "Demo Operator" ;;
   "ad signed-in-user show --query mail"*) echo "operator@example.invalid" ;;
+  "ad group show --group"*)
+    [ "${FAKE_GROUP_MISSING:-0}" = "1" ] && exit 1
+    case " $* " in
+      *" displayName "*|*" displayName"*) echo "grp-ops" ;;
+      *) echo "${FAKE_GROUP_ID:-22222222-2222-2222-2222-222222222222}" ;;
+    esac ;;
   "storage account show"*) echo "/subscriptions/x/resourceGroups/rg-demo1-tfstate/providers/Microsoft.Storage/storageAccounts/acct" ;;
   "storage container create"*) exit "${AZ_CONTAINER_FAIL:-0}" ;;
+  "keyvault show-deleted"*) [ -z "$FAKE_DELETED_VAULT" ] || echo "$FAKE_DELETED_VAULT" ;;
+  "role assignment create"*)
+    prev=; scope=; role=
+    for a in "$@"; do [ "$prev" = "--scope" ] && scope=$a; [ "$prev" = "--role" ] && role=$a; prev=$a; done
+    case "$scope:$role" in
+      */vaults/*:*Certificates*) echo "$scope/providers/Microsoft.Authorization/roleAssignments/55555555-5555-5555-5555-555555555555" ;;
+      */vaults/*:*Secrets*) echo "$scope/providers/Microsoft.Authorization/roleAssignments/66666666-6666-6666-6666-666666666666" ;;
+    esac ;;
+  "resource show"*"release-image-signing-certificate"*) echo "https://kv.vault.azure.net/secrets/release-image-signing-certificate/0123456789abcdef0123456789abcdef" ;;
 esac
 exit 0
 """
@@ -52,7 +68,7 @@ class DeployScriptTests(unittest.TestCase):
         })
         self.args = [
             "--prefix", "demo1", "--location", "swedencentral", "--model-name", "gpt-demo-model",
-            "--model-version", "2025-01-01", "--ops-group-id", GROUP, "--ops-group-name", "grp-ops",
+            "--model-version", "2025-01-01",
             "--budget-amount", "250", "--image-digest", "sha256:" + "a" * 64,
             "--passcode-secret-uri", "https://kv-demo.vault.azure.net/secrets/demo-passcode",
         ]
@@ -70,16 +86,55 @@ class DeployScriptTests(unittest.TestCase):
     def test_help_lists_every_required_option(self):
         result = subprocess.run([str(DEPLOY), "--help"], cwd=ROOT, text=True, capture_output=True)
         self.assertEqual(0, result.returncode)
-        for option in ("--prefix", "--location", "--model-name", "--model-version", "--ops-group-id",
-                       "--ops-group-name", "--budget-amount", "--image-digest", "--passcode-secret-uri"):
+        for option in ("--prefix", "--location", "--model-name", "--model-version", "--ops-group-name",
+                       "--ops-group-id", "--budget-amount", "--image-digest", "--passcode-secret-uri"):
             self.assertIn(option, result.stdout)
+
+    def test_default_identity_uses_signed_in_user(self):
+        result = self.run_deploy("--prepare-only")
+        self.assertEqual(0, result.returncode, result.stderr)
+        calls = self.calls()
+        self.assertFalse([c for c in calls if "az ad group" in c])
+        values = json.loads((self.state / "demo1/deploy.tfvars.json").read_text())
+        self.assertEqual("User", values["telemetry_reader_principal_type"])
+        self.assertEqual(PRINCIPAL, values["sql_admin_group_object_id"])
+        self.assertEqual("Demo Operator", values["sql_admin_group_name"])
+
+    def test_existing_ops_group_is_found_by_name_without_modification(self):
+        result = self.run_deploy("--prepare-only", "--ops-group-name", "grp-ops")
+        self.assertEqual(0, result.returncode, result.stderr)
+        calls = self.calls()
+        self.assertTrue(any(c.startswith("az ad group show --group grp-ops") for c in calls))
+        self.assertFalse([c for c in calls if "az ad group create" in c or "az ad group member add" in c])
+        values = json.loads((self.state / "demo1/deploy.tfvars.json").read_text())
+        self.assertEqual("Group", values["telemetry_reader_principal_type"])
+        self.assertEqual(GROUP, values["sql_admin_group_object_id"])
+
+    def test_existing_ops_group_id_is_resolved_without_modification(self):
+        result = self.run_deploy("--prepare-only", "--ops-group-id", GROUP)
+        self.assertEqual(0, result.returncode, result.stderr)
+        calls = self.calls()
+        self.assertTrue(any(c.startswith("az ad group show --group " + GROUP) for c in calls))
+        self.assertFalse([c for c in calls if "az ad group create" in c or "az ad group member add" in c])
+
+    def test_group_name_and_id_must_match(self):
+        result = self.run_deploy("--prepare-only", "--ops-group-name", "other-group", "--ops-group-id", GROUP)
+        self.assertEqual(2, result.returncode)
+        self.assertIn("does not match object ID", result.stderr)
+
+    def test_missing_ops_group_name_is_rejected_without_modification(self):
+        env = dict(self.env, FAKE_GROUP_MISSING="1")
+        result = self.run_deploy("--prepare-only", "--ops-group-name", "grp-ops", env=env)
+        self.assertEqual(2, result.returncode)
+        self.assertIn("could not find existing Entra group 'grp-ops'", result.stderr)
+        self.assertFalse([c for c in self.calls() if "az ad group create" in c or "az ad group member add" in c])
 
     def test_prepare_only_writes_discovered_values_and_changes_nothing_in_azure(self):
         result = self.run_deploy("--prepare-only", "--presenter-cidrs", "203.0.113.0/24,198.51.100.7/32")
         self.assertEqual(0, result.returncode, result.stderr)
         values = json.loads((self.state / "demo1/deploy.tfvars.json").read_text())
         self.assertEqual(
-            (SUBSCRIPTION, TENANT, PRINCIPAL, "demo1", GROUP, ["operator@example.invalid"],
+            (SUBSCRIPTION, TENANT, PRINCIPAL, "demo1", PRINCIPAL, ["operator@example.invalid"],
              ["203.0.113.0/24", "198.51.100.7/32"], 250,
              {"name": "Demo Operator", "email": "operator@example.invalid"}),
             (values["subscription_id"], values["tenant_id"], values["terraform_principal_object_id"],
@@ -113,13 +168,11 @@ class DeployScriptTests(unittest.TestCase):
     def test_missing_required_options_are_all_named_at_once(self):
         result = self.run_deploy(args=["--prefix", "demo1"])
         self.assertEqual(2, result.returncode)
-        self.assertIn("missing required options: --location --model-name --model-version --ops-group-id "
-                      "--ops-group-name --budget-amount --image-digest --passcode-secret-uri", result.stderr)
+        self.assertIn("missing required options: --location --model-name --model-version --budget-amount\n", result.stderr)
 
     def test_invalid_values_are_rejected_before_anything_is_written(self):
         cases = [
             ("--prefix", "Demo_1", "--prefix must be 3-10 lowercase letters or digits starting with a letter"),
-            ("--ops-group-id", "not-a-guid", "--ops-group-id must be a GUID"),
             ("--image-digest", "latest", "--image-digest must be sha256: followed by 64 lowercase hex characters"),
             ("--budget-amount", "12.5", "--budget-amount must be a whole number"),
             ("--model-name", 'gpt"; rm', "--model-name contains characters that are not allowed"),
@@ -132,6 +185,46 @@ class DeployScriptTests(unittest.TestCase):
                 self.assertEqual(2, result.returncode)
                 self.assertIn(message, result.stderr)
         self.assertFalse(self.state.exists())
+
+    def test_platform_phase_writes_null_application_values(self):
+        args = self.args[:self.args.index("--image-digest")]
+        result = self.run_deploy("--prepare-only", args=args)
+        self.assertEqual(0, result.returncode, result.stderr)
+        values = json.loads((self.state / "demo1/deploy.tfvars.json").read_text())
+        self.assertEqual((None, None), (values["image_digest"], values["demo_passcode_secret_uri"]))
+
+    def test_digest_without_passcode_uri_is_rejected(self):
+        args = self.args[:self.args.index("--passcode-secret-uri")]
+        result = self.run_deploy("--prepare-only", args=args)
+        self.assertEqual(2, result.returncode)
+        self.assertIn("give --image-digest and --passcode-secret-uri together", result.stderr)
+        self.assertFalse(self.state.exists())
+
+    def test_soft_deleted_vault_is_recovered_and_adopted_before_planning(self):
+        suffix = hashlib.sha1(f"{SUBSCRIPTION}/demo1".encode()).hexdigest()[:6]
+        vault = f"kv-demo1-{suffix}"
+        vault_id = f"/subscriptions/{SUBSCRIPTION}/resourceGroups/rg-demo1/providers/Microsoft.KeyVault/vaults/{vault}"
+        result = self.run_deploy("--register-providers", env=dict(self.env, FAKE_DELETED_VAULT=vault))
+        self.assertEqual(4, result.returncode, result.stderr)
+        calls = self.calls()
+        order = [next(i for i, c in enumerate(calls) if c.startswith(prefix)) for prefix in (
+            "az group create --name rg-demo1 ", f"az keyvault recover --name {vault}",
+            f"az role assignment create --assignee-object-id {PRINCIPAL} --assignee-principal-type User --role Key Vault Certificates Officer --scope {vault_id}",
+            "terraform -chdir=infra/terraform plan")]
+        self.assertEqual(sorted(order), order)
+        adopt = json.loads((self.state / "demo1/deploy.tfvars.json").read_text())["adopt_key_vault"]
+        self.assertEqual({
+            "certificates_role_assignment_id": f"{vault_id}/providers/Microsoft.Authorization/roleAssignments/55555555-5555-5555-5555-555555555555",
+            "secrets_role_assignment_id": f"{vault_id}/providers/Microsoft.Authorization/roleAssignments/66666666-6666-6666-6666-666666666666",
+            "signing_certificate_version": "0123456789abcdef0123456789abcdef",
+            "build_runner_token_version": None,
+        }, adopt)
+
+    def test_live_vault_without_soft_delete_is_not_recovered(self):
+        result = self.run_deploy("--register-providers")
+        self.assertEqual(4, result.returncode, result.stderr)
+        self.assertFalse([c for c in self.calls() if c.startswith(("az keyvault recover", "az group create --name rg-demo1 "))])
+        self.assertIsNone(json.loads((self.state / "demo1/deploy.tfvars.json").read_text())["adopt_key_vault"])
 
     def test_invalid_cidr_is_rejected(self):
         result = self.run_deploy("--prepare-only", "--presenter-cidrs", "203.0.113.0/24,evil")

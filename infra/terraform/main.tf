@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 3.0"
+    }
   }
 
   # Entra auth only; the azurerm backend takes a blob lease for state locking.
@@ -22,6 +26,10 @@ provider "azurerm" {
   # Storage has shared keys disabled, so container management must use Entra auth.
   storage_use_azuread = true
   features {}
+}
+
+provider "azuread" {
+  tenant_id = var.tenant_id
 }
 
 locals {
@@ -45,6 +53,22 @@ locals {
 
   presenter_reviewer_rules = { for i, c in var.presenter_reviewer_cidrs : tostring(i) => c }
   egress_rules             = { for i, c in var.egress_allowed_destinations : tostring(i) => c }
+
+  gateway_region = coalesce(var.gateway_region, var.location)
+  # The client appends /openai/v1/chat/completions; the gateway API path is "openai".
+  model_endpoint                        = coalesce(var.gateway_endpoint, azurerm_api_management.gateway.gateway_url)
+  gateway_model_deployment              = coalesce(var.gateway_model_deployment, local.model_deployment_name)
+  gateway_approved_application_identity = coalesce(var.gateway_approved_application_identity, azurerm_user_assigned_identity.app.principal_id)
+
+  # Platform traffic a workload-profiles Container Apps environment needs when outbound is denied by default.
+  # These are Azure service tags, not internet destinations; app egress stays limited to egress_allowed_destinations.
+  container_apps_platform_egress = {
+    entra     = { priority = 200, destination = "AzureActiveDirectory", protocol = "Tcp", ports = ["443"] }
+    monitor   = { priority = 201, destination = "AzureMonitor", protocol = "Tcp", ports = ["443"] }
+    mcr       = { priority = 202, destination = "MicrosoftContainerRegistry", protocol = "Tcp", ports = ["443"] }
+    frontdoor = { priority = 203, destination = "AzureFrontDoor.FirstParty", protocol = "Tcp", ports = ["443"] }
+    dns       = { priority = 204, destination = "168.63.129.16", protocol = "*", ports = ["53"] }
+  }
 }
 
 resource "azurerm_resource_group" "demo" {
@@ -81,6 +105,49 @@ resource "azurerm_subnet" "private_endpoints" {
   virtual_network_name              = azurerm_virtual_network.demo.name
   address_prefixes                  = [local.private_endpoint_subnet_cidr]
   private_endpoint_network_policies = "Enabled"
+}
+
+# API Management VNet injection needs a dedicated subnet with an NSG that admits its management plane.
+resource "azurerm_subnet" "gateway" {
+  name                 = "snet-apim"
+  resource_group_name  = azurerm_resource_group.demo.name
+  virtual_network_name = azurerm_virtual_network.demo.name
+  address_prefixes     = [local.gateway_subnet_cidr]
+}
+
+resource "azurerm_network_security_group" "gateway" {
+  name                = "nsg-apim"
+  location            = azurerm_resource_group.demo.location
+  resource_group_name = azurerm_resource_group.demo.name
+
+  security_rule {
+    name                       = "allow-apim-management"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3443"
+    source_address_prefix      = "ApiManagement"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "allow-load-balancer"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "6390"
+    source_address_prefix      = "AzureLoadBalancer"
+    destination_address_prefix = "VirtualNetwork"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "gateway" {
+  subnet_id                 = azurerm_subnet.gateway.id
+  network_security_group_id = azurerm_network_security_group.gateway.id
 }
 
 # Allow rules exist only for configured CIDRs; priority 4096 denies are the default.
@@ -134,6 +201,93 @@ resource "azurerm_network_security_rule" "egress_private_endpoints" {
   destination_port_range      = "443"
   source_address_prefix       = local.app_subnet_cidr
   destination_address_prefix  = local.private_endpoint_subnet_cidr
+  resource_group_name         = azurerm_resource_group.demo.name
+  network_security_group_name = azurerm_network_security_group.app.name
+}
+
+resource "azurerm_network_security_rule" "egress_private_endpoints_sql" {
+  name                        = "allow-private-endpoints-sql"
+  priority                    = 101
+  direction                   = "Outbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_ranges     = ["1433", "11000-11999"]
+  source_address_prefix       = local.app_subnet_cidr
+  destination_address_prefix  = local.private_endpoint_subnet_cidr
+  resource_group_name         = azurerm_resource_group.demo.name
+  network_security_group_name = azurerm_network_security_group.app.name
+}
+
+# The environment's own components talk to each other inside the infrastructure subnet.
+resource "azurerm_network_security_rule" "egress_gateway" {
+  name                        = "allow-model-gateway-443"
+  priority                    = 102
+  direction                   = "Outbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = local.app_subnet_cidr
+  destination_address_prefix  = local.gateway_subnet_cidr
+  resource_group_name         = azurerm_resource_group.demo.name
+  network_security_group_name = azurerm_network_security_group.app.name
+}
+
+resource "azurerm_network_security_rule" "app_subnet_internal_inbound" {
+  name                        = "allow-app-subnet-internal-inbound"
+  priority                    = 300
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "*"
+  source_port_range           = "*"
+  destination_port_range      = "*"
+  source_address_prefix       = local.app_subnet_cidr
+  destination_address_prefix  = local.app_subnet_cidr
+  resource_group_name         = azurerm_resource_group.demo.name
+  network_security_group_name = azurerm_network_security_group.app.name
+}
+
+# Load balancer health probes; without them ingress never becomes healthy.
+resource "azurerm_network_security_rule" "app_load_balancer_inbound" {
+  name                        = "allow-azure-load-balancer"
+  priority                    = 301
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "30000-32767"
+  source_address_prefix       = "AzureLoadBalancer"
+  destination_address_prefix  = local.app_subnet_cidr
+  resource_group_name         = azurerm_resource_group.demo.name
+  network_security_group_name = azurerm_network_security_group.app.name
+}
+
+resource "azurerm_network_security_rule" "app_subnet_internal_outbound" {
+  name                        = "allow-app-subnet-internal-outbound"
+  priority                    = 300
+  direction                   = "Outbound"
+  access                      = "Allow"
+  protocol                    = "*"
+  source_port_range           = "*"
+  destination_port_range      = "*"
+  source_address_prefix       = local.app_subnet_cidr
+  destination_address_prefix  = local.app_subnet_cidr
+  resource_group_name         = azurerm_resource_group.demo.name
+  network_security_group_name = azurerm_network_security_group.app.name
+}
+
+resource "azurerm_network_security_rule" "egress_container_apps_platform" {
+  for_each                    = local.container_apps_platform_egress
+  name                        = "allow-platform-${each.key}"
+  priority                    = each.value.priority
+  direction                   = "Outbound"
+  access                      = "Allow"
+  protocol                    = each.value.protocol
+  source_port_range           = "*"
+  destination_port_ranges     = each.value.ports
+  source_address_prefix       = local.app_subnet_cidr
+  destination_address_prefix  = each.value.destination
   resource_group_name         = azurerm_resource_group.demo.name
   network_security_group_name = azurerm_network_security_group.app.name
 }
@@ -223,12 +377,28 @@ resource "azurerm_key_vault" "kv" {
   rbac_authorization_enabled    = true
   purge_protection_enabled      = true
   soft_delete_retention_days    = 90
-  public_network_access_enabled = false
+  public_network_access_enabled = length(var.deployer_ip_cidrs) > 0
 
+  # Deny by default; deployer_ip_cidrs lets a Terraform runner outside the VNet create the signing certificate.
   network_acls {
     default_action = "Deny"
     bypass         = "AzureServices"
+    ip_rules       = var.deployer_ip_cidrs
   }
+}
+
+# Key Vault uses RBAC, so the Terraform principal needs data-plane rights to manage the signing certificate.
+resource "azurerm_role_assignment" "terraform_kv_certificates" {
+  scope                = azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Certificates Officer"
+  principal_id         = var.terraform_principal_object_id
+}
+
+# The deployer stores the demo passcode and the runner token between the platform and application phases.
+resource "azurerm_role_assignment" "terraform_kv_secrets" {
+  scope                = azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = var.terraform_principal_object_id
 }
 
 resource "azurerm_cognitive_account" "model" {
@@ -247,21 +417,32 @@ resource "azurerm_cognitive_account" "model" {
 }
 
 resource "azurerm_api_management" "gateway" {
-  name                          = "apim-foundry-${local.resource_group_name}"
-  location                      = var.gateway_region
-  resource_group_name           = azurerm_resource_group.demo.name
-  publisher_name                = "Airline Demo"
-  publisher_email               = "owner@example.invalid"
-  sku_name                      = "${var.gateway_api_management_tier}_1"
-  public_network_access_enabled = false
+  name                = local.gateway_name
+  location            = local.gateway_region
+  resource_group_name = azurerm_resource_group.demo.name
+  publisher_name      = "Airline Demo"
+  publisher_email     = "owner@example.invalid"
+  sku_name            = "${var.gateway_api_management_tier}_1"
+  # Azure rejects publicNetworkAccess = Disabled when the service is created; Internal VNet mode
+  # already gives the gateway only a private address.
+  public_network_access_enabled = true
   virtual_network_type          = "Internal"
 
   virtual_network_configuration {
-    subnet_id = azurerm_subnet.private_endpoints.id
+    subnet_id = azurerm_subnet.gateway.id
   }
 
   identity {
     type = "SystemAssigned"
+  }
+
+  depends_on = [azurerm_subnet_network_security_group_association.gateway]
+
+  lifecycle {
+    precondition {
+      condition     = lower(replace(local.gateway_region, " ", "")) == lower(replace(var.location, " ", ""))
+      error_message = "gateway_region must equal location: API Management can only join a virtual network in its own region."
+    }
   }
 }
 
@@ -269,6 +450,30 @@ resource "azurerm_role_assignment" "gateway_cognitive_services" {
   scope                = azurerm_cognitive_account.model.id
   role_definition_name = "Cognitive Services OpenAI User"
   principal_id         = azurerm_api_management.gateway.identity[0].principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# Internal mode publishes no public DNS for the gateway, so the VNet resolves its default hostnames privately.
+# This zone answers for all of azure-api.net inside the VNet; other API Management instances need records here too.
+resource "azurerm_private_dns_zone" "gateway" {
+  name                = "azure-api.net"
+  resource_group_name = azurerm_resource_group.demo.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "gateway" {
+  name                  = "link-gateway"
+  resource_group_name   = azurerm_resource_group.demo.name
+  private_dns_zone_name = azurerm_private_dns_zone.gateway.name
+  virtual_network_id    = azurerm_virtual_network.demo.id
+}
+
+resource "azurerm_private_dns_a_record" "gateway" {
+  for_each            = toset(["", ".portal", ".developer", ".management", ".scm"])
+  name                = "${local.gateway_name}${each.key}"
+  zone_name           = azurerm_private_dns_zone.gateway.name
+  resource_group_name = azurerm_resource_group.demo.name
+  ttl                 = 300
+  records             = azurerm_api_management.gateway.private_ip_addresses
 }
 
 resource "azurerm_api_management_api" "gateway_model" {
@@ -280,7 +485,8 @@ resource "azurerm_api_management_api" "gateway_model" {
   path                  = "openai"
   protocols             = ["https"]
   subscription_required = false
-  service_url           = "https://${local.model_endpoint_subdomain}.privatelink.openai.azure.com/openai"
+  # The public host name matches the service certificate; the linked private DNS zone resolves it to the private endpoint.
+  service_url = "https://${local.model_endpoint_subdomain}.openai.azure.com/openai"
 }
 
 resource "azurerm_api_management_api_operation" "gateway_chat_completions" {
@@ -290,7 +496,7 @@ resource "azurerm_api_management_api_operation" "gateway_chat_completions" {
   resource_group_name = azurerm_resource_group.demo.name
   display_name        = "Private chat completions"
   method              = "POST"
-  url_template        = "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}"
+  url_template        = "v1/chat/completions"
 }
 
 resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions" {
@@ -305,11 +511,15 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
     <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="gateway caller identity rejected">
       <openid-config url="https://login.microsoftonline.com/${var.tenant_id}/v2.0/.well-known/openid-configuration" />
       <audiences>
-        <audience>${var.gateway_audience}</audience>
+        <audience>${local.gateway_audience}</audience>
+        <audience>${azuread_application.gateway.client_id}</audience>
       </audiences>
       <required-claims>
         <claim name="oid" match="any">
-          <value>${var.gateway_approved_application_identity}</value>
+          <value>${local.gateway_approved_application_identity}</value>
+        </claim>
+        <claim name="roles" match="any">
+          <value>Gateway.Invoke</value>
         </claim>
       </required-claims>
     </validate-jwt>
@@ -385,6 +595,9 @@ resource "azurerm_role_assignment" "terraform_contributor" {
   role_definition_name = "Contributor"
   principal_id         = var.terraform_principal_object_id
 
+  # The scope is a literal ID, so the resource group must exist before the grant is created.
+  depends_on = [azurerm_resource_group.demo]
+
   # Fails the plan if this existing Contributor grant would go to a workflow identity.
   lifecycle {
     precondition {
@@ -414,5 +627,5 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
 
 output "model_endpoint" {
   description = "Private Foundry AI Gateway endpoint; secrets and model keys are never output."
-  value       = var.gateway_endpoint
+  value       = local.model_endpoint
 }

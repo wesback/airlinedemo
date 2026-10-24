@@ -59,12 +59,12 @@ if command -v az >/dev/null 2>&1 && az account show >/dev/null 2>&1; then
   printf 'INFO: current tenant=%s\n' "$logged_tenant"
 
   if [ -n "${AZURE_TENANT_ID:-}" ] &&
-     [ "$(printf '%s' "${AZURE_TENANT_ID}" | tr '[:upper:]' '[:lower:]')" !=
+     [ "$(printf '%s' "${AZURE_TENANT_ID}" | tr '[:upper:]' '[:lower:]')" != \
        "$(printf '%s' "$logged_tenant" | tr '[:upper:]' '[:lower:]')" ]; then
     issue "AZURE_TENANT_ID does not match the Azure CLI tenant"
   fi
   if [ -n "${AZURE_SUBSCRIPTION_ID:-}" ] &&
-     [ "$(printf '%s' "${AZURE_SUBSCRIPTION_ID}" | tr '[:upper:]' '[:lower:]')" !=
+     [ "$(printf '%s' "${AZURE_SUBSCRIPTION_ID}" | tr '[:upper:]' '[:lower:]')" != \
        "$(printf '%s' "$logged_subscription" | tr '[:upper:]' '[:lower:]')" ]; then
     issue "AZURE_SUBSCRIPTION_ID does not match the Azure CLI subscription"
   fi
@@ -89,7 +89,7 @@ if [ -n "${BACKEND_CONFIG_FILE:-}" ]; then
 fi
 
 if command -v az >/dev/null 2>&1 && [ -n "$logged_subscription" ]; then
-  required_providers='Microsoft.App Microsoft.Authorization Microsoft.CognitiveServices Microsoft.ContainerRegistry Microsoft.Insights Microsoft.KeyVault Microsoft.ManagedIdentity Microsoft.Network Microsoft.OperationalInsights Microsoft.Resources Microsoft.Sql Microsoft.Storage'
+  required_providers='Microsoft.ApiManagement Microsoft.App Microsoft.Authorization Microsoft.CognitiveServices Microsoft.Compute Microsoft.Consumption Microsoft.ContainerRegistry Microsoft.Insights Microsoft.KeyVault Microsoft.ManagedIdentity Microsoft.Network Microsoft.OperationalInsights Microsoft.Resources Microsoft.Sql Microsoft.Storage'
   for provider in $required_providers; do
     [ -n "$provider" ] || continue
     state=$(az provider show --namespace "$provider" --query registrationState --output tsv 2>/dev/null || true)

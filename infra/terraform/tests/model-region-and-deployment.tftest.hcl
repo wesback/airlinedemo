@@ -1,3 +1,21 @@
+mock_provider "azuread" {
+  mock_data "azuread_client_config" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000d0"
+    }
+  }
+  mock_resource "azuread_application" {
+    defaults = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+  mock_resource "azuread_service_principal" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000b1"
+    }
+  }
+}
 mock_provider "azurerm" {}
 
 variables {

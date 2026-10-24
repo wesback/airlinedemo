@@ -16,7 +16,7 @@ public sealed record EvaluationCase(string CaseId, string Category, string Conte
     public IReadOnlyList<string> AnnotatedMissingRequirements { get; init; } = [];
     public IReadOnlyList<EvaluationExpectedCitation> AnnotatedCitations { get; init; } = [];
 }
-public sealed record EvaluationEffectiveConfiguration(string ManifestVersion, string Arm, string DeploymentName, string Model, string ApiVersion, string Region, string ContentFilter);
+public sealed record EvaluationEffectiveConfiguration(string ManifestVersion, string Arm, string DeploymentName, string Model, string ModelVersion, string ApiVersion, string Region, string ContentFilter);
 public sealed record EvaluationModelCall(string Prompt, string? Response, string? Error);
 public sealed record EvaluationArmFailure(string Arm, string CaseId, string ErrorType);
 public sealed record EvaluationDispatch(EvaluationArm Arm, string? Answer, long TokenUsage, IReadOnlyList<EvaluationModelCall> ModelCalls, EvaluationArmFailure? Failure)
@@ -105,7 +105,7 @@ public sealed class ProductionEvaluationArmExecutor(
         var manifest = request.Manifest?.RequireUsable() ?? throw new EvaluationInputException("model arm has no approved manifest");
         var correlation = new GatewayCorrelation(
             arm.ToString(), "frozen-v2", "aircraft-return-readiness", request.Case.CaseId,
-            $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}",
+            $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ModelVersion}-{manifest.ApiVersion}-{manifest.Region}",
             FourArmEvaluationRunner.FrozenV2Sha256,
             $"{arm.ToString().ToLowerInvariant()}-{request.Case.Sha256}");
         ModelGatewayTokenomics.ValidateCorrelation(correlation);
@@ -408,7 +408,7 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
 
             var manifests = new Dictionary<EvaluationArm, ApprovedModelManifest?> { [EvaluationArm.A] = null, [EvaluationArm.B] = manifestB, [EvaluationArm.C] = manifestC, [EvaluationArm.D] = manifestB };
             var configs = manifests.ToDictionary(p => p.Key, p => p.Value is { } m
-                ? new EvaluationEffectiveConfiguration(m.ManifestVersion!, m.Arm!, m.DeploymentName!, m.Model!, m.ApiVersion!, m.Region!, m.ContentFilter!)
+                ? new EvaluationEffectiveConfiguration(m.ManifestVersion!, m.Arm!, m.DeploymentName!, m.Model!, m.ModelVersion!, m.ApiVersion!, m.Region!, m.ContentFilter!)
                 : null);
             var results = new List<EvaluationCaseResult>(cases.Count);
             long used = 0, reserved = 0;

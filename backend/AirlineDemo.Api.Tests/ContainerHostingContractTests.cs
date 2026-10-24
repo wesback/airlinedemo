@@ -160,21 +160,35 @@ public class ContainerHostingContractTests
         Assert.Matches(@"for_each\s*=\s*local\.egress_rules", egressAllowRule);
         Assert.Matches(@"destination_address_prefix\s*=\s*each\.value", egressAllowRule);
         // Every Allow rule must target only an approved destination: the private-endpoint subnet, the app subnet,
-        // or one configured egress destination. Service tags such as Internet or VirtualNetwork are rejected.
+        // the internal API Management subnet, one configured egress destination, or one entry of the pinned
+        // Container Apps platform list. Service tags such as Internet, VirtualNetwork or AzureCloud are rejected.
         foreach (Match rule in Regex.Matches(main, @"resource\s+""azurerm_network_security_rule""\s+""\w+""\s*\{"))
         {
             var ruleBlock = Block(main, rule.Value);
             if (Regex.IsMatch(ruleBlock, @"access\s*=\s*""Allow"""))
             {
                 Assert.DoesNotMatch(@"destination_address_prefixes\s*=", ruleBlock);
-                Assert.Matches(@"(?m)^\s*destination_address_prefix\s*=\s*(local\.app_subnet_cidr|local\.private_endpoint_subnet_cidr|each\.value)\s*$", ruleBlock);
+                Assert.Matches(@"(?m)^\s*destination_address_prefix\s*=\s*(local\.app_subnet_cidr|local\.private_endpoint_subnet_cidr|local\.gateway_subnet_cidr|each\.value|each\.value\.destination)\s*$", ruleBlock);
                 // each.value is only a safe destination when the rule iterates the configured egress allowlist.
-                if (Regex.IsMatch(ruleBlock, @"destination_address_prefix\s*=\s*each\.value"))
+                if (Regex.IsMatch(ruleBlock, @"(?m)destination_address_prefix\s*=\s*each\.value\s*$"))
                 {
                     Assert.Matches(@"(?m)^\s*for_each\s*=\s*local\.egress_rules\s*$", ruleBlock);
                 }
+                // each.value.destination is only safe when the rule iterates the pinned platform list below.
+                if (Regex.IsMatch(ruleBlock, @"destination_address_prefix\s*=\s*each\.value\.destination"))
+                {
+                    Assert.Matches(@"(?m)^\s*for_each\s*=\s*local\.container_apps_platform_egress\s*$", ruleBlock);
+                }
             }
         }
+
+        // The platform list is exactly what a workload-profiles environment with an NSG needs, and nothing broader.
+        var platform = Block(main, "container_apps_platform_egress = {");
+        Assert.Equal(
+            new[] { "168.63.129.16", "AzureActiveDirectory", "AzureFrontDoor.FirstParty", "AzureMonitor", "MicrosoftContainerRegistry" },
+            Regex.Matches(platform, @"destination\s*=\s*""([^""]+)""").Select(m => m.Groups[1].Value).OrderBy(d => d, StringComparer.Ordinal).ToArray());
+        Assert.Matches(@"(?m)^\s*dns\s*=\s*\{[^}]*ports\s*=\s*\[""53""\]", platform);
+        Assert.Equal(4, Regex.Matches(platform, @"protocol\s*=\s*""Tcp"",\s*ports\s*=\s*\[""443""\]").Count);
 
         Assert.Matches(@"sha256", Tf("variables.tf"));
     }
@@ -188,8 +202,7 @@ public class ContainerHostingContractTests
         string[] required =
         {
             "subscription_id", "tenant_id", "location", "presenter_reviewer_cidrs", "budget_amount",
-            "budget_start_date", "budget_contact_emails", "terraform_state_backend", "image_digest",
-            "demo_passcode_secret_uri",
+            "budget_start_date", "budget_contact_emails", "terraform_state_backend",
         };
         string[] derived =
         {
@@ -218,5 +231,11 @@ public class ContainerHostingContractTests
         Assert.Matches(@"cidrnetmask", egress);
         var digest = Block(variables, "variable \"image_digest\"");
         Assert.Matches(@"\^sha256:\[0-9a-f\]\{64\}\$", digest);
+
+        // Two-phase deploy: the application inputs are null on the platform-only run and must be given together.
+        var passcode = Block(variables, "variable \"demo_passcode_secret_uri\"");
+        Assert.Matches(@"(?m)^\s*default\s*=\s*null\s*$", digest);
+        Assert.Matches(@"(?m)^\s*default\s*=\s*null\s*$", passcode);
+        Assert.Matches(@"\(var\.demo_passcode_secret_uri\s*==\s*null\)\s*==\s*\(var\.image_digest\s*==\s*null\)", passcode);
     }
 }

@@ -1,3 +1,21 @@
+mock_provider "azuread" {
+  mock_data "azuread_client_config" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000d0"
+    }
+  }
+  mock_resource "azuread_application" {
+    defaults = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+  mock_resource "azuread_service_principal" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000b1"
+    }
+  }
+}
 mock_provider "azurerm" {}
 
 # Only the inputs that cannot be derived. Every name and range comes from name_prefix.
@@ -26,7 +44,7 @@ run "names_and_ranges_derive_from_prefix" {
   command = plan
 
   assert {
-    condition     = azurerm_resource_group.demo.name == "rg-demo1" && azurerm_container_app.app.name == "ca-demo1" && azurerm_container_app_environment.demo.name == "cae-demo1" && azurerm_cognitive_deployment.model.name == "gpt-demo1"
+    condition     = azurerm_resource_group.demo.name == "rg-demo1" && azurerm_container_app.app[0].name == "ca-demo1" && azurerm_container_app_environment.demo.name == "cae-demo1" && azurerm_cognitive_deployment.model.name == "gpt-demo1"
     error_message = "Resource group, container app, environment and model deployment names must derive from name_prefix."
   }
 

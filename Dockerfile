@@ -1,4 +1,4 @@
-FROM node:22.12.0-bookworm-slim AS frontend
+FROM node:22.22.2-bookworm-slim AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -17,6 +17,7 @@ COPY --from=build /out/ ./
 # The telemetry approval file is read at startup from docs/telemetry under the working directory.
 COPY --from=build /src/docs/telemetry/source-system-proposed-additions.md ./docs/telemetry/source-system-proposed-additions.md
 ENV ASPNETCORE_URLS=http://+:8080
+ENV Investigation__ManifestPath=/app/config/model-manifest.json
 EXPOSE 8080
 USER 1654:1654
 ENTRYPOINT ["dotnet", "AirlineDemo.Api.dll"]

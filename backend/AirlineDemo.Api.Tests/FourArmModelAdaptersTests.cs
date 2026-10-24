@@ -99,7 +99,8 @@ public sealed class FourArmModelAdaptersTests
         var (adapter, client) = Setup(); var b = FakeApprovedManifest.Approved(); var result = await adapter.ExecuteAsync(EvaluationArm.D, Case(), b, b);
         Assert.Equal((1, 0, 0), (result.ModelCalls, result.ToolCalls, result.CitationReflections)); Assert.Equal(1, client.Calls);
         var mismatches = new[] { b with { ManifestVersion = "2026.10.2" }, b with { DeploymentName = "other-deployment" },
-            b with { Model = "other-model" }, b with { ApiVersion = "2025-02-01" }, b with { Region = "westeurope" }, b with { ContentFilter = "disabled" } };
+            b with { Model = "other-model" }, b with { ModelVersion = "2026-09-23" }, b with { ApiVersion = "v2" },
+            b with { Region = "westeurope" }, b with { ContentFilter = "disabled" } };
         foreach (var mismatch in mismatches) await Assert.ThrowsAsync<EvaluationInputException>(() => adapter.ExecuteAsync(EvaluationArm.D, Case(), mismatch, b));
         Assert.Equal(1, client.Calls);
     }

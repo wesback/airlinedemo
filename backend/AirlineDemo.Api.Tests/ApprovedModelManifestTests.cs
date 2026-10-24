@@ -14,7 +14,8 @@ public class ApprovedModelManifestTests
           "arm": "investigation-live",
           "deploymentName": "fixture-deployment",
           "model": "fixture-model",
-          "apiVersion": "2025-01-01",
+          "modelVersion": "2026-09-22",
+          "apiVersion": "v1",
           "region": "swedencentral",
           "contentFilter": "enabled"
         }
@@ -42,15 +43,10 @@ public class ApprovedModelManifestTests
 
     private static string ShippedManifestPath()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "config", "model-manifest.json")))
-        {
-            dir = dir.Parent;
-        }
-
-        return dir is null
-            ? throw new FileNotFoundException("config/model-manifest.json not found above the test binaries")
-            : Path.Combine(dir.FullName, "config", "model-manifest.json");
+        var path = Path.Combine(AppContext.BaseDirectory, "config", "model-manifest.json");
+        return File.Exists(path)
+            ? path
+            : throw new FileNotFoundException("config/model-manifest.json was not copied beside the test binaries", path);
     }
 
     [Fact]
@@ -83,6 +79,8 @@ public class ApprovedModelManifestTests
     [InlineData("apiVersion", "myApiKeyValue")]
     [InlineData("deploymentName", "Qz7mR2pL9xVb4kTn8WcF")]
     [InlineData("model", "fixture-model-0a1b2c3d4e5f6g7h8i9j")]
+    [InlineData("modelVersion", "2026-99-99")]
+    [InlineData("modelVersion", "2026-09-22-preview")]
     [InlineData("region", "janesmith")]
     [InlineData("region", "Jane Smith")]
     [InlineData("apiVersion", "2025-01-01-Jane")]
@@ -98,6 +96,7 @@ public class ApprovedModelManifestTests
     [InlineData("manifestVersion")]
     [InlineData("deploymentName")]
     [InlineData("model")]
+    [InlineData("modelVersion")]
     [InlineData("apiVersion")]
     [InlineData("region")]
     [InlineData("contentFilter")]
@@ -157,6 +156,38 @@ public class ApprovedModelManifestTests
     }
 
     [Fact]
+    public void Dated_api_version_is_refused()
+    {
+        var manifest = Approved("apiVersion", "2024-10-21");
+
+        Assert.Contains("apiVersion is not a plain identifier", manifest.Validate());
+        Assert.Throws<ModelGateException>(() => manifest.RequireUsable());
+    }
+
+    [Fact]
+    public void Approved_manifest_requires_exact_configured_model_settings()
+    {
+        var manifest = Approved();
+
+        manifest.RequireConfigurationMatches("fixture-deployment", "fixture-model", "2026-09-22");
+        Assert.Throws<ModelGateException>(() =>
+            manifest.RequireConfigurationMatches("other-deployment", "fixture-model", "2026-09-22"));
+        Assert.Throws<ModelGateException>(() =>
+            manifest.RequireConfigurationMatches("fixture-deployment", "other-model", "2026-09-22"));
+        Assert.Throws<ModelGateException>(() =>
+            manifest.RequireConfigurationMatches("fixture-deployment", "fixture-model", "2026-09-23"));
+        Assert.Throws<ModelGateException>(() =>
+            manifest.RequireConfigurationMatches("fixture-deployment", "fixture-model", null));
+    }
+
+    [Fact]
+    public void Unapproved_manifest_does_not_require_deployment_settings()
+    {
+        Approved("approved", (JsonNode?)false)
+            .RequireConfigurationMatches(null, null, null);
+    }
+
+    [Fact]
     public void Invalid_json_is_refused_explicitly()
     {
         Assert.Throws<ModelGateException>(() => ApprovedModelManifest.Parse("{ not json"));
@@ -178,7 +209,8 @@ public class ApprovedModelManifestTests
         Assert.Equal("investigation-live", trace.Arm);
         Assert.Equal("fixture-deployment", trace.DeploymentName);
         Assert.Equal("fixture-model", trace.Model);
-        Assert.Equal("2025-01-01", trace.ApiVersion);
+        Assert.Equal("2026-09-22", trace.ModelVersion);
+        Assert.Equal("v1", trace.ApiVersion);
         Assert.Equal("swedencentral", trace.Region);
         Assert.Equal("enabled", trace.ContentFilter);
         Assert.Equal(SyntheticContentRegistry.Sha256Hex(Marked(body)), Assert.Single(trace.EvidenceSha256));
@@ -356,6 +388,7 @@ public class ApprovedModelManifestTests
         Assert.Equal("STUB", manifest.Arm);
         Assert.Equal("STUB", manifest.DeploymentName);
         Assert.Equal("STUB", manifest.Model);
+        Assert.Equal("STUB", manifest.ModelVersion);
         Assert.Equal("STUB", manifest.ApiVersion);
         Assert.Equal("STUB", manifest.Region);
         Assert.Equal("STUB", manifest.ContentFilter);
