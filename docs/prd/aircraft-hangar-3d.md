@@ -2,7 +2,7 @@
 prd_id: "aircraft-hangar-3d"
 title: "Aircraft Hangar 3D Presentation Layer"
 status: "approved"
-version: "0.4.0"
+version: "0.4.1"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-14"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Aircraft Hangar 3D Presentation Layer
 
-> **aircraft-hangar-3d** | Status: Approved | Version: 0.4.0 | Last Updated: 2026-10-23
+> **aircraft-hangar-3d** | Status: Approved | Version: 0.4.1 | Last Updated: 2026-10-23
 
 ## Executive Summary
 
@@ -110,6 +110,7 @@ The frontend today is a health-check stub. Almost everything the hangar relies o
 | DD-034 | Hangar mode creates one `PerspectiveCamera` (vertical field of view 40 degrees, near 0.5, far 1000), passes that instance to the canvas and sets its pose from the camera controllers on every change. The `camera` prop is applied only when the canvas is created (research E-6), so passing options would leave the camera fixed. |
 | DD-035 | The canvas renders on demand (`frameloop: "demand"`) with device pixel ratio clamped to [1, 2], antialiasing on and no shadow map; a frame is requested only when the camera, avatar, selection, route, labels or scene data change, and on each step of a follow-camera easing. Reason: the scene is static between inputs, and continuous rendering on the integrated-GPU demo baseline costs battery and heat. |
 | DD-036 | WebGL context loss is a render failure: Hangar mode shows the non-3D equivalent with fallback reason `render_failed` and does not remount the canvas by itself; re-entering Hangar mode creates a new canvas. R3F registers no context-loss handler (research E-7). |
+| DD-037 | Version 0.4.1. Defaults the Functional Planner assumed are decisions. (1) Release 0.4.x ships no GLB, texture, image, blob worker, external font, model CDN or runtime third-party resource; code-built geometry and same-origin assets are the default (DD-029, DD-010). (2) A missing or unsupported browser capability, contract version, scene envelope, asset, source summary or refresh shows the fallback of DD-025 with the matching NFR-006 fallback reason and never a partial scene. (3) Hangar is a presentation client only: companion server authentication, CP and ARR authorization, reset anti-forgery, SS source-summary scope and ARR server logging stay authoritative (CON-002, NFR-003, ARR:DD-029) and no client check replaces them. No open question remains for a person to decide; Planning blockers stay None. |
 
 ## Product Goals
 
@@ -677,7 +678,7 @@ None requested.
 
 ### Handoff Readiness
 
-Approved by the Product Owner on 2026-10-22 (pull request #223). Version 0.4.0 adds DD-029 to DD-036, FR-022 to FR-027, AC-048 to AC-061 and Scene rendering, amends DD-010, DD-012, DD-021, FR-012, FR-015, AC-042, NFR-001, NFR-002 and NFR-006, and needs new stories (hints 23 to 33); it is approved by the merge of its pull request. Version 0.3.1 records the planner's assumed defaults as DD-023 to DD-028 and the research readiness, and changes no requirement. The original gate: merge this PRD only after a named person approves its pull request and verifies delivered CP behavior/fixture approval and ARR endpoint prerequisites on the default branch. ARR, CP and HG merges are staged separately. Generated HG stories cite this PRD path and local IDs, with real `Depends on #N` lines only for stories within their HG plan. Accepted design targets are not implementation or release evidence.
+Version 0.4.1 adds DD-037 only, to record the planner's assumed defaults from issue #590 (no new stories needed). Approved by the Product Owner on 2026-10-22 (pull request #223). Version 0.4.0 adds DD-029 to DD-036, FR-022 to FR-027, AC-048 to AC-061 and Scene rendering, amends DD-010, DD-012, DD-021, FR-012, FR-015, AC-042, NFR-001, NFR-002 and NFR-006, and needs new stories (hints 23 to 33); it is approved by the merge of its pull request. Version 0.3.1 records the planner's assumed defaults as DD-023 to DD-028 and the research readiness, and changes no requirement. The original gate: merge this PRD only after a named person approves its pull request and verifies delivered CP behavior/fixture approval and ARR endpoint prerequisites on the default branch. ARR, CP and HG merges are staged separately. Generated HG stories cite this PRD path and local IDs, with real `Depends on #N` lines only for stories within their HG plan. Accepted design targets are not implementation or release evidence.
 
 ## Disclaimer
 
