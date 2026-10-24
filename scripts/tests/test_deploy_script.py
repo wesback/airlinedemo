@@ -56,6 +56,18 @@ class DeployScriptTests(unittest.TestCase):
         self.bin.mkdir()
         self.state = base / "state"
         self.log = base / "calls.log"
+        self.manifest = base / "model-manifest.json"
+        self.manifest.write_text(json.dumps({
+            "manifestVersion": "1.0.0",
+            "approved": True,
+            "arm": "investigation-live",
+            "deploymentName": "demo-model",
+            "model": "gpt-demo-model",
+            "modelVersion": "2025-01-01",
+            "apiVersion": "v1",
+            "region": "swedencentral",
+            "contentFilter": "enabled",
+        }))
         for name, body in (("az", AZ), ("terraform", TERRAFORM)):
             path = self.bin / name
             path.write_text(body)
@@ -65,11 +77,10 @@ class DeployScriptTests(unittest.TestCase):
             "PATH": f"{self.bin}:{self.env['PATH']}", "CALL_LOG": str(self.log),
             "DEPLOY_STATE_DIR": str(self.state), "DEPLOY_ROLE_WAIT_SECONDS": "0",
             "FAKE_TENANT": TENANT, "FAKE_SUBSCRIPTION": SUBSCRIPTION, "FAKE_PRINCIPAL": PRINCIPAL,
+            "AIRLINEDEMO_MODEL_MANIFEST_FILE": str(self.manifest),
         })
         self.args = [
-            "--prefix", "demo1", "--location", "swedencentral", "--model-name", "gpt-demo-model",
-            "--model-version", "2025-01-01",
-            "--budget-amount", "250", "--image-digest", "sha256:" + "a" * 64,
+            "--image-digest", "sha256:" + "a" * 64,
             "--passcode-secret-uri", "https://kv-demo.vault.azure.net/secrets/demo-passcode",
         ]
 
@@ -89,6 +100,22 @@ class DeployScriptTests(unittest.TestCase):
         for option in ("--prefix", "--location", "--model-name", "--model-version", "--ops-group-name",
                        "--ops-group-id", "--budget-amount", "--image-digest", "--passcode-secret-uri"):
             self.assertIn(option, result.stdout)
+
+    def test_defaults_use_demo_prefix_location_budget_and_manifest_model(self):
+        result = self.run_deploy("--prepare-only")
+        self.assertEqual(0, result.returncode, result.stderr)
+        values = json.loads((self.state / "demo1/deploy.tfvars.json").read_text())
+        self.assertEqual("demo1", values["name_prefix"])
+        self.assertEqual("swedencentral", values["location"])
+        self.assertEqual(250, values["budget_amount"])
+        self.assertEqual("demo-model", values["model_deployment_name"])
+        self.assertEqual("gpt-demo-model", values["model_name"])
+        self.assertEqual("2025-01-01", values["model_version"])
+
+    def test_explicit_model_must_match_approved_manifest(self):
+        result = self.run_deploy("--prepare-only", "--model-name", "other-model")
+        self.assertEqual(2, result.returncode)
+        self.assertIn("must match the approved model manifest 'gpt-demo-model'", result.stderr)
 
     def test_default_identity_uses_signed_in_user(self):
         result = self.run_deploy("--prepare-only")
@@ -166,21 +193,21 @@ class DeployScriptTests(unittest.TestCase):
         self.assertIn('storage_account_name = "stownerstate"', (self.state / "demo1/backend.hcl").read_text())
 
     def test_missing_required_options_are_all_named_at_once(self):
-        result = self.run_deploy(args=["--prefix", "demo1"])
-        self.assertEqual(2, result.returncode)
-        self.assertIn("missing required options: --location --model-name --model-version --budget-amount\n", result.stderr)
+        result = self.run_deploy("--prepare-only", args=["--prefix", "demo1"])
+        self.assertEqual(0, result.returncode)
+        values = json.loads((self.state / "demo1/deploy.tfvars.json").read_text())
+        self.assertEqual("demo1", values["name_prefix"])
 
     def test_invalid_values_are_rejected_before_anything_is_written(self):
         cases = [
             ("--prefix", "Demo_1", "--prefix must be 3-10 lowercase letters or digits starting with a letter"),
-            ("--image-digest", "latest", "--image-digest must be sha256: followed by 64 lowercase hex characters"),
             ("--budget-amount", "12.5", "--budget-amount must be a whole number"),
-            ("--model-name", 'gpt"; rm', "--model-name contains characters that are not allowed"),
+            ("--image-digest", "latest", "--image-digest must be sha256: followed by 64 lowercase hex characters"),
+            ("--model-name", 'gpt"; rm', "must match the approved model manifest"),
         ]
         for option, value, message in cases:
             with self.subTest(option=option):
-                args = list(self.args)
-                args[args.index(option) + 1] = value
+                args = list(self.args) + [option, value]
                 result = self.run_deploy(args=args)
                 self.assertEqual(2, result.returncode)
                 self.assertIn(message, result.stderr)
