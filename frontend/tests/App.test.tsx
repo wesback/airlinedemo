@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
 
 const users = [{ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer' }];
@@ -7,6 +7,14 @@ const signedIn = { id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technic
 const decisions = [{ id: 'accept', label: 'Accept finding' }, { id: 'reject', label: 'Reject finding' }];
 
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
+
+beforeAll(() => {
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+});
 
 function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = decisions, traces: { label: string; url: string }[] = []) {
   return {
@@ -32,6 +40,7 @@ function setupApi(options: {
   canReset?: boolean;
   resetStatus?: number;
 } = {}) {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const calls: { url: string; init?: RequestInit }[] = [];
   let dashboardRequests = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -235,25 +244,21 @@ describe('reviewer workspace', () => {
       if (scene) return json(makeEnvelope(scene[1], scene[1] === 'cp-case-a' ? revision : 7));
       return baseFetch(input, init);
     });
-    function ProductionScene({ sceneData, hangarClientSnapshot, onSelect }: { sceneData?: unknown; hangarClientSnapshot?: unknown; onSelect?: (id: string) => unknown }) {
-      const root = sceneData as { cases?: Array<{ nextAction?: { text?: string } }> };
-      const clientRoot = hangarClientSnapshot as { case?: { nextAction?: { text?: string } } } | undefined;
-      const serverText = root?.cases?.[0]?.nextAction?.text;
-      const injectedClientText = clientRoot?.case?.nextAction?.text;
-      const text = serverText ?? 'Missing server scene text';
-      expect(text).not.toBe(injectedClientText);
-      return <><span data-hangar-label="SYN-CP-A-AIR-001">Air One<br />narrow-body<br />Rules-based<br />{text}</span><button onClick={() => onSelect?.('SYN-CP-A-AIR-001')}>Select Aircraft A</button></>;
-    }
-    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => ProductionScene} hangarAircraftSelectionHandler={vi.fn()} hangarClientSnapshot={{ case: { caseId: 'cp-case-a', nextAction: { text: 'Injected client text' } } }} />);
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarAircraftSelectionHandler={vi.fn()} hangarClientSnapshot={{ case: { caseId: 'cp-case-a', nextAction: { text: 'Injected client text' } } }} />);
     await signIn(); fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
-    await screen.findByRole('button', { name: 'Select Aircraft A' });
-    fireEvent.click(screen.getByRole('button', { name: 'Select Aircraft A' }));
+    await screen.findByRole('button', { name: 'Pointer select AIR-1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Pointer select AIR-1' }));
     injectedText = 'Injected client text';
     expect(screen.queryByText(`Next action: ${injectedText}`)).toBeNull();
     revision = 8;
     window.dispatchEvent(new Event('focus'));
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/scene')).length).toBeGreaterThanOrEqual(3));
-    await waitFor(() => expect(document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.textContent).toContain('Approve server evidence'));
+    await waitFor(() => {
+      const label = document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.textContent ?? '';
+      expect(label).toContain('Approve server evidence');
+      expect(label).not.toContain('Injected client text');
+    });
+    expect(document.body.textContent).not.toContain('Injected client text');
     await waitFor(() => expect(screen.getByText('Next action: Approve server evidence')).toBeTruthy());
   });
 
@@ -271,10 +276,9 @@ describe('reviewer workspace', () => {
       if (scene) return fail ? json({ error: 'refresh failed' }, 500) : json(makeEnvelope(scene[1], scene[1] === 'cp-case-a' ? revision : 7));
       return baseFetch(input, init);
     });
-    function ProductionScene({ onSelect }: { onSelect?: (id: string) => unknown }) { return <button onClick={() => onSelect?.('SYN-CP-A-AIR-001')}>Select Aircraft A</button>; }
-    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => ProductionScene} hangarAircraftSelectionHandler={vi.fn()} />);
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarAircraftSelectionHandler={vi.fn()} />);
     await signIn(); fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
-    const select = await screen.findByRole('button', { name: 'Select Aircraft A' }); fireEvent.click(select);
+    const select = await screen.findByRole('button', { name: 'Pointer select AIR-1' }); fireEvent.click(select);
     await waitFor(() => expect(screen.getByText('Next action: Review evidence')).toBeTruthy());
     fail = true; window.dispatchEvent(new Event('focus'));
     await screen.findByText('Stale server snapshot: evidence and commands are unavailable.');

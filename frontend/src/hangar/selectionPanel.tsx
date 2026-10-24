@@ -61,7 +61,7 @@ export function resolveHangarSelection(envelope:unknown, identifier:unknown, exp
     evidence.push({documentId,version,basisId,basisVersion,displayLabel,witnesses,status:processing||null,blocked:false});
   }
   const projectedStatus=object.status!==undefined?object.status:(isObject(c.status)?c.status:undefined);
-  return {objectId:identifier,caseId:String(c.caseId),kind:text(object.kind)??'object',status:projectedStatus,owner:text(object.owner)??text(c.owner)??'Unknown',nextAction:isObject(object.nextAction)?text(object.nextAction.text)??'Unknown':text(object.nextAction)??(isObject(c.nextAction)?text(c.nextAction.text)??'Unknown':text(c.nextAction)??'Unknown'),capabilityLabel:text(object.capabilityLabel)??text(c.capabilityLabel)??'Unknown',evidence,error};
+  return {objectId:identifier,caseId:String(c.caseId),kind:text(object.kind)??'object',status:projectedStatus,owner:text(object.owner)??text(c.owner)??'Unknown',nextAction:isObject(c.nextAction)?text(c.nextAction.text)??'Unknown':text(c.nextAction)??(isObject(object.nextAction)?text(object.nextAction.text)??'Unknown':text(object.nextAction)??'Unknown'),capabilityLabel:text(object.capabilityLabel)??text(c.capabilityLabel)??'Unknown',evidence,error};
 }
 export const activateProjectedObject=resolveHangarSelection;
 export const buildHangarSelection=resolveHangarSelection;
@@ -86,7 +86,7 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
   useEffect(()=>{if(isObject(snapshot))setRefreshSnapshot(snapshot as ServerSceneSnapshot);},[snapshot]);
   useEffect(()=>{if(!refreshReader)return;const onFocus=()=>{const generation=++refreshGeneration.current;void refreshHangarScene(refreshReader,refreshSnapshot).then(result=>{if(generation!==refreshGeneration.current)return;setRefreshSnapshot(result.snapshot);if(result.valid&&result.scene)setSource(result.scene);onRefresh?.(result);});};window.addEventListener('focus',onFocus);return ()=>window.removeEventListener('focus',onFocus);},[refreshReader,refreshSnapshot,onRefresh]);
   const explicitSnapshot=isObject(snapshot)?snapshot:null;
-  const staleSnapshot=stale || explicitSnapshot?.current===false || (explicitSnapshot?.current!==true && refreshSnapshot?.current===false);
+  const staleSnapshot=explicitSnapshot?.current===true ? false : stale || explicitSnapshot?.current===false || (refreshSnapshot?.current===false);
   const admittedFromEnvelope=isObject(source)&&Array.isArray(source.allowedActions)?source.allowedActions.filter((action):action is string=>typeof action==='string'):[];
   const snapshotActions=refreshSnapshot?.current===true?getHangarServerAuthorizedActions(refreshSnapshot):explicitSnapshot?.current===true?getHangarServerAuthorizedActions(explicitSnapshot as ServerSceneSnapshot):[];
   const serverAllowedActions=Array.from(new Set([...snapshotActions,...admittedFromEnvelope]));
