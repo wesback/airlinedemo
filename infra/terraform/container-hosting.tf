@@ -13,21 +13,47 @@ resource "azurerm_role_assignment" "app_acr_pull" {
   scope                = azurerm_container_registry.acr.id
   role_definition_name = "AcrPull"
   principal_id         = azurerm_user_assigned_identity.app.principal_id
+  principal_type       = "ServicePrincipal"
 }
 
+# When the passcode lives in this deployment's vault, the app identity needs to read it.
+# A passcode in another vault needs the same grant there, made by that vault's owner.
+resource "azurerm_role_assignment" "app_passcode_secret" {
+  count                = local.deploy_application && startswith(lower(coalesce(var.demo_passcode_secret_uri, "-")), "https://${lower(local.key_vault_name)}.vault.azure.net/") ? 1 : 0
+  scope                = "${azurerm_key_vault.kv.id}/secrets/${split("/", coalesce(var.demo_passcode_secret_uri, "-/-/-/-/-"))[4]}"
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# A workload-profiles environment: the delegated app subnet and its NSG only support this environment type.
 resource "azurerm_container_app_environment" "demo" {
   name                           = local.container_apps_environment_name
   resource_group_name            = azurerm_resource_group.demo.name
   location                       = azurerm_resource_group.demo.location
   infrastructure_subnet_id       = azurerm_subnet.app.id
   internal_load_balancer_enabled = false
+
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+  }
+
+  depends_on = [azurerm_subnet_network_security_group_association.app]
+}
+
+# Two-phase first deploy: the app is created only once its image is in this registry and its passcode is in this vault.
+locals {
+  deploy_application = var.image_digest != null && var.demo_passcode_secret_uri != null
 }
 
 resource "azurerm_container_app" "app" {
+  count                        = local.deploy_application ? 1 : 0
   name                         = local.container_app_name
   resource_group_name          = azurerm_resource_group.demo.name
   container_app_environment_id = azurerm_container_app_environment.demo.id
   revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
 
   identity {
     type         = "UserAssigned"
@@ -101,11 +127,47 @@ resource "azurerm_container_app" "app" {
       }
 
       env {
+        name  = "ModelGateway__Endpoint"
+        value = local.model_endpoint
+      }
+
+      env {
+        name  = "ModelGateway__Audience"
+        value = local.gateway_audience
+      }
+
+      env {
+        name  = "ModelGateway__DeploymentName"
+        value = local.gateway_model_deployment
+      }
+
+      env {
+        name  = "ModelGateway__Model"
+        value = var.model_name
+      }
+
+      env {
+        name  = "ModelGateway__ModelVersion"
+        value = var.model_version
+      }
+
+      env {
         name        = "Demo__Passcode"
         secret_name = "demo-passcode"
       }
     }
   }
 
-  depends_on = [azurerm_role_assignment.app_acr_pull]
+  # The release workflow rolls out new signed digests with az containerapp update; Terraform sets only the first one.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
+  # The image pull and the passcode lookup go through the private endpoints, so their DNS must resolve first.
+  depends_on = [
+    azurerm_role_assignment.app_acr_pull,
+    azurerm_role_assignment.app_passcode_secret,
+    azurerm_private_endpoint.demo,
+    azurerm_private_dns_zone_virtual_network_link.demo,
+  ]
 }

@@ -12,7 +12,7 @@ public class InvestigatorInjectionTests
     private const string ReturnStatusText = "SYNTHETIC EVIDENCE: Return readiness is pending reserve approval.";
     private const string OtherCaseText = "SYNTHETIC EVIDENCE: Other case private note.";
 
-    private const string ApprovedJson = """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""";
+    private const string ApprovedJson = """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","modelVersion":"2026-09-22","apiVersion":"v1","region":"swedencentral","contentFilter":"enabled"}""";
 
     private const string ClaimsJson =
         """[{"text":"Return readiness is pending reserve approval.","witnesses":[{"documentId":"return-status","page":1,"quote":"Return readiness is pending reserve approval."}]}]""";

@@ -1,3 +1,21 @@
+mock_provider "azuread" {
+  mock_data "azuread_client_config" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000d0"
+    }
+  }
+  mock_resource "azuread_application" {
+    defaults = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+  mock_resource "azuread_service_principal" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000b1"
+    }
+  }
+}
 mock_provider "azurerm" {
   mock_resource "azurerm_mssql_server" {
     defaults = {
@@ -76,6 +94,12 @@ mock_provider "azurerm" {
   mock_resource "azurerm_private_dns_zone" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/privateDnsZones/privatelink.database.windows.net"
+    }
+  }
+
+  mock_resource "azurerm_monitor_private_link_scope" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Insights/privateLinkScopes/ampls-airline-telemetry"
     }
   }
 
@@ -485,6 +509,25 @@ run "M-07_telemetry_reader_is_read_only_group" {
   assert {
     condition     = azurerm_role_assignment.telemetry_reader.principal_id == var.telemetry_reader_group_id
     error_message = "Telemetry reader must be bound to the configured reader group id; a different group must fail."
+  }
+}
+
+run "M-07_demo_telemetry_reader_supports_signed_in_user" {
+  command = apply
+
+  variables {
+    telemetry_reader_principal_type = "User"
+    telemetry_reader_group_id       = "44444444-4444-4444-4444-444444444444"
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.telemetry_reader.role_definition_name == "Log Analytics Reader" && azurerm_role_assignment.telemetry_reader.principal_type == "User"
+    error_message = "Demo telemetry reader must support a signed-in user with read-only Log Analytics access."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.telemetry_reader.principal_id == var.telemetry_reader_group_id
+    error_message = "Demo telemetry reader principal id must equal the signed-in user object id."
   }
 }
 

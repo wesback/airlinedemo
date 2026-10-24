@@ -138,7 +138,7 @@ public class DockerfileTests
     }
 
     [Theory]
-    [InlineData("node:22.12.0-bookworm-slim")]
+    [InlineData("node:22.22.2-bookworm-slim")]
     [InlineData("mcr.microsoft.com/dotnet/sdk:10.0.100")]
     public void ExactVersionTagCheckAcceptsPinnedTags(string image)
     {

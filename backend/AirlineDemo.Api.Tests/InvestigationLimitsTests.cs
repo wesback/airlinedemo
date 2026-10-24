@@ -413,7 +413,7 @@ public class InvestigationLimitsTests
     }
 
     private static ApprovedModelManifest ApprovedManifest() => ApprovedModelManifest.Parse(
-        """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""");
+        """{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"fixture-deployment","model":"fixture-model","modelVersion":"2026-09-22","apiVersion":"v1","region":"swedencentral","contentFilter":"enabled"}""");
 
     private sealed class TraceLogger : Microsoft.Extensions.Logging.ILogger
     {

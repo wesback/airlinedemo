@@ -70,23 +70,33 @@ builder.Services.AddSingleton<Func<ApprovedModelManifest, Microsoft.Extensions.A
     var createCredential = sp.GetRequiredService<Func<Azure.Core.TokenCredential>>();
     var credential = new GatewayScopedTokenCredential(new LazyTokenCredential(createCredential),
         ModelGatewayTokenomics.TokenScope(builder.Configuration["ModelGateway:Audience"]));
-    // The gateway operation matches this exact api-version (Terraform gateway_api_version); never follow the SDK default.
-    var options = new Azure.AI.OpenAI.AzureOpenAIClientOptions(ModelGatewayTokenomics.ApiServiceVersion);
+    var options = new OpenAI.OpenAIClientOptions
+    {
+        Endpoint = new Uri(endpoint, $"/openai/{ModelGatewayTokenomics.ApiVersion}/"),
+    };
     options.AddPolicy(new GatewayCorrelationHeadersPolicy(), System.ClientModel.Primitives.PipelinePosition.PerCall);
     var handler = sp.GetService<System.Net.Http.HttpMessageHandler>();
     if (handler is not null)
     {
         options.Transport = new System.ClientModel.Primitives.HttpClientPipelineTransport(new System.Net.Http.HttpClient(handler));
     }
-    Microsoft.Extensions.AI.IChatClient client = new Azure.AI.OpenAI.AzureOpenAIClient(endpoint, credential, options)
+#pragma warning disable OPENAI001
+    var tokenPolicy = new System.ClientModel.Primitives.BearerTokenPolicy(credential, "https://ai.azure.com/.default");
+    Microsoft.Extensions.AI.IChatClient client = new OpenAI.OpenAIClient(tokenPolicy, options)
         .GetChatClient(deployment)
         .AsIChatClient();
+#pragma warning restore OPENAI001
     return client;
 });
 var approvedModelManifestPath = builder.Configuration["Investigation:ManifestPath"];
 if (!string.IsNullOrEmpty(approvedModelManifestPath))
 {
-    builder.Services.AddSingleton(ApprovedModelManifest.Load(approvedModelManifestPath));
+    var manifest = ApprovedModelManifest.Load(approvedModelManifestPath);
+    manifest.RequireConfigurationMatches(
+        builder.Configuration["ModelGateway:DeploymentName"],
+        builder.Configuration["ModelGateway:Model"],
+        builder.Configuration["ModelGateway:ModelVersion"]);
+    builder.Services.AddSingleton(manifest);
 }
 // The only place a DefaultAzureCredential is constructed; it runs on the first token request, never while registering the client.
 builder.Services.AddSingleton<Func<Azure.Core.TokenCredential>>(_ => () => new Azure.Identity.DefaultAzureCredential());

@@ -1,3 +1,21 @@
+mock_provider "azuread" {
+  mock_data "azuread_client_config" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000d0"
+    }
+  }
+  mock_resource "azuread_application" {
+    defaults = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+  mock_resource "azuread_service_principal" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000b1"
+    }
+  }
+}
 mock_provider "azurerm" {
   mock_resource "azurerm_mssql_server" {
     defaults = {
@@ -43,43 +61,43 @@ mock_provider "azurerm" {
 }
 
 variables {
-  subscription_id                 = "00000000-0000-0000-0000-000000000000"
-  tenant_id                       = "11111111-1111-1111-1111-111111111111"
-  location                        = "uksouth"
-  resource_group_name             = "rg-demo-test"
-  vnet_address_space              = ["10.60.0.0/16"]
-  app_subnet_cidr                 = "10.60.1.0/24"
-  private_endpoint_subnet_cidr    = "10.60.2.0/24"
-  presenter_reviewer_cidrs        = ["203.0.113.0/24"]
-  egress_allowed_destinations     = ["198.51.100.0/24"]
-  sql_server_name                 = "sql-demo-test"
-  sql_admin_group_name            = "grp-demo-sql-admins"
-  sql_admin_group_object_id       = "22222222-2222-2222-2222-222222222222"
-  storage_account_name            = "stdemotest"
-  key_vault_name                  = "kv-demo-test"
-  model_account_name              = "aoai-demo-test"
-  model_endpoint_subdomain        = "aoai-demo-test"
-  model_deployment_name           = "gpt-demo-test"
-  model_name                      = "gpt-demo-model"
-  model_version                   = "0000-00-00"
-  gateway_endpoint                = "https://apim-demo-test.private.invalid/"
-  gateway_region                  = "swedencentral"
-  gateway_api_version             = "2024-10-21"
-  gateway_api_management_tier     = "Developer"
-  gateway_model_deployment        = "gpt-demo-test"
-  terraform_principal_object_id   = "33333333-3333-3333-3333-333333333333"
-  budget_amount                   = 100
-  budget_start_date               = "2026-11-01T00:00:00Z"
-  budget_contact_emails           = ["ops@example.invalid"]
-  telemetry_reader_group_id       = "44444444-4444-4444-4444-444444444444"
-  sql_database_name               = "airlinedemo"
-  acr_name                        = "acrdemotest"
-  container_apps_environment_name = "cae-demo-test"
-  container_app_name              = "ca-airline-demo-test"
-  image_digest                    = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-  demo_passcode_secret_uri        = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
-  security_response_owner         = { name = "Response Owner", email = "owner@example.invalid" }
-  security_alert_settings         = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
+  subscription_id                       = "00000000-0000-0000-0000-000000000000"
+  tenant_id                             = "11111111-1111-1111-1111-111111111111"
+  location                              = "uksouth"
+  resource_group_name                   = "rg-demo-test"
+  vnet_address_space                    = ["10.60.0.0/16"]
+  app_subnet_cidr                       = "10.60.1.0/24"
+  private_endpoint_subnet_cidr          = "10.60.2.0/24"
+  presenter_reviewer_cidrs              = ["203.0.113.0/24"]
+  egress_allowed_destinations           = ["198.51.100.0/24"]
+  sql_server_name                       = "sql-demo-test"
+  sql_admin_group_name                  = "grp-demo-sql-admins"
+  sql_admin_group_object_id             = "22222222-2222-2222-2222-222222222222"
+  storage_account_name                  = "stdemotest"
+  key_vault_name                        = "kv-demo-test"
+  model_account_name                    = "aoai-demo-test"
+  model_endpoint_subdomain              = "aoai-demo-test"
+  model_deployment_name                 = "gpt-demo-test"
+  model_name                            = "gpt-demo-model"
+  model_version                         = "0000-00-00"
+  gateway_endpoint                      = "https://apim-demo-test.private.invalid/"
+  gateway_region                        = "uksouth"
+  gateway_api_management_tier           = "Developer"
+  gateway_model_deployment              = "gpt-demo-test"
+  gateway_approved_application_identity = "55555555-5555-5555-5555-555555555555"
+  terraform_principal_object_id         = "33333333-3333-3333-3333-333333333333"
+  budget_amount                         = 100
+  budget_start_date                     = "2026-11-01T00:00:00Z"
+  budget_contact_emails                 = ["ops@example.invalid"]
+  telemetry_reader_group_id             = "44444444-4444-4444-4444-444444444444"
+  sql_database_name                     = "airlinedemo"
+  acr_name                              = "acrdemotest"
+  container_apps_environment_name       = "cae-demo-test"
+  container_app_name                    = "ca-airline-demo-test"
+  image_digest                          = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  demo_passcode_secret_uri              = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
+  security_response_owner               = { name = "Response Owner", email = "owner@example.invalid" }
+  security_alert_settings               = { enabled = true, failure_threshold = 5, window_minutes = 15, evaluation_frequency_minutes = 5 }
   terraform_state_backend = {
     storage_account_name = "stdemotfstate"
     container_name       = "tfstate"
@@ -92,17 +110,26 @@ variables {
 run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct_model_access" {
   command = plan
 
+  override_resource {
+    target          = azuread_application.gateway
+    override_during = plan
+    values = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+
   assert {
-    condition     = azurerm_api_management.gateway.public_network_access_enabled == false && azurerm_api_management.gateway.virtual_network_type == "Internal" && azurerm_api_management.gateway.identity[0].type == "SystemAssigned"
-    error_message = "The gateway must be internal, private, and use its managed identity."
+    condition     = azurerm_api_management.gateway.virtual_network_type == "Internal" && azurerm_api_management.gateway.identity[0].type == "SystemAssigned" && can(regex("(?s)virtual_network_configuration \\{\\s*subnet_id\\s*=\\s*azurerm_subnet\\.gateway\\.id", file("main.tf")))
+    error_message = "The gateway must be injected into its own subnet in Internal mode (private address only) and use its managed identity."
   }
   assert {
     condition     = azurerm_api_management_api.gateway_model.subscription_required == false && azurerm_cognitive_account.model.public_network_access_enabled == false && azurerm_cognitive_account.model.local_auth_enabled == false
     error_message = "Gateway calls must require no subscription key and direct model public or key access must be disabled."
   }
   assert {
-    condition     = azurerm_api_management_api_operation.gateway_chat_completions.url_template == "deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" && can(regex("validate-jwt", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_approved_application_identity, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_audience, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("authentication-managed-identity", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
-    error_message = "The operation and policy must pin deployment/API version and validate the approved caller before managed-identity backend forwarding."
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.url_template == "v1/chat/completions" && can(regex("validate-jwt", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex(var.gateway_approved_application_identity, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "<audience>api://00000000-0000-0000-0000-0000000000c1</audience>") && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "context.Request.Body.As") && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "gpt-demo-test") && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "<set-status code=\"400\" reason=\"Unsupported model\" />") && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "https://ai.azure.com")
+    error_message = "The v1 operation must validate the approved caller, restrict model selection to the configured deployment, and authenticate the backend with the v1 audience."
   }
   assert {
     condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint
@@ -407,12 +434,6 @@ run "rejects_empty_gateway_region" {
   command = plan
   variables { gateway_region = " " }
   expect_failures = [var.gateway_region]
-}
-
-run "rejects_empty_gateway_api_version" {
-  command = plan
-  variables { gateway_api_version = " " }
-  expect_failures = [var.gateway_api_version]
 }
 
 run "rejects_empty_gateway_api_management_tier" {

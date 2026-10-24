@@ -169,7 +169,7 @@ public sealed class FourArmEvaluationRunnerTests
         Assert.All(fakes[1].Requests, r => Assert.Equal(EvaluationExecutionMode.BoundedAgent, r.Mode));
         Assert.All(fakes[2].Requests, r => Assert.Equal(EvaluationExecutionMode.BoundedAgent, r.Mode));
         Assert.All(fakes[0].Requests, r => Assert.Equal(EvaluationExecutionMode.RulesBaseline, r.Mode));
-        Assert.Equal(new EvaluationEffectiveConfiguration(b.ManifestVersion!, b.Arm!, b.DeploymentName!, b.Model!, b.ApiVersion!, b.Region!, b.ContentFilter!),
+        Assert.Equal(new EvaluationEffectiveConfiguration(b.ManifestVersion!, b.Arm!, b.DeploymentName!, b.Model!, b.ModelVersion!, b.ApiVersion!, b.Region!, b.ContentFilter!),
             result.EffectiveConfigurations[EvaluationArm.D]);
         Assert.Equal(40, fakes[3].Requests.Count);
         Assert.Equal((1, 0, 0), fakes[3].Counts);

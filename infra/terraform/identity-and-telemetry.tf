@@ -99,33 +99,108 @@ resource "azurerm_role_assignment" "migration_sql" {
 }
 
 resource "azurerm_log_analytics_workspace" "telemetry" {
-  name                          = "log-airline-telemetry"
-  location                      = azurerm_resource_group.demo.location
-  resource_group_name           = azurerm_resource_group.demo.name
-  sku                           = "PerGB2018"
-  retention_in_days             = 30
-  internet_ingestion_enabled    = false
-  internet_query_enabled        = false
-  local_authentication_disabled = true
+  name                         = "log-airline-telemetry"
+  location                     = azurerm_resource_group.demo.location
+  resource_group_name          = azurerm_resource_group.demo.name
+  sku                          = "PerGB2018"
+  retention_in_days            = 30
+  internet_ingestion_enabled   = false
+  internet_query_enabled       = false
+  local_authentication_enabled = false
 }
 
 resource "azurerm_application_insights" "app" {
-  name                          = "appi-airline-telemetry"
-  location                      = azurerm_resource_group.demo.location
-  resource_group_name           = azurerm_resource_group.demo.name
-  application_type              = "web"
-  workspace_id                  = azurerm_log_analytics_workspace.telemetry.id
-  retention_in_days             = 30
-  internet_ingestion_enabled    = false
-  internet_query_enabled        = false
-  local_authentication_disabled = true
+  name                         = "appi-airline-telemetry"
+  location                     = azurerm_resource_group.demo.location
+  resource_group_name          = azurerm_resource_group.demo.name
+  application_type             = "web"
+  workspace_id                 = azurerm_log_analytics_workspace.telemetry.id
+  retention_in_days            = 30
+  internet_ingestion_enabled   = false
+  internet_query_enabled       = false
+  local_authentication_enabled = false
+}
+
+# Internet ingestion and query are disabled above, so telemetry reaches the workspace through an
+# Azure Monitor Private Link Scope that only accepts traffic from its private endpoint.
+locals {
+  monitor_private_dns_zones = {
+    monitor  = "privatelink.monitor.azure.com"
+    oms      = "privatelink.oms.opinsights.azure.com"
+    ods      = "privatelink.ods.opinsights.azure.com"
+    agentsvc = "privatelink.agentsvc.azure-automation.net"
+  }
+}
+
+resource "azurerm_monitor_private_link_scope" "telemetry" {
+  name                  = "ampls-airline-telemetry"
+  resource_group_name   = azurerm_resource_group.demo.name
+  ingestion_access_mode = "PrivateOnly"
+  query_access_mode     = "PrivateOnly"
+}
+
+resource "azurerm_monitor_private_link_scoped_service" "workspace" {
+  name                = "amplsrs-workspace"
+  resource_group_name = azurerm_resource_group.demo.name
+  scope_name          = azurerm_monitor_private_link_scope.telemetry.name
+  linked_resource_id  = azurerm_log_analytics_workspace.telemetry.id
+}
+
+resource "azurerm_monitor_private_link_scoped_service" "app_insights" {
+  name                = "amplsrs-app-insights"
+  resource_group_name = azurerm_resource_group.demo.name
+  scope_name          = azurerm_monitor_private_link_scope.telemetry.name
+  linked_resource_id  = azurerm_application_insights.app.id
+}
+
+resource "azurerm_private_dns_zone" "monitor" {
+  for_each            = local.monitor_private_dns_zones
+  name                = each.value
+  resource_group_name = azurerm_resource_group.demo.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "monitor" {
+  for_each              = local.monitor_private_dns_zones
+  name                  = "link-${each.key}"
+  resource_group_name   = azurerm_resource_group.demo.name
+  private_dns_zone_name = azurerm_private_dns_zone.monitor[each.key].name
+  virtual_network_id    = azurerm_virtual_network.demo.id
+}
+
+resource "azurerm_private_endpoint" "monitor" {
+  name                = "pe-monitor"
+  resource_group_name = azurerm_resource_group.demo.name
+  location            = azurerm_resource_group.demo.location
+  subnet_id           = azurerm_subnet.private_endpoints.id
+
+  private_service_connection {
+    name                           = "psc-monitor"
+    private_connection_resource_id = azurerm_monitor_private_link_scope.telemetry.id
+    subresource_names              = ["azuremonitor"]
+    is_manual_connection           = false
+  }
+
+  # Azure Monitor also registers its agent storage endpoints in the blob zone the storage endpoint uses.
+  private_dns_zone_group {
+    name = "dzg-monitor"
+    private_dns_zone_ids = concat(
+      [for k in sort(keys(local.monitor_private_dns_zones)) : azurerm_private_dns_zone.monitor[k].id],
+      [azurerm_private_dns_zone.demo["blob"].id],
+    )
+  }
+
+  # Scoped resources must be linked first so their workspace-specific records are written to the zones.
+  depends_on = [
+    azurerm_monitor_private_link_scoped_service.workspace,
+    azurerm_monitor_private_link_scoped_service.app_insights,
+  ]
 }
 
 resource "azurerm_role_assignment" "telemetry_reader" {
   scope                = azurerm_log_analytics_workspace.telemetry.id
   role_definition_name = "Log Analytics Reader"
   principal_id         = var.telemetry_reader_group_id
-  principal_type       = "Group"
+  principal_type       = var.telemetry_reader_principal_type
 }
 
 resource "azurerm_monitor_action_group" "security_owner" {

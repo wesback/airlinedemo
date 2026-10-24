@@ -1,3 +1,21 @@
+mock_provider "azuread" {
+  mock_data "azuread_client_config" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000d0"
+    }
+  }
+  mock_resource "azuread_application" {
+    defaults = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+  mock_resource "azuread_service_principal" {
+    defaults = {
+      object_id = "00000000-0000-0000-0000-0000000000b1"
+    }
+  }
+}
 mock_provider "azurerm" {
   mock_resource "azurerm_user_assigned_identity" {
     defaults = {
@@ -68,6 +86,12 @@ mock_provider "azurerm" {
     }
   }
 
+  mock_resource "azurerm_monitor_private_link_scope" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Insights/privateLinkScopes/ampls-airline-telemetry"
+    }
+  }
+
   mock_resource "azurerm_private_endpoint" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Network/privateEndpoints/pe-demo-test"
@@ -134,6 +158,7 @@ variables {
   key_vault_name                  = "kv-demo-test"
   model_account_name              = "aoai-demo-test"
   model_endpoint_subdomain        = "aoai-demo-test"
+  gateway_endpoint                = "https://apim-demo-test.private.invalid/"
   model_deployment_name           = "gpt-demo-test"
   model_name                      = "gpt-demo-model"
   model_version                   = "0000-00-00"
@@ -282,7 +307,7 @@ run "signing_rights_are_resource_scoped" {
   }
 
   override_resource {
-    target = azurerm_container_app.app
+    target = azurerm_container_app.app[0]
     values = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test"
     }
@@ -325,7 +350,7 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
-    condition     = azurerm_role_assignment.release_container_app.role_definition_name == "Container Apps Contributor" && azurerm_role_assignment.release_container_app.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test" && azurerm_role_assignment.release_container_app.principal_id == azurerm_user_assigned_identity.release.principal_id
+    condition     = azurerm_role_assignment.release_container_app[0].role_definition_name == "Container Apps Contributor" && azurerm_role_assignment.release_container_app[0].scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test" && azurerm_role_assignment.release_container_app[0].principal_id == azurerm_user_assigned_identity.release.principal_id
     error_message = "The release identity must hold Container Apps Contributor scoped to the application only."
   }
 

@@ -30,8 +30,10 @@ public sealed class ReleaseIdentityContractTests
                 "app_acr_pull",
                 "app_evidence",
                 "app_openai_user",
+                "app_passcode_secret",
                 "app_telemetry",
                 "build_acr_push",
+                "build_runner_token_secret",
                 "gateway_cognitive_services",
                 "migration_sql",
                 "release_acr_push",
@@ -40,6 +42,8 @@ public sealed class ReleaseIdentityContractTests
                 "release_signing_key",
                 "telemetry_reader",
                 "terraform_contributor",
+                "terraform_kv_certificates",
+                "terraform_kv_secrets",
             },
             names);
 
@@ -60,6 +64,7 @@ public sealed class ReleaseIdentityContractTests
             new[]
             {
                 "app_sql_grant_statements",
+                "gateway_audience",
                 "migration_sql_grant_statements",
                 "model_endpoint",
             },

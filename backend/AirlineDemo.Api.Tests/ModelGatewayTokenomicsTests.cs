@@ -16,7 +16,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     private static GatewayCorrelation Correlation(string model = "model-v1") => new("B", "run-1", "package-1", "case-1", model, "suite-v1", "call-1");
 
     private const string Private = "https://gateway-demo.private.invalid/";
-    private const string ModelConfiguration = "fixture-deployment-fixture-model-2025-01-01-swedencentral";
+    private const string ModelConfiguration = "fixture-deployment-fixture-model-2026-09-22-v1-swedencentral";
     private readonly string _statePath = Path.Combine(Path.GetTempPath(), $"case-state-{Guid.NewGuid():N}.json");
 
     public void Dispose()
@@ -64,7 +64,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
 
         Assert.Equal(49, result.TokenUsage);
         Assert.Equal(1, fake.Calls);
-        Assert.Equal(ModelConfiguration, fake.LastOptions?.ModelId);
+        Assert.Null(fake.LastOptions?.ModelId);
         Assert.Equal(new Dictionary<string, object?>
         {
             ["gateway.arm"] = "B", ["gateway.run"] = "frozen-v2", ["gateway.package"] = "aircraft-return-readiness",
@@ -106,23 +106,32 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     }
 
     [Fact]
-    public async Task Production_client_sends_correlation_headers_and_the_pinned_api_version()
+    public async Task Production_client_sends_correlation_headers_and_the_v1_model_route()
     {
         Uri? uri = null;
+        System.Net.Http.HttpMethod? method = null;
         System.Net.Http.Headers.HttpRequestHeaders? headers = null;
+        string? body = null;
         using var host = Host(Private, credential: () => new RecordingCredential([]),
-            handler: new CountingHandler(request => { uri = request.RequestUri; headers = request.Headers; }));
+            handler: new CountingHandler(request =>
+            {
+                uri = request.RequestUri;
+                method = request.Method;
+                headers = request.Headers;
+                body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            }));
 
         await Assert.ThrowsAnyAsync<Exception>(() => Executor(host).ExecuteAsync(Request(), TestContext.Current.CancellationToken));
 
-        Assert.Equal("2024-10-21", System.Web.HttpUtility.ParseQueryString(uri!.Query)["api-version"]);
+        Assert.Equal(System.Net.Http.HttpMethod.Post, method);
+        Assert.NotNull(uri);
+        Assert.Equal("/openai/v1/chat/completions", uri!.AbsolutePath);
+        Assert.Empty(uri.Query);
+        using var json = System.Text.Json.JsonDocument.Parse(body!);
+        Assert.Equal("fixture-deployment", json.RootElement.GetProperty("model").GetString());
         Assert.Equal(
             ["B", "frozen-v2", "aircraft-return-readiness", "case-1", ModelConfiguration, FourArmEvaluationRunner.FrozenV2Sha256, "b-sha-1"],
             GatewayCorrelationHeadersPolicy.HeaderNames.Select(name => Assert.Single(headers!.GetValues(name))).ToArray());
-        // The Terraform gateway operation matches this api-version; the two must not drift apart.
-        var variables = File.ReadAllText(Path.Combine(RepositoryRoot(), "infra", "terraform", "variables.tf"));
-        var block = variables[variables.IndexOf("variable \"gateway_api_version\"", StringComparison.Ordinal)..];
-        Assert.Contains("default  = \"2024-10-21\"", block[..block.IndexOf("\nvariable ", 1, StringComparison.Ordinal)], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -139,9 +148,6 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
         Assert.NotNull(headers);
         Assert.All(GatewayCorrelationHeadersPolicy.HeaderNames, name => Assert.False(headers!.Contains(name)));
     }
-
-    private static string RepositoryRoot([CallerFilePath] string source = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", ".."));
 
     [Fact]
     public async Task Production_executor_rejects_direct_openai_endpoint_before_dispatch()
@@ -354,7 +360,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
              executor.LastGatewayMetrics!.EstimatedCost));
         Assert.Single(activities);
 
-        var otherModel = ApprovedModelManifest.Parse("""{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"other-deployment","model":"fixture-model","apiVersion":"2025-01-01","region":"swedencentral","contentFilter":"enabled"}""");
+        var otherModel = ApprovedModelManifest.Parse("""{"manifestVersion":"2026.10.1","approved":true,"arm":"investigation-live","deploymentName":"other-deployment","model":"fixture-model","modelVersion":"2026-09-22","apiVersion":"v1","region":"swedencentral","contentFilter":"enabled"}""");
         var rejected = await Assert.ThrowsAsync<InvalidOperationException>(
             () => executor.ExecuteAsync(Request(manifest: otherModel), TestContext.Current.CancellationToken));
         Assert.Equal("gateway replay rejected: model configuration changed", rejected.Message);

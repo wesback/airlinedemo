@@ -49,6 +49,23 @@ variable "private_endpoint_subnet_cidr" {
   default     = null
 }
 
+variable "gateway_subnet_cidr" {
+  description = "Optional. Dedicated API Management subnet; defaults to the fourth /24 of the first vnet_address_space entry."
+  type        = string
+  default     = null
+}
+
+variable "deployer_ip_cidrs" {
+  description = "Public CIDRs of the machine running Terraform. Empty (the default) keeps Key Vault fully private, so Terraform must then run inside the VNet to create the signing certificate."
+  type        = list(string)
+  default     = []
+  nullable    = false
+  validation {
+    condition     = alltrue([for c in var.deployer_ip_cidrs : can(cidrnetmask(c))])
+    error_message = "deployer_ip_cidrs entries must be CIDR blocks."
+  }
+}
+
 variable "presenter_reviewer_cidrs" {
   type     = list(string)
   nullable = false
@@ -114,32 +131,22 @@ variable "model_endpoint_subdomain" {
 }
 
 variable "gateway_endpoint" {
-  type     = string
-  default  = "https://apim-demo-test.private.invalid/"
-  nullable = false
+  description = "Optional. Defaults to the API Management gateway URL."
+  type        = string
+  default     = null
   validation {
-    condition     = length(trimspace(var.gateway_endpoint)) > 0 && can(regex("^https://", lower(trimspace(var.gateway_endpoint))))
+    condition     = var.gateway_endpoint == null ? true : length(trimspace(var.gateway_endpoint)) > 0 && can(regex("^https://", lower(trimspace(var.gateway_endpoint))))
     error_message = "gateway_endpoint must not be empty or whitespace."
   }
 }
 
 variable "gateway_region" {
-  type     = string
-  default  = "swedencentral"
-  nullable = false
+  description = "Optional. Defaults to location; VNet injection requires API Management in the virtual network's region."
+  type        = string
+  default     = null
   validation {
-    condition     = length(trimspace(var.gateway_region)) > 0
+    condition     = var.gateway_region == null ? true : length(trimspace(var.gateway_region)) > 0
     error_message = "gateway_region must not be empty or whitespace."
-  }
-}
-
-variable "gateway_api_version" {
-  type     = string
-  default  = "2024-10-21"
-  nullable = false
-  validation {
-    condition     = length(trimspace(var.gateway_api_version)) > 0
-    error_message = "gateway_api_version must not be empty or whitespace."
   }
 }
 
@@ -154,33 +161,31 @@ variable "gateway_api_management_tier" {
 }
 
 variable "gateway_model_deployment" {
-  type     = string
-  default  = "gpt-demo-test"
-  nullable = false
+  description = "Optional. Defaults to the model deployment this configuration creates."
+  type        = string
+  default     = null
   validation {
-    condition     = length(trimspace(var.gateway_model_deployment)) > 0
+    condition     = var.gateway_model_deployment == null ? true : length(trimspace(var.gateway_model_deployment)) > 0
     error_message = "gateway_model_deployment must not be empty or whitespace."
   }
 }
 
 variable "gateway_audience" {
-  description = "Expected JWT audience for the application calling the private model gateway."
+  description = "Identifier URI of the gateway's Entra application and the JWT audience the policy accepts. Null uses api://<client id> of the application Terraform creates; a custom URI must be allowed by the tenant's app management policy."
   type        = string
-  default     = "api://airline-demo-model-gateway"
-  nullable    = false
+  default     = null
   validation {
-    condition     = length(trimspace(var.gateway_audience)) > 0
-    error_message = "gateway_audience must not be empty or whitespace."
+    condition     = var.gateway_audience == null ? true : can(regex("^(api|https)://[^\\s/]+(/[^\\s]*[^\\s/])?$", var.gateway_audience))
+    error_message = "gateway_audience must be null or an api:// or https:// URI without whitespace or a trailing slash."
   }
 }
 
 variable "gateway_approved_application_identity" {
-  description = "Entra object identity approved to call the private model gateway."
+  description = "Entra object identity approved to call the private model gateway. Optional; defaults to the app's managed identity."
   type        = string
-  default     = "55555555-5555-5555-5555-555555555555"
-  nullable    = false
+  default     = null
   validation {
-    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.gateway_approved_application_identity))
+    condition     = var.gateway_approved_application_identity == null ? true : can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.gateway_approved_application_identity))
     error_message = "gateway_approved_application_identity must be an Entra object ID (GUID)."
   }
 }
@@ -239,6 +244,17 @@ variable "telemetry_reader_group_id" {
   validation {
     condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.telemetry_reader_group_id))
     error_message = "telemetry_reader_group_id must be an Entra object id (GUID)."
+  }
+}
+
+variable "telemetry_reader_principal_type" {
+  description = "Entra principal type for restricted, read-only diagnostics access."
+  type        = string
+  default     = "Group"
+  nullable    = false
+  validation {
+    condition     = contains(["Group", "User"], var.telemetry_reader_principal_type)
+    error_message = "telemetry_reader_principal_type must be Group or User."
   }
 }
 
@@ -310,17 +326,101 @@ variable "container_app_name" {
 }
 
 variable "image_digest" {
-  description = "Immutable digest of the application image, for example sha256:<64 lowercase hex characters>."
+  description = "Immutable digest of the application image, for example sha256:<64 lowercase hex characters>. Null on the first (platform) phase: the container app is created once the digest and demo_passcode_secret_uri are both set. Afterwards the release workflow owns the running image."
   type        = string
-  nullable    = false
+  default     = null
   validation {
-    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
+    condition     = var.image_digest == null || can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
     error_message = "image_digest must be a sha256 digest (sha256 followed by 64 lowercase hex characters), not a tag."
   }
 }
 
 variable "demo_passcode_secret_uri" {
-  description = "Key Vault secret URI of the demo passcode. The Container App references it as a secret; the value is never inlined."
+  description = "Key Vault secret URI of the demo passcode. The Container App references it as a secret; the value is never inlined. Set together with image_digest."
   type        = string
+  default     = null
+  validation {
+    condition     = (var.demo_passcode_secret_uri == null) == (var.image_digest == null)
+    error_message = "Set image_digest and demo_passcode_secret_uri together, or leave both unset for the platform-only first phase."
+  }
+}
+
+variable "enable_build_runner" {
+  description = "Create the self-hosted GitHub Actions runner VM (label private-acr) that builds, pushes and signs images through the private registry."
+  type        = bool
+  default     = false
   nullable    = false
+}
+
+variable "build_runner_github_repository" {
+  description = "Repository the runner registers with, as owner/name. Required when enable_build_runner is true."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.build_runner_github_repository == null || can(regex("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", var.build_runner_github_repository))
+    error_message = "build_runner_github_repository must be owner/name."
+  }
+}
+
+variable "build_runner_token_secret_name" {
+  description = "Key Vault secret (in this deployment's vault) holding a GitHub token allowed to create runner registration tokens for the repository. Terraform creates it with the value unset; set the real token after the first apply."
+  type        = string
+  default     = "github-runner-token"
+  nullable    = false
+  validation {
+    condition     = can(regex("^[A-Za-z0-9-]{1,127}$", var.build_runner_token_secret_name))
+    error_message = "build_runner_token_secret_name must be a Key Vault secret name."
+  }
+}
+
+variable "build_runner_admin_ssh_public_key" {
+  description = "OpenSSH public key for the runner VM admin account. The VM has no inbound access; the key is for az vm run-command or Bastion break-glass. Required when enable_build_runner is true."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.build_runner_admin_ssh_public_key == null || can(regex("^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+", var.build_runner_admin_ssh_public_key))
+    error_message = "build_runner_admin_ssh_public_key must be an OpenSSH public key."
+  }
+}
+
+variable "build_runner_vm_size" {
+  description = "Runner VM size."
+  type        = string
+  default     = "Standard_D2s_v5"
+  nullable    = false
+}
+
+variable "build_runner_subnet_cidr" {
+  description = "Optional. Defaults to the fifth /24 of the virtual network."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.build_runner_subnet_cidr == null || can(cidrnetmask(var.build_runner_subnet_cidr))
+    error_message = "build_runner_subnet_cidr must be a CIDR block."
+  }
+}
+
+variable "adopt_key_vault" {
+  description = "Adopt a Key Vault that scripts/deploy.sh recovered from soft delete (purge protection keeps the name for 90 days after a destroy). Terraform imports the resource group, the vault, the deployer's two vault roles and the existing signing certificate and runner token instead of failing with 'already exists'. Imports of objects already in state are no-ops. Leave null otherwise."
+  type = object({
+    certificates_role_assignment_id = string
+    secrets_role_assignment_id      = string
+    signing_certificate_version     = optional(string)
+    build_runner_token_version      = optional(string)
+  })
+  default = null
+  validation {
+    condition = var.adopt_key_vault == null || alltrue([
+      for id in [try(var.adopt_key_vault.certificates_role_assignment_id, ""), try(var.adopt_key_vault.secrets_role_assignment_id, "")] :
+      can(regex("^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft\\.KeyVault/vaults/[^/]+/providers/Microsoft\\.Authorization/roleAssignments/[0-9a-f-]{36}$", id))
+    ])
+    error_message = "adopt_key_vault role assignment ids must be role assignments scoped to the deployment Key Vault."
+  }
+  validation {
+    condition = var.adopt_key_vault == null || alltrue([
+      for v in [try(var.adopt_key_vault.signing_certificate_version, null), try(var.adopt_key_vault.build_runner_token_version, null)] :
+      v == null || can(regex("^[0-9a-f]{32}$", v))
+    ])
+    error_message = "adopt_key_vault object versions must be 32 lowercase hex characters."
+  }
 }

@@ -51,17 +51,26 @@ resource "azurerm_role_assignment" "build_acr_push" {
   scope                = azurerm_container_registry.acr.id
   role_definition_name = "AcrPush"
   principal_id         = azurerm_user_assigned_identity.build.principal_id
+  principal_type       = "ServicePrincipal"
 }
 
 resource "azurerm_role_assignment" "release_acr_push" {
   scope                = azurerm_container_registry.acr.id
   role_definition_name = "AcrPush"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
+  principal_type       = "ServicePrincipal"
 }
 
 resource "azurerm_key_vault_certificate" "signing" {
   name         = var.signing_certificate_name
   key_vault_id = azurerm_key_vault.kv.id
+
+  # Data-plane access needs the Terraform principal's role and the vault's private endpoint.
+  depends_on = [
+    azurerm_role_assignment.terraform_kv_certificates,
+    azurerm_private_endpoint.demo,
+    azurerm_private_dns_zone_virtual_network_link.demo,
+  ]
 
   certificate_policy {
     issuer_parameters {
@@ -91,16 +100,23 @@ resource "azurerm_role_assignment" "release_signing_key" {
   scope                = local.signing_key_id
   role_definition_name = "Key Vault Crypto User"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
+  principal_type       = "ServicePrincipal"
+
+  # The key scope only exists once the certificate has created it.
+  depends_on = [azurerm_key_vault_certificate.signing]
 }
 
 resource "azurerm_role_assignment" "release_signing_certificate" {
   scope                = azurerm_key_vault_certificate.signing.resource_manager_id
   role_definition_name = "Key Vault Certificate User"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
+  principal_type       = "ServicePrincipal"
 }
 
 resource "azurerm_role_assignment" "release_container_app" {
-  scope                = azurerm_container_app.app.id
+  count                = local.deploy_application ? 1 : 0
+  scope                = azurerm_container_app.app[0].id
   role_definition_name = "Container Apps Contributor"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
+  principal_type       = "ServicePrincipal"
 }

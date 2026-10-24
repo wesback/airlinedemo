@@ -94,9 +94,8 @@ public static class ModelGatewayTokenomics
     public const string PrivateEndpointRequired = "model route rejected: direct Azure OpenAI endpoints are forbidden";
     public const string MissingUsage = "unavailable";
     public const string DefaultAudience = "api://airline-demo-model-gateway";
-    /// <summary>The api-version the client sends; it must equal the Terraform default of gateway_api_version.</summary>
-    public const Azure.AI.OpenAI.AzureOpenAIClientOptions.ServiceVersion ApiServiceVersion =
-        Azure.AI.OpenAI.AzureOpenAIClientOptions.ServiceVersion.V2024_10_21;
+    /// <summary>The versionless Azure OpenAI API protocol used by both the client and gateway.</summary>
+    public const string ApiVersion = "v1";
     public const string OverLimit = "gateway quota exceeded by one unit: {0}";
 
     public static Uri RequirePrivateGatewayEndpoint(string? configured)
@@ -236,7 +235,6 @@ public sealed class GatewayGovernedChatClient(IChatClient inner, GatewayCorrelat
         }
 
         options ??= new ChatOptions();
-        options.ModelId = correlation.ModelConfiguration;
         options.AdditionalProperties ??= new AdditionalPropertiesDictionary();
         foreach (var field in new[] { "Arm", "Run", "Package", "Case", "ModelConfiguration", "SuiteVersion", "CallIdentity" })
         {
