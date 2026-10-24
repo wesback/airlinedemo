@@ -132,13 +132,22 @@ run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct
     error_message = "The v1 operation must validate the approved caller, restrict model selection to the configured deployment, and authenticate the backend with the v1 audience."
   }
   assert {
-    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "chat/completions?api-version=v1")
     error_message = "The route must accept POST client paths without subscription authentication or secret output."
   }
 }
 
 run "gateway_policy_requires_the_seven_correlation_headers" {
   command = plan
+
+  override_resource {
+    target          = azuread_application.gateway
+    override_during = plan
+    values = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
 
   assert {
     condition = alltrue([
@@ -446,4 +455,52 @@ run "rejects_empty_gateway_model_deployment" {
   command = plan
   variables { gateway_model_deployment = " " }
   expect_failures = [var.gateway_model_deployment]
+}
+
+run "gateway_audience_defaults_to_application_client_id_and_accepts_custom_uri" {
+  command = plan
+
+  override_resource {
+    target          = azuread_application.gateway
+    override_during = plan
+    values = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+
+  assert {
+    condition     = local.gateway_audience == "api://00000000-0000-0000-0000-0000000000c1"
+    error_message = "A null audience must resolve to api:// followed by the gateway application's client ID."
+  }
+
+  assert {
+    condition     = strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "<audience>api://00000000-0000-0000-0000-0000000000c1</audience>") && length([for env in azurerm_container_app.app[0].template[0].container[0].env : env if env.name == "ModelGateway__Audience" && env.value == local.gateway_audience]) == 1
+    error_message = "The default audience must be identical in the JWT policy and Container App setting."
+  }
+}
+
+run "gateway_audience_accepts_custom_uri" {
+  command = plan
+  variables { gateway_audience = "api://custom-gateway" }
+
+  override_resource {
+    target          = azuread_application.gateway
+    override_during = plan
+    values = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+
+  assert {
+    condition     = local.gateway_audience == "api://custom-gateway" && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "<audience>api://custom-gateway</audience>") && length([for env in azurerm_container_app.app[0].template[0].container[0].env : env if env.name == "ModelGateway__Audience" && env.value == "api://custom-gateway"]) == 1
+    error_message = "A custom audience must be used identically by the JWT policy and Container App setting."
+  }
+}
+
+run "rejects_invalid_gateway_audience" {
+  command = plan
+  variables { gateway_audience = "bad value" }
+  expect_failures = [var.gateway_audience]
 }
