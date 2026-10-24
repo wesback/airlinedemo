@@ -29,6 +29,8 @@ function setupApi(options: {
   traces?: { label: string; url: string }[];
   traceStatus?: number;
   trace?: unknown;
+  canReset?: boolean;
+  resetStatus?: number;
 } = {}) {
   const calls: { url: string; init?: RequestInit }[] = [];
   let dashboardRequests = 0;
@@ -57,10 +59,22 @@ function setupApi(options: {
         ));
     }
     if (url.includes('/dashboard/traces/')) return json(options.trace ?? {}, options.traceStatus ?? 200);
+    if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [
+      { caseId: 'cp-case-a', name: 'Case A', aircraftCategory: 'narrow-body', caseRevision: 7 },
+      { caseId: 'cp-case-b', name: 'Case B', aircraftCategory: 'regional', caseRevision: 7 },
+      { caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 },
+    ] });
+    const sceneMatch = url.match(/^\/api\/v1\/cases\/([^/]+)\/scene$/);
+    if (sceneMatch && method === 'GET') {
+      const caseId = sceneMatch[1]; const letter = caseId.slice(-1).toUpperCase();
+      return json({ contractVersion: 1, case: { caseId, caseRevision: 7, status: { assessment: 'ready' }, owner: 'Technical reviewer', nextAction: { text: 'Review evidence' }, name: `Case ${letter}`, aircraftName: `Case ${letter}`, aircraftCategory: letter === 'A' ? 'narrow-body' : letter === 'B' ? 'regional' : 'wide-body', capabilityLabel: 'Rules-based', permission: options.canReset ? true : { canResetBlockedVariant: options.canReset ?? false } }, canResetBlockedVariant: caseId === 'cp-case-c' && (options.canReset ?? false), allowedActions: caseId === 'cp-case-c' && options.canReset ? ['reset'] : [], history: [], evidence: [], documentRefs: [], objects: ['AIR-001','ENG-001','CMP-001','CMP-002'].map((suffix, index) => ({ objectId: `SYN-CP-${letter}-${suffix}`, kind: index === 0 ? 'aircraft' : index === 1 ? 'engine' : 'component', caseId })) });
+    }
     if (url === '/api/cases/case-001/technical-reviews' && method === 'GET')
       return json({ basisVersion: 4, decisions: dashboardRequests > 1 ? [{ decision: 'accept', current: true }] : [] });
     if (url === '/api/cases/case-001/technical-reviews' && method === 'POST')
       return options.decisionStatus ? json({ error: 'decision rejected' }, options.decisionStatus) : json({ decision: 'accept', current: true });
+    if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && method === 'POST')
+      return json({ accepted: true }, options.resetStatus ?? 200);
     throw new Error(`Unexpected request: ${method} ${url}`);
   }));
   return calls;
@@ -152,6 +166,32 @@ describe('reviewer workspace', () => {
       expect(screen.queryByText('Revision: 7')).toBeNull();
       expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
     }
+  });
+
+  it('Hangar case-work composition remains in the App host', async () => {
+    setupApi({ canReset: true });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
+    await signIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+
+    const objectButtons = screen.getByLabelText('Hangar scene objects').querySelectorAll('button');
+    expect(objectButtons).toHaveLength(12);
+    for (const name of ['Case A', 'Case B', 'Case C']) {
+      expect(screen.getByRole('button', { name: `View ${name}` })).toBeTruthy();
+    }
+    expect(screen.getByRole('button', { name: 'Overview' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Move avatar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
+
+    fireEvent.click(objectButtons[0]);
+    expect(screen.getByRole('region', { name: /^Selection SYN-CP-A-/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'SYN-CP-A-AIR-001' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Hangar object selection' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Move avatar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reset blocked variant' })).toBeTruthy();
   });
 
   it('reports an unavailable API without claiming it is connected', async () => {
