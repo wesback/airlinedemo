@@ -59,6 +59,7 @@ locals {
   model_endpoint                        = coalesce(var.gateway_endpoint, azurerm_api_management.gateway.gateway_url)
   gateway_model_deployment              = coalesce(var.gateway_model_deployment, local.model_deployment_name)
   gateway_approved_application_identity = coalesce(var.gateway_approved_application_identity, azurerm_user_assigned_identity.app.principal_id)
+  gateway_audience                      = coalesce(var.gateway_audience, "api://${azuread_application.gateway.client_id}")
 
   # Platform traffic a workload-profiles Container Apps environment needs when outbound is denied by default.
   # These are Azure service tags, not internet destinations; app egress stays limited to egress_allowed_destinations.
@@ -416,6 +417,36 @@ resource "azurerm_cognitive_account" "model" {
   }
 }
 
+resource "azuread_application" "gateway" {
+  display_name     = "Foundry model gateway"
+  sign_in_audience = "AzureADMyOrg"
+
+  app_role {
+    allowed_member_types = ["Application"]
+    description          = "Allows an approved application to invoke the private model gateway."
+    display_name         = "Gateway Invoke"
+    enabled              = true
+    id                   = "00000000-0000-0000-0000-000000006177"
+    value                = "Gateway.Invoke"
+  }
+}
+
+resource "azuread_application_identifier_uri" "gateway" {
+  application_id = azuread_application.gateway.id
+  identifier_uri = coalesce(var.gateway_audience, "api://${azuread_application.gateway.client_id}")
+}
+
+resource "azuread_service_principal" "gateway" {
+  client_id                    = azuread_application.gateway.client_id
+  app_role_assignment_required = true
+}
+
+resource "azuread_app_role_assignment" "gateway_invoke" {
+  app_role_id         = "00000000-0000-0000-0000-000000006177"
+  principal_object_id = local.gateway_approved_application_identity
+  resource_object_id  = azuread_service_principal.gateway.object_id
+}
+
 resource "azurerm_api_management" "gateway" {
   name                = local.gateway_name
   location            = local.gateway_region
@@ -534,8 +565,19 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
         </return-response>
       </when>
     </choose>
-    <rewrite-uri template="/openai/deployments/${var.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" copy-unmatched-params="false" />
-    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+    <choose>
+      <when condition="@{
+        var deployment = context.Request.Body.As<JObject>(preserveContent: true)[&quot;model&quot;]?.Value&lt;string&gt;();
+        return deployment != null &amp;&amp; deployment != &quot;${local.gateway_model_deployment}&quot;;
+      }">
+        <return-response>
+          <set-status code="400" reason="Unsupported model" />
+          <set-body>Unsupported model</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <rewrite-uri template="/openai/deployments/${local.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" copy-unmatched-params="false" />
+    <authentication-managed-identity resource="https://ai.azure.com" />
   </inbound>
 </policies>
 XML
@@ -623,6 +665,11 @@ resource "azurerm_consumption_budget_resource_group" "demo" {
     operator       = "GreaterThan"
     contact_emails = var.budget_contact_emails
   }
+}
+
+output "gateway_audience" {
+  description = "Resolved JWT audience for the gateway Entra application."
+  value       = local.gateway_audience
 }
 
 output "model_endpoint" {

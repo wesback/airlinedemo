@@ -160,6 +160,17 @@ variable "gateway_api_management_tier" {
   }
 }
 
+variable "gateway_api_version" {
+  description = "API version appended to the private model gateway's backend chat-completions URI."
+  type        = string
+  default     = "v1"
+  nullable    = false
+  validation {
+    condition     = length(trimspace(var.gateway_api_version)) > 0
+    error_message = "gateway_api_version must not be empty or whitespace."
+  }
+}
+
 variable "gateway_model_deployment" {
   description = "Optional. Defaults to the model deployment this configuration creates."
   type        = string

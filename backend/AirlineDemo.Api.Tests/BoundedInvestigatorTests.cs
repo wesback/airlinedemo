@@ -469,7 +469,7 @@ public class BoundedInvestigatorTests
             Assert.Matches("^trace-[0-9a-f]{16}$", correlation.Run);
             Assert.Equal("evidence-investigation", correlation.Package);
             Assert.Equal(CaseId, correlation.Case);
-            Assert.Equal("fixture-deployment-fixture-model-2025-01-01-swedencentral", correlation.ModelConfiguration);
+            Assert.Equal("fixture-deployment-fixture-model-v1-swedencentral", correlation.ModelConfiguration);
             Assert.Equal("investigation-v1", correlation.SuiteVersion);
         });
         Assert.Equal("call-1", model.Correlations[0]!.CallIdentity);
