@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { refreshHangarScene, type RefreshResult, type ServerSceneSnapshot } from './sceneRefresh';
+import { refreshHangarScene, getHangarServerAuthorizedActions, type RefreshResult, type ServerSceneSnapshot } from './sceneRefresh';
 import { HANGAR_ACTUAL_OBJECT_IDS } from './sceneProjection';
 
 const isObject=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
@@ -85,14 +85,20 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
   useEffect(()=>{setSource(initialSource);},[initialSource]);
   useEffect(()=>{if(isObject(snapshot))setRefreshSnapshot(snapshot as ServerSceneSnapshot);},[snapshot]);
   useEffect(()=>{if(!refreshReader)return;const onFocus=()=>{const generation=++refreshGeneration.current;void refreshHangarScene(refreshReader,refreshSnapshot).then(result=>{if(generation!==refreshGeneration.current)return;setRefreshSnapshot(result.snapshot);if(result.valid&&result.scene)setSource(result.scene);onRefresh?.(result);});};window.addEventListener('focus',onFocus);return ()=>window.removeEventListener('focus',onFocus);},[refreshReader,refreshSnapshot,onRefresh]);
-  const staleSnapshot=stale || (isObject(snapshot)&&snapshot.current===false) || (refreshSnapshot?.current===false && (!isObject(snapshot)||snapshot.current!==true));
+  const explicitSnapshot=isObject(snapshot)?snapshot:null;
+  const staleSnapshot=stale || explicitSnapshot?.current===false || (explicitSnapshot?.current!==true && refreshSnapshot?.current===false);
+  const admittedFromEnvelope=isObject(source)&&Array.isArray(source.allowedActions)?source.allowedActions.filter((action):action is string=>typeof action==='string'):[];
+  const snapshotActions=refreshSnapshot?.current===true?getHangarServerAuthorizedActions(refreshSnapshot):explicitSnapshot?.current===true?getHangarServerAuthorizedActions(explicitSnapshot as ServerSceneSnapshot):[];
+  const serverAllowedActions=Array.from(new Set([...snapshotActions,...admittedFromEnvelope]));
+  const selectionAllowed=!staleSnapshot;
+  const contentAllowed=staleSnapshot ? false : serverAllowedActions.length===0 || serverAllowedActions.includes('evidence') || serverAllowedActions.includes('selection');
   const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
   const projected=useMemo(()=>isObject(source)&&Array.isArray(source.objects)?source.objects.map((o)=>isObject(o)?o:null).filter((o):o is Record<string,unknown>=>!!o):[],[source]);
   const selection=useMemo(()=>resolveHangarSelection(source,selectedId,manifest),[source,selectedId,manifest]);
   function activate(raw:unknown){if(staleSnapshot)return; if(typeof raw!=='string'||typeof selectedId==='string'&&raw!==selectedId&&selectedId!==null){} ; const result=resolveHangarSelection(source,raw,manifest); if(!result){setSelectedId(null);setIdentifierError('Unknown or out-of-scope identifier');setEvidenceError(null);return;} setSelectedId(result.objectId);setIdentifierError('');setEvidenceError(result.error); const read=reader??onRead??evidenceReader;if(typeof read==='function')void read(result.objectId);}
   const read=reader??onRead??evidenceReader;
   return <section aria-label="Hangar object selection"><h2>Hangar object selection</h2>{staleSnapshot&&<p role="alert">Stale server snapshot: evidence and commands are unavailable.</p>}{identifierError&&<p role="alert">{identifierError}</p>}
-    {projected.map((o)=>typeof o.objectId==='string'?<button key={o.objectId} type="button" disabled={staleSnapshot} onClick={()=>activate(o.objectId)}>Select {o.objectId}</button>:null)}
+    {projected.map((o)=>typeof o.objectId==='string'?<button key={o.objectId} type="button" disabled={staleSnapshot || !selectionAllowed} onClick={()=>activate(o.objectId)}>Select {o.objectId}</button>:null)}
     {!selection&&selectedId!==null&&<p role="alert">Visible identifier error</p>}
     {selection&&<section aria-label={`Selection ${selection.objectId}`}><h3>{selection.objectId}</h3>
       <p>Status: {typeof selection.status==='object'&&selection.status!==null?Object.entries(selection.status).map(([key,value])=>`${key}: ${value ?? 'none'}`).join('; '):String(selection.status)}</p>
@@ -101,7 +107,7 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
       {selection.evidence.map((e,i)=>{const blocked=e.blocked || e.status!==null&&(['blocked','processing','retry','pending','failed','partial','unprocessed'].some(s=>e.status!.toLowerCase().includes(s)));return <article key={`${e.documentId}-${e.version}-${e.basisId}-${e.basisVersion}-${i}`}>
         <p>{e.documentId} v{e.version} / {e.basisId} v{e.basisVersion}</p>
         {e.status!==null&&e.status.length>0&&<p>{e.displayLabel}</p>}
-        {blocked?<p role="status">Evidence processing/retry: {e.status}</p>:<div aria-label={`ARR content controls for ${e.documentId}`}><button type="button" disabled={staleSnapshot} onClick={()=>{if(staleSnapshot)return;const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e))}}>Open content</button>{e.witnesses.map((w,j)=>{const witness=isObject(w)?w:null;const page=witness?.page;return typeof page==='number'?<button key={j} type="button" disabled={staleSnapshot} onClick={()=>{if(staleSnapshot)return;const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e,page))}}>{`Page witness ${page}`}</button>:null})}</div>}
+        {blocked?<p role="status">Evidence processing/retry: {e.status}</p>:<div aria-label={`ARR content controls for ${e.documentId}`}><button type="button" disabled={staleSnapshot || !contentAllowed} onClick={()=>{if(staleSnapshot||!contentAllowed)return;const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e))}}>Open content</button>{e.witnesses.map((w,j)=>{const witness=isObject(w)?w:null;const page=witness?.page;return typeof page==='number'?<button key={j} type="button" disabled={staleSnapshot || !contentAllowed} onClick={()=>{if(staleSnapshot||!contentAllowed)return;const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e,page))}}>{`Page witness ${page}`}</button>:null})}</div>}
       </article>})}
     </section>}
   </section>;

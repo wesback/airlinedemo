@@ -78,9 +78,15 @@ describe('HangarSceneRefresh', () => {
     expect(missingRevision.valid).toBe(false);
     expect(missingRevision.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
     expect(canAdmitHangarCommands(missingRevision.snapshot)).toBe(false);
-    const badWitness = applyServerRefresh(first, envelope({ history: [{ witnessIds: ['missing-witness'] }] }));
-    expect(badWitness.valid).toBe(false);
+    const badUnknownObject = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseRevision: 8 }, objects: envelope().objects.map((object, index) => index === 0 ? { ...object, objectId: 'UNKNOWN-AIR-001' } : object) }));
+    expect(badUnknownObject).toMatchObject({ valid: false, stale: true, error: 'Unknown scene object identifier', snapshot: { revision: 7, current: false, fallbackReason: 'refresh_failed' } });
+    expect(canAdmitHangarCommands(badUnknownObject.snapshot)).toBe(false);
+    expect(buildHangarServerSceneView(badUnknownObject.scene)).toBeNull();
+
+    const badWitness = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseRevision: 8 }, history: [{ witnessIds: ['missing-witness'] }] }));
+    expect(badWitness).toMatchObject({ valid: false, stale: true, error: 'Bad witness ID', snapshot: { revision: 7, current: false, fallbackReason: 'refresh_failed' } });
     expect(canAdmitHangarCommands(badWitness.snapshot)).toBe(false);
+    expect(buildHangarServerSceneView(badWitness.scene)).toBeNull();
     const recovered = applyServerRefresh(missingRevision.snapshot, envelope({ case: { ...envelope().case, caseRevision: 8 } }));
     expect(recovered.valid).toBe(true);
     expect(recovered.snapshot).toMatchObject({ revision: 8, current: true, fallbackReason: null });

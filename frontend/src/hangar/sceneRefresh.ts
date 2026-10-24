@@ -28,15 +28,20 @@ export function snapshotFromServer(envelope: unknown, _injected?: unknown): Serv
   if(!labels.includes(label)) return null;
   const resolvedAction=label==='Unknown'?null:(isObj(c.nextAction)?c.nextAction:null);
   const rawPermission=c.permission ?? c.permissions;
-  const permission=isObj(rawPermission)?{...rawPermission,allowedActions:Array.isArray(c.allowedActions)?c.allowedActions:Array.isArray(envelope.allowedActions)?envelope.allowedActions:Array.isArray(rawPermission.allowedActions)?rawPermission.allowedActions:[]}:
-    rawPermission===true?true:rawPermission===false?false:undefined;
+  const permission=isObj(rawPermission)?{...rawPermission,allowedActions:Array.isArray(rawPermission.allowedActions)?rawPermission.allowedActions:Array.isArray(envelope.allowedActions)?envelope.allowedActions:Array.isArray(c.allowedActions)?c.allowedActions:[]}:
+    rawPermission===true?{canResetBlockedVariant:true,allowedActions:Array.isArray(envelope.allowedActions)?envelope.allowedActions:Array.isArray(c.allowedActions)?c.allowedActions:['reset']}:
+    rawPermission===false?false:undefined;
   return {revision:rawRevision as number,status:c.status,owner:c.owner??null,nextAction:resolvedAction,
     capabilityLabel:label,permissions:permission,
     current:true,fallbackReason:null,caseId:c.caseId,completeContent:envelope};
 }
 export function replaceWithServerSnapshot(previous: ServerSceneSnapshot|null, envelope: unknown, injected?: unknown): RefreshResult {
   const snapshot=snapshotFromServer(envelope,injected);
-  if(!snapshot)return {snapshot:previous?{...previous,current:false,fallbackReason:'refresh_failed'}:null,scene:null,valid:false,stale:true,error:'Unsupported or malformed scene refresh'};
+  if(!snapshot){
+    const validation=validateHangarSceneEnvelope(envelope);
+    const error=!validation.valid&&validation.error?validation.error:'Unsupported or malformed scene refresh';
+    return {snapshot:previous?{...previous,current:false,fallbackReason:'refresh_failed'}:null,scene:null,valid:false,stale:true,error};
+  }
   if(previous && previous.caseId===snapshot.caseId && previous.revision!==null && snapshot.revision!==null) {
     if(snapshot.revision < previous.revision) {
       const staleSnapshot: ServerSceneSnapshot={...previous,current:false,fallbackReason:'refresh_failed'};
