@@ -35,6 +35,7 @@ npm --prefix frontend run build
 npm --prefix frontend test -- --run
 dotnet test AirlineDemo.sln --no-restore -m:1
 python3 scripts/tests/test_deployment_scripts.py
+python3 scripts/tests/test_deploy_script.py
 ```
 
 Use committed synthetic fixtures only. Local development must not ingest live records or connect to a production service.
@@ -85,8 +86,10 @@ REHEARSAL_EXPECTED_ORIGIN=<approved independently verified origin>
 The operator supplies subscription, tenant, resource-group, file-path, network, deployment, and origin values through protected environment variables or reviewed external files. The passcode value is supplied from Key Vault and never stored in the repository. Configuration contains names or secret URIs, not secret values. State files, plans, tokens, connection strings, real customer records, and private-network addresses must remain outside tracked paths.
 
 For compatibility with the legacy demo scripts, the pre-bootstrap gate also
-accepts `AIRLINEDEMO_SUBSCRIPTION_ID` and `AIRLINEDEMO_TENANT_ID` when the
-matching `AZURE_*` variables are unset. The deployment script itself uses the
+accepts `AIRLINEDEMO_SUBSCRIPTION_ID`, `AIRLINEDEMO_TENANT_ID`,
+`AIRLINEDEMO_RESOURCE_GROUP_NAME` and `AIRLINEDEMO_OPERATOR_VARS_FILE` when
+`AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `RESOURCE_GROUP_NAME` and
+`TFVARS_FILE` are unset. The deployment script itself uses the
 documented `AZURE_*` names.
 
 ## Deploy and release
@@ -117,6 +120,16 @@ Stop demonstrations and evaluation first. Preserve approved rehearsal, audit, an
 
 ```sh
 scripts/destroy-deployment.sh --yes
+```
+
+For an environment created with `scripts/deploy.sh --prefix <prefix>`, export these first (`deploy.sh` exports them only in its own process):
+
+```sh
+export AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)
+export AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+export RESOURCE_GROUP_NAME=rg-<prefix>
+export TFVARS_FILE=~/.local/state/airlinedemo/<prefix>/deploy.tfvars.json
+export BACKEND_CONFIG_FILE=~/.local/state/airlinedemo/<prefix>/backend.hcl
 ```
 
 The script destroys only Terraform deployment-owned resources. The protected state backend is handled separately by its owner. Follow the [full teardown procedure](docs/aircraft-return-readiness/README.md#removal-and-teardown), revoke temporary release access, and remove the Key Vault passcode only when approved.
