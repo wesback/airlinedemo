@@ -7,7 +7,7 @@ import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/
 import { buildHangarAircraftSceneGroups } from '../src/hangar/sceneBuilder';
 import hangarManifest from '../src/hangar/sceneManifest.json';
 
-const envelope=(overrides:Record<string,unknown>={})=>({contractVersion:1,case:{caseId:'cp-case-a',caseRevision:7,status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},objects:[{objectId:'SYN-CP-A-AIR-001',kind:'aircraft',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-ENG-001',kind:'engine',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-001',kind:'component',caseId:'cp-case-a',evidenceIds:['ref-1'],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-002',kind:'component',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'}],documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual',processingState:'accepted',retryable:false,usableAsEvidence:true}],evidence:[{witnessId:'wit-1',evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,page:3,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual'}],history:[],canResetBlockedVariant:false,allowedActions:[],...overrides});
+const envelope=(overrides:Record<string,unknown>={})=>({contractVersion:1,case:{caseId:'cp-case-a',caseRevision:7,status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},objects:[{objectId:'SYN-CP-A-AIR-001',kind:'aircraft',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-ENG-001',kind:'engine',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-001',kind:'component',caseId:'cp-case-a',evidenceIds:['ref-1'],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'},{objectId:'SYN-CP-A-CMP-002',kind:'component',caseId:'cp-case-a',evidenceIds:[],status:{assessment:'ready',review:'pending'},owner:'Technical reviewer',nextAction:{actionId:'review',text:'Review evidence'},capabilityLabel:'Rules-based'}],documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual',processingState:'accepted',retryable:false,usableAsEvidence:true}],evidence:[{witnessId:'wit-1',evidenceRefId:'ref-1',documentId:'case-a/manual.txt',documentVersion:2,page:3,basisId:'basis-v2',basisVersion:2,displayLabel:'Engine manual'}],history:[],canResetBlockedVariant:false,allowedActions:['evidence','selection'],...overrides});
 const manifest={objectIds:['SYN-CP-A-AIR-001','SYN-CP-A-ENG-001','SYN-CP-A-CMP-001','SYN-CP-A-CMP-002']};
 
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
@@ -147,6 +147,39 @@ describe('HangarSelectionEvidence',()=>{
     const {container}=render(createElement(HangarCanvasAdapter,{sceneGroup:scene,camera,sceneData:source,selection:'SYN-CP-A-ENG-001',canvasComponent:Canvas}));
     const label=container.querySelector('[data-hangar-label="SYN-CP-A-ENG-001"]') as HTMLElement|null;expect(label?.textContent).toBe('<b>Left engine</b>');expect(container.querySelector('b')).toBeNull();expect(label?.getAttribute('aria-hidden')).toBe('true');expect(label?.querySelector('button')).toBeNull();
     camera.position.set(0,30,-50);camera.lookAt(0,3,-100);camera.updateProjectionMatrix();await waitFor(()=>expect(label?.style.display).toBe('none'));expect(resolveHangarSelection(envelope(), 'DOES-NOT-EXIST',manifest)).toBeNull();
+  });
+  it('Hangar stale refresh preserves evidence and disables commands',async ()=>{
+    const mutation=vi.fn(); const reset=vi.fn(); const stale={revision:7,current:false,fallbackReason:'refresh_failed',caseId:'cp-case-a'};
+    const preserved=render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={stale} refreshReader={()=>{throw new Error('network')}} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(()=>expect(screen.getByText('Stale server snapshot: evidence and commands are unavailable.')).toBeTruthy());
+    expect((screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'Page witness 3'}) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'})); expect(reset).not.toHaveBeenCalled(); expect(mutation).not.toHaveBeenCalled();
+
+    const recovered=envelope({case:{...envelope().case,caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'},permission:{allowedActions:['evidence','selection']}},allowedActions:['evidence','selection'],objects:envelope().objects.map((o)=>o.objectId==='SYN-CP-A-CMP-001'?{...o,nextAction:{actionId:'approve',text:'Approve server evidence'}}:o)});
+    preserved.rerender(<HangarSelectionEvidence envelope={recovered} manifest={manifest} snapshot={{revision:8,current:true,fallbackReason:null,caseId:'cp-case-a'}} refreshReader={()=>recovered} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(()=>expect(screen.getByText('Next action: Approve server evidence')).toBeTruthy());
+    expect(screen.queryByText('Stale server snapshot: evidence and commands are unavailable.')).toBeNull();
+    expect((screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'}) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).toHaveBeenCalledTimes(1); expect(reset).not.toHaveBeenCalled();
+  });
+  it('HangarSelectionEvidence takes actions only from the highest revision so a newer revocation holds',()=>{
+    const mutation=vi.fn();
+    const newer={revision:8,current:true,fallbackReason:null,caseId:'cp-case-a',permissions:{allowedActions:['selection']}};
+    const older={revision:6,current:true,fallbackReason:null,caseId:'cp-case-a',permissions:{allowedActions:['evidence','selection']}};
+    // Envelope at revision 7 still lists evidence; the revision 8 snapshot revokes it.
+    const revoked=render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={newer} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    expect((screen.getByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'Page witness 3'}) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).not.toHaveBeenCalled();
+    revoked.unmount();
+    // Negative case: an older snapshot cannot add or remove actions from the newer envelope.
+    render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={older} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    expect((screen.getByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).toHaveBeenCalledTimes(1);
   });
   it('HangarSelectionEvidence blocks witnesses and renders markup as text',()=>{
     const read=vi.fn(); const blocked=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,basisId:'basis-v1',basisVersion:1,displayLabel:'<img src=x onerror=alert(1)>',processingState:'rejected-retryable',retryable:true,usableAsEvidence:false}],evidence:[{witnessId:'secret',evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,page:9,basisId:'basis-v1',basisVersion:1,displayLabel:'SECRET-WITNESS'}]});

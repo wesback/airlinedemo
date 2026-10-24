@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
 
 const users = [{ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer' }];
@@ -7,6 +7,14 @@ const signedIn = { id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technic
 const decisions = [{ id: 'accept', label: 'Accept finding' }, { id: 'reject', label: 'Reject finding' }];
 
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
+
+beforeAll(() => {
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+});
 
 function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = decisions, traces: { label: string; url: string }[] = []) {
   return {
@@ -32,6 +40,7 @@ function setupApi(options: {
   canReset?: boolean;
   resetStatus?: number;
 } = {}) {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const calls: { url: string; init?: RequestInit }[] = [];
   let dashboardRequests = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -218,6 +227,69 @@ describe('reviewer workspace', () => {
     expect((post?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
     expect(JSON.parse(String(post?.init?.body))).toEqual({ expectedRevision: 7, expectedBasisVersion: 4, decision: 'accept', reason: 'Evidence supports return.' });
     expect(calls.filter(({ url }) => url.endsWith('/dashboard'))).toHaveLength(2);
+  });
+
+  it('App focus refresh updates production label and open selection panel from server scene', async () => {
+    setupApi();
+    const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    let revision = 7;
+    let injectedText = 'Review evidence';
+    const makeEnvelope = (caseId = 'cp-case-a', caseRevision = revision) => ({ contractVersion: 1, packVersion: '1.0.2', case: { caseId, caseRevision, status: { assessment: 'ready', review: null }, name: caseId === 'cp-case-a' ? 'Air One' : caseId === 'cp-case-b' ? 'Air Two' : 'Air Three', category: caseId === 'cp-case-a' ? 'narrow-body' : caseId === 'cp-case-b' ? 'regional' : 'wide-body', owner: 'Technical reviewer', nextAction: { actionId: 'review', text: caseId === 'cp-case-a' ? (caseRevision >= 8 ? 'Approve server evidence' : 'Review evidence') : 'Review evidence' }, capabilityLabel: 'Rules-based', permission: { canResetBlockedVariant: false, allowedActions: ['evidence','selection'] } }, canResetBlockedVariant: false, allowedActions: ['evidence','selection'], history: [], evidence: [], documentRefs: [], objects: [
+      { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-AIR-001`, kind: 'aircraft', caseId }, { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-ENG-001`, kind: 'engine', caseId }, { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-CMP-001`, kind: 'component', caseId }, { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-CMP-002`, kind: 'component', caseId },
+    ] });
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-a', name: 'Air One', aircraftCategory: 'narrow-body', caseRevision: 7 }, { caseId: 'cp-case-b', name: 'Air Two', aircraftCategory: 'regional', caseRevision: 7 }, { caseId: 'cp-case-c', name: 'Air Three', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+      const scene = url.match(/^\/api\/v1\/cases\/([^/]+)\/scene$/);
+      if (scene) return json(makeEnvelope(scene[1], scene[1] === 'cp-case-a' ? revision : 7));
+      return baseFetch(input, init);
+    });
+    const { container } = render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarAircraftSelectionHandler={vi.fn()} hangarClientSnapshot={{ case: { caseId: 'cp-case-a', nextAction: { text: 'Injected client text' } } }} />);
+    await signIn(); fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Pointer select AIR-1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Pointer select AIR-1' }));
+        injectedText = 'Injected client text';
+    expect(screen.queryByText(`Next action: ${injectedText}`)).toBeNull();
+    revision = 8;
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/scene')).length).toBeGreaterThanOrEqual(3));
+    await waitFor(() => {
+      const productionLabel = container.querySelector('[data-hangar-label-host] [data-hangar-label="SYN-CP-A-AIR-001"]') as HTMLElement | null;
+      expect(productionLabel?.textContent).toBe('Air One\nnarrow-body\nRules-based\nApprove server evidence');
+      expect(productionLabel?.textContent).not.toContain('Injected client text');
+    });
+    await waitFor(() => {
+      const panel = screen.getByLabelText('Selection SYN-CP-A-AIR-001');
+      expect(panel.textContent).toContain('Next action: Approve server evidence');
+      expect(panel.textContent).not.toContain('Injected client text');
+    });
+    expect(document.body.textContent).not.toContain('Injected client text');
+  });
+
+  it('App focus refresh failure preserves stale panel and recovery enables server-authorized actions', async () => {
+    setupApi();
+    const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    let revision = 7; let fail = false;
+    const makeEnvelope = (caseId: string, caseRevision: number) => ({ contractVersion: 1, packVersion: '1.0.2', case: { caseId, caseRevision, status: { assessment: 'ready', review: null }, name: caseId === 'cp-case-a' ? 'Air One' : caseId === 'cp-case-b' ? 'Air Two' : 'Air Three', category: caseId === 'cp-case-a' ? 'narrow-body' : caseId === 'cp-case-b' ? 'regional' : 'wide-body', owner: 'Technical reviewer', nextAction: { actionId: 'review', text: caseRevision >= 8 ? 'Approve server evidence' : 'Review evidence' }, capabilityLabel: 'Rules-based', permission: { canResetBlockedVariant: false, allowedActions: ['evidence','selection'] } }, canResetBlockedVariant: false, allowedActions: caseRevision >= 8 ? ['evidence','selection'] : [], history: [], evidence: [], documentRefs: [], objects: [
+      { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-AIR-001`, kind: 'aircraft', caseId }, { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-ENG-001`, kind: 'engine', caseId }, { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-CMP-001`, kind: 'component', caseId }, { objectId: `SYN-CP-${caseId.slice(-1).toUpperCase()}-CMP-002`, kind: 'component', caseId },
+    ] });
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-a', name: 'Air One', aircraftCategory: 'narrow-body', caseRevision: 7 }, { caseId: 'cp-case-b', name: 'Air Two', aircraftCategory: 'regional', caseRevision: 7 }, { caseId: 'cp-case-c', name: 'Air Three', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+      const scene = url.match(/^\/api\/v1\/cases\/([^/]+)\/scene$/);
+      if (scene) return fail ? json({ error: 'refresh failed' }, 500) : json(makeEnvelope(scene[1], scene[1] === 'cp-case-a' ? revision : 7));
+      return baseFetch(input, init);
+    });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarAircraftSelectionHandler={vi.fn()} />);
+    await signIn(); fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    const select = await screen.findByRole('button', { name: 'Pointer select AIR-1' }); fireEvent.click(select);
+    await waitFor(() => expect(screen.getByText('Next action: Review evidence')).toBeTruthy());
+    fail = true; window.dispatchEvent(new Event('focus'));
+    await screen.findByText('Stale server snapshot: evidence and commands are unavailable.');
+    expect((screen.getByRole('button', { name: 'Select SYN-CP-A-AIR-001' }) as HTMLButtonElement).disabled).toBe(true);
+    fail = false; revision = 8; window.dispatchEvent(new Event('focus'));
+    await waitFor(() => expect(screen.getByText('Next action: Approve server evidence')).toBeTruthy());
+    expect((screen.getByRole('button', { name: 'Select SYN-CP-A-AIR-001' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('keeps server projections unchanged after forbidden or stale decisions', async () => {

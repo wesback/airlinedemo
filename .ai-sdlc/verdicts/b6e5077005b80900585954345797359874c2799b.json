@@ -1,0 +1,295 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 595,
+  "branch": "ai-sdlc/issue-595",
+  "commitSha": "b6e5077005b80900585954345797359874c2799b",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The refreshed scene reaches the production canvas, but the change does not connect it to an open selection panel. The named App tests for the required production refresh and stale recovery paths are also missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 447,
+          "message": "The production refresh updates the canvas scene but does not propagate refreshed server state to an open selection panel, leaving the first acceptance criterion unmet.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The App passes refreshed scene data to LoadedHangarScene, but this change does not connect that state to a production HangarSelectionEvidence panel.",
+            "failureScenario": "When a focus refresh returns a higher revision while an aircraft selection panel is open, the canvas label can update while the panel continues showing the previous next-action text."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 447,
+          "message": "The first acceptance criterion's named App test is missing: `frontend/tests/App.test.tsx` / `App focus refresh updates production label and open selection panel from server scene`. The adapter-level test does not cover the required production path.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added HangarSceneRefresh test renders HangarCanvasAdapter directly and checks a label; it does not exercise the App production startup path or an open selection panel. The named App.test.tsx cases are absent from this change.",
+            "failureScenario": "If the App focus refresh fails to update the production label and panel together, the added adapter test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 447,
+          "message": "The second acceptance criterion's named production-path test is missing: `frontend/tests/App.test.tsx` / `App focus refresh failure preserves stale panel and recovery enables server-authorized actions`.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed selection test renders HangarSelectionEvidence directly, starts with a stale snapshot, then manually rerenders with a recovered snapshot. It does not exercise failure and recovery through the production App refresh path; the named App.test.tsx case is absent.",
+            "failureScenario": "If the App fails to preserve the last labelled content or re-enable only server-authorized actions after a failed focus refresh, the isolated component test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover a direct adapter refresh and a directly rendered stale selection panel, but they do not prove the required production App flows. The specified unknown-object and missing-witness refresh cases are also untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneRefresh.test.ts",
+          "line": 46,
+          "message": "Acceptance criterion 1 is not proved by the changed test. The required `frontend/tests/App.test.tsx` case, `App focus refresh updates production label and open selection panel from server scene`, is absent from the diff.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test renders HangarCanvasAdapter directly with a refreshReader. It does not exercise the App test host, production startup path, selection flow, or production scene builder.",
+            "failureScenario": "If the production App focus handler fails to update the label or an open selection panel, this adapter-only test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 151,
+          "message": "Acceptance criterion 2 is not proved through the production App path. The required `frontend/tests/App.test.tsx` case, `App focus refresh failure preserves stale panel and recovery enables server-authorized actions`, is absent from the diff.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test renders HangarSelectionEvidence directly and changes its props to simulate recovery. It does not exercise the production App refresh path or a transport that changes from failure to a valid response.",
+            "failureScenario": "If App fails to preserve stale content or re-enable only server-authorized actions after recovery, this component-only test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneRefresh.test.ts",
+          "line": 46,
+          "message": "Acceptance criterion 3's contract cases for `UNKNOWN-AIR-001` and `witnessIds: ['missing-witness']` are not covered. The test does not assert the specified validator errors, preservation of revision 7 as stale, command denial, or absence of a label for either rejected response.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added refresh test checks a valid revision 8 response, a stale revision 6 response, and an unsupported contract version. It does not exercise a higher-revision envelope with an unknown aircraft object ID or a missing witness ID.",
+            "failureScenario": "If refresh validation accepts either an unknown object ID or a missing witness and creates a label from that response, the changed tests still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change introduces a stale-state check that can leave panel commands enabled after a failed refresh, and it does not wire refreshed server state into the production selection panel.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/selectionPanel.tsx",
+          "line": 87,
+          "message": "A failed panel refresh can leave commands enabled. When the snapshot prop remains current, the stale refresh result is ignored by staleSnapshot.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "After a failed refresh, refreshHangarScene marks refreshSnapshot.current false. staleSnapshot then suppresses that state whenever the snapshot prop still has current true.",
+            "failureScenario": "A panel receives a current snapshot prop, then its focus refetch fails. staleSnapshot remains false, leaving selection and content controls enabled instead of preserving stale state and disabling commands."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 447,
+          "message": "The production App refresh is not connected to the open selection panel, so the panel can remain stale after a valid higher-revision refetch; the named App test covering this path is also missing.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The production scene receives hangarServerScene and refreshReader, but this App change does not connect the refreshed scene or snapshot to HangarSelectionEvidence. The changed tests also do not include the acceptance criterion's named App test.",
+            "failureScenario": "With a selection panel open during a focus refetch that returns changed next-action text, the canvas can update while the panel continues showing old text."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSceneRefresh.test.ts",
+      "frontend/tests/HangarSelectionEvidence.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

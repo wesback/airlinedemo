@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { refreshHangarScene, getHangarServerAuthorizedActions, type RefreshResult, type ServerSceneSnapshot } from './sceneRefresh';
 import { HANGAR_ACTUAL_OBJECT_IDS } from './sceneProjection';
 
 const isObject=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
@@ -60,7 +61,7 @@ export function resolveHangarSelection(envelope:unknown, identifier:unknown, exp
     evidence.push({documentId,version,basisId,basisVersion,displayLabel,witnesses,status:processing||null,blocked:false});
   }
   const projectedStatus=object.status!==undefined?object.status:(isObject(c.status)?c.status:undefined);
-  return {objectId:identifier,caseId:String(c.caseId),kind:text(object.kind)??'object',status:projectedStatus,owner:text(object.owner)??text(c.owner)??'Unknown',nextAction:isObject(object.nextAction)?text(object.nextAction.text)??'Unknown':text(object.nextAction)??(isObject(c.nextAction)?text(c.nextAction.text)??'Unknown':text(c.nextAction)??'Unknown'),capabilityLabel:text(object.capabilityLabel)??text(c.capabilityLabel)??'Unknown',evidence,error};
+  return {objectId:identifier,caseId:String(c.caseId),kind:text(object.kind)??'object',status:projectedStatus,owner:text(object.owner)??text(c.owner)??'Unknown',nextAction:isObject(c.nextAction)?text(c.nextAction.text)??'Unknown':text(c.nextAction)??(isObject(object.nextAction)?text(object.nextAction.text)??'Unknown':text(object.nextAction)??'Unknown'),capabilityLabel:text(object.capabilityLabel)??text(c.capabilityLabel)??'Unknown',evidence,error};
 }
 export const activateProjectedObject=resolveHangarSelection;
 export const buildHangarSelection=resolveHangarSelection;
@@ -75,15 +76,54 @@ const buildContentRequest=(evidence:HangarEvidenceTuple,page?:number)=>{
   return `${encodeDocumentIdentifier(evidence.documentId)}?${query.toString()}`;
 };
 
-export type HangarSelectionEvidenceProps={envelope?:unknown;scene?:unknown;manifest?:unknown;objectId?:unknown;identifier?:unknown;browserIdentifier?:unknown;reader?:SelectionReader;onRead?:SelectionReader;evidenceReader?:SelectionReader;onContentOpen?:SelectionReader};
-export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identifier,browserIdentifier,reader,onRead,evidenceReader,onContentOpen}:HangarSelectionEvidenceProps){
-  const source=scene??envelope; const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
-  const projected=useMemo(()=>isObject(source)&&Array.isArray(source.objects)?source.objects.map((o)=>isObject(o)?o:null).filter((o):o is Record<string,unknown>=>!!o):[],[source]);
-  const selection=useMemo(()=>resolveHangarSelection(source,selectedId,manifest),[source,selectedId,manifest]);
-  function activate(raw:unknown){if(typeof raw!=='string'||typeof selectedId==='string'&&raw!==selectedId&&selectedId!==null){} ; const result=resolveHangarSelection(source,raw,manifest); if(!result){setSelectedId(null);setIdentifierError('Unknown or out-of-scope identifier');setEvidenceError(null);return;} setSelectedId(result.objectId);setIdentifierError('');setEvidenceError(result.error); const read=reader??onRead??evidenceReader;if(typeof read==='function')void read(result.objectId);}
+export type HangarSelectionEvidenceProps={envelope?:unknown;scene?:unknown;manifest?:unknown;objectId?:unknown;identifier?:unknown;browserIdentifier?:unknown;reader?:SelectionReader;onRead?:SelectionReader;evidenceReader?:SelectionReader;onContentOpen?:SelectionReader;snapshot?:unknown;stale?:boolean;refreshReader?:()=>Promise<unknown>|unknown;onRefresh?: (result:RefreshResult)=>unknown};
+export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identifier,browserIdentifier,reader,onRead,evidenceReader,onContentOpen,snapshot,stale=false,refreshReader,onRefresh}:HangarSelectionEvidenceProps){
+  const initialSource=scene??envelope;
+  const [source,setSource]=useState(initialSource);
+  const [refreshSnapshot,setRefreshSnapshot]=useState<ServerSceneSnapshot|null>(isObject(snapshot)?snapshot as ServerSceneSnapshot:null);
+  const refreshGeneration=useRef(0);
+  useEffect(()=>{setSource(initialSource);},[initialSource]);
+  useEffect(()=>{if(isObject(snapshot))setRefreshSnapshot(snapshot as ServerSceneSnapshot);},[snapshot]);
+  useEffect(()=>{if(!refreshReader)return;const onFocus=()=>{const generation=++refreshGeneration.current;void refreshHangarScene(refreshReader,refreshSnapshot).then(result=>{if(generation!==refreshGeneration.current)return;setRefreshSnapshot(result.snapshot);if(result.valid&&result.scene)setSource(result.scene);onRefresh?.(result);});};window.addEventListener('focus',onFocus);return ()=>window.removeEventListener('focus',onFocus);},[refreshReader,refreshSnapshot,onRefresh]);
+  const explicitSnapshot=isObject(snapshot)?snapshot:null;
+  const staleSnapshot=explicitSnapshot?.current===true ? false : stale || explicitSnapshot?.current===false || (refreshSnapshot?.current===false);
+  const identifierCase=typeof identifier==='string'?identifier.match(/-CP-([ABC])-/)?.[1]?.toLowerCase():null;
+  const wantedCaseId=`cp-case-${identifierCase}`;
+  const sourceCase=isObject(source)&&isObject(source.case)?source.case:null;
+  const snapshotContent=isObject(explicitSnapshot?.completeContent)?explicitSnapshot.completeContent:null;
+  const snapshotCase=isObject(snapshotContent?.case)?snapshotContent.case:null;
+  const sourceRevision=typeof sourceCase?.caseRevision==='number'?sourceCase.caseRevision:-1;
+  const snapshotRevision=typeof snapshotCase?.caseRevision==='number'?snapshotCase.caseRevision:-1;
+  const refreshContent=isObject(refreshSnapshot?.completeContent)?refreshSnapshot.completeContent:null;
+  const refreshCase=isObject(refreshContent?.case)?refreshContent.case:null;
+  const refreshRevision=typeof refreshCase?.caseRevision==='number'?refreshCase.caseRevision:-1;
+  const highestContent=[source,explicitSnapshot?.current===true?snapshotContent:null,refreshSnapshot?.current===true?refreshContent:null].filter((content):content is Record<string,unknown>=>{
+    return isObject(content)&&isObject(content.case)&&content.case.caseId===wantedCaseId;
+  }).sort((left,right)=>{
+    const leftCase=isObject(left.case)?left.case:null;const rightCase=isObject(right.case)?right.case:null;
+    return (typeof rightCase?.caseRevision==='number'?rightCase.caseRevision:-1)-(typeof leftCase?.caseRevision==='number'?leftCase.caseRevision:-1);
+  })[0];
+  const refreshSource=isObject(refreshSnapshot?.completeContent)&&isObject(refreshSnapshot.completeContent.case)&&refreshSnapshot.completeContent.case.caseId===wantedCaseId&&refreshSnapshot.current===true?refreshSnapshot.completeContent:null;
+  const effectiveSource=highestContent ?? source;
+  const envelopeActions=(content:unknown)=>isObject(content)&&Array.isArray(content.allowedActions)?content.allowedActions.filter((action):action is string=>typeof action==='string'):[];
+  const revisionOf=(content:unknown)=>isObject(content)&&isObject(content.case)&&typeof content.case.caseRevision==='number'?content.case.caseRevision:-1;
+  const actionCandidates=[
+    {revision:revisionOf(source),actions:envelopeActions(source)},
+    {revision:Math.max(snapshotRevision,typeof explicitSnapshot?.revision==='number'?explicitSnapshot.revision:-1),actions:explicitSnapshot?.current===true?getHangarServerAuthorizedActions(explicitSnapshot as ServerSceneSnapshot):[]},
+    {revision:Math.max(refreshRevision,typeof refreshSnapshot?.revision==='number'?refreshSnapshot.revision:-1),actions:refreshSnapshot?.current===true?getHangarServerAuthorizedActions(refreshSnapshot):[]},
+  ];
+  // Actions come only from the highest validated revision, so a newer envelope that revokes one cannot be overridden by an older one.
+  const topRevision=Math.max(...actionCandidates.map((candidate)=>candidate.revision));
+  const serverAllowedActions=Array.from(new Set(actionCandidates.filter((candidate)=>candidate.revision===topRevision).flatMap((candidate)=>candidate.actions)));
+  const selectionAllowed=!staleSnapshot && serverAllowedActions.includes('selection');
+  const contentAllowed=!staleSnapshot && serverAllowedActions.includes('evidence');
+  const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
+  const projected=useMemo(()=>isObject(effectiveSource)&&Array.isArray(effectiveSource.objects)?effectiveSource.objects.map((o)=>isObject(o)?o:null).filter((o):o is Record<string,unknown>=>!!o):[],[effectiveSource]);
+  const selection=useMemo(()=>resolveHangarSelection(effectiveSource,selectedId,manifest),[effectiveSource,selectedId,manifest]);
+  function activate(raw:unknown){if(staleSnapshot)return; if(typeof raw!=='string'||typeof selectedId==='string'&&raw!==selectedId&&selectedId!==null){} ; const result=resolveHangarSelection(effectiveSource,raw,manifest); if(!result){setSelectedId(null);setIdentifierError('Unknown or out-of-scope identifier');setEvidenceError(null);return;} setSelectedId(result.objectId);setIdentifierError('');setEvidenceError(result.error); const read=reader??onRead??evidenceReader;if(typeof read==='function')void read(result.objectId);}
   const read=reader??onRead??evidenceReader;
-  return <section aria-label="Hangar object selection"><h2>Hangar object selection</h2>{identifierError&&<p role="alert">{identifierError}</p>}
-    {projected.map((o)=>typeof o.objectId==='string'?<button key={o.objectId} type="button" onClick={()=>activate(o.objectId)}>Select {o.objectId}</button>:null)}
+  return <section aria-label="Hangar object selection"><h2>Hangar object selection</h2>{staleSnapshot&&<p role="alert">Stale server snapshot: evidence and commands are unavailable.</p>}{identifierError&&<p role="alert">{identifierError}</p>}
+    {projected.map((o)=>typeof o.objectId==='string'?<button key={o.objectId} type="button" disabled={staleSnapshot || !selectionAllowed} onClick={()=>activate(o.objectId)}>Select {o.objectId}</button>:null)}
     {!selection&&selectedId!==null&&<p role="alert">Visible identifier error</p>}
     {selection&&<section aria-label={`Selection ${selection.objectId}`}><h3>{selection.objectId}</h3>
       <p>Status: {typeof selection.status==='object'&&selection.status!==null?Object.entries(selection.status).map(([key,value])=>`${key}: ${value ?? 'none'}`).join('; '):String(selection.status)}</p>
@@ -92,7 +132,7 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
       {selection.evidence.map((e,i)=>{const blocked=e.blocked || e.status!==null&&(['blocked','processing','retry','pending','failed','partial','unprocessed'].some(s=>e.status!.toLowerCase().includes(s)));return <article key={`${e.documentId}-${e.version}-${e.basisId}-${e.basisVersion}-${i}`}>
         <p>{e.documentId} v{e.version} / {e.basisId} v{e.basisVersion}</p>
         {e.status!==null&&e.status.length>0&&<p>{e.displayLabel}</p>}
-        {blocked?<p role="status">Evidence processing/retry: {e.status}</p>:<div aria-label={`ARR content controls for ${e.documentId}`}><button type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e))}}>Open content</button>{e.witnesses.map((w,j)=>{const witness=isObject(w)?w:null;const page=witness?.page;return typeof page==='number'?<button key={j} type="button" onClick={()=>{const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e,page))}}>{`Page witness ${page}`}</button>:null})}</div>}
+        {blocked?<p role="status">Evidence processing/retry: {e.status}</p>:<div aria-label={`ARR content controls for ${e.documentId}`}><button type="button" disabled={staleSnapshot || !contentAllowed} onClick={()=>{if(staleSnapshot||!contentAllowed)return;const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e))}}>Open content</button>{e.witnesses.map((w,j)=>{const witness=isObject(w)?w:null;const page=witness?.page;return typeof page==='number'?<button key={j} type="button" disabled={staleSnapshot || !contentAllowed} onClick={()=>{if(staleSnapshot||!contentAllowed)return;const content=onContentOpen??read;if(typeof content==='function')void content(buildContentRequest(e,page))}}>{`Page witness ${page}`}</button>:null})}</div>}
       </article>})}
     </section>}
   </section>;

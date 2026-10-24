@@ -1,0 +1,241 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 595,
+  "branch": "ai-sdlc/issue-595",
+  "commitSha": "cfa515a4e0998d7b9ca679ef28a0919131eea109",
+  "round": 0,
+  "pipelineVersion": "d128747-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff adds snapshot and stale-state helpers, but the new scene view is only exercised directly by a unit test. The live adapter path is not updated to apply it.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneRefresh.ts",
+          "line": 69,
+          "message": "The server-authored scene view is not wired into the live refresh path, so the acceptance criterion requiring updated labels and panels after a higher-revision refetch is not met.",
+          "confidence": 0.86,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The new server scene view is built by buildHangarServerSceneView, but the diff only calls it from the test; HangarCanvasAdapter.tsx has no change wiring it into the refresh and builder path.",
+            "failureScenario": "When a window-focus refetch returns a higher revision with changed next-action text, the adapter does not use this new view, so the aircraft label and open panel can remain on the old text."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover snapshot projection and stale button disabling, but they do not prove the rendered refresh behavior, failed-refetch preservation and recovery, or the exact test case named by criterion 3.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneRefresh.test.ts",
+          "line": 40,
+          "message": "Criterion 1 is not proved by the named test: it does not exercise the label, open panel, or real builder call.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test refreshes a snapshot, then calls buildHangarServerSceneView directly and checks its returned text. It does not render HangarCanvasAdapter, check the aircraft label or open panel, or assert that the real builder receives the refreshed view.",
+            "failureScenario": "If a higher-revision refresh returns the new scene but the rendered aircraft label and open panel keep their old text, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSelectionEvidence.test.tsx",
+          "line": 151,
+          "message": "Criterion 2 is not covered end to end by the named test; it checks stale rendering only.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test supplies a manually constructed stale snapshot to the component and checks disabled buttons. It does not trigger a failed refetch, assert that the last labelled server snapshot is preserved, or exercise a later valid refresh and server-authorized actions.",
+            "failureScenario": "If a failed refetch discards the last labelled snapshot, or a later valid refresh admits a client-injected action, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/HangarSceneRefresh.test.ts",
+          "line": 40,
+          "message": "Criterion 3 names a test case that is missing from this change.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed test is named `Hangar refresh rebuilds label and panel text from server snapshot`; the required case `HangarSceneRefresh replaces client state with server snapshot` is not present in the supplied diff.",
+            "failureScenario": "If an old injected client snapshot is still accepted as current, the acceptance criterion's named test is not run to detect it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added stale-state controls are present, but the diff does not demonstrate that a higher-revision server refresh updates the live canvas and open panel.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/hangar/sceneRefresh.ts",
+          "line": 71,
+          "message": "The refresh path required by the first acceptance criterion is not wired through the canvas adapter. The test only checks the helper's returned object, so it would pass even if a real window-focus refresh never updated the label or open panel.",
+          "confidence": 0.91,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added test calls buildHangarServerSceneView directly; the diff does not connect that helper to HangarCanvasAdapter's window-focus refresh or scene builder.",
+            "failureScenario": "After a window-focus refetch returns a higher revision, the adapter can keep showing the old aircraft label and open panel because the new server scene view is never passed through the production refresh path."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/HangarSceneRefresh.test.ts",
+      "frontend/tests/HangarSelectionEvidence.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 25,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

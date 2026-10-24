@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, waitFor } from '@testing-library/react';
+import { createElement } from 'react';
+import * as THREE from 'three';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildHangarSceneDescriptor, projectHangarScene, validateHangarSceneEnvelope } from '../src/hangar/sceneProjection';
-import { applyServerRefresh, canAdmitHangarCommands, refreshHangarScene, markRefreshStale } from '../src/hangar/sceneRefresh';
+import { applyServerRefresh, canAdmitHangarCommands, refreshHangarScene, markRefreshStale, buildHangarServerSceneView } from '../src/hangar/sceneRefresh';
+import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/hangar/HangarCanvasAdapter';
+
+afterEach(cleanup);
 
 const envelope = (overrides: Record<string, unknown> = {}) => ({
   contractVersion: 1, packVersion: '1.0.2', case: {
@@ -37,6 +43,28 @@ describe('HangarSceneRefresh', () => {
     expect(applyServerRefresh(null, envelope({ case: { ...envelope().case, capabilityLabel: 'unresolved', nextAction: { actionId: 'fake', text: 'fake' } } })).valid).toBe(false);
   });
 
+  it('Hangar refresh rebuilds label and panel text from server snapshot', async () => {
+    const injected={revision:1,status:'client',owner:'Injected owner',nextAction:{text:'fake'},capabilityLabel:'Unknown'};
+    const first=applyServerRefresh(injected as never,envelope()).snapshot!;
+    const higher=envelope({case:{...envelope().case,name:'Aircraft A',category:'Passenger aircraft',caseRevision:8,nextAction:{actionId:'approve',text:'Approve server evidence'}}});
+    const result=await refreshHangarScene(()=>higher,first);
+    expect(result.valid).toBe(true); expect(result.snapshot?.revision).toBe(8); expect(result.snapshot?.nextAction).toEqual({actionId:'approve',text:'Approve server evidence'});
+    expect(result.scene).toBe(higher);
+    const view=buildHangarServerSceneView(result.scene);
+    expect(view).not.toBeNull(); expect((view as any).cases[0].nextAction.text).toBe('Approve server evidence');
+    const stale=applyServerRefresh(first,envelope({case:{...envelope().case,caseRevision:6,nextAction:{text:'stale'}}}));
+    expect(stale.valid).toBe(false); expect(stale.snapshot?.nextAction).toEqual({actionId:'review',text:'Review evidence'});
+    expect(stale.snapshot?.revision).toBe(7); expect(canAdmitHangarCommands(stale.snapshot)).toBe(false);
+    expect(buildHangarServerSceneView({contractVersion:99,case:{}})).toBeNull();
+
+    const sceneGroup=new THREE.Group(); const aircraft=new THREE.Group(); aircraft.name='AircraftA'; sceneGroup.add(aircraft);
+    const camera=createHangarOwnedPerspectiveCamera(); camera.position.set(0,30,50); camera.lookAt(0,0,0);
+    const Canvas=()=>createElement('div',{'data-testid':'hangar-live-canvas'});
+    const live=render(createElement(HangarCanvasAdapter,{sceneGroup,camera,selection:'SYN-CP-A-AIR-001',sceneData:buildHangarServerSceneView(envelope()),refreshReader:()=>higher,snapshot:first,canvasComponent:Canvas}));
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(()=>expect(live.container.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.textContent).toContain('Approve server evidence'));
+  });
+
   it('HangarSceneRefresh preserves stale state and command admission', async () => {
     const first = applyServerRefresh(null, envelope()).snapshot!;
     expect(canAdmitHangarCommands(first)).toBe(true);
@@ -50,9 +78,15 @@ describe('HangarSceneRefresh', () => {
     expect(missingRevision.valid).toBe(false);
     expect(missingRevision.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
     expect(canAdmitHangarCommands(missingRevision.snapshot)).toBe(false);
-    const badWitness = applyServerRefresh(first, envelope({ history: [{ witnessIds: ['missing-witness'] }] }));
-    expect(badWitness.valid).toBe(false);
+    const badUnknownObject = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseRevision: 8 }, objects: envelope().objects.map((object, index) => index === 0 ? { ...object, objectId: 'UNKNOWN-AIR-001' } : object) }));
+    expect(badUnknownObject).toMatchObject({ valid: false, stale: true, error: 'Unknown scene object identifier', snapshot: { revision: 7, current: false, fallbackReason: 'refresh_failed' } });
+    expect(canAdmitHangarCommands(badUnknownObject.snapshot)).toBe(false);
+    expect(buildHangarServerSceneView(badUnknownObject.scene)).toBeNull();
+
+    const badWitness = applyServerRefresh(first, envelope({ case: { ...envelope().case, caseRevision: 8 }, history: [{ witnessIds: ['missing-witness'] }] }));
+    expect(badWitness).toMatchObject({ valid: false, stale: true, error: 'Bad witness ID', snapshot: { revision: 7, current: false, fallbackReason: 'refresh_failed' } });
     expect(canAdmitHangarCommands(badWitness.snapshot)).toBe(false);
+    expect(buildHangarServerSceneView(badWitness.scene)).toBeNull();
     const recovered = applyServerRefresh(missingRevision.snapshot, envelope({ case: { ...envelope().case, caseRevision: 8 } }));
     expect(recovered.valid).toBe(true);
     expect(recovered.snapshot).toMatchObject({ revision: 8, current: true, fallbackReason: null });
