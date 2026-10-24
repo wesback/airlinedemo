@@ -116,7 +116,7 @@ export default function App({
   }
   const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = Object.fromEntries(hangarEntries.map((entry, index) => [entry.caseId, index === 0 ? { x: 4, z: -4 } : index === 1 ? { x: -4, z: 4 } : { x: 0, z: 6 }]));
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
-    if (!canAdmitHangarCommands(hangarSnapshot)) return;
+    if (hangarSnapshot && !canAdmitHangarCommands(hangarSnapshot)) return;
     let serverIndex = hangarEntries.findIndex((entry) => entry.caseId === aircraftId);
     if (/^AIR-[1-9]\d*$/.test(aircraftId)) {
       serverIndex = Number(aircraftId.slice(4)) - 1;
@@ -203,7 +203,6 @@ export default function App({
         setHangarStale(false);
         setHangarView('3d');
         setHangarSceneLoaded(true);
-      } catch {
         const staleCases: Record<string, ServerSceneSnapshot> = Object.fromEntries(Object.entries(hangarCaseSnapshotsRef.current).map(([caseId, snapshot]) => [caseId, {...snapshot,current:false,fallbackReason:'refresh_failed' as const}]));
         const result = await refreshHangarScene(() => { throw new Error('refresh_failed'); }, hangarSnapshotRef.current);
         const retained = Object.values(staleCases).reduce<ServerSceneSnapshot|null>((highest, snapshot) => !highest || (snapshot.revision ?? -1) >= (highest.revision ?? -1) ? snapshot : highest, hangarSnapshotRef.current);
@@ -268,8 +267,8 @@ export default function App({
         if (!listedId || envelopeId !== listedId) throw {fallback:'contract_invalid'};
         return {
           caseId: listedId,
-          name: typeof c.name === 'string' ? c.name : (typeof c.aircraftName === 'string' ? c.aircraftName : ''),
-          category: typeof c.aircraftCategory === 'string' ? c.aircraftCategory : '',
+          name: typeof c.name === 'string' ? c.name : (typeof c.aircraftName === 'string' ? c.aircraftName : (typeof cases[index]?.name === 'string' ? cases[index].name as string : '')),
+          category: typeof c.aircraftCategory === 'string' ? c.aircraftCategory : (typeof c.category === 'string' ? c.category : (typeof cases[index]?.aircraftCategory === 'string' ? cases[index].aircraftCategory as string : '')),
           unavailable: false,
           sources: HANGAR_SOURCE_IDS.map(sourceId => ({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`})),
         };

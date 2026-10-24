@@ -248,7 +248,7 @@ describe('reviewer workspace', () => {
     await signIn(); fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('button', { name: 'Pointer select AIR-1' });
     fireEvent.click(screen.getByRole('button', { name: 'Pointer select AIR-1' }));
-    injectedText = 'Injected client text';
+        injectedText = 'Injected client text';
     expect(screen.queryByText(`Next action: ${injectedText}`)).toBeNull();
     revision = 8;
     window.dispatchEvent(new Event('focus'));

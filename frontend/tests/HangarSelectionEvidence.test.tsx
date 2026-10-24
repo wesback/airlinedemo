@@ -166,6 +166,21 @@ describe('HangarSelectionEvidence',()=>{
     expect((screen.getByRole('button',{name:'Select SYN-CP-A-CMP-001'}) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).toHaveBeenCalledTimes(1); expect(reset).not.toHaveBeenCalled();
   });
+  it('HangarSelectionEvidence takes actions only from the highest revision so a newer revocation holds',()=>{
+    const mutation=vi.fn();
+    const newer={revision:8,current:true,fallbackReason:null,caseId:'cp-case-a',permissions:{allowedActions:['selection']}};
+    const older={revision:6,current:true,fallbackReason:null,caseId:'cp-case-a',permissions:{allowedActions:['evidence','selection']}};
+    // Envelope at revision 7 still lists evidence; the revision 8 snapshot revokes it.
+    const revoked=render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={newer} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    expect((screen.getByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'Page witness 3'}) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).not.toHaveBeenCalled();
+    revoked.unmount();
+    // Negative case: an older snapshot cannot add or remove actions from the newer envelope.
+    render(<HangarSelectionEvidence envelope={envelope()} manifest={manifest} snapshot={older} identifier="SYN-CP-A-CMP-001" onContentOpen={mutation} />);
+    expect((screen.getByRole('button',{name:'Open content'}) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button',{name:'Open content'})); expect(mutation).toHaveBeenCalledTimes(1);
+  });
   it('HangarSelectionEvidence blocks witnesses and renders markup as text',()=>{
     const read=vi.fn(); const blocked=envelope({documentRefs:[{evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,basisId:'basis-v1',basisVersion:1,displayLabel:'<img src=x onerror=alert(1)>',processingState:'rejected-retryable',retryable:true,usableAsEvidence:false}],evidence:[{witnessId:'secret',evidenceRefId:'ref-1',documentId:'case-a/blocked.txt',documentVersion:4,page:9,basisId:'basis-v1',basisVersion:1,displayLabel:'SECRET-WITNESS'}]});
     const {container}=render(<HangarSelectionEvidence envelope={blocked} manifest={manifest} identifier="SYN-CP-A-CMP-001" onContentOpen={read}/>);

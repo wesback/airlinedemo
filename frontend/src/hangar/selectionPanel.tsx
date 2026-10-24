@@ -105,9 +105,16 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
   })[0];
   const refreshSource=isObject(refreshSnapshot?.completeContent)&&isObject(refreshSnapshot.completeContent.case)&&refreshSnapshot.completeContent.case.caseId===wantedCaseId&&refreshSnapshot.current===true?refreshSnapshot.completeContent:null;
   const effectiveSource=highestContent ?? source;
-  const admittedFromEnvelope=isObject(effectiveSource)&&Array.isArray(effectiveSource.allowedActions)?effectiveSource.allowedActions.filter((action):action is string=>typeof action==='string'):[];
-  const snapshotActions=refreshSnapshot?.current===true?getHangarServerAuthorizedActions(refreshSnapshot):explicitSnapshot?.current===true?getHangarServerAuthorizedActions(explicitSnapshot as ServerSceneSnapshot):[];
-  const serverAllowedActions=Array.from(new Set([...snapshotActions,...admittedFromEnvelope]));
+  const envelopeActions=(content:unknown)=>isObject(content)&&Array.isArray(content.allowedActions)?content.allowedActions.filter((action):action is string=>typeof action==='string'):[];
+  const revisionOf=(content:unknown)=>isObject(content)&&isObject(content.case)&&typeof content.case.caseRevision==='number'?content.case.caseRevision:-1;
+  const actionCandidates=[
+    {revision:revisionOf(source),actions:envelopeActions(source)},
+    {revision:Math.max(snapshotRevision,typeof explicitSnapshot?.revision==='number'?explicitSnapshot.revision:-1),actions:explicitSnapshot?.current===true?getHangarServerAuthorizedActions(explicitSnapshot as ServerSceneSnapshot):[]},
+    {revision:Math.max(refreshRevision,typeof refreshSnapshot?.revision==='number'?refreshSnapshot.revision:-1),actions:refreshSnapshot?.current===true?getHangarServerAuthorizedActions(refreshSnapshot):[]},
+  ];
+  // Actions come only from the highest validated revision, so a newer envelope that revokes one cannot be overridden by an older one.
+  const topRevision=Math.max(...actionCandidates.map((candidate)=>candidate.revision));
+  const serverAllowedActions=Array.from(new Set(actionCandidates.filter((candidate)=>candidate.revision===topRevision).flatMap((candidate)=>candidate.actions)));
   const selectionAllowed=!staleSnapshot && serverAllowedActions.includes('selection');
   const contentAllowed=!staleSnapshot && serverAllowedActions.includes('evidence');
   const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
