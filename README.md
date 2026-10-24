@@ -46,9 +46,8 @@ For a demonstration environment, sign in with `az login` and run one command twi
 
 ```sh
 az login --tenant <tenant-id>
-scripts/deploy.sh --prefix demo1 --location swedencentral \
-  --model-name <approved model> --model-version <approved version> \
-  --budget-amount 250 --allow-my-ip --vault-allow-my-ip --register-providers
+scripts/deploy.sh --presenter-cidrs 84.196.152.13/32 \
+  --allow-my-ip --vault-allow-my-ip --register-providers
 ```
 
 The first run creates the platform only: the network, registry, Key Vault, data services, model gateway and identities, but no Container App, because the image must be pushed into this deployment's private registry first. At the end it prints the next steps:

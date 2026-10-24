@@ -4,17 +4,21 @@
 # then runs the pre-bootstrap checks and the bootstrap script (saved plan, explicit "yes" before apply).
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPOSITORY_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+MODEL_MANIFEST_FILE=${AIRLINEDEMO_MODEL_MANIFEST_FILE:-"$REPOSITORY_ROOT/config/model-manifest.json"}
+
 usage() {
   cat <<'USAGE'
-Usage: scripts/deploy.sh --prefix <name> --location <region> --model-name <name> --model-version <version> \
-         --budget-amount <number> \
+Usage: scripts/deploy.sh \
          [--image-digest sha256:<hex> --passcode-secret-uri <uri>] [options]
 
-Required:
-  --prefix <name>               3-10 lowercase letters/digits; every resource name derives from it
-  --location <region>           Azure region, for example swedencentral
-  --model-name, --model-version approved Azure OpenAI model and version
-  --budget-amount <number>      monthly budget
+Defaults (override with the matching option):
+  --prefix demo1                3-10 lowercase letters/digits; every resource name derives from it
+  --location swedencentral      Azure region
+  --model-name <name>           approved model from config/model-manifest.json
+  --model-version <version>     approved model version from config/model-manifest.json
+  --budget-amount 250           monthly budget
 Application (second phase; give both or neither):
   --image-digest <digest>       first application image digest, already pushed and signed in this deployment's registry
   --passcode-secret-uri <uri>   Key Vault secret URI of the demo passcode in this deployment's vault
@@ -41,7 +45,8 @@ USAGE
 
 fail() { printf 'deploy: %s\n' "$*" >&2; exit 2; }
 
-PREFIX= LOCATION= MODEL_NAME= MODEL_VERSION= OPS_ID= OPS_NAME= BUDGET= DIGEST= PASSCODE_URI=
+PREFIX=demo1 LOCATION=swedencentral MODEL_NAME= MODEL_VERSION= OPS_ID= OPS_NAME= BUDGET=250 DIGEST= PASSCODE_URI=
+MODEL_DEPLOYMENT_NAME=
 RUNNER_REPO= RUNNER_KEY_FILE=$HOME/.ssh/id_ed25519.pub CIDRS= EMAILS= EXISTING= ALLOW_IP=false VAULT_IP=false REGISTER=false PREPARE_ONLY=false
 while [ $# -gt 0 ]; do
   [ "$1" = --help ] || [ "$1" = -h ] && { usage; exit 0; }
@@ -63,14 +68,54 @@ while [ $# -gt 0 ]; do
   shift 2
 done
 
-missing=
-for pair in prefix:"$PREFIX" location:"$LOCATION" model-name:"$MODEL_NAME" model-version:"$MODEL_VERSION" \
-            budget-amount:"$BUDGET"; do
-  [ -n "${pair#*:}" ] || missing="$missing --${pair%%:*}"
-done
-[ -z "$missing" ] || { usage >&2; fail "missing required options:$missing"; }
 if { [ -n "$DIGEST" ] && [ -z "$PASSCODE_URI" ]; } || { [ -z "$DIGEST" ] && [ -n "$PASSCODE_URI" ]; }; then
   fail "give --image-digest and --passcode-secret-uri together, or neither for the platform-only first run"
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  fail "python3 is required to read the approved model manifest"
+fi
+if ! MANIFEST_FIELDS=$(
+  python3 - "$MODEL_MANIFEST_FILE" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as manifest_file:
+        manifest = json.load(manifest_file)
+except (OSError, json.JSONDecodeError) as error:
+    print(f"deploy: could not read approved model manifest '{path}': {error}", file=sys.stderr)
+    raise SystemExit(2)
+
+required = ("deploymentName", "model", "modelVersion", "region")
+missing = [name for name in required if not isinstance(manifest.get(name), str) or not manifest[name].strip()]
+if manifest.get("approved") is not True:
+    print("deploy: model manifest is not approved", file=sys.stderr)
+    raise SystemExit(2)
+if missing:
+    print("deploy: approved model manifest is missing " + ", ".join(missing), file=sys.stderr)
+    raise SystemExit(2)
+print("|".join(manifest[name] for name in required))
+PY
+); then
+  exit 2
+fi
+IFS='|' read -r MANIFEST_DEPLOYMENT_NAME MANIFEST_MODEL_NAME MANIFEST_MODEL_VERSION MANIFEST_REGION <<EOF
+$MANIFEST_FIELDS
+EOF
+
+if [ -n "$MODEL_NAME" ] && [ "$MODEL_NAME" != "$MANIFEST_MODEL_NAME" ]; then
+  fail "--model-name must match the approved model manifest '$MANIFEST_MODEL_NAME'"
+fi
+if [ -n "$MODEL_VERSION" ] && [ "$MODEL_VERSION" != "$MANIFEST_MODEL_VERSION" ]; then
+  fail "--model-version must match the approved model manifest '$MANIFEST_MODEL_VERSION'"
+fi
+MODEL_DEPLOYMENT_NAME=$MANIFEST_DEPLOYMENT_NAME
+MODEL_NAME=$MANIFEST_MODEL_NAME
+MODEL_VERSION=$MANIFEST_MODEL_VERSION
+if [ "$LOCATION" != "$MANIFEST_REGION" ]; then
+  fail "--location must match the approved model manifest region '$MANIFEST_REGION'"
 fi
 
 guid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
@@ -186,6 +231,7 @@ cat >"$TFVARS" <<JSON
   "sql_admin_group_object_id": "$OPS_ID",
   "telemetry_reader_group_id": "$OPS_ID",
   "telemetry_reader_principal_type": "$IDENTITY_TYPE",
+  "model_deployment_name": "$MODEL_DEPLOYMENT_NAME",
   "model_name": "$MODEL_NAME",
   "model_version": "$MODEL_VERSION",
   "terraform_principal_object_id": "$PRINCIPAL",
