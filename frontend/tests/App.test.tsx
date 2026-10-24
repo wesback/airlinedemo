@@ -198,9 +198,10 @@ describe('reviewer workspace', () => {
     function ProductionScene({ sceneData, hangarClientSnapshot, onSelect }: { sceneData?: unknown; hangarClientSnapshot?: unknown; onSelect?: (id: string) => unknown }) {
       const root = sceneData as { cases?: Array<{ nextAction?: { text?: string } }> };
       const clientRoot = hangarClientSnapshot as { case?: { nextAction?: { text?: string } } } | undefined;
+      const serverText = root?.cases?.[0]?.nextAction?.text;
       const injectedClientText = clientRoot?.case?.nextAction?.text;
-      const text = root?.cases?.[0]?.nextAction?.text ?? 'Review evidence';
-      void injectedClientText;
+      const text = serverText ?? 'Missing server scene text';
+      expect(text).not.toBe(injectedClientText);
       return <><span data-hangar-label="SYN-CP-A-AIR-001">Air One<br />narrow-body<br />Rules-based<br />{text}</span><button onClick={() => onSelect?.('SYN-CP-A-AIR-001')}>Select Aircraft A</button></>;
     }
     render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => ProductionScene} hangarAircraftSelectionHandler={vi.fn()} hangarClientSnapshot={{ case: { caseId: 'cp-case-a', nextAction: { text: 'Injected client text' } } }} />);
