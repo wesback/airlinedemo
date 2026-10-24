@@ -88,6 +88,17 @@ public class DockerfileTests
         Assert.Equal(new List<string> { "EXPOSE 8080" }, exposes);
     }
 
+    [Fact]
+    public void RuntimeStageShipsTheTelemetryApprovalFileWhereStartupReadsIt()
+    {
+        var body = StageBody("runtime");
+
+        Assert.Contains("WORKDIR /app", body);
+        Assert.Contains(
+            "COPY --from=build /src/docs/telemetry/source-system-proposed-additions.md ./docs/telemetry/source-system-proposed-additions.md",
+            body);
+    }
+
     private static void AssertExactVersionTag(string image)
     {
         var lastSegment = image[(image.LastIndexOf('/') + 1)..];

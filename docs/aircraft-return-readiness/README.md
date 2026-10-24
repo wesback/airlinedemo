@@ -23,7 +23,7 @@ The demo stops short of the case-study levels: it has no invoices, notices, sanc
 
 ## Architecture
 
-The .NET 10 API owns workflow state, policy, and decisions; the React client is built into the same application image. The Azure design runs that image in Container Apps with SQL state, private Blob storage, a private model endpoint, Key Vault, and a private container registry. Managed identity and private endpoints provide service access. The investigator is only one bounded part of this rules- and person-led workflow.
+The .NET 10 API owns workflow state, policy, and decisions; the React client is built into the same application image. The Azure design runs that image in Container Apps with SQL state, private Blob storage, a private model endpoint reached through an internal API Management gateway, Key Vault, a private container registry, and Log Analytics with Application Insights for diagnostics. Managed identity and private endpoints provide service access. The investigator is only one bounded part of this rules- and person-led workflow.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ External organization-provided prerequisites remain outside Terraform deployment
 - Terraform 1.17 or later, Azure CLI, Git, .NET 10 SDK, Node.js LTS/npm, and access to the repository's protected build and release workflows.
 - An approved model deployment and reviewed model manifest before investigation or scored evaluation.
 
-The deployment requires approved resource names from `infra/terraform/variables.tf`, including `resource_group_name`, SQL server/database names, storage account name, Key Vault name, model account/deployment names, Container Registry name, Container Apps environment/app names, subnet names and ACR configuration. CIDRs must be explicit and valid: `vnet_address_space`, `app_subnet_cidr`, `private_endpoint_subnet_cidr`, `presenter_reviewer_cidrs`, and `egress_allowed_destinations`. The Container Apps ingress allowlist uses only configured presenter/reviewer CIDRs. An empty allowlist produces a deny-all rule and denies all ingress.
+The deployment requires approved resource names from `infra/terraform/variables.tf`, including `resource_group_name`, SQL server/database names, storage account name, Key Vault name, model account/deployment names, Container Registry name, Container Apps environment/app names, subnet names and ACR configuration. CIDRs must be explicit and valid: `vnet_address_space`, `app_subnet_cidr`, `private_endpoint_subnet_cidr`, `presenter_reviewer_cidrs`, and `egress_allowed_destinations`. Model access goes through a private API Management gateway; set `gateway_api_management_tier` (default `Developer`), `gateway_model_deployment`, `gateway_region`, `gateway_api_version`, `gateway_endpoint`, `gateway_audience` and `gateway_approved_application_identity` to approved values. The Container Apps ingress allowlist uses only configured presenter/reviewer CIDRs. An empty allowlist produces a deny-all rule and denies all ingress.
 
 Stop if identity, private connectivity, model approval, or organization approval is missing. Do not substitute public endpoints or personal credentials.
 
@@ -113,6 +113,10 @@ No numeric estimate or spending cap is approved. The Terraform budget notificati
 | Azure SQL | STUB |
 | Azure Blob storage | STUB |
 | Azure Container Registry | STUB |
+| Azure API Management | STUB |
+| Azure Monitor (Log Analytics and Application Insights) | STUB |
+| Azure Key Vault | STUB |
+| Private endpoints and private DNS | STUB |
 | Model input tokens | STUB |
 | Model output tokens | STUB |
 

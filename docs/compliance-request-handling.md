@@ -1,6 +1,6 @@
 # How the product handles compliance requests
 
-Status: explainer for the capstone presentation. Not a requirement document and not legal, accounting or airworthiness advice. The demonstrator runs on synthetic data and does not establish compliance with any regime. Build scope is in [Source Systems PRD](prd/aircraft-source-systems.md) (SRC, v0.3.0).
+Status: explainer for the capstone presentation. Not a requirement document and not legal, accounting or airworthiness advice. The demonstrator runs on synthetic data and does not establish compliance with any regime. Build scope is in [Source Systems PRD](prd/aircraft-source-systems.md) (SRC, v0.9.1).
 
 ## The position
 
