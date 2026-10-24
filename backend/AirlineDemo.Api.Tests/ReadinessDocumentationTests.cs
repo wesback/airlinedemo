@@ -11,6 +11,7 @@ public sealed class ReadinessDocumentationTests
     private static readonly string[] CostComponents =
     {
         "Azure compute", "Azure SQL", "Azure Blob Storage", "Azure Container Registry",
+        "Azure API Management", "Azure Monitor (Log Analytics and Application Insights)",
         "Model input tokens", "Model output tokens",
     };
 
@@ -83,6 +84,7 @@ public sealed class ReadinessDocumentationTests
         foreach (var item in new[]
         {
             "Azure compute", "Azure SQL", "Azure Blob storage", "Azure Container Registry",
+            "Azure API Management", "Azure Monitor (Log Analytics and Application Insights)",
             "Model input tokens", "Model output tokens",
         })
         {
@@ -97,7 +99,7 @@ public sealed class ReadinessDocumentationTests
     public void Cost_model_lists_every_component_and_lifecycle_state()
     {
         var rows = CostRows(CostModel);
-        Assert.Equal(18, rows.Length);
+        Assert.Equal(24, rows.Length);
         foreach (var component in CostComponents)
         foreach (var lifecycle in LifecycleStates)
         {

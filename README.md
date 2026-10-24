@@ -14,7 +14,7 @@ The demonstrator establishes no real operational, airworthiness, financial, lega
 
 ## Architecture
 
-The .NET 10 API owns workflow state, policy, and deterministic decisions. The React client is built into the same application image. Azure Container Apps runs that image behind approved network controls. Azure SQL stores workflow state; private Blob storage holds application data; Key Vault holds secrets; and a private Azure OpenAI endpoint supports bounded investigation.
+The .NET 10 API owns workflow state, policy, and deterministic decisions. The React client is built into the same application image. Azure Container Apps runs that image behind approved network controls. Azure SQL stores workflow state; private Blob storage holds application data; Key Vault holds secrets; and a private Azure OpenAI endpoint, reached through an internal API Management gateway, supports bounded investigation. Log Analytics and Application Insights collect diagnostics.
 
 Managed identity and private networking control service access. Azure Container Registry stores immutable images. Protected Terraform state is bootstrapped separately from the deployment inventory.
 
