@@ -576,7 +576,7 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
         </return-response>
       </when>
     </choose>
-    <rewrite-uri template="/openai/deployments/${local.gateway_model_deployment}/chat/completions" copy-unmatched-params="false" />
+    <rewrite-uri template="/openai/deployments/${local.gateway_model_deployment}/chat/completions?api-version=${var.gateway_api_version}" copy-unmatched-params="false" />
     <authentication-managed-identity resource="https://ai.azure.com" />
   </inbound>
 </policies>

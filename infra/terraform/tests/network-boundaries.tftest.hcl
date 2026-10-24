@@ -132,7 +132,7 @@ run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct
     error_message = "The v1 operation must validate the approved caller, restrict model selection to the configured deployment, and authenticate the backend with the v1 audience."
   }
   assert {
-    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "chat/completions?api-version=v1")
     error_message = "The route must accept POST client paths without subscription authentication or secret output."
   }
 }
