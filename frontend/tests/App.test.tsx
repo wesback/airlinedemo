@@ -244,7 +244,7 @@ describe('reviewer workspace', () => {
       if (scene) return json(makeEnvelope(scene[1], scene[1] === 'cp-case-a' ? revision : 7));
       return baseFetch(input, init);
     });
-    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarAircraftSelectionHandler={vi.fn()} hangarClientSnapshot={{ case: { caseId: 'cp-case-a', nextAction: { text: 'Injected client text' } } }} />);
+    const { container } = render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarAircraftSelectionHandler={vi.fn()} hangarClientSnapshot={{ case: { caseId: 'cp-case-a', nextAction: { text: 'Injected client text' } } }} />);
     await signIn(); fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('button', { name: 'Pointer select AIR-1' });
     fireEvent.click(screen.getByRole('button', { name: 'Pointer select AIR-1' }));
@@ -254,12 +254,16 @@ describe('reviewer workspace', () => {
     window.dispatchEvent(new Event('focus'));
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/scene')).length).toBeGreaterThanOrEqual(3));
     await waitFor(() => {
-      const label = document.querySelector('[data-hangar-label="SYN-CP-A-AIR-001"]')?.textContent ?? '';
-      expect(label).toContain('Approve server evidence');
-      expect(label).not.toContain('Injected client text');
+      const productionLabel = container.querySelector('[data-hangar-label-host] [data-hangar-label="SYN-CP-A-AIR-001"]') as HTMLElement | null;
+      expect(productionLabel?.textContent).toBe('Air One\nnarrow-body\nRules-based\nApprove server evidence');
+      expect(productionLabel?.textContent).not.toContain('Injected client text');
+    });
+    await waitFor(() => {
+      const panel = screen.getByLabelText('Selection SYN-CP-A-AIR-001');
+      expect(panel.textContent).toContain('Next action: Approve server evidence');
+      expect(panel.textContent).not.toContain('Injected client text');
     });
     expect(document.body.textContent).not.toContain('Injected client text');
-    await waitFor(() => expect(screen.getByText('Next action: Approve server evidence')).toBeTruthy());
   });
 
   it('App focus refresh failure preserves stale panel and recovery enables server-authorized actions', async () => {

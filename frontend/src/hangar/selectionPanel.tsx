@@ -87,15 +87,33 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
   useEffect(()=>{if(!refreshReader)return;const onFocus=()=>{const generation=++refreshGeneration.current;void refreshHangarScene(refreshReader,refreshSnapshot).then(result=>{if(generation!==refreshGeneration.current)return;setRefreshSnapshot(result.snapshot);if(result.valid&&result.scene)setSource(result.scene);onRefresh?.(result);});};window.addEventListener('focus',onFocus);return ()=>window.removeEventListener('focus',onFocus);},[refreshReader,refreshSnapshot,onRefresh]);
   const explicitSnapshot=isObject(snapshot)?snapshot:null;
   const staleSnapshot=explicitSnapshot?.current===true ? false : stale || explicitSnapshot?.current===false || (refreshSnapshot?.current===false);
-  const admittedFromEnvelope=isObject(source)&&Array.isArray(source.allowedActions)?source.allowedActions.filter((action):action is string=>typeof action==='string'):[];
+  const identifierCase=typeof identifier==='string'?identifier.match(/-CP-([ABC])-/)?.[1]?.toLowerCase():null;
+  const wantedCaseId=`cp-case-${identifierCase}`;
+  const sourceCase=isObject(source)&&isObject(source.case)?source.case:null;
+  const snapshotContent=isObject(explicitSnapshot?.completeContent)?explicitSnapshot.completeContent:null;
+  const snapshotCase=isObject(snapshotContent?.case)?snapshotContent.case:null;
+  const sourceRevision=typeof sourceCase?.caseRevision==='number'?sourceCase.caseRevision:-1;
+  const snapshotRevision=typeof snapshotCase?.caseRevision==='number'?snapshotCase.caseRevision:-1;
+  const refreshContent=isObject(refreshSnapshot?.completeContent)?refreshSnapshot.completeContent:null;
+  const refreshCase=isObject(refreshContent?.case)?refreshContent.case:null;
+  const refreshRevision=typeof refreshCase?.caseRevision==='number'?refreshCase.caseRevision:-1;
+  const highestContent=[source,explicitSnapshot?.current===true?snapshotContent:null,refreshSnapshot?.current===true?refreshContent:null].filter((content):content is Record<string,unknown>=>{
+    return isObject(content)&&isObject(content.case)&&content.case.caseId===wantedCaseId;
+  }).sort((left,right)=>{
+    const leftCase=isObject(left.case)?left.case:null;const rightCase=isObject(right.case)?right.case:null;
+    return (typeof rightCase?.caseRevision==='number'?rightCase.caseRevision:-1)-(typeof leftCase?.caseRevision==='number'?leftCase.caseRevision:-1);
+  })[0];
+  const refreshSource=isObject(refreshSnapshot?.completeContent)&&isObject(refreshSnapshot.completeContent.case)&&refreshSnapshot.completeContent.case.caseId===wantedCaseId&&refreshSnapshot.current===true?refreshSnapshot.completeContent:null;
+  const effectiveSource=highestContent ?? source;
+  const admittedFromEnvelope=isObject(effectiveSource)&&Array.isArray(effectiveSource.allowedActions)?effectiveSource.allowedActions.filter((action):action is string=>typeof action==='string'):[];
   const snapshotActions=refreshSnapshot?.current===true?getHangarServerAuthorizedActions(refreshSnapshot):explicitSnapshot?.current===true?getHangarServerAuthorizedActions(explicitSnapshot as ServerSceneSnapshot):[];
   const serverAllowedActions=Array.from(new Set([...snapshotActions,...admittedFromEnvelope]));
   const selectionAllowed=!staleSnapshot && serverAllowedActions.includes('selection');
   const contentAllowed=!staleSnapshot && serverAllowedActions.includes('evidence');
   const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
-  const projected=useMemo(()=>isObject(source)&&Array.isArray(source.objects)?source.objects.map((o)=>isObject(o)?o:null).filter((o):o is Record<string,unknown>=>!!o):[],[source]);
-  const selection=useMemo(()=>resolveHangarSelection(source,selectedId,manifest),[source,selectedId,manifest]);
-  function activate(raw:unknown){if(staleSnapshot)return; if(typeof raw!=='string'||typeof selectedId==='string'&&raw!==selectedId&&selectedId!==null){} ; const result=resolveHangarSelection(source,raw,manifest); if(!result){setSelectedId(null);setIdentifierError('Unknown or out-of-scope identifier');setEvidenceError(null);return;} setSelectedId(result.objectId);setIdentifierError('');setEvidenceError(result.error); const read=reader??onRead??evidenceReader;if(typeof read==='function')void read(result.objectId);}
+  const projected=useMemo(()=>isObject(effectiveSource)&&Array.isArray(effectiveSource.objects)?effectiveSource.objects.map((o)=>isObject(o)?o:null).filter((o):o is Record<string,unknown>=>!!o):[],[effectiveSource]);
+  const selection=useMemo(()=>resolveHangarSelection(effectiveSource,selectedId,manifest),[effectiveSource,selectedId,manifest]);
+  function activate(raw:unknown){if(staleSnapshot)return; if(typeof raw!=='string'||typeof selectedId==='string'&&raw!==selectedId&&selectedId!==null){} ; const result=resolveHangarSelection(effectiveSource,raw,manifest); if(!result){setSelectedId(null);setIdentifierError('Unknown or out-of-scope identifier');setEvidenceError(null);return;} setSelectedId(result.objectId);setIdentifierError('');setEvidenceError(result.error); const read=reader??onRead??evidenceReader;if(typeof read==='function')void read(result.objectId);}
   const read=reader??onRead??evidenceReader;
   return <section aria-label="Hangar object selection"><h2>Hangar object selection</h2>{staleSnapshot&&<p role="alert">Stale server snapshot: evidence and commands are unavailable.</p>}{identifierError&&<p role="alert">{identifierError}</p>}
     {projected.map((o)=>typeof o.objectId==='string'?<button key={o.objectId} type="button" disabled={staleSnapshot || !selectionAllowed} onClick={()=>activate(o.objectId)}>Select {o.objectId}</button>:null)}

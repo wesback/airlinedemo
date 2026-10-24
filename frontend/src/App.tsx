@@ -592,8 +592,18 @@ export default function App({
                       />
                       {hangarSelectedObjectId && (() => {
                         const letter = hangarSelectedObjectId.match(/-CP-([ABC])-/)?.[1]?.toLowerCase();
-                        const selectionEnvelope = letter ? hangarSceneEnvelopes[`cp-case-${letter}`] : selectedCaseEnvelope;
-                        return <HangarSelectionEvidence scene={selectionEnvelope} manifest={hangarManifest.objectIds} identifier={hangarSelectedObjectId} snapshot={hangarStale ? {...hangarSnapshot,current:false,fallbackReason:'refresh_failed'} : hangarSnapshot ? {...hangarSnapshot,current:true,fallbackReason:null} : hangarSnapshot} stale={hangarStale} />;
+                        const selectionSnapshotEnvelope = letter ? hangarCaseSnapshots[`cp-case-${letter}`]?.completeContent : null;
+                        const selectionEnvelopeFromSnapshot = typeof selectionSnapshotEnvelope === 'object' && selectionSnapshotEnvelope !== null ? selectionSnapshotEnvelope : null;
+                        const sceneEnvelopeForSelection = letter ? hangarSceneEnvelopes[`cp-case-${letter}`] ?? selectedCaseEnvelope : selectedCaseEnvelope;
+                        const snapshotCase = selectionEnvelopeFromSnapshot && typeof (selectionEnvelopeFromSnapshot as Record<string,unknown>).case === 'object' ? ((selectionEnvelopeFromSnapshot as Record<string,unknown>).case as Record<string,unknown>) : null;
+                        const sceneCase = typeof sceneEnvelopeForSelection === 'object' && sceneEnvelopeForSelection !== null ? (sceneEnvelopeForSelection as Record<string,unknown>).case as Record<string,unknown> : null;
+                        const snapshotRevision = typeof snapshotCase?.caseRevision === 'number' ? snapshotCase.caseRevision : -1;
+                        const sceneRevision = typeof sceneCase?.caseRevision === 'number' ? sceneCase.caseRevision : -1;
+                        const selectionEnvelope = sceneRevision >= snapshotRevision ? sceneEnvelopeForSelection : selectionEnvelopeFromSnapshot;
+                        const selectionCase = typeof selectionEnvelope === 'object' && selectionEnvelope !== null ? (selectionEnvelope as Record<string,unknown>).case as Record<string,unknown> | undefined : undefined;
+                        const selectionRevision = typeof selectionCase?.caseRevision === 'number' ? selectionCase.caseRevision : null;
+                        const selectionSnapshot = letter ? hangarCaseSnapshots[`cp-case-${letter}`] : hangarSnapshot;
+                        return <HangarSelectionEvidence key={`${hangarSelectedObjectId}:${selectionRevision}`} scene={selectionEnvelope} manifest={hangarManifest.objectIds} identifier={hangarSelectedObjectId} snapshot={hangarStale ? {...selectionSnapshot,current:false,fallbackReason:'refresh_failed'} : selectionSnapshot ? {...selectionSnapshot,current:true,fallbackReason:null} : selectionSnapshot} stale={hangarStale} />;
                       })()}
                       <HangarGuidedJourney scene={selectedCaseEnvelope} />
                       <HangarCaseReset
