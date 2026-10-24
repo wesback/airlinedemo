@@ -32,6 +32,7 @@ export type HangarEntryAppProps = {
   hangarLazyLoader?: () => unknown | Promise<unknown>;
   hangarMonotonicClock?: () => number;
   hangarAircraftSelectionHandler?: (aircraftId: string) => unknown;
+  hangarClientSnapshot?: unknown;
 };
 
 export default function App({
@@ -41,6 +42,7 @@ export default function App({
   hangarLazyLoader,
   hangarMonotonicClock,
   hangarAircraftSelectionHandler,
+  hangarClientSnapshot,
 }: HangarEntryAppProps = {}) {
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
   const [session, setSession] = useState<SignedInSession | null>(null);
@@ -166,7 +168,6 @@ export default function App({
           if (!result.valid || !result.snapshot) throw new Error(result.error ?? 'refresh_failed');
           nextCaseSnapshots[entry.caseId] = result.snapshot;
           nextScenes[entry.caseId] = envelope;
-          if (entry.caseId === 'cp-case-a') setHangarServerScene(buildHangarServerSceneView(envelope) ?? envelope);
           if (!nextSnapshot?.revision || (result.snapshot.revision ?? -1) >= (nextSnapshot.revision ?? -1)) nextSnapshot = result.snapshot;
         }
         if (!cases.length) throw new Error('refresh_failed');
@@ -456,7 +457,7 @@ export default function App({
                   {hangarView === '3d' && hangarSceneLoaded && (
                     <div aria-label="Hangar 3D scene">
                       <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
-                      {LoadedHangarScene ? <LoadedHangarScene onSelect={sharedHangarAircraftSelectionHandler} sceneData={hangarServerScene} refreshReader={async ()=>{const first=hangarEntries[0]?.caseId;if(!first)throw new Error('refresh_failed');const response=await fetch(`/api/v1/cases/${encodeURIComponent(first)}/scene`);if(!response.ok)throw new Error('refresh_failed');return response.json();}} externalRefresh={true} snapshot={hangarSnapshot} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
+                      {LoadedHangarScene ? <LoadedHangarScene {...({ sceneData: hangarServerScene, hangarClientSnapshot } as Record<string, unknown>) } onSelect={sharedHangarAircraftSelectionHandler} refreshReader={async ()=>{const first=hangarEntries[0]?.caseId;if(!first)throw new Error('refresh_failed');const response=await fetch(`/api/v1/cases/${encodeURIComponent(first)}/scene`);if(!response.ok)throw new Error('refresh_failed');return response.json();}} externalRefresh={true} snapshot={hangarSnapshot} onCreated={handleHangarCanvasCreated} onContextLost={handleHangarContextLost} /> : <canvas aria-label="3D hangar scene" />}
                       {selectedHangarObjectId && <HangarSelectionEvidence scene={hangarServerScene} snapshot={hangarSnapshot} stale={hangarStale || hangarSnapshot?.current===false} identifier={selectedHangarObjectId} />}
                       <HangarGuideLineAdapter
                         entries={hangarEntries}

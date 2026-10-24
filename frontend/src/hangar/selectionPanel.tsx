@@ -90,8 +90,8 @@ export function HangarSelectionEvidence({envelope,scene,manifest,objectId,identi
   const admittedFromEnvelope=isObject(source)&&Array.isArray(source.allowedActions)?source.allowedActions.filter((action):action is string=>typeof action==='string'):[];
   const snapshotActions=refreshSnapshot?.current===true?getHangarServerAuthorizedActions(refreshSnapshot):explicitSnapshot?.current===true?getHangarServerAuthorizedActions(explicitSnapshot as ServerSceneSnapshot):[];
   const serverAllowedActions=Array.from(new Set([...snapshotActions,...admittedFromEnvelope]));
-  const selectionAllowed=!staleSnapshot;
-  const contentAllowed=staleSnapshot ? false : serverAllowedActions.length===0 || serverAllowedActions.includes('evidence') || serverAllowedActions.includes('selection');
+  const selectionAllowed=!staleSnapshot && serverAllowedActions.includes('selection');
+  const contentAllowed=!staleSnapshot && serverAllowedActions.includes('evidence');
   const browserSupplied=typeof browserIdentifier==='string'; const supplied=browserSupplied?null:(identifier??objectId); const initialSelected=typeof supplied==='string'?supplied:null; const initialSelection=resolveHangarSelection(source,initialSelected,manifest); const [selectedId,setSelectedId]=useState<string|null>(initialSelected); const [identifierError,setIdentifierError]=useState(initialSelected&&!initialSelection?'Unknown or out-of-scope identifier':browserSupplied?'Browser-supplied identifiers are not accepted':''); const [evidenceError,setEvidenceError]=useState<string|null>(initialSelection?.error??null);
   const projected=useMemo(()=>isObject(source)&&Array.isArray(source.objects)?source.objects.map((o)=>isObject(o)?o:null).filter((o):o is Record<string,unknown>=>!!o):[],[source]);
   const selection=useMemo(()=>resolveHangarSelection(source,selectedId,manifest),[source,selectedId,manifest]);

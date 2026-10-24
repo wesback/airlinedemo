@@ -195,11 +195,15 @@ describe('reviewer workspace', () => {
       if (scene) return json(makeEnvelope(scene[1], scene[1] === 'cp-case-a' ? revision : 7));
       return baseFetch(input, init);
     });
-    function ProductionScene({ sceneData, onSelect }: { sceneData?: unknown; onSelect?: (id: string) => unknown }) {
-      const root = sceneData as { cases?: Array<{ nextAction?: { text?: string } }> }; const text = root?.cases?.[0]?.nextAction?.text ?? 'Review evidence';
+    function ProductionScene({ sceneData, hangarClientSnapshot, onSelect }: { sceneData?: unknown; hangarClientSnapshot?: unknown; onSelect?: (id: string) => unknown }) {
+      const root = sceneData as { cases?: Array<{ nextAction?: { text?: string } }> };
+      const clientRoot = hangarClientSnapshot as { case?: { nextAction?: { text?: string } } } | undefined;
+      const injectedClientText = clientRoot?.case?.nextAction?.text;
+      const text = root?.cases?.[0]?.nextAction?.text ?? 'Review evidence';
+      void injectedClientText;
       return <><span data-hangar-label="SYN-CP-A-AIR-001">Air One<br />narrow-body<br />Rules-based<br />{text}</span><button onClick={() => onSelect?.('SYN-CP-A-AIR-001')}>Select Aircraft A</button></>;
     }
-    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => ProductionScene} hangarAircraftSelectionHandler={vi.fn()} />);
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => ProductionScene} hangarAircraftSelectionHandler={vi.fn()} hangarClientSnapshot={{ case: { caseId: 'cp-case-a', nextAction: { text: 'Injected client text' } } }} />);
     await signIn(); fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('button', { name: 'Select Aircraft A' });
     fireEvent.click(screen.getByRole('button', { name: 'Select Aircraft A' }));
