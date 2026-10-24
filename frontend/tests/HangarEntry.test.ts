@@ -20,6 +20,43 @@ import {
 const HangarApp = App as ComponentType<HangarEntryAppProps>;
 
 describe('HangarEntry', () => {
+  it('Hangar App composes walk region and follow camera', async () => {
+    stubCaseApi();
+    const selection = vi.fn();
+    render(createElement(HangarApp, {
+      hangarBrowserSupported: true,
+      hangarWebGl2Probe: { webgl2: true },
+      hangarLazyLoader: () => { function Scene() { return createElement('canvas', { 'aria-label': '3D hangar scene' }); } return Scene; },
+      hangarAircraftSelectionHandler: selection,
+    }));
+    await signInAsReviewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    const walk = screen.getByRole('region', { name: 'Walk region' });
+    expect((walk as HTMLElement).tabIndex).toBe(0);
+    const avatarBefore = screen.getByText(/^Avatar: /).textContent;
+    const cameraBefore = screen.getByText(/^Camera pose$/).getAttribute('data-hangar-camera-pose');
+    walk.focus();
+    fireEvent.keyDown(walk, { key: 'ArrowUp' });
+    expect(screen.getByText(/^Avatar: /).textContent).toBe('Avatar: 0, -0.5');
+    const cameraAfter = screen.getByText(/^Camera pose$/).getAttribute('data-hangar-camera-pose');
+    expect(cameraAfter).not.toBe(cameraBefore);
+    const follow = screen.getByRole('button', { name: 'Follow avatar: on' });
+    fireEvent.click(follow);
+    expect(screen.getByRole('button', { name: 'Follow avatar: off' })).toBeTruthy();
+    const cameraOff = screen.getByText(/^Camera pose$/).getAttribute('data-hangar-camera-pose');
+    fireEvent.keyDown(walk, { key: 'ArrowUp' });
+    expect(screen.getByText(/^Avatar: /).textContent).toBe('Avatar: 0, -1');
+    expect(screen.getByText(/^Camera pose$/).getAttribute('data-hangar-camera-pose')).toBe(cameraOff);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Refresh Hangar scene' }), { key: 'ArrowUp' });
+    expect(screen.getByText(/^Avatar: /).textContent).toBe('Avatar: 0, -1');
+    expect(screen.getByText(/^Camera pose$/).getAttribute('data-hangar-camera-pose')).toBe(cameraOff);
+    fireEvent.keyDown(walk, { key: 'w' });
+    expect(screen.getByText(/^Avatar: /).textContent).toBe('Avatar: 0, -1');
+    expect(screen.getByText(/^Camera pose$/).getAttribute('data-hangar-camera-pose')).toBe(cameraOff);
+    expect(selection).not.toHaveBeenCalled();
+  });
+
   it('HangarEntry rejects unsupported browser and missing WebGL', () => {
     expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: false, webgl2: { webgl2: true } }).fallbackReason).toBe('unsupported_browser');
     expect(getHangarEntryDecision({ contractVersion: 1, browserSupported: true, webgl2: null }).fallbackReason).toBe('webgl_unavailable');

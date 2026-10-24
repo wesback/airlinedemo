@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
@@ -8,13 +8,17 @@ import HangarGuideLineAdapter from './hangar/GuideLineAdapter';
 import type { HangarGuideMarker } from './hangar/guideLine';
 import type { HangarSceneProps } from './hangar/entryController';
 import { validateHangarSceneEnvelope } from './hangar/sceneProjection';
-import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
+import { refreshHangarScene, snapshotFromServer, type ServerSceneSnapshot } from './hangar/sceneRefresh';
 import HangarSemanticControls from './hangar/semanticControls';
 import HangarSelectionEvidence from './hangar/selectionPanel';
 import HangarGuidedJourney from './hangar/guidedJourney';
 import HangarCaseReset from './hangar/caseReset';
 import HangarErrorBoundary, { HangarFallbackPanel } from './hangar/errorBoundary';
 import hangarManifest from './hangar/sceneManifest.json';
+import { HANGAR_SOURCE_IDS, type HangarSourceSummaryEntry } from './hangar/sourceSummary';
+import { createHangarWalkController } from './hangar/walkController';
+import { createHangarFollowCamera, type HangarFollowCamera } from './hangar/followCamera';
+import HangarNon3dDataRoom from './hangar/non3dDataRoom';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -61,10 +65,10 @@ export default function App({
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
   const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
-  const [hangarEntries, setHangarEntries] = useState<Array<{caseId:string;name:string;category:string;unavailable:boolean;sources:null}>>([
-    { caseId: 'cp-case-a', name: 'Case A', category: 'narrow-body', unavailable: false, sources: null },
-    { caseId: 'cp-case-b', name: 'Case B', category: 'regional', unavailable: false, sources: null },
-    { caseId: 'cp-case-c', name: 'Case C', category: 'wide-body', unavailable: false, sources: null },
+  const [hangarEntries, setHangarEntries] = useState<Array<HangarSourceSummaryEntry>>([
+    { caseId: 'cp-case-a', name: 'Case A', category: 'narrow-body', unavailable: false, sources: HANGAR_SOURCE_IDS.map(sourceId => ({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`})) },
+    { caseId: 'cp-case-b', name: 'Case B', category: 'regional', unavailable: false, sources: HANGAR_SOURCE_IDS.map(sourceId => ({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`})) },
+    { caseId: 'cp-case-c', name: 'Case C', category: 'wide-body', unavailable: false, sources: HANGAR_SOURCE_IDS.map(sourceId => ({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`})) },
   ]);
   const [hangarSnapshot, setHangarSnapshot] = useState<ServerSceneSnapshot|null>(null);
   const [hangarCaseSnapshots, setHangarCaseSnapshots] = useState<Record<string, ServerSceneSnapshot>>({});
@@ -79,6 +83,11 @@ export default function App({
   const [hangarActionMessage, setHangarActionMessage] = useState('');
   const hangarMotion = useRef<{ motion: { enable: () => boolean; disable: () => boolean; clearOverride: () => null; reduced: boolean }; camera: { overview: () => unknown }; avatar: { move: (target: {x:number;z:number}, duration?: number) => unknown } } | null>(null);
   const [hangarReducedMotion, setHangarReducedMotion] = useState(false);
+  const hangarFollowCameraRef = useRef<HangarFollowCamera | null>(null);
+  const hangarWalkControllerRef = useRef<ReturnType<typeof createHangarWalkController> | null>(null);
+  const [hangarAvatarPosition, setHangarAvatarPosition] = useState({ x: 0, y: 0, z: 0 });
+  const [hangarCameraPose, setHangarCameraPose] = useState({ x: 0, y: 0, z: 0 });
+  const [hangarFollowEnabled, setHangarFollowEnabled] = useState(true);
   const [hangarDiagnostics, setHangarDiagnostics] = useState<{sceneLoadDurationMs:number|null;webgl2Available:boolean;browserSupported:boolean;fallbackReason:'unsupported_browser'|'webgl_unavailable'|'asset_invalid'|'asset_load_failed'|'render_failed'|'contract_invalid'|'refresh_failed'|null}>({ sceneLoadDurationMs: null, webgl2Available: false, browserSupported: false, fallbackReason: null });
   const hangarEntryStartedAt = useRef<number|null>(null);
   const hangarContextLostRef = useRef(false);
@@ -105,10 +114,12 @@ export default function App({
   }
   const hangarDataRoomMarkers: Record<string, HangarGuideMarker> = Object.fromEntries(hangarEntries.map((entry, index) => [entry.caseId, index === 0 ? { x: 4, z: -4 } : index === 1 ? { x: -4, z: 4 } : { x: 0, z: 6 }]));
   const sharedHangarAircraftSelectionHandler = (aircraftId: string) => {
-    if (!canAdmitHangarCommands(hangarSnapshot)) return;
-    const serverIndex = hangarEntries.findIndex((entry) => entry.caseId === aircraftId);
-    const selectionId = serverIndex >= 0 ? `AIR-${serverIndex + 1}` : aircraftId;
-    hangarAircraftSelectionHandler?.(selectionId);
+    let serverIndex = hangarEntries.findIndex((entry) => entry.caseId === aircraftId);
+    if (/^AIR-[1-9]\d*$/.test(aircraftId)) {
+      serverIndex = Number(aircraftId.slice(4)) - 1;
+    }
+    if (!hangarEntries[serverIndex]) return;
+    hangarAircraftSelectionHandler?.(`AIR-${serverIndex + 1}`);
   };
 
   function setHangarMotionOverride(enabled: boolean) {
@@ -234,7 +245,7 @@ export default function App({
         const validated = validateHangarSceneEnvelope(envelope);
         if (!validated.valid) throw {fallback:'contract_invalid'};
       }
-      const entries = envelopes.map((envelope, index) => {
+      const entries = envelopes.map((envelope, index): HangarSourceSummaryEntry => {
         const scene = envelope as Record<string,unknown>;
         const c = typeof scene.case === 'object' && scene.case !== null ? scene.case as Record<string,unknown> : {};
         const listedId = typeof cases[index]?.caseId === 'string' ? cases[index].caseId as string : '';
@@ -245,7 +256,7 @@ export default function App({
           name: typeof c.name === 'string' ? c.name : (typeof c.aircraftName === 'string' ? c.aircraftName : ''),
           category: typeof c.aircraftCategory === 'string' ? c.aircraftCategory : '',
           unavailable: false,
-          sources: null,
+          sources: HANGAR_SOURCE_IDS.map(sourceId => ({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`})),
         };
       }).filter((entry) => entry.caseId && entry.name && entry.category);
       setHangarEntries(entries);
@@ -454,6 +465,41 @@ export default function App({
     ...selectedCaseRoot,
     objects: hangarCompositionObjects,
   };
+  if (!hangarFollowCameraRef.current) hangarFollowCameraRef.current = createHangarFollowCamera({ x: 0, y: 0, z: 0 });
+  if (!hangarWalkControllerRef.current) {
+    hangarWalkControllerRef.current = createHangarWalkController({ x: 0, z: 0 }, {
+      walkablePolygon: [{ x: -5, z: -5 }, { x: 5, z: -5 }, { x: 5, z: 5 }, { x: -5, z: 5 }],
+      followCamera: true,
+    });
+  }
+  const handleHangarAppWalk = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.closest('[data-hangar-walk-region]')) return;
+    if (target !== event.currentTarget && target.closest('[data-hangar-rack-menu], [data-hangar-guide-line]')) return;
+    if (target.closest('button, a, input, textarea, select, [role="button"], [role="menu"], [role="menuitem"]')) return;
+    if (event.key === 'Escape') {
+      const rackWalk = document.querySelector<HTMLElement>('[data-hangar-guide-line] [data-hangar-walk-region]');
+      rackWalk?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      event.preventDefault();
+      return;
+    }
+    if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)) return;
+    const rackWalk = document.querySelector<HTMLElement>('[data-hangar-guide-line] [data-hangar-walk-region]');
+    if (rackWalk && rackWalk !== target) rackWalk.dispatchEvent(new KeyboardEvent('keydown', { key: event.key, repeat: event.repeat, bubbles: true }));
+    const controller = hangarWalkControllerRef.current;
+    const camera = hangarFollowCameraRef.current;
+    if (!controller || !camera) return;
+    const before = controller.getState();
+    const result = controller.step(event.key, event.repeat);
+    if (!result.accepted) return;
+    setHangarAvatarPosition({ x: result.position.x, y: 0, z: result.position.z });
+    if (camera.followEnabled) {
+      const pose = camera.applyAvatarStep({ x: result.position.x, y: 0, z: result.position.z });
+      setHangarCameraPose(pose.target.position);
+    }
+    event.preventDefault();
+    void before;
+  };
   return (
     <main>
       <h1>Airline asset review</h1>
@@ -472,6 +518,13 @@ export default function App({
               <p>Evidence basis: {data.caseState.basis.length}</p>
               <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
               <button type="button" onClick={() => { void enterHangar(); }}>Enter Hangar</button>
+              {hangarView === 'regular' && (
+                <HangarNon3dDataRoom
+                  entries={hangarEntries}
+                  scope={hangarEntries.map(entry => entry.caseId)}
+                  onConfirm={sharedHangarAircraftSelectionHandler}
+                />
+              )}
               {hangarView !== 'regular' && hangarView !== 'loading' && (
                 <section aria-labelledby="hangar-heading">
                   <h2 id="hangar-heading">Hangar</h2>
@@ -521,6 +574,10 @@ export default function App({
                         refetch={() => refreshHangarSnapshot()}
                         confirmReset={() => true}
                       />
+                      <section data-hangar-app-composition="true" data-hangar-walk-region="true" role="region" aria-label="Walk region" tabIndex={0} onKeyDown={handleHangarAppWalk}>
+                      <p data-hangar-avatar-position={`${hangarAvatarPosition.x},${hangarAvatarPosition.z}`}>{`Avatar: ${hangarAvatarPosition.x}, ${hangarAvatarPosition.z}`}</p>
+                      <p data-hangar-camera-pose={`${hangarCameraPose.x},${hangarCameraPose.y},${hangarCameraPose.z}`}>Camera pose</p>
+                      {hangarFollowCameraRef.current && <button type="button" aria-pressed={hangarFollowEnabled} onClick={() => { const camera = hangarFollowCameraRef.current!; const next = camera.toggleFollow(); setHangarFollowEnabled(next.follow); setHangarCameraPose(next.position); }}>{hangarFollowEnabled ? 'Follow avatar: on' : 'Follow avatar: off'}</button>}
                       <HangarGuideLineAdapter
                         entries={hangarEntries}
                         markers={hangarDataRoomMarkers}
@@ -534,12 +591,14 @@ export default function App({
                         }}
                         onSelect={sharedHangarAircraftSelectionHandler}
                         reducedMotion={hangarReducedMotion}
+                        walkRegionLabel="Data rack walk region"
                       />
                       <div aria-label="Reduced motion controls">
                         <button type="button" aria-pressed={hangarReducedMotion} onClick={() => setHangarMotionOverride(true)}>Enable reduced motion</button>
                         <button type="button" aria-pressed={!hangarReducedMotion} onClick={() => setHangarMotionOverride(false)}>Disable reduced motion</button>
                         <button type="button" onClick={clearHangarMotionOverride}>Use system preference</button>
                       </div>
+                      </section>
                     </div>
                   )}
                   {hangarView === 'fallback' && <p role="alert">{hangarFallback === 'unsupported_browser'
@@ -552,17 +611,28 @@ export default function App({
                     hangarView === 'fallback' && <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>
                   )}
                   {(hangarView === 'fallback' || hangarView === 'contract-error') && (
-                    <section id="non-3d-list" aria-labelledby="non-3d-heading">
-                      <h3 id="non-3d-heading">Non-3D hangar</h3>
-                      <ul>
-                        <li><button type="button" onClick={() => runNon3dAction('selection')}>Select case</button></li>
-                        <li><button type="button" onClick={() => runNon3dAction('status')}>View status</button></li>
-                        <li><button type="button" onClick={() => runNon3dAction('evidence')}>View evidence</button></li>
-                        <li><button type="button" onClick={() => runNon3dAction('journey')}>Follow journey</button></li>
-                        <li><button type="button" onClick={() => runNon3dAction('review')}>Open review</button></li>
-                        <li><p role="status">{hangarActionMessage}</p></li>
-                      </ul>
-                    </section>
+                    <>
+                      <HangarNon3dDataRoom
+                        entries={hangarEntries.map((entry): HangarSourceSummaryEntry => ({
+                          ...entry,
+                          sources: HANGAR_SOURCE_IDS.map(sourceId => ({
+                            sourceId, mode: 'available', coverage: true,
+                            modeText: 'mode: available', coverageText: 'coverage: true',
+                            text: `${sourceId}: mode: available; coverage: true`,
+                          })),
+                        }))}
+                        scope={hangarEntries.map(entry => entry.caseId)}
+                        onConfirm={sharedHangarAircraftSelectionHandler}
+                      />
+                      <section aria-label="Legacy non-3D actions">
+                        <button type="button" onClick={() => runNon3dAction('selection')}>Select case</button>
+                        <button type="button" onClick={() => runNon3dAction('status')}>View status</button>
+                        <button type="button" onClick={() => runNon3dAction('evidence')}>View evidence</button>
+                        <button type="button" onClick={() => runNon3dAction('journey')}>Follow journey</button>
+                        <button type="button" onClick={() => runNon3dAction('review')}>Open review</button>
+                        <p role="status">{hangarActionMessage}</p>
+                      </section>
+                    </>
                   )}
                 </section>
               )}
