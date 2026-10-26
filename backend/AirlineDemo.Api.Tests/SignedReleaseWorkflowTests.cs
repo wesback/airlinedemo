@@ -56,6 +56,24 @@ public sealed class SignedReleaseWorkflowTests
             "Build run provenance must be verified before the digest is signed.");
     }
 
+    [Theory]
+    [InlineData(true, false, 0, "")]
+    [InlineData(false, false, 0, "apt-get update\napt-get install -y gh\n")]
+    [InlineData(false, true, 42, "apt-get update\napt-get install -y gh\n")]
+    public void Release_installs_github_cli_only_when_missing_and_fails_closed(
+        bool installed, bool installFails, int expectedExitCode, string expectedCalls)
+    {
+        var workflow = ReadWorkflow();
+        var script = RunScript(workflow, "Ensure GitHub CLI is available");
+        var result = RunGitHubCliSetup(script, installed, installFails);
+
+        Assert.Equal(expectedExitCode, result.ExitCode);
+        Assert.Equal(expectedCalls, result.Calls);
+        Assert.Equal(expectedExitCode == 0 ? "gh version test\n" : "", result.Output);
+        Assert.True(workflow.IndexOf("- name: Ensure GitHub CLI is available", StringComparison.Ordinal)
+            < workflow.IndexOf("- name: Verify build run provenance", StringComparison.Ordinal));
+    }
+
     // AC: M-12. OIDC: federated credentials only, no stored cloud secrets.
     [Fact]
     public void Release_authenticates_with_oidc_and_stores_no_cloud_secrets()
@@ -339,6 +357,64 @@ public sealed class SignedReleaseWorkflowTests
             var stdout = process.StandardOutput.ReadToEnd();
             process.WaitForExit();
             return (process.ExitCode, stdout + stderr.Result);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    private static (int ExitCode, string Output, string Calls) RunGitHubCliSetup(
+        string script, bool installed, bool installFails)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "release-cli-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var bin = Path.Combine(dir, "bin");
+            Directory.CreateDirectory(bin);
+            var gh = Path.Combine(dir, "gh");
+            var sudo = Path.Combine(bin, "sudo");
+            var calls = Path.Combine(dir, "calls");
+            File.WriteAllText(gh, "#!/bin/bash\nprintf 'gh version test\\n'\n");
+            File.WriteAllText(sudo, """
+                #!/bin/bash
+                set -euo pipefail
+                printf '%s\n' "$*" >> "$APT_CALLS"
+                if [[ "$*" == "apt-get install -y gh" ]]; then
+                  if [[ "$INSTALL_FAILS" == true ]]; then exit 42; fi
+                  /bin/cp "$GH_STUB" "$TOOLS/gh"
+                fi
+                """);
+            if (!OperatingSystem.IsWindows())
+            {
+                var mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+                File.SetUnixFileMode(gh, mode);
+                File.SetUnixFileMode(sudo, mode);
+            }
+            if (installed)
+            {
+                File.Copy(gh, Path.Combine(bin, "gh"));
+            }
+
+            var scriptPath = Path.Combine(dir, "setup.sh");
+            File.WriteAllText(scriptPath, script);
+            var psi = new ProcessStartInfo("/bin/bash", scriptPath)
+            {
+                WorkingDirectory = dir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.Environment["PATH"] = bin;
+            psi.Environment["APT_CALLS"] = calls;
+            psi.Environment["TOOLS"] = bin;
+            psi.Environment["GH_STUB"] = gh;
+            psi.Environment["INSTALL_FAILS"] = installFails ? "true" : "false";
+
+            using var process = Process.Start(psi) ?? throw new InvalidOperationException("bash could not be started.");
+            var stderr = process.StandardError.ReadToEndAsync();
+            var stdout = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            return (process.ExitCode, stdout + stderr.Result, File.Exists(calls) ? File.ReadAllText(calls) : "");
         }
         finally
         {
