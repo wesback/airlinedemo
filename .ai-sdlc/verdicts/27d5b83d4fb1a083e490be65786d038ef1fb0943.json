@@ -1,0 +1,255 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 643,
+  "branch": "ai-sdlc/issue-643",
+  "commitSha": "27d5b83d4fb1a083e490be65786d038ef1fb0943",
+  "round": 0,
+  "pipelineVersion": "fdef8fa",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint implements the visible scope, role, ordering, and item-limit behavior. The guard test does not prove the required no-store-read behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 83,
+          "message": "The role and version guard criterion requires zero case-store reads for forbidden roles and unsupported API versions, but this test asserts only response status and body. Add assertions that the store read count remains zero for both requests.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Worklist_rejects_forbidden_versions_and_roles checks the executive response and the v2 status, but never asserts WorkspaceStore.Reads.",
+            "failureScenario": "If a future change reads case state before rejecting an executive or an unsupported API version, these assertions still pass; the acceptance criterion's zero-read requirement is untested."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint tests cover the main response shape, ordering, scope filtering, and the 201-item truncation case. They miss the exact 200-item boundary and do not prove that denied or unsupported requests avoid case-store reads.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 58,
+          "message": "The named limit test does not cover the 200-item boundary required by the acceptance criterion. Add an exact 200-item case asserting 200 rows and truncated=false.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Worklist_limits_filtered_items_after_scope seeds 201 eligible items and asserts 200 results with truncated=true, but does not exercise exactly 200 eligible items.",
+            "failureScenario": "If the endpoint incorrectly sets truncated=true when exactly 200 eligible items exist, this test still passes; the acceptance criterion requires 200 items to return truncated=false."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 73,
+          "message": "The guard test does not verify the required no-read behavior for forbidden roles and unsupported API versions. Assert the store's Reads count remains zero for those requests.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Worklist_rejects_forbidden_versions_and_roles asserts the executive receives 403, but never asserts the fake store's Reads count; the same test also does not assert reads stay at zero for the unsupported API version.",
+            "failureScenario": "If a change reads case state before rejecting an executive or an unsupported API version, the current status-code assertions still pass, despite the acceptance criterion requiring zero case-store reads."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint checks roles before reading case state and applies the 200-item cap after building the scoped worklist. The changed tests leave the zero-read denial invariant and the exact 200-item boundary unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 80,
+          "message": "The forbidden-role test does not verify the required zero-read behavior. Assert that the store read count remains zero after the executive request.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The executive-role test asserts the 403 response, but does not assert the WorkspaceStore read count. The fake store already exposes a Reads counter.",
+            "failureScenario": "If the endpoint reads case state before rejecting an executive, the test still passes. That leaves the acceptance criterion requiring zero case-store reads unverified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 64,
+          "message": "The limit test does not cover the acceptance criterion for exactly 200 eligible items returning truncated=false.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Worklist_limits_filtered_items_after_scope creates 201 eligible items and asserts the 200-item truncated response, but does not exercise exactly 200 eligible items.",
+            "failureScenario": "If the endpoint incorrectly marks an exactly 200-item response as truncated, this test still passes, despite the acceptance criterion requiring truncated=false at that boundary."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 60,
+      "total": 61,
+      "percent": 98.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Program.cs",
+          "covered": 1,
+          "total": 1,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Workspace/WorkspaceEndpoints.cs",
+          "covered": 59,
+          "total": 60,
+          "missed": [
+            46
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
