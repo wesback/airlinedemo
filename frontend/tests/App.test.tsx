@@ -214,6 +214,17 @@ describe('reviewer workspace', () => {
       '/api/cases/cp%2Fcase%20a/technical-reviews', '/api/cases/cp%2Fcase%20a/readiness',
     ]);
     expect(calls.some(({ url }) => url.includes('case-001'))).toBe(false);
+
+    cleanup();
+    const case001Calls = setupApi({ session: { ...signedIn, caseScopes: ['case-001'] } });
+    render(<App />);
+    await signIn();
+    expect(await screen.findByRole('heading', { name: 'Case case-001' })).toBeTruthy();
+    expect(case001Calls.filter(({ url }) => url.startsWith('/api/cases/')).map(({ url }) => url)).toEqual([
+      '/api/cases/case-001', '/api/cases/case-001/dashboard',
+      '/api/cases/case-001/technical-reviews', '/api/cases/case-001/readiness',
+    ]);
+    expect(screen.queryByRole('combobox', { name: 'Case' })).toBeNull();
   });
 
   it('shows a message and requests nothing when no case is assigned', async () => {
