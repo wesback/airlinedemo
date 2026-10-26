@@ -542,7 +542,7 @@ export default function App({
       <SignIn onSessionChange={handleSessionChange} />
       {session && (
         <section aria-labelledby="case-heading">
-          {session.caseScopes?.length === 0 ? (
+          {!session.caseScopes?.length ? (
             <p>No cases are assigned to your account.</p>
           ) : (
             <>
