@@ -31,7 +31,8 @@ Options:
                                 certificate when Terraform runs outside the VNet); the vault stays deny-by-default
   --build-runner <owner/repo>   create the self-hosted runner VM (label private-acr) registered with this repository;
                                 after the first run, store a GitHub token in the vault secret github-runner-token
-  --runner-ssh-key <file>       runner admin public key (default: ~/.ssh/id_ed25519.pub)
+  --runner-ssh-key <file>       runner admin public key (default: ~/.ssh/id_ed25519.pub, or a key created
+                                in the deployment files directory when that does not exist)
   --budget-emails <a,b>         budget contacts (default: the signed-in user)
   --ops-group-name <name>       existing Entra group for organization deployments; defaults to the signed-in user
   --ops-group-id <guid>         existing Entra group object ID; may be used without --ops-group-name
@@ -47,7 +48,7 @@ fail() { printf 'deploy: %s\n' "$*" >&2; exit 2; }
 
 PREFIX=demo1 LOCATION=swedencentral MODEL_NAME= MODEL_VERSION= OPS_ID= OPS_NAME= BUDGET=250 DIGEST= PASSCODE_URI=
 MODEL_DEPLOYMENT_NAME=
-RUNNER_REPO= RUNNER_KEY_FILE=$HOME/.ssh/id_ed25519.pub CIDRS= EMAILS= EXISTING= ALLOW_IP=false VAULT_IP=false REGISTER=false PREPARE_ONLY=false
+RUNNER_REPO= RUNNER_KEY_FILE=$HOME/.ssh/id_ed25519.pub RUNNER_KEY_EXPLICIT=false CIDRS= EMAILS= EXISTING= ALLOW_IP=false VAULT_IP=false REGISTER=false PREPARE_ONLY=false
 while [ $# -gt 0 ]; do
   [ "$1" = --help ] || [ "$1" = -h ] && { usage; exit 0; }
   case "$1" in
@@ -62,7 +63,7 @@ while [ $# -gt 0 ]; do
     --model-version) MODEL_VERSION=$2 ;; --ops-group-id) OPS_ID=$2 ;; --ops-group-name) OPS_NAME=$2 ;;
     --budget-amount) BUDGET=$2 ;; --image-digest) DIGEST=$2 ;; --passcode-secret-uri) PASSCODE_URI=$2 ;;
     --presenter-cidrs) CIDRS=$2 ;; --budget-emails) EMAILS=$2 ;; --existing-backend) EXISTING=$2 ;;
-    --build-runner) RUNNER_REPO=$2 ;; --runner-ssh-key) RUNNER_KEY_FILE=$2 ;;
+    --build-runner) RUNNER_REPO=$2 ;; --runner-ssh-key) RUNNER_KEY_FILE=$2; RUNNER_KEY_EXPLICIT=true ;;
     *) usage >&2; fail "unknown argument: $1" ;;
   esac
   shift 2
@@ -132,6 +133,15 @@ done
 runner_json='"enable_build_runner": false,'
 if [ -n "$RUNNER_REPO" ]; then
   [[ $RUNNER_REPO =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || fail "--build-runner must be owner/repo"
+  if [ "$RUNNER_KEY_EXPLICIT" = false ] && [ ! -f "$RUNNER_KEY_FILE" ]; then
+    # No default key: create a dedicated one next to the deployment files (the VM has no inbound access).
+    key_dir=${DEPLOY_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/airlinedemo}/$PREFIX
+    (umask 077; mkdir -p "$key_dir")
+    [ -f "$key_dir/runner_ed25519.pub" ] ||
+      ssh-keygen -q -t ed25519 -N '' -C "airlinedemo-runner-$PREFIX" -f "$key_dir/runner_ed25519" ||
+      fail "could not create a runner SSH key; pass --runner-ssh-key"
+    RUNNER_KEY_FILE=$key_dir/runner_ed25519.pub
+  fi
   [ -f "$RUNNER_KEY_FILE" ] || fail "runner SSH public key not found: $RUNNER_KEY_FILE (use --runner-ssh-key)"
   runner_key=$(head -n 1 "$RUNNER_KEY_FILE")
   [[ $runner_key =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256)\ [A-Za-z0-9+/=]+(\ [A-Za-z0-9._@-]*)?$ ]] || fail "$RUNNER_KEY_FILE is not an OpenSSH public key"
@@ -173,8 +183,9 @@ else
 fi
 
 my_ip=
-if [ "$ALLOW_IP" = true ] || [ "$VAULT_IP" = true ]; then
-  my_ip=$(curl -fsS --max-time 10 https://api.ipify.org) || fail "could not look up the public address; use --presenter-cidrs"
+# The state backend created here is reached through a network security perimeter that admits this machine.
+if [ "$ALLOW_IP" = true ] || [ "$VAULT_IP" = true ] || { [ "$PREPARE_ONLY" = false ] && [ -z "$EXISTING" ]; }; then
+  my_ip=${DEPLOY_PUBLIC_IP:-$(curl -fsS --max-time 10 https://api.ipify.org)} || fail "could not look up the public address; use --presenter-cidrs"
   [[ $my_ip =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || fail "unexpected answer from the address lookup"
 fi
 [ "$ALLOW_IP" = true ] && CIDRS="${CIDRS:+$CIDRS,}$my_ip/32"
@@ -261,10 +272,22 @@ if [ -z "$EXISTING" ]; then
   printf 'Creating the protected Terraform state backend %s in %s (Entra-only, no shared keys, versioned)\n' "$STATE_ACCOUNT" "$STATE_RG"
   az group create --name "$STATE_RG" --location "$LOCATION" --output none
   az storage account create --name "$STATE_ACCOUNT" --resource-group "$STATE_RG" --location "$LOCATION" \
-    --sku Standard_LRS --allow-shared-key-access false --allow-blob-public-access false --min-tls-version TLS1_2 --output none
+    --sku Standard_LRS --allow-shared-key-access false --allow-blob-public-access false --min-tls-version TLS1_2 \
+    --public-network-access Disabled --output none
   az storage account blob-service-properties update --account-name "$STATE_ACCOUNT" --resource-group "$STATE_RG" \
     --enable-versioning true --output none
   account_id=$(az storage account show --name "$STATE_ACCOUNT" --resource-group "$STATE_RG" --query id --output tsv)
+  # Public network access stays Disabled (managed-tenant policy enforces it); an enforced network security
+  # perimeter admits only this machine's address. ARM REST avoids the preview nsp CLI extension.
+  nsp_id="/subscriptions/$SUBSCRIPTION/resourceGroups/$STATE_RG/providers/Microsoft.Network/networkSecurityPerimeters/nsp-$PREFIX-tfstate"
+  nsp_api=api-version=2024-07-01
+  az rest --method put --url "$nsp_id?$nsp_api" --body "{\"location\":\"$LOCATION\"}" --output none
+  az rest --method put --url "$nsp_id/profiles/deployer?$nsp_api" --body "{\"location\":\"$LOCATION\"}" --output none
+  az rest --method put --url "$nsp_id/profiles/deployer/accessRules/deployer-ip?$nsp_api" \
+    --body "{\"properties\":{\"direction\":\"Inbound\",\"addressPrefixes\":[\"$my_ip/32\"]}}" --output none
+  az rest --method put --url "$nsp_id/resourceAssociations/state?$nsp_api" \
+    --body "{\"properties\":{\"privateLinkResource\":{\"id\":\"$account_id\"},\"profile\":{\"id\":\"$nsp_id/profiles/deployer\"},\"accessMode\":\"Enforced\"}}" \
+    --output none
   az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type User \
     --role "Storage Blob Data Owner" --scope "$account_id" --output none
   created=false
