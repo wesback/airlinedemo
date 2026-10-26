@@ -75,7 +75,7 @@ public sealed class DemoCaseSeederTests : IDisposable
         DemoCaseSeeder.Seed(Configuration("true"), race);
 
         var raceScope = inner.AuthorizeCase("cp-case-a", "race-owner");
-        var raceBefore = inner.Read(raceScope);
+        var raceBefore = race.RaceStateBeforeDuplicate ?? throw new InvalidOperationException("Race case state was not captured.");
         DemoCaseSeeder.Seed(Configuration("true"), race);
 
         var existingAfter = inner.Read(inner.AuthorizeCase("case-001", "original-owner"));
@@ -198,6 +198,8 @@ public sealed class DemoCaseSeederTests : IDisposable
 
     private sealed class RaceCreatingStore(ICaseStateStore inner, string raceCaseId, string raceOwner, string basisContent) : ICaseStateStore
     {
+        public CaseState? RaceStateBeforeDuplicate { get; private set; }
+
         public string? OwnerOf(string caseId)
         {
             var owner = inner.OwnerOf(caseId);
@@ -206,6 +208,7 @@ public sealed class DemoCaseSeederTests : IDisposable
                 var scope = inner.CreateCase(raceCaseId, raceOwner);
                 var basis = CaseStateStore.CreateBasisVersion(1, basisContent, string.Empty);
                 inner.Commit(scope, 0, new CaseCommit(basis, "race-receipt", "race-creator", "seed-race", "race audit"));
+                RaceStateBeforeDuplicate = inner.Read(scope);
                 return null;
             }
             return owner;
