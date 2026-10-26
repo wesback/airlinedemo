@@ -124,11 +124,18 @@ public sealed class WorkspaceEndpointTests
         Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
         Assert.Equal(["case-a", "case-b"], root.GetProperty("cases").EnumerateArray().Select(x => x.GetProperty("caseId").GetString()));
         Assert.Equal(["case-missing"], root.GetProperty("unavailableCaseIds").EnumerateArray().Select(x => x.GetString()));
-        foreach (var row in root.GetProperty("cases").EnumerateArray())
+        var rows = root.GetProperty("cases").EnumerateArray().ToArray();
+        foreach (var row in rows)
         {
             Assert.True(row.EnumerateObject().Select(x => x.Name).ToHashSet().SetEquals(["caseId", "openItemsByRole", "nextDecisionOwner", "oldestOpenAgeSeconds", "latestActivity"]));
             Assert.True(row.GetProperty("openItemsByRole").EnumerateObject().Select(x => x.Name).ToHashSet().SetEquals(["technical-reviewer", "finance-reviewer", "legal-reviewer", "presenter"]));
         }
+        Assert.Equal(1, rows[0].GetProperty("openItemsByRole").GetProperty("technical-reviewer").GetInt32());
+        Assert.Equal(0, rows[0].GetProperty("openItemsByRole").GetProperty("finance-reviewer").GetInt32());
+        Assert.Equal(0, rows[0].GetProperty("openItemsByRole").GetProperty("legal-reviewer").GetInt32());
+        Assert.Equal(0, rows[0].GetProperty("openItemsByRole").GetProperty("presenter").GetInt32());
+        foreach (var role in new[] { "technical-reviewer", "finance-reviewer", "legal-reviewer", "presenter" })
+            Assert.Equal(0, rows[1].GetProperty("openItemsByRole").GetProperty(role).GetInt32());
     }
 
     [Fact]
@@ -149,7 +156,12 @@ public sealed class WorkspaceEndpointTests
         var rows = json.RootElement.GetProperty("cases").EnumerateArray().ToArray();
         Assert.Equal("finance-reviewer", rows[0].GetProperty("nextDecisionOwner").GetString());
         Assert.Equal(100, rows[0].GetProperty("oldestOpenAgeSeconds").GetInt64());
-        Assert.Equal(7, rows[0].GetProperty("latestActivity").GetProperty("sequence").GetInt64());
+        var activity = rows[0].GetProperty("latestActivity");
+        Assert.True(activity.EnumerateObject().Select(x => x.Name).ToHashSet().SetEquals(["sequence", "actor", "label", "outcome"]));
+        Assert.Equal(7, activity.GetProperty("sequence").GetInt64());
+        Assert.Equal("reviewer-1", activity.GetProperty("actor").GetString());
+        Assert.Equal("Unknown", activity.GetProperty("label").GetString());
+        Assert.Equal("technical-review-review.decided", activity.GetProperty("outcome").GetString());
         Assert.True(rows[1].GetProperty("nextDecisionOwner").ValueKind is JsonValueKind.Null);
         Assert.True(rows[1].GetProperty("oldestOpenAgeSeconds").ValueKind is JsonValueKind.Null);
         Assert.True(rows[1].GetProperty("latestActivity").ValueKind is JsonValueKind.Null);
@@ -171,7 +183,13 @@ public sealed class WorkspaceEndpointTests
         Assert.DoesNotContain("secret-item", text);
         Assert.DoesNotContain("evidence", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("draft", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"itemId\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"evidence\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"draft\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"decisionText\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"noticeText\"", text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, store.Reads);
+        Assert.Equal(["case-a"], store.ReadCaseIds);
     }
 
     [Fact]
@@ -268,10 +286,11 @@ public sealed class WorkspaceEndpointTests
     {
         private readonly Dictionary<string, CaseState> _states = new(StringComparer.Ordinal);
         public int Reads { get; private set; }
+        public List<string> ReadCaseIds { get; } = [];
         public void Set(string caseId, CaseState state) => _states[caseId] = state;
         public string? OwnerOf(string caseId) => _states.TryGetValue(caseId, out var state) ? state.Owner : null;
         public CaseScope AuthorizeCase(string caseId, string owner) => OwnerOf(caseId) == owner ? new CaseScope(caseId) : throw new CaseAccessDeniedException();
-        public CaseState Read(CaseScope scope) { Reads++; return _states[scope.CaseId]; }
+        public CaseState Read(CaseScope scope) { Reads++; ReadCaseIds.Add(scope.CaseId); return _states[scope.CaseId]; }
         public CaseScope CreateCase(string caseId, string owner) => throw new NotSupportedException();
         public BasisVersion GetBasisVersion(CaseScope scope, int version) => throw new NotSupportedException();
         public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => throw new NotSupportedException();
