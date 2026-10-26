@@ -126,6 +126,7 @@ SourceFixtureLoader.LoadPinned(
     app.Environment.EnvironmentName);
 await app.Services.GetRequiredService<AircraftCasePackPublisher>().PublishAsync(
     app.Services.GetRequiredService<AircraftCasePackLoader>(), 0);
+DemoCaseSeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>());
 if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error); return; }
 
 app.UseTransportSecurityHeaders();
