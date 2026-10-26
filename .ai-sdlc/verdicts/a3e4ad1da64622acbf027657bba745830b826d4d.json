@@ -1,0 +1,205 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 632,
+  "branch": "ai-sdlc/issue-632",
+  "commitSha": "a3e4ad1da64622acbf027657bba745830b826d4d",
+  "round": 0,
+  "pipelineVersion": "f97c2ad-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The deployment adds the requested environment variable. The plan test can pass when a duplicate variable violates the exactly-one requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/container-hosting.tftest.hcl",
+          "line": 216,
+          "message": "The assertion does not detect duplicate Demo__SeedCases entries with a value other than true. Count entries by name, then assert there is exactly one and its value is true.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The assertion filters env entries by both name and value, then checks the matching count.",
+            "failureScenario": "If the container has two Demo__SeedCases entries, one set to true and one set to false, the filter counts only the true entry and the assertion passes, despite the acceptance criterion requiring exactly one variable."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform change adds the requested environment variable. The new assertion misses a duplicate-variable state that violates the exact-one requirement.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/container-hosting.tftest.hcl",
+          "line": 216,
+          "message": "The test does not catch duplicate Demo__SeedCases entries with a wrong value. Count all entries named Demo__SeedCases and assert there is exactly one, then assert that entry's value is true.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The run block filters env entries by both name and value, then asserts that the filtered count is one.",
+            "failureScenario": "If the app has one Demo__SeedCases=true entry and a second Demo__SeedCases=false entry, the filtered count remains one and the test passes, although the acceptance criterion requires exactly one variable."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The Terraform change adds the requested environment variable. The new test can pass with a duplicate variable, so it does not prove the exact-one acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "infra/terraform/tests/container-hosting.tftest.hcl",
+          "line": 216,
+          "message": "The test does not verify that Demo__SeedCases is unique. Count all entries with that name and assert there is exactly one and its value is true.",
+          "confidence": 0.86,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new plan assertion counts only entries whose name is Demo__SeedCases and whose value is true; it does not count all entries with that name.",
+            "failureScenario": "If the container has both Demo__SeedCases=true and Demo__SeedCases=false, the assertion still counts one and passes, although the acceptance criterion requires exactly one variable."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "infra/terraform/tests/container-hosting.tftest.hcl"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
