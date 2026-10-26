@@ -399,8 +399,9 @@ run "redeploy_adopts_a_recovered_key_vault" {
     target          = azurerm_key_vault_certificate.signing
     override_during = plan
     values = {
-      id                  = "https://kv-demo-test.vault.azure.net/certificates/release-signing/0123456789abcdef0123456789abcdef"
-      resource_manager_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-signing"
+      id                              = "https://kv-demo-test.vault.azure.net/certificates/release-signing/0123456789abcdef0123456789abcdef"
+      resource_manager_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-signing/versions/0123456789abcdef0123456789abcdef"
+      resource_manager_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-signing"
     }
   }
   override_resource {
