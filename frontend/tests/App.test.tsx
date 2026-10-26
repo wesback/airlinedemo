@@ -39,6 +39,7 @@ function setupApi(options: {
   trace?: unknown;
   canReset?: boolean;
   resetStatus?: number;
+  session?: typeof signedIn;
 } = {}) {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -50,7 +51,7 @@ function setupApi(options: {
     if (url === '/api/health') return json({ status: 'ok' }, options.healthStatus ?? 200);
     if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
     if (url === '/api/auth/users') return json(users);
-    if (url === '/api/auth/sign-in') return json(signedIn);
+    if (url === '/api/auth/sign-in') return json(options.session ?? signedIn);
     if (url === '/api/cases/case-001' && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
     if (url === '/api/cases/case-001/readiness' && method === 'GET') return json({
       monthsUntilReturn: 9, gapsFound: 1, requestsSent: 1, heldForReview: 1, notProcessed: 2,
@@ -67,6 +68,15 @@ function setupApi(options: {
           options.allowed, options.traces,
         ));
     }
+    const scopedCase = url.match(/^\/api\/cases\/([^/]+)$/)?.[1];
+    if (scopedCase && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
+    const scopedDashboard = url.match(/^\/api\/cases\/([^/]+)\/dashboard$/)?.[1];
+    if (scopedDashboard && method === 'GET') return json(dashboard([], [], options.allowed, options.traces));
+    const scopedReadiness = url.match(/^\/api\/cases\/([^/]+)\/readiness$/)?.[1];
+    if (scopedReadiness && method === 'GET') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months. 0 records gap found, 0 routine request sent, 0 item held for internal review, 0 documents not processed.' });
+    const scopedReviews = url.match(/^\/api\/cases\/([^/]+)\/technical-reviews$/)?.[1];
+    if (scopedReviews && scopedReviews !== 'case-001' && method === 'GET') return json({ basisVersion: 4, decisions: [] });
+    if (scopedReviews && scopedReviews !== 'case-001' && method === 'POST') return json({ decision: 'accept', current: true });
     if (url.includes('/dashboard/traces/')) return json(options.trace ?? {}, options.traceStatus ?? 200);
     if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [
       { caseId: 'cp-case-a', name: 'Case A', aircraftCategory: 'narrow-body', caseRevision: 7 },
@@ -101,7 +111,11 @@ async function signIn() {
   await prepareSignIn();
   fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
   await screen.findByText('Signed in as Ada Reviewer.');
-  await waitFor(() => expect(screen.queryByText('Revision: 7') || screen.queryByRole('alert')).toBeTruthy());
+  await waitFor(() => expect(
+    screen.queryByText('Revision: 7')
+    || screen.queryByRole('alert')
+    || screen.queryByText('No cases are assigned to your account.')
+  ).toBeTruthy());
 }
 
 afterEach(() => {
@@ -175,6 +189,27 @@ describe('reviewer workspace', () => {
       expect(screen.queryByText('Revision: 7')).toBeNull();
       expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
     }
+  });
+
+  it('loads the first case in the session scope and encodes its id', async () => {
+    const calls = setupApi({ session: { ...signedIn, caseScopes: ['cp/case a', 'cp-case-b'] } });
+    render(<App />);
+    await signIn();
+    expect(await screen.findByRole('heading', { name: 'Case cp/case a' })).toBeTruthy();
+    expect(calls.filter(({ url }) => url.startsWith('/api/cases/')).map(({ url }) => url)).toEqual([
+      '/api/cases/cp%2Fcase%20a', '/api/cases/cp%2Fcase%20a/dashboard',
+      '/api/cases/cp%2Fcase%20a/technical-reviews', '/api/cases/cp%2Fcase%20a/readiness',
+    ]);
+    expect(calls.some(({ url }) => url.includes('case-001'))).toBe(false);
+  });
+
+  it('shows a message and requests nothing when no case is assigned', async () => {
+    const calls = setupApi({ session: { ...signedIn, caseScopes: [] } });
+    render(<App />);
+    await signIn();
+    expect(await screen.findByText('No cases are assigned to your account.')).toBeTruthy();
+    expect(calls.filter(({ url }) => url.startsWith('/api/cases/'))).toHaveLength(0);
+    expect(screen.queryByRole('combobox', { name: 'Case' })).toBeNull();
   });
 
   it('Hangar case-work composition remains in the App host', async () => {
