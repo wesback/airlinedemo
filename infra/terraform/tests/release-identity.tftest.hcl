@@ -266,8 +266,8 @@ run "federation_is_limited_to_trusted_workflows" {
   }
 
   assert {
-    condition     = azurerm_federated_identity_credential.build.subject == "repo:wesback/airlinedemo:ref:refs/heads/main" && length(azurerm_federated_identity_credential.build.audience) == 1 && contains(azurerm_federated_identity_credential.build.audience, "api://AzureADTokenExchange") && azurerm_federated_identity_credential.build.issuer == "https://token.actions.githubusercontent.com"
-    error_message = "Build federation must trust only wesback/airlinedemo on refs/heads/main with audience api://AzureADTokenExchange."
+    condition     = azurerm_federated_identity_credential.build.subject == "repo:wesback@14137481/airlinedemo@1364258050:ref:refs/heads/main" && length(azurerm_federated_identity_credential.build.audience) == 1 && contains(azurerm_federated_identity_credential.build.audience, "api://AzureADTokenExchange") && azurerm_federated_identity_credential.build.issuer == "https://token.actions.githubusercontent.com"
+    error_message = "Build federation must trust only owner 14137481 and repository 1364258050 on refs/heads/main with audience api://AzureADTokenExchange."
   }
 
   assert {
@@ -276,8 +276,8 @@ run "federation_is_limited_to_trusted_workflows" {
   }
 
   assert {
-    condition     = azurerm_federated_identity_credential.release.subject == "repo:wesback/airlinedemo:environment:production-release" && length(azurerm_federated_identity_credential.release.audience) == 1 && contains(azurerm_federated_identity_credential.release.audience, "api://AzureADTokenExchange") && azurerm_federated_identity_credential.release.issuer == "https://token.actions.githubusercontent.com"
-    error_message = "Release federation must trust only wesback/airlinedemo in environment production-release with audience api://AzureADTokenExchange."
+    condition     = azurerm_federated_identity_credential.release.subject == "repo:wesback@14137481/airlinedemo@1364258050:environment:production-release" && length(azurerm_federated_identity_credential.release.audience) == 1 && contains(azurerm_federated_identity_credential.release.audience, "api://AzureADTokenExchange") && azurerm_federated_identity_credential.release.issuer == "https://token.actions.githubusercontent.com"
+    error_message = "Release federation must trust only owner 14137481 and repository 1364258050 in environment production-release with audience api://AzureADTokenExchange."
   }
 
 }
