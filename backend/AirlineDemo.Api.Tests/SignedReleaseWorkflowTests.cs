@@ -201,14 +201,52 @@ public sealed class SignedReleaseWorkflowTests
         Assert.DoesNotContain("runs-on: ubuntu-latest\n    timeout-minutes: 30", workflow);
     }
 
-    // AC: the signature export authenticates with the registry token via Basic auth, never as a raw Bearer token.
+    // ACR refresh credentials must be exchanged before repository API reads.
     [Fact]
-    public void Signature_export_uses_registry_basic_auth_not_bearer()
+    public void Signature_export_exchanges_refresh_token_for_repository_scoped_access()
     {
         var step = StepBody(ReadWorkflow(), "Sign image digest");
 
-        Assert.Contains("-u \"00000000-0000-0000-0000-000000000000:$token\"", step);
-        Assert.DoesNotContain("Bearer", step, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--data-urlencode \"grant_type=refresh_token\"", step);
+        Assert.Contains("--data-urlencode \"service=$ACR_LOGIN_SERVER\"", step);
+        Assert.Contains("--data-urlencode \"scope=repository:$IMAGE_REPOSITORY:pull\"", step);
+        Assert.Contains("--data-urlencode \"refresh_token=$refresh_token\"", step);
+        Assert.Contains("\"https://$ACR_LOGIN_SERVER/oauth2/token\"", step);
+        Assert.Equal(3, Regex.Matches(step, Regex.Escape("-H \"Authorization: Bearer $token\"")).Count);
+        Assert.DoesNotContain("-u \"00000000-0000-0000-0000-000000000000:", step);
+    }
+
+    [Theory]
+    [InlineData("{\"access_token\":\"opaque-access\"}", 0, "opaque-access\n")]
+    [InlineData("{}", 4, "")]
+    [InlineData("{\"access_token\":\"\"}", 4, "")]
+    [InlineData("{\"access_token\":null}", 4, "")]
+    [InlineData("{\"access_token\":42}", 4, "")]
+    [InlineData("{\"error\":\"invalid_grant\"}", 4, "")]
+    public void Signature_export_requires_a_nonempty_access_token(
+        string response, int expectedExitCode, string expectedOutput)
+    {
+        var step = StepBody(ReadWorkflow(), "Sign image digest");
+        var filter = Regex.Match(step, @"\|\s*jq -er '([^']+)'");
+        Assert.True(filter.Success, "The access-token exchange must fail closed when its response has no usable token.");
+        var psi = new ProcessStartInfo("jq")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("-er");
+        psi.ArgumentList.Add(filter.Groups[1].Value);
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("jq could not be started.");
+        var stderr = process.StandardError.ReadToEndAsync();
+        process.StandardInput.Write(response);
+        process.StandardInput.Close();
+        var stdout = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+
+        Assert.Equal(expectedExitCode, process.ExitCode);
+        Assert.Equal(expectedOutput, stdout);
+        Assert.Equal("", stderr.GetAwaiter().GetResult());
     }
 
     // AC: SBOM, audit output, and signature retained for 90 days; missing artifacts fail the release.
