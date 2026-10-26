@@ -247,6 +247,8 @@ jobs:
           cert="$RUNNER_TEMP/signing-cert.pem"
           az keyvault certificate download --vault-name "$KV_NAME" --name "$SIGNING_CERT_NAME" --encoding PEM --file "$cert"
           test -s "$cert"
+          # Self-hosted runners keep $HOME between runs: trust only the certificate downloaded by this run.
+          rm -rf "$HOME/.config/notation/truststore/x509/ca/airlinedemo"
           notation cert add --type ca --store airlinedemo "$cert"
           mkdir -p "$HOME/.config/notation"
           jq -n --arg scope "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY" --arg subject "$SIGNING_CERT_SUBJECT" \

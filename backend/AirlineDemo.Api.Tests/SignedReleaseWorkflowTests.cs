@@ -147,6 +147,10 @@ public sealed class SignedReleaseWorkflowTests
         // trust policy pins the certificate subject and the registry scope before `notation verify` runs.
         Assert.Contains("az keyvault certificate download", verify);
         Assert.Contains("notation cert add --type ca --store airlinedemo", verify);
+        const string clearStore = "rm -rf \"$HOME/.config/notation/truststore/x509/ca/airlinedemo\"";
+        Assert.Contains(clearStore, verify);
+        Assert.True(verify.IndexOf(clearStore, StringComparison.Ordinal) < verify.IndexOf("notation cert add", StringComparison.Ordinal),
+            "A stale trust store from an earlier run on a self-hosted runner must be cleared before the certificate is added.");
         Assert.Contains("trustpolicy.json", verify);
         Assert.Contains("signatureVerification: {level: \"strict\"}", verify);
         Assert.Contains("x509.subject: \\($subject)", verify);
