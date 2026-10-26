@@ -1,0 +1,243 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 645,
+  "branch": "ai-sdlc/issue-645",
+  "commitSha": "248b4c863dda7f31b3e01732db656dd7a90203e4",
+  "round": 1,
+  "pipelineVersion": "fdef8fa",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix emits an event for malformed JSON, but changes the response body for that request despite the requirement to preserve #634 behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "line": 113,
+          "message": "Preserve the existing malformed-body response while emitting the rejection event; converting every JSON parse failure into an unknown-user response changes the endpoint body.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "A malformed JSON body throws JsonException in ReadFromJsonAsync, which this catch converts to null; the null request then follows the unknown-user response path.",
+            "failureScenario": "A signed-in caller with a valid CSRF token sends malformed JSON. The endpoint now returns {\"error\":\"Unknown user.\"} with status 400 instead of preserving the response produced by the previous request-body binding path, changing the endpoint body despite the issue requiring #634 statuses and bodies to remain unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-2 change handles the previously missed malformed-body event path, but maps malformed JSON to a new response body, violating the requirement to preserve the endpoint’s existing statuses and bodies.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "line": 116,
+          "message": "Malformed JSON now returns the unknown-user body. Preserve the existing body-binding rejection response while emitting the role-switch event.",
+          "confidence": 0.87,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "SwitchUser catches JsonException, turns the request into null, then returns the same Unknown user response used for an unrecognized user.",
+            "failureScenario": "A signed-in caller with a valid CSRF token sends malformed JSON. The previous body-binding rejection is replaced with HTTP 400 and {\"error\":\"Unknown user.\"}, changing the endpoint response body despite the issue requiring switch statuses and bodies to remain unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix emits an event for malformed JSON, but changes the endpoint’s existing error body for that request.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "line": 121,
+          "message": "Preserve the existing malformed-body response while emitting the role-switch event; this path changes the response body for malformed JSON.",
+          "confidence": 0.89,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Malformed JSON is now caught in SwitchUser, converted to a null request, and handled by the unknown-user response.",
+            "failureScenario": "A signed-in caller with a valid CSRF token sends malformed JSON. The endpoint returns {\"error\":\"Unknown user.\"} instead of the response produced by the existing request-body binding path, changing the endpoint body despite the issue requiring #634's statuses and bodies to remain unchanged."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass",
+      "approval-tier-auto"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 1
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "security-review",
+    "complexityScore": 3,
+    "needsHuman": true,
+    "securitySensitive": true,
+    "securityPaths": [
+      "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs"
+    ],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 56,
+      "total": 60,
+      "percent": 93.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/DemoAuthEndpoints.cs",
+          "covered": 23,
+          "total": 23,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 33,
+          "total": 37,
+          "missed": [
+            278,
+            279,
+            282,
+            283
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
