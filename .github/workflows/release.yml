@@ -93,6 +93,15 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure GitHub CLI is available
+        run: |
+          set -euo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+          gh --version
+
       - name: Private registry connectivity
         run: |
           set -euo pipefail
@@ -194,7 +203,7 @@ jobs:
           mkdir -p artifacts/signature
           notation sign "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" \
             --id "$SIGNING_KEY_ID" --plugin azure-kv --signature-format cose \
-            --allow-referrers-api
+            --force-referrers-tag=false
           notation inspect "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" > artifacts/signature/notation-inspect.txt
           test -s artifacts/signature/notation-inspect.txt
           # Export the COSE signature from the registry's OCI referrers API (Notation signatures are referrers of the digest).
