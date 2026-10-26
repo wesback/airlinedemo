@@ -11,7 +11,8 @@ variable "signing_certificate_name" {
 locals {
   github_oidc_issuer = "https://token.actions.githubusercontent.com"
   github_audience    = "api://AzureADTokenExchange"
-  github_repository  = "wesback/airlinedemo"
+  # This repository's default OIDC subject includes immutable owner and repository IDs.
+  github_subject_prefix = "repo:wesback@14137481/airlinedemo@1364258050"
   # Key Vault creates the key that backs a certificate under the certificate's name, so this is the signing key.
   signing_key_id = "${azurerm_key_vault.kv.id}/keys/${var.signing_certificate_name}"
 }
@@ -35,7 +36,7 @@ resource "azurerm_federated_identity_credential" "build" {
   user_assigned_identity_id = azurerm_user_assigned_identity.build.id
   audience                  = [local.github_audience]
   issuer                    = local.github_oidc_issuer
-  subject                   = "repo:${local.github_repository}:ref:refs/heads/main"
+  subject                   = "${local.github_subject_prefix}:ref:refs/heads/main"
 }
 
 # Release workflow: runs only inside the production-release environment, which requires product-owner approval.
@@ -44,7 +45,7 @@ resource "azurerm_federated_identity_credential" "release" {
   user_assigned_identity_id = azurerm_user_assigned_identity.release.id
   audience                  = [local.github_audience]
   issuer                    = local.github_oidc_issuer
-  subject                   = "repo:${local.github_repository}:environment:production-release"
+  subject                   = "${local.github_subject_prefix}:environment:production-release"
 }
 
 resource "azurerm_role_assignment" "build_acr_push" {
