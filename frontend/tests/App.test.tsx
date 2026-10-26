@@ -279,11 +279,9 @@ describe('reviewer workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('heading', { name: 'Case cp-case-c' })).toBeTruthy();
-    await waitFor(() => {
-      expect(calls.filter(({ url }) => url === '/api/cases/case-001').length).toBe(1);
-      expect(calls.filter(({ url }) => url === '/api/cases/cp-case-c').length).toBe(1);
-      expect(calls.some(({ url }) => url === '/api/cases/case-001/dashboard')).toBe(true);
-    });
+    expect(calls.filter(({ url }) => url === '/api/cases/case-001').length).toBe(1);
+    expect(calls.filter(({ url }) => url === '/api/cases/cp-case-c').length).toBe(1);
+    expect(calls.some(({ url }) => url === '/api/cases/case-001/dashboard')).toBe(true);
   });
 
   it('records a technical review against the selected case', async () => {
