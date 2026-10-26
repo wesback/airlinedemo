@@ -79,6 +79,17 @@ public class DockerfileTests
     }
 
     [Fact]
+    public void BuildStageSkipsTheNpmClientBuildBecauseTheSdkImageHasNoNode()
+    {
+        var publish = Assert.Single(StageBody("build"), l => l.StartsWith("RUN dotnet publish ", StringComparison.Ordinal));
+        Assert.EndsWith(" -p:SkipClientBuild=true", publish);
+
+        var project = System.Xml.Linq.XDocument.Load(Path.Combine(RepoRoot, "backend", "AirlineDemo.Api", "AirlineDemo.Api.csproj"));
+        var target = Assert.Single(project.Descendants("Target"), t => (string?)t.Attribute("Name") == "BuildAndStageClient");
+        Assert.Equal("'$(SkipClientBuild)' != 'true'", (string?)target.Attribute("Condition"));
+    }
+
+    [Fact]
     public void RuntimeStageCopiesPublishedOutputAndExposesOnlyPort8080()
     {
         var body = StageBody("runtime");
