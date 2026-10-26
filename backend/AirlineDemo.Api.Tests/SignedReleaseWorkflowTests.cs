@@ -112,6 +112,18 @@ public sealed class SignedReleaseWorkflowTests
         Assert.DoesNotContain("--allow-referrers-api", step);
     }
 
+    [Fact]
+    public void Release_selects_cli_credentials_and_the_self_signed_certificate()
+    {
+        var workflow = ReadWorkflow();
+        var sign = StepBody(workflow, "Sign image digest");
+
+        Assert.Contains("--plugin-config self_signed=true", sign);
+        Assert.Contains("--plugin-config credential_type=azurecli", sign);
+        Assert.True(workflow.IndexOf("- name: Azure login (OIDC)", StringComparison.Ordinal)
+            < workflow.IndexOf("- name: Sign image digest", StringComparison.Ordinal));
+    }
+
     // AC: deployment verifies the certificate and digest before updating the app.
     [Fact]
     public void Deploy_is_gated_by_signature_and_digest_verification()

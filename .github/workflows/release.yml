@@ -203,6 +203,7 @@ jobs:
           mkdir -p artifacts/signature
           notation sign "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" \
             --id "$SIGNING_KEY_ID" --plugin azure-kv --signature-format cose \
+            --plugin-config self_signed=true --plugin-config credential_type=azurecli \
             --force-referrers-tag=false
           notation inspect "$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY@$IMAGE_DIGEST" > artifacts/signature/notation-inspect.txt
           test -s artifacts/signature/notation-inspect.txt
