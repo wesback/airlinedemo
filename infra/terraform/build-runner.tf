@@ -96,6 +96,7 @@ resource "azurerm_key_vault_secret" "build_runner_token" {
     azurerm_role_assignment.terraform_kv_secrets,
     azurerm_private_endpoint.demo,
     azurerm_private_dns_zone_virtual_network_link.demo,
+    azurerm_network_security_perimeter_association.key_vault,
   ]
 }
 

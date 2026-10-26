@@ -369,22 +369,55 @@ resource "azurerm_storage_account" "blob" {
 }
 
 resource "azurerm_key_vault" "kv" {
-  name                          = local.key_vault_name
-  resource_group_name           = azurerm_resource_group.demo.name
-  location                      = azurerm_resource_group.demo.location
-  tenant_id                     = var.tenant_id
-  sku_name                      = "standard"
-  rbac_authorization_enabled    = true
-  purge_protection_enabled      = true
-  soft_delete_retention_days    = 90
-  public_network_access_enabled = length(var.deployer_ip_cidrs) > 0
+  name                       = local.key_vault_name
+  resource_group_name        = azurerm_resource_group.demo.name
+  location                   = azurerm_resource_group.demo.location
+  tenant_id                  = var.tenant_id
+  sku_name                   = "standard"
+  rbac_authorization_enabled = true
+  purge_protection_enabled   = true
+  soft_delete_retention_days = 90
+  # Public access stays disabled (managed-tenant policy forces it); deployer_ip_cidrs are admitted through the
+  # network security perimeter below, so a Terraform runner outside the VNet can create the signing certificate.
+  public_network_access_enabled = false
 
-  # Deny by default; deployer_ip_cidrs lets a Terraform runner outside the VNet create the signing certificate.
   network_acls {
     default_action = "Deny"
     bypass         = "AzureServices"
-    ip_rules       = var.deployer_ip_cidrs
+    ip_rules       = []
   }
+}
+
+# Enforced perimeter: with publicNetworkAccess Disabled, only these inbound rules (and private endpoints) reach the vault.
+resource "azurerm_network_security_perimeter" "deployer" {
+  count               = length(var.deployer_ip_cidrs) > 0 ? 1 : 0
+  name                = "nsp-${local.name_prefix}-${local.name_suffix}"
+  resource_group_name = azurerm_resource_group.demo.name
+  location            = azurerm_resource_group.demo.location
+}
+
+resource "azurerm_network_security_perimeter_profile" "deployer" {
+  count                         = length(azurerm_network_security_perimeter.deployer)
+  name                          = "deployer"
+  network_security_perimeter_id = azurerm_network_security_perimeter.deployer[0].id
+}
+
+resource "azurerm_network_security_perimeter_access_rule" "deployer" {
+  count                                 = length(azurerm_network_security_perimeter.deployer)
+  name                                  = "deployer-ip"
+  network_security_perimeter_profile_id = azurerm_network_security_perimeter_profile.deployer[0].id
+  direction                             = "Inbound"
+  address_prefixes                      = var.deployer_ip_cidrs
+}
+
+resource "azurerm_network_security_perimeter_association" "key_vault" {
+  count                                 = length(azurerm_network_security_perimeter.deployer)
+  name                                  = "key-vault"
+  network_security_perimeter_profile_id = azurerm_network_security_perimeter_profile.deployer[0].id
+  resource_id                           = azurerm_key_vault.kv.id
+  access_mode                           = "Enforced"
+
+  depends_on = [azurerm_network_security_perimeter_access_rule.deployer]
 }
 
 # Key Vault uses RBAC, so the Terraform principal needs data-plane rights to manage the signing certificate.

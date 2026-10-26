@@ -127,8 +127,8 @@ run "key_vault_stays_private_without_deployer_cidrs" {
   command = plan
 
   assert {
-    condition     = azurerm_key_vault.kv.public_network_access_enabled == false && length(azurerm_key_vault.kv.network_acls[0].ip_rules) == 0 && azurerm_role_assignment.terraform_kv_certificates.role_definition_name == "Key Vault Certificates Officer"
-    error_message = "Without deployer CIDRs the vault must stay private; the Terraform principal still needs certificate rights."
+    condition     = azurerm_key_vault.kv.public_network_access_enabled == false && length(azurerm_key_vault.kv.network_acls[0].ip_rules) == 0 && azurerm_role_assignment.terraform_kv_certificates.role_definition_name == "Key Vault Certificates Officer" && length(azurerm_network_security_perimeter.deployer) == 0
+    error_message = "Without deployer CIDRs the vault must stay private with no perimeter; the Terraform principal still needs certificate rights."
   }
 }
 
@@ -140,8 +140,8 @@ run "key_vault_admits_only_deployer_cidrs" {
   }
 
   assert {
-    condition     = azurerm_key_vault.kv.public_network_access_enabled == true && azurerm_key_vault.kv.network_acls[0].default_action == "Deny" && toset(azurerm_key_vault.kv.network_acls[0].ip_rules) == toset(["198.51.100.7/32"])
-    error_message = "Deployer CIDRs must be the only public addresses the vault admits."
+    condition     = azurerm_key_vault.kv.public_network_access_enabled == false && length(azurerm_key_vault.kv.network_acls[0].ip_rules) == 0 && azurerm_network_security_perimeter_access_rule.deployer[0].direction == "Inbound" && toset(azurerm_network_security_perimeter_access_rule.deployer[0].address_prefixes) == toset(["198.51.100.7/32"]) && azurerm_network_security_perimeter_association.key_vault[0].access_mode == "Enforced"
+    error_message = "Deployer CIDRs must reach the vault only through an enforced perimeter inbound rule; public access stays disabled."
   }
 }
 
@@ -371,7 +371,7 @@ run "redeploy_adopts_a_recovered_key_vault" {
       certificates_role_assignment_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/providers/Microsoft.Authorization/roleAssignments/55555555-5555-5555-5555-555555555555"
       secrets_role_assignment_id      = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/providers/Microsoft.Authorization/roleAssignments/66666666-6666-6666-6666-666666666666"
       signing_certificate_version     = "0123456789abcdef0123456789abcdef"
-      build_runner_token_version      = "fedcba9876543210fedcba9876543210"
+      build_runner_token_version      = "fedcba9876543210fedcba9876543210" #gitleaks:allow
     }
   }
 

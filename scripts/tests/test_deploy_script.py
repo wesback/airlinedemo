@@ -75,7 +75,7 @@ class DeployScriptTests(unittest.TestCase):
         self.env = os.environ.copy()
         self.env.update({
             "PATH": f"{self.bin}:{self.env['PATH']}", "CALL_LOG": str(self.log),
-            "DEPLOY_STATE_DIR": str(self.state), "DEPLOY_ROLE_WAIT_SECONDS": "0",
+            "DEPLOY_STATE_DIR": str(self.state), "DEPLOY_ROLE_WAIT_SECONDS": "0", "DEPLOY_PUBLIC_IP": "203.0.113.9",
             "FAKE_TENANT": TENANT, "FAKE_SUBSCRIPTION": SUBSCRIPTION, "FAKE_PRINCIPAL": PRINCIPAL,
             "AIRLINEDEMO_MODEL_MANIFEST_FILE": str(self.manifest),
         })
@@ -183,13 +183,22 @@ class DeployScriptTests(unittest.TestCase):
         self.assertEqual(sorted(order), order)
         account_create = next(c for c in calls if c.startswith("az storage account create"))
         self.assertIn("--allow-shared-key-access false --allow-blob-public-access false", account_create)
+        self.assertIn("--public-network-access Disabled", account_create)
+        nsp = "/resourceGroups/rg-demo1-tfstate/providers/Microsoft.Network/networkSecurityPerimeters/nsp-demo1-tfstate"
+        rest = [c for c in calls if c.startswith("az rest --method put")]
+        self.assertEqual(4, len(rest))
+        self.assertIn(nsp + "/profiles/deployer/accessRules/deployer-ip?", rest[2])
+        self.assertIn('"direction":"Inbound","addressPrefixes":["203.0.113.9/32"]', rest[2])
+        self.assertIn(nsp + "/resourceAssociations/state?", rest[3])
+        self.assertIn('"accessMode":"Enforced"', rest[3])
+        self.assertLess(calls.index(rest[3]), next(i for i, c in enumerate(calls) if c.startswith("az storage container create")))
         self.assertFalse([c for c in calls if c.startswith("terraform -chdir=infra/terraform apply")])
         self.assertIn("Terraform apply declined", result.stderr)
 
     def test_existing_backend_is_not_created(self):
         result = self.run_deploy("--existing-backend", "stownerstate", "--register-providers")
         self.assertEqual(4, result.returncode, result.stderr)
-        self.assertFalse([c for c in self.calls() if c.startswith(("az group create", "az storage", "az role"))])
+        self.assertFalse([c for c in self.calls() if c.startswith(("az group create", "az storage", "az role", "az rest"))])
         self.assertIn('storage_account_name = "stownerstate"', (self.state / "demo1/backend.hcl").read_text())
 
     def test_missing_required_options_are_all_named_at_once(self):
