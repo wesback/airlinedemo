@@ -40,10 +40,18 @@ function setupApi(options: {
   canReset?: boolean;
   resetStatus?: number;
   session?: typeof signedIn;
+  signInSessions?: typeof signedIn[];
+  pendingCaseId?: string;
 } = {}) {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const calls: { url: string; init?: RequestInit }[] = [];
   let dashboardRequests = 0;
+  let signInSessionIndex = 0;
+  let resolvePendingCase: ((response: Response) => void) | undefined;
+  const pendingCaseProjection = options.pendingCaseId
+    ? new Promise<Response>((resolve) => { resolvePendingCase = resolve; })
+    : null;
+  Object.defineProperty(calls, 'resolvePendingCase', { get: () => resolvePendingCase });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -51,8 +59,13 @@ function setupApi(options: {
     if (url === '/api/health') return json({ status: 'ok' }, options.healthStatus ?? 200);
     if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
     if (url === '/api/auth/users') return json(users);
-    if (url === '/api/auth/sign-in') return json(options.session ?? signedIn);
+    if (url === '/api/auth/sign-in') {
+      const session = options.signInSessions?.[signInSessionIndex++] ?? options.session ?? signedIn;
+      return json(session);
+    }
+    if (url === '/api/auth/sign-out' && method === 'POST') return new Response(null, { status: 204 });
     if (url === '/api/cases/case-001' && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
+    if (options.pendingCaseId && url === `/api/cases/${encodeURIComponent(options.pendingCaseId)}` && method === 'GET') return pendingCaseProjection!;
     if (url === '/api/cases/case-001/readiness' && method === 'GET') return json({
       monthsUntilReturn: 9, gapsFound: 1, requestsSent: 1, heldForReview: 1, notProcessed: 2,
       sentence: 'Return in 9 months. 1 records gap found, 1 routine request sent, 1 item held for internal review, 2 documents not processed.',
@@ -210,6 +223,72 @@ describe('reviewer workspace', () => {
     expect(await screen.findByText('No cases are assigned to your account.')).toBeTruthy();
     expect(calls.filter(({ url }) => url.startsWith('/api/cases/'))).toHaveLength(0);
     expect(screen.queryByRole('combobox', { name: 'Case' })).toBeNull();
+  });
+
+  it('switching the case picker reloads projections and clears prior case data', async () => {
+    const calls = setupApi({
+      session: { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] },
+      pendingCaseId: 'cp-case-b',
+    });
+    render(<App />);
+    await signIn();
+    await screen.findByRole('heading', { name: 'Case cp-case-a' });
+
+    const picker = screen.getByRole('combobox', { name: 'Case' }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map((option) => option.value)).toEqual(['cp-case-a', 'cp-case-b']);
+    expect(screen.getByRole('button', { name: 'Accept finding' })).toBeTruthy();
+
+    fireEvent.change(picker, { target: { value: 'cp-case-b' } });
+    expect(screen.queryByText('Revision: 7')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Accept finding' })).toBeNull();
+
+    const resolver = (calls as typeof calls & { resolvePendingCase: (response: Response) => void }).resolvePendingCase;
+    resolver(json({ revision: 7, basis: [{ version: 4 }] }));
+
+    expect(await screen.findByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+    await waitFor(() => expect(calls.map(({ url }) => url)).toEqual(expect.arrayContaining([
+      '/api/cases/cp-case-b', '/api/cases/cp-case-b/dashboard',
+      '/api/cases/cp-case-b/technical-reviews', '/api/cases/cp-case-b/readiness',
+    ])));
+    expect(calls.some(({ url }) => url.startsWith('/api/cases/cp-case-a'))).toBe(true);
+  });
+
+  it('a new session loads the first case of that session', async () => {
+    const calls = setupApi({ signInSessions: [
+      { ...signedIn, caseScopes: ['case-001'] },
+      { ...signedIn, caseScopes: ['cp-case-c'] },
+    ] });
+    render(<App />);
+    await signIn();
+    await screen.findByRole('heading', { name: 'Case case-001' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await screen.findByText('You are signed out.');
+    await prepareSignIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByRole('heading', { name: 'Case cp-case-c' })).toBeTruthy();
+    expect(calls.filter(({ url }) => url === '/api/cases/case-001').length).toBe(1);
+    expect(calls.filter(({ url }) => url === '/api/cases/cp-case-c').length).toBe(1);
+    expect(calls.some(({ url }) => url === '/api/cases/case-001/dashboard')).toBe(true);
+  });
+
+  it('records a technical review against the selected case', async () => {
+    const calls = setupApi({ session: { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] } });
+    render(<App />);
+    await signIn();
+    await screen.findByRole('heading', { name: 'Case cp-case-a' });
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    await screen.findByRole('heading', { name: 'Case cp-case-b' });
+    fireEvent.change(screen.getByLabelText('Reason for decision'), { target: { value: 'Selected case evidence reviewed.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Accept finding' }));
+
+    await waitFor(() => expect(calls.some(({ url, init }) => url === '/api/cases/cp-case-b/technical-reviews' && init?.method === 'POST')).toBe(true));
+    const post = calls.find(({ url, init }) => url === '/api/cases/cp-case-b/technical-reviews' && init?.method === 'POST');
+    expect(post?.url).toBe('/api/cases/cp-case-b/technical-reviews');
+    expect((post?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+    expect(calls.some(({ url, init }) => url === '/api/cases/case-001/technical-reviews' && init?.method === 'POST')).toBe(false);
   });
 
   it('Hangar case-work composition remains in the App host', async () => {
