@@ -32,9 +32,11 @@ public sealed class DemoCaseSeederTests : IDisposable
     [Fact]
     public void Seeds_the_five_demo_cases_owned_by_presenter_when_enabled()
     {
-        var store = new CaseStateStore(PathFor());
+        var inner = new CaseStateStore(PathFor());
+        var store = new RecordingStore(inner);
         DemoCaseSeeder.Seed(Configuration("true"), store);
 
+        Assert.Equal(["case-001", "case-002", "cp-case-a", "cp-case-b", "cp-case-c"], store.CreatedCaseIds);
         Assert.Equal("presenter", store.OwnerOf("case-001"));
         Assert.Equal("presenter", store.OwnerOf("case-002"));
         Assert.Equal("presenter", store.OwnerOf("cp-case-a"));
@@ -152,6 +154,28 @@ public sealed class DemoCaseSeederTests : IDisposable
         deniedRequest.Headers.Add("Cookie", sessionCookie);
         using var denied = await client.SendAsync(deniedRequest, ct);
         Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+    }
+
+    private sealed class RecordingStore(ICaseStateStore inner) : ICaseStateStore
+    {
+        public List<string> CreatedCaseIds { get; } = [];
+
+        public string? OwnerOf(string caseId) => inner.OwnerOf(caseId);
+        public CaseScope AuthorizeCase(string caseId, string owner) => inner.AuthorizeCase(caseId, owner);
+        public CaseScope CreateCase(string caseId, string owner)
+        {
+            CreatedCaseIds.Add(caseId);
+            return inner.CreateCase(caseId, owner);
+        }
+        public CaseState Read(CaseScope scope) => inner.Read(scope);
+        public BasisVersion GetBasisVersion(CaseScope scope, int version) => inner.GetBasisVersion(scope, version);
+        public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => inner.ReadAudit(scope);
+        public CommitResult Commit(CaseScope scope, long expectedRevision, CaseCommit commit) => inner.Commit(scope, expectedRevision, commit);
+        public IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope) => inner.ListWorkItems(scope);
+        public CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor) => inner.CreateWorkItem(scope, expectedRevision, draft, actor);
+        public CommitResult ChangeWorkItemState(CaseScope scope, long expectedRevision, string itemId, string state, string actor) => inner.ChangeWorkItemState(scope, expectedRevision, itemId, state, actor);
+        public void AppendTrace(CaseScope scope, InvestigationTrace trace) => inner.AppendTrace(scope, trace);
+        public InvestigationTrace? FindTrace(CaseScope scope, string caseId, string runId, string investigationId) => inner.FindTrace(scope, caseId, runId, investigationId);
     }
 
     private sealed class RaceCreatingStore(ICaseStateStore inner, string raceCaseId, string raceOwner, string basisContent) : ICaseStateStore
