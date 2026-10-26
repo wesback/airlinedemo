@@ -53,7 +53,8 @@ jobs:
           set -euo pipefail
           # Only tracked files are scanned. Each is copied to a neutral name (f<n>) so gitleaks' default
           # path allowlist (which skips files such as package-lock.json) cannot hide its content.
-          # `cp --` stops a tracked name beginning with "-" being read as an option.
+          # `cp -L --` includes a tracked symlink's target contents as well as regular files.
+          # `--` stops a tracked name beginning with "-" being read as an option.
           work=$(mktemp -d)
           scan_dir="$work/scan"
           mkdir "$scan_dir"
@@ -63,7 +64,7 @@ jobs:
           n=0
           while IFS= read -r -d '' f; do
             n=$((n + 1))
-            cp -- "$f" "$scan_dir/f$n"
+            cp -L -- "$f" "$scan_dir/f$n"
             printf 'f%s\t%s\n' "$n" "$f" >> "$map"
           done < "$work/files.z"
           if ! gitleaks detect --no-git --source "$scan_dir" --redact --exit-code 1; then

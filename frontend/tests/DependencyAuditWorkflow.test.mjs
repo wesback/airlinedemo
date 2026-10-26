@@ -32,6 +32,21 @@ function runSeverityGate(severity, dotnetLines = '') {
 }
 
 describe('dependency audit workflow', () => {
+  it('secret scan configuration preserves tracked-file coverage', () => {
+    const workflow = readFileSync('../.github/workflows/build.yml', 'utf8');
+    const scanStart = workflow.indexOf('      - name: Secret scan\n');
+    expect(scanStart).toBeGreaterThanOrEqual(0);
+    const nextStep = workflow.indexOf('\n      - name:', scanStart + 1);
+    const scan = workflow.slice(scanStart, nextStep === -1 ? undefined : nextStep);
+
+    expect(scan).toContain('git ls-files -z > "$work/files.z"');
+    expect(scan).toContain('while IFS= read -r -d \'\' f; do');
+    expect(scan).toContain('cp -L -- "$f" "$scan_dir/f$n"');
+    expect(scan).toContain('printf \'f%s\\t%s\\n\' "$n" "$f" >> "$map"');
+    expect(scan).toContain('gitleaks detect --no-git --source "$scan_dir" --redact --exit-code 1');
+    expect(scan).not.toContain('--config ');
+  });
+
   it('keeps the dependency audit exception allowlist empty', () => {
     const exceptions = JSON.parse(readFileSync('../docs/security/dependency-audit-exceptions.json', 'utf8'));
 
