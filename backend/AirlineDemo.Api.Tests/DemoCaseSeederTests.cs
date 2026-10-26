@@ -73,6 +73,9 @@ public sealed class DemoCaseSeederTests : IDisposable
         var existingBefore = inner.Read(existingScope);
         var race = new RaceCreatingStore(inner, "cp-case-a", "race-owner", "race basis");
         DemoCaseSeeder.Seed(Configuration("true"), race);
+
+        var raceScope = inner.AuthorizeCase("cp-case-a", "race-owner");
+        var raceBefore = inner.Read(raceScope);
         DemoCaseSeeder.Seed(Configuration("true"), race);
 
         var existingAfter = inner.Read(inner.AuthorizeCase("case-001", "original-owner"));
@@ -82,13 +85,18 @@ public sealed class DemoCaseSeederTests : IDisposable
         Assert.Equal(existingBefore.ReceiptIds, existingAfter.ReceiptIds);
         Assert.Equal(existingBefore.Audit, existingAfter.Audit);
         Assert.Equal(existingBefore.ReceiptFingerprints, existingAfter.ReceiptFingerprints);
-        var raceScope = inner.AuthorizeCase("cp-case-a", "race-owner");
-        var raceState = inner.Read(raceScope);
-        Assert.Equal("race-owner", raceState.Owner);
-        Assert.Equal(1, raceState.Revision);
-        Assert.Single(raceState.Basis);
-        Assert.Equal(["race-receipt"], raceState.ReceiptIds);
-        Assert.Single(raceState.Audit);
+        var raceAfter = inner.Read(raceScope);
+        Assert.Equal(raceBefore.Owner, raceAfter.Owner);
+        Assert.Equal(raceBefore.Revision, raceAfter.Revision);
+        Assert.Equal(raceBefore.Basis, raceAfter.Basis);
+        Assert.Equal(raceBefore.ReceiptIds, raceAfter.ReceiptIds);
+        Assert.Equal(raceBefore.Audit, raceAfter.Audit);
+        Assert.Equal(raceBefore.ReceiptFingerprints, raceAfter.ReceiptFingerprints);
+        Assert.Equal("race-owner", raceAfter.Owner);
+        Assert.Equal(1, raceAfter.Revision);
+        Assert.Single(raceAfter.Basis);
+        Assert.Equal(["race-receipt"], raceAfter.ReceiptIds);
+        Assert.Single(raceAfter.Audit);
         Assert.Equal("presenter", inner.OwnerOf("case-002"));
         Assert.Equal("presenter", inner.OwnerOf("cp-case-b"));
         Assert.Equal("presenter", inner.OwnerOf("cp-case-c"));
@@ -117,9 +125,19 @@ public sealed class DemoCaseSeederTests : IDisposable
                 ["Persistence:CaseStateProvider"] = "File",
                 ["CaseState:Path"] = PathFor("host-cases.json"),
             })));
+        var hostStore = factory.Services.GetRequiredService<ICaseStateStore>();
         var packages = factory.Services.GetRequiredService<EvidencePackageStore>();
         foreach (var caseId in new[] { "case-001", "case-002", "cp-case-a", "cp-case-b", "cp-case-c" })
+        {
+            var state = hostStore.Read(hostStore.AuthorizeCase(caseId, "presenter"));
+            Assert.Equal(caseId, state.CaseId);
+            Assert.Equal("presenter", state.Owner);
+            Assert.Equal(0, state.Revision);
+            Assert.Empty(state.Basis);
+            Assert.Empty(state.ReceiptIds);
+            Assert.Empty(state.Audit);
             Assert.Empty(packages.ListForCase(caseId));
+        }
     }
 
     [Fact]
