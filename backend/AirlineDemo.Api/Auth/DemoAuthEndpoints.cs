@@ -110,7 +110,9 @@ public static class DemoAuthEndpoints
         }
         catch (JsonException)
         {
-            request = null;
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "unknown_user", oldSession.User.Role, oldSession.Id,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return Results.BadRequest();
         }
 
         var user = request is not null ? DemoFixture.Find(request.UserId) : null;

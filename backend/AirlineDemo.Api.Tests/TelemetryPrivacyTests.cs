@@ -410,6 +410,7 @@ public sealed class TelemetryPrivacyTests
             var expectedStatus = scenario.Contains("token") ? HttpStatusCode.Forbidden : HttpStatusCode.BadRequest;
             Assert.Equal(expectedStatus, response.StatusCode);
             if (scenario.Contains("token")) Assert.Equal("{\"error\":\"Anti-forgery validation failed.\"}", await response.Content.ReadAsStringAsync(ct));
+            else if (scenario == "malformed-json") Assert.Equal(string.Empty, await response.Content.ReadAsStringAsync(ct));
             else Assert.Equal("{\"error\":\"Unknown user.\"}", await response.Content.ReadAsStringAsync(ct));
         }
 
