@@ -41,7 +41,11 @@ describe('dependency audit workflow', () => {
 
     expect(scan).toContain('git ls-files -z > "$work/files.z"');
     expect(scan).toContain('while IFS= read -r -d \'\' f; do');
+    expect(scan).toContain('if [[ -f "$f" ]]; then');
     expect(scan).toContain('cp -L -- "$f" "$scan_dir/f$n"');
+    expect(scan).toContain('elif [[ -L "$f" ]]; then');
+    expect(scan).toContain('readlink -- "$f" > "$scan_dir/f$n"');
+    expect(scan).toContain('else\n              : > "$scan_dir/f$n"');
     expect(scan).toContain('printf \'f%s\\t%s\\n\' "$n" "$f" >> "$map"');
     expect(scan).toContain('gitleaks detect --no-git --source "$scan_dir" --redact --exit-code 1');
     expect(scan).not.toContain('--config ');
