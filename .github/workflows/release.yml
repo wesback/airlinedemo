@@ -12,6 +12,11 @@ on:
         description: "Build workflow run ID that produced the supply-chain-evidence artifact."
         required: true
         type: string
+      bootstrap_only:
+        description: "Sign and verify the first image for Terraform bootstrap without updating a Container App."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -239,6 +244,7 @@ jobs:
           fi
 
       - name: Deploy signed digest
+        if: ${{ !inputs.bootstrap_only }}
         run: |
           set -euo pipefail
           az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \

@@ -109,7 +109,7 @@ public sealed class SignedReleaseWorkflowTests
         Assert.DoesNotContain("|| true", workflow);
         Assert.DoesNotContain("continue-on-error", workflow, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("if:", verify);
-        Assert.DoesNotContain("if:", deploy);
+        Assert.Contains("if: ${{ !inputs.bootstrap_only }}", deploy);
 
         // Trust: the signing certificate is downloaded from Key Vault, added to Notation's CA trust store, and a strict
         // trust policy pins the certificate subject and the registry scope before `notation verify` runs.
@@ -126,6 +126,24 @@ public sealed class SignedReleaseWorkflowTests
         Assert.True(workflow.IndexOf("- name: Verify signature and digest", StringComparison.Ordinal)
             < workflow.IndexOf("- name: Deploy signed digest", StringComparison.Ordinal),
             "Signature and digest verification must run before deployment.");
+    }
+
+    [Fact]
+    public void Bootstrap_only_defaults_off_and_preserves_approval_and_signature_checks()
+    {
+        var workflow = ReadWorkflow();
+
+        Assert.Matches(@"bootstrap_only:\s+description: [^\n]+\s+required: false\s+default: false\s+type: boolean", workflow);
+        Assert.Contains("needs: preflight", JobBody(workflow, "release"));
+        Assert.Matches(@"environment:\s*production-release", JobBody(workflow, "release"));
+        Assert.DoesNotContain("bootstrap_only", JobBody(workflow, "preflight"));
+        Assert.DoesNotContain("bootstrap_only", StepBody(workflow, "Verify build run provenance"));
+        Assert.DoesNotContain("bootstrap_only", StepBody(workflow, "Verify build evidence present"));
+        Assert.DoesNotContain("bootstrap_only", StepBody(workflow, "Sign image digest"));
+        Assert.DoesNotContain("bootstrap_only", StepBody(workflow, "Verify signature and digest"));
+        Assert.Equal(1, Regex.Matches(workflow, @"if:.*inputs\.bootstrap_only").Count);
+        Assert.Contains("if: ${{ !inputs.bootstrap_only }}", StepBody(workflow, "Deploy signed digest"));
+        Assert.Contains("if: always()", StepBody(workflow, "Retain release evidence"));
     }
 
     // AC: private registry use. The ACR must resolve to a private address; public resolution fails the release.
