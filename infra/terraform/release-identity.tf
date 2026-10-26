@@ -91,7 +91,8 @@ resource "azurerm_key_vault_certificate" "signing" {
     }
 
     x509_certificate_properties {
-      subject            = "CN=airline-demo-release-signing"
+      # Notation trust policies reject an identity without C, ST and O attributes.
+      subject            = "CN=airline-demo-release-signing, O=Airline Demo, ST=Brussels, C=BE"
       key_usage          = ["digitalSignature"]
       validity_in_months = 12
     }
