@@ -108,6 +108,8 @@ public sealed class SignedReleaseWorkflowTests
         Assert.Contains("notation sign", step);
         Assert.Contains("--plugin azure-kv", step);
         Assert.Contains("--id \"$SIGNING_KEY_ID\"", step);
+        Assert.Contains("--force-referrers-tag=false", step);
+        Assert.DoesNotContain("--allow-referrers-api", step);
     }
 
     // AC: deployment verifies the certificate and digest before updating the app.
