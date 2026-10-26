@@ -55,6 +55,7 @@ export default function App({
 }: HangarEntryAppProps = {}) {
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
   const [session, setSession] = useState<SignedInSession | null>(null);
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [data, setData] = useState<Projections | null>(null);
   const [loadingCase, setLoadingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
@@ -351,6 +352,16 @@ export default function App({
     return () => { active = false; };
   }, []);
 
+  function handleSessionChange(nextSession: SignedInSession | null) {
+    setSession(nextSession);
+    setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
+    traceRequestId.current += 1;
+    setData(null);
+    setReason('');
+    setDecisionBusy(false);
+    setTraceView(null);
+  }
+
   useEffect(() => {
     if (!session) {
       traceRequestId.current += 1;
@@ -361,15 +372,23 @@ export default function App({
       setTraceView(null);
       return;
     }
+    if (!selectedCaseId) {
+      setData(null);
+      setCaseError('');
+      setLoadingCase(false);
+      return;
+    }
     let active = true;
     setLoadingCase(true);
     setCaseError('');
+    const encodedCaseId = encodeURIComponent(selectedCaseId);
+    const caseBase = `/api/cases/${encodedCaseId}`;
     (async () => {
       try {
-        const caseProjection = await getProjection<CaseProjection>('/api/cases/case-001');
-        const dashboardProjection = await getProjection<DashboardData>('/api/cases/case-001/dashboard');
-        const reviewProjection = await getProjection<TechnicalReviewProjection>('/api/cases/case-001/technical-reviews');
-        const readiness = await getProjection<ReadinessSummaryData>('/api/cases/case-001/readiness');
+        const caseProjection = await getProjection<CaseProjection>(caseBase);
+        const dashboardProjection = await getProjection<DashboardData>(`${caseBase}/dashboard`);
+        const reviewProjection = await getProjection<TechnicalReviewProjection>(`${caseBase}/technical-reviews`);
+        const readiness = await getProjection<ReadinessSummaryData>(`${caseBase}/readiness`);
         if (!active) return;
         setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection, readiness });
       } catch (error) {
@@ -381,7 +400,7 @@ export default function App({
       }
     })();
     return () => { active = false; };
-  }, [session, refresh]);
+  }, [session, selectedCaseId, refresh]);
 
   async function showTrace(url: string) {
     const requestId = ++traceRequestId.current;
@@ -402,7 +421,7 @@ export default function App({
       capabilityId !== 'technical-review'
       || !['accept', 'reject'].includes(decision)
       || !data?.dashboard.allowedDecisions.some((action) => action.id === decision)
-      || !session || !data
+      || !session || !selectedCaseId || !data
       || !Number.isInteger(data.caseState.revision) || !Number.isInteger(data.review.basisVersion)
       || !reason.trim()
     ) return;
@@ -410,7 +429,7 @@ export default function App({
     setDecisionBusy(true);
     setCaseError('');
     try {
-      const response = await fetch('/api/cases/case-001/technical-reviews', {
+      const response = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/technical-reviews`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
         body: JSON.stringify({
@@ -520,11 +539,32 @@ export default function App({
       <h1>Airline asset review</h1>
       <p>Reviewer workspace</p>
       <p role="status" aria-live="polite">{healthMessage}</p>
-      <SignIn onSessionChange={setSession} />
+      <SignIn onSessionChange={handleSessionChange} />
       {session && (
         <section aria-labelledby="case-heading">
-          {data && <ReadinessSummary summary={data.readiness} />}
-          <h2 id="case-heading" tabIndex={-1}>Case case-001</h2>
+          {!session.caseScopes?.length ? (
+            <p>No cases are assigned to your account.</p>
+          ) : (
+            <>
+              {session.caseScopes.length > 1 && (
+                <label>
+                  Case
+                  <select value={selectedCaseId ?? ''} onChange={(event) => {
+                    setData(null);
+                    setReason('');
+                    setDecisionBusy(false);
+                    setTraceView(null);
+                    setCaseError('');
+                    setSelectedCaseId(event.target.value);
+                  }}>
+                    {session.caseScopes.map((caseId) => <option key={caseId} value={caseId}>{caseId}</option>)}
+                  </select>
+                </label>
+              )}
+              {data && <ReadinessSummary summary={data.readiness} />}
+              {selectedCaseId && <h2 id="case-heading" tabIndex={-1}>Case {selectedCaseId}</h2>}
+            </>
+          )}
           {loadingCase && <p role="status">Loading case data…</p>}
           {caseError && <p role="alert">{caseError}</p>}
           {data && (
