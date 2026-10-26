@@ -232,6 +232,7 @@ public sealed class AuthBoundaryTests
         Assert.Contains("httponly", attributes);
         Assert.Contains("secure", attributes);
         Assert.Contains("samesite=strict", attributes);
+        Assert.Contains("path=/", attributes);
 
         var body = await switchResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
         Assert.Equal("exec-1", body.GetProperty("id").GetString());
