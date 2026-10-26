@@ -41,6 +41,19 @@ public sealed class DemoSessionStore(TimeProvider time)
         }
     }
 
+    public DemoSession Replace(string id, DemoUser user)
+    {
+        lock (_gate)
+        {
+            PurgeExpired();
+            if (!_sessions.ContainsKey(id)) throw new InvalidOperationException("Session no longer exists.");
+            _sessions.Remove(id);
+            var session = new DemoSession(NewToken(), user, NewToken(), time.GetUtcNow() + Lifetime);
+            _sessions[session.Id] = session;
+            return session;
+        }
+    }
+
     public void GrantScope(string id, string scope)
     {
         lock (_gate)

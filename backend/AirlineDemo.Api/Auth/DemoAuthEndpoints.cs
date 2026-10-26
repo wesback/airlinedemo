@@ -86,20 +86,45 @@ public static class DemoAuthEndpoints
         return Results.Ok(SessionView(session));
     }
 
-    private static IResult SwitchUser(SwitchUserRequest request, HttpContext http, DemoSessionStore sessions)
+    private static IResult SwitchUser(SwitchUserRequest request, HttpContext http, IConfiguration config,
+        DemoSessionStore sessions, ILogger<DemoSessionStore> logger)
     {
         var oldSession = CurrentSession(http, sessions);
-        if (oldSession is null) return Unauthenticated();
-        if (!HasValidAntiForgery(http, oldSession)) return AntiForgeryFailed();
+        var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+        if (oldSession is null)
+        {
+            EmitRoleSwitch(logger, config, null, "unknown", "unauthorized", traceId);
+            return Unauthenticated();
+        }
+        if (!HasValidAntiForgery(http, oldSession))
+        {
+            EmitRoleSwitch(logger, config, oldSession.Id, oldSession.User.Role, "anti_forgery_failed", traceId);
+            return AntiForgeryFailed();
+        }
 
         var user = DemoFixture.Find(request.UserId);
         if (user is null)
-            return Results.Json(new { error = "Unknown user." }, statusCode: StatusCodes.Status400BadRequest);
+        {
+            EmitRoleSwitch(logger, config, oldSession.Id, oldSession.User.Role, "unknown_user", traceId);
+            return Results.Json(new { error = "Unknown user." }, statusCode: StatusCodes.Status404NotFound);
+        }
+        if (oldSession.User.Role is not "presenter" and not "technical-reviewer")
+        {
+            EmitRoleSwitch(logger, config, oldSession.Id, oldSession.User.Role, "role_not_permitted", traceId);
+            return Results.Json(new { error = "Role not permitted." }, statusCode: StatusCodes.Status403Forbidden);
+        }
 
-        sessions.Remove(oldSession.Id);
-        var newSession = sessions.Create(user);
+        var newSession = sessions.Replace(oldSession.Id, user);
         http.Response.Cookies.Append(CookieName, newSession.Id, SessionCookie);
+        EmitRoleSwitch(logger, config, oldSession.Id, user.Role, "success", traceId);
         return Results.Ok(SessionView(newSession));
+    }
+
+    private static void EmitRoleSwitch(ILogger logger, IConfiguration config, string? sessionId,
+        string fixtureRole, string outcome, string traceId)
+    {
+        TelemetryRedaction.EmitRoleSwitchEvent(logger, sessionId, fixtureRole, outcome, traceId,
+            TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
     }
 
     private static IResult PasscodeStep(PasscodeRequest request, HttpContext http, IConfiguration config, PasscodeThrottle throttle, TimeProvider time, ILogger<DemoSessionStore> logger)

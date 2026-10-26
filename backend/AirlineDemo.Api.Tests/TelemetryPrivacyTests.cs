@@ -444,6 +444,46 @@ public sealed class TelemetryPrivacyTests
     }
 
     [Fact]
+    public async Task Role_switch_events_are_redacted()
+    {
+        var logger = new CapturingLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Demo:Passcode"] = AppPasscode,
+                ["CaseState:Path"] = CaseSeed.CreateFile(),
+            }));
+            builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
+        });
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        using var signIn = await client.PostAsJsonAsync("/api/auth/sign-in", new { userId = "presenter", passcode = AppPasscode }, ct);
+        signIn.EnsureSuccessStatusCode();
+        var cookie = signIn.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var csrf = (await signIn.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("csrfToken").GetString()!;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user") { Content = JsonContent.Create(new { userId = "fin-1" }) };
+        request.Headers.Add("Cookie", cookie);
+        request.Headers.Add("X-CSRF-Token", csrf);
+        using var response = await client.SendAsync(request, ct);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var events = logger.States.Select(ToProperties)
+            .Where(p => p.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.RoleSwitch).ToList();
+        var properties = Assert.Single(events);
+        Assert.Equal("role-switch", properties["action"]);
+        Assert.Equal("success", properties["event.outcome"]);
+        Assert.Equal("finance-reviewer", properties["fixture.role"]);
+        Assert.Matches("^trace-[0-9a-f]{16}$", properties["trace.id"]!);
+        Assert.Matches("^actor-[0-9a-f]{16}$", properties["enduser.pseudo.id"]!);
+        var payload = string.Join("|", properties.Values);
+        Assert.DoesNotContain(AppPasscode, payload);
+        Assert.DoesNotContain(cookie, payload);
+        Assert.DoesNotContain(csrf, payload);
+    }
+
+    [Fact]
     public async Task Case_integrity_failure_emits_integrity_alert_event_through_the_app()
     {
         var logger = new CapturingLogger();

@@ -25,6 +25,7 @@ public static partial class TelemetryRedaction
         "investigation.basis_version", "gen_ai.request.model", "investigation.model", "investigation.tools",
         "investigation.citations", "investigation.decision", "enduser.pseudo.id",
         "investigation.outcome", "error.type", "severity.text", "severity.number",
+        "fixture.role", "action", "event.outcome",
         "source.id", "case.id", "event.outcome", "duration",
     };
 
@@ -33,6 +34,7 @@ public static partial class TelemetryRedaction
         public const string AuthScopeFailure = "security.auth_scope_failure";
         public const string IntegritySignatureFailure = "security.integrity_signature_failure";
         public const string BudgetExhausted = "security.budget_exhausted";
+        public const string RoleSwitch = "security.role_switch";
     }
 
     public static class SourceEvents
@@ -51,6 +53,7 @@ public static partial class TelemetryRedaction
     private static readonly HashSet<string> SecurityEventNames = new(StringComparer.Ordinal)
     {
         SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+        "security.role_switch",
     };
 
     private static readonly HashSet<string> SourceEventNames = new(StringComparer.Ordinal)
@@ -100,7 +103,7 @@ public static partial class TelemetryRedaction
 
     private static readonly HashSet<string> AllowedEventNames = new(StringComparer.Ordinal)
     {
-        "investigation.completed", "review.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+        "investigation.completed", "review.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted, "security.role_switch",
         SourceEvents.ModeChangeAccepted, SourceEvents.CrossCaseReadDenied, SourceEvents.OutOfRoleReadDenied, SourceEvents.FixtureRejected,
         SourceEvents.SourceUnavailable, SourceEvents.ReadLimited, SourceEvents.RecordLimitRejected, SourceEvents.ReadTimedOut, SourceEvents.AuditWriteFailed,
     };
@@ -167,8 +170,10 @@ public static partial class TelemetryRedaction
         ["severity.number"] = v => v is "9" or "13" or "17",
         ["source.id"] = v => AllowedSourceIds.Contains(v),
         ["case.id"] = v => CaseIdRule.IsMatch(v),
-        ["event.outcome"] = v => AllowedSourceOutcomes.Contains(v),
+        ["event.outcome"] = v => AllowedSourceOutcomes.Contains(v) || v is "success" or "unauthorized" or "anti_forgery_failed" or "unknown_user" or "role_not_permitted",
         ["duration"] = v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var duration) && duration >= 0,
+        ["fixture.role"] = v => v is "presenter" or "technical-reviewer" or "finance-reviewer" or "legal-reviewer" or "executive" or "unknown",
+        ["action"] = v => v == "role-switch",
     };
 
     // Keeps only allowlisted keys, drops denylisted keys and replaces values that fail their key's rule.
@@ -242,6 +247,26 @@ public static partial class TelemetryRedaction
     public static void EmitInvestigationTrace(
         ILogger logger, InvestigationTraceRecord trace, string serviceVersion, string environment, byte[] actorKey, string eventName = "investigation.completed") =>
         Emit(logger, LogLevel.Information, InvestigationTrace(trace, serviceVersion, environment, actorKey, eventName));
+
+    public static void EmitRoleSwitchEvent(ILogger logger, string? sessionId, string fixtureRole,
+        string outcome, string traceId, string serviceVersion, string environment)
+    {
+        var pseudonymSource = sessionId ?? "missing-session";
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(pseudonymSource));
+        var pseudoId = "actor-" + Convert.ToHexString(digest, 0, 8).ToLowerInvariant();
+        var attributes = Redact(new KeyValuePair<string, object?>[]
+        {
+            new("event.name", SecurityEvents.RoleSwitch),
+            new("trace.id", traceId),
+            new("enduser.pseudo.id", pseudoId),
+            new("fixture.role", fixtureRole),
+            new("action", "role-switch"),
+            new("event.outcome", outcome),
+        });
+        var merged = attributes.ToDictionary(attribute => attribute.Key, attribute => (object?)attribute.Value, StringComparer.Ordinal);
+        foreach (var (key, value) in ResourceAttributes(serviceVersion, environment)) merged[key] = value;
+        Emit(logger, LogLevel.Information, merged, "INFO", 9);
+    }
 
     public static void EmitSecurityEvent(ILogger logger, string eventName, string serviceVersion, string environment)
     {

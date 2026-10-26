@@ -214,7 +214,7 @@ public sealed class AuthBoundaryTests
     }
 
     [Fact]
-    public async Task Switch_user_with_session_and_token_issues_a_session_for_the_target_user()
+    public async Task Role_switch_session_invariants()
     {
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
@@ -243,6 +243,8 @@ public sealed class AuthBoundaryTests
         var csrfToken = body.GetProperty("csrfToken").GetString();
         Assert.False(string.IsNullOrEmpty(csrfToken));
 
+        Assert.NotEqual(presenter.Cookie, cookieValue);
+        Assert.NotEqual(presenter.Csrf, csrfToken);
         var executive = new Session(cookieValue, csrfToken!);
         using var denied = await SendAsync(client, HttpMethod.Get, "/api/cases/case-001",
             executive, false, null, ct);
@@ -275,9 +277,10 @@ public sealed class AuthBoundaryTests
     [InlineData("no-session", 401, "{\"error\":\"Not signed in.\"}")]
     [InlineData("no-token", 403, "{\"error\":\"Anti-forgery validation failed.\"}")]
     [InlineData("wrong-token", 403, "{\"error\":\"Anti-forgery validation failed.\"}")]
-    [InlineData("unknown-user", 400, "{\"error\":\"Unknown user.\"}")]
-    [InlineData("empty-user", 400, "{\"error\":\"Unknown user.\"}")]
-    public async Task Switch_user_rejections_keep_the_current_session(string scenario, int status, string expectedJson)
+    [InlineData("unknown-user", 404, "{\"error\":\"Unknown user.\"}")]
+    [InlineData("empty-user", 404, "{\"error\":\"Unknown user.\"}")]
+    [InlineData("prohibited-role", 403, "{\"error\":\"Role not permitted.\"}")]
+    public async Task Role_switch_rejections_preserve_old_session(string scenario, int status, string expectedJson)
     {
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
@@ -285,7 +288,8 @@ public sealed class AuthBoundaryTests
         Session? presenter = null;
         object body = new { userId = "exec-1" };
 
-        if (scenario != "no-session") presenter = await SignInAsync(client, "presenter", ct);
+        if (scenario != "no-session")
+            presenter = await SignInAsync(client, scenario == "prohibited-role" ? "fin-1" : "presenter", ct);
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user");
         if (presenter is not null) request.Headers.Add("Cookie", presenter.Cookie);
         if (scenario == "wrong-token") request.Headers.Add("X-CSRF-Token", "wrong-token");
@@ -315,9 +319,12 @@ public sealed class AuthBoundaryTests
         using var client = factory.CreateClient();
         var ct = TestContext.Current.CancellationToken;
         var presenter = await SignInAsync(client, "presenter", ct);
-        using var response = await SendAsync(client, HttpMethod.Post, "/api/auth/sign-in",
-            presenter, false, new { userId = "reviewer", passcode = Passcode }, ct);
+        using var response = await SendAsync(client, HttpMethod.Post, "/api/auth/switch-user",
+            presenter, true, new { userId = "reviewer" }, ct);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal("reviewer", body.GetProperty("id").GetString());
+        Assert.Equal("technical-reviewer", body.GetProperty("role").GetString());
     }
 }
