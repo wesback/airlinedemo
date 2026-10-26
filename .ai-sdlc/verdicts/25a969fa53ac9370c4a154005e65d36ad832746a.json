@@ -1,0 +1,277 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 633,
+  "branch": "ai-sdlc/issue-633",
+  "commitSha": "25a969fa53ac9370c4a154005e65d36ad832746a",
+  "round": 0,
+  "pipelineVersion": "f97c2ad-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation adds scoped reads and handles empty scopes, but three required behavior tests are absent: switching cases, replacing the session after sign-out, and posting a decision to the selected case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 207,
+          "message": "Acceptance criterion 2 requires `frontend/tests/App.test.tsx` / `switching the case picker reloads projections and clears prior case data`; that test is missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added tests cover the first scoped case and the empty-scope session, but do not exercise changing the case picker while a projection request is pending.",
+            "failureScenario": "If selecting cp-case-b leaves cp-case-a data or decision controls visible until the new response arrives, the named test `switching the case picker reloads projections and clears prior case data` is absent and no test in this change catches the regression."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 207,
+          "message": "Acceptance criterion 4 requires `frontend/tests/App.test.tsx` / `a new session loads the first case of that session`; that test is missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added tests do not sign out and sign in again with a different session scope.",
+            "failureScenario": "If signing in again after signing out retains case-001 instead of loading the new session's first scope cp-case-c, the named test `a new session loads the first case of that session` is absent and no test in this change catches the regression."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 207,
+          "message": "Acceptance criterion 5 requires `frontend/tests/App.test.tsx` / `records a technical review against the selected case`; that test is missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added tests do not submit a technical-review decision after selecting a different case.",
+            "failureScenario": "If a decision after selecting cp-case-b is posted to case-001 or omits the session CSRF token, the named test `records a technical review against the selected case` is absent and no test in this change catches the regression."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation has tests for initial scoped loading and the empty-scope state. Three required behavior tests are missing: case switching, selecting the first case after a new sign-in, and posting a decision to the selected case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 191,
+          "message": "Acceptance criterion 2 has no test for switching cases, clearing prior data and decision controls while the new response is pending, or reloading all four projections. Add the named test.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The case picker updates selectedCaseId, and the projection effect reloads data for that ID. The changed tests cover initial loading and the empty-scope case, but do not include the acceptance criterion's named test, `switching the case picker reloads projections and clears prior case data`.",
+            "failureScenario": "With scopes `['cp-case-a', 'cp-case-b']`, a regression that leaves the old case data or decision controls visible while the cp-case-b response is pending, or fails to request all four cp-case-b projections, would not be caught."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 191,
+          "message": "Acceptance criterion 4 has no test for signing out and signing in with a different session. Add the named test and assert the second session's first case is loaded without requesting case-001.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed tests sign in once, but none signs out and signs in with a different session. The acceptance criterion's named test, `a new session loads the first case of that session`, is absent.",
+            "failureScenario": "If a later session is given `caseScopes: ['cp-case-c']` but the app retains the prior selection `case-001`, the existing added tests would not detect the wrong heading or request."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 191,
+          "message": "Acceptance criterion 5 has no test for posting a technical-review decision to the selected case with the exact session anti-forgery token. Add the named test.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The decision handler builds its POST URL from selectedCaseId and uses session.csrfToken, but the changed tests do not submit a decision for a selected case. The acceptance criterion's named test, `records a technical review against the selected case`, is absent.",
+            "failureScenario": "If the handler posts to case-001 after the user selects cp-case-b, or omits or changes the session CSRF token, the added tests would still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff shows no security vulnerability in the changed request construction, but three behavior criteria lack their required tests: case switching, selecting the first scope after a new sign-in, and posting a decision to the selected case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 191,
+          "message": "The case-picker behavior criterion has no test in this change. Add the named `switching the case picker reloads projections and clears prior case data` test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The issue requires a test that switches the case picker while the new case response is pending; the added tests cover initial loading and the empty-scope case, but not switching.",
+            "failureScenario": "If switching cases stops clearing the previous case data or loads projections for the wrong case, the named test is absent and the React test job can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 191,
+          "message": "The new-session behavior criterion has no test in this change. Add the named `a new session loads the first case of that session` test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The issue requires a sign-out and second sign-in flow that proves the new session's first scope is selected; no such test is added.",
+            "failureScenario": "If sign-out leaves the previous selected case in state, signing in with a different scope could request the old case, and the named test would not catch it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 191,
+          "message": "The selected-case decision criterion has no test in this change. Add the named `records a technical review against the selected case` test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The issue requires submitting a technical-review decision after selecting a case and checking the POST URL and CSRF header; no such test is added.",
+            "failureScenario": "If the decision POST continues targeting `case-001` or omits the session anti-forgery token, the named test would detect it, but it is absent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
