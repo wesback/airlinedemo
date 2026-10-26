@@ -106,6 +106,134 @@ public sealed class WorkspaceEndpointTests
     }
 
     [Fact]
+    public async Task Portfolio_returns_exact_scoped_case_rows()
+    {
+        var store = new WorkspaceStore();
+        store.Set("case-a", State("case-a", [Item("item-a", "records-investigation", "technical-reviewer", -100, "case-a") ]));
+        store.Set("case-b", State("case-b", []));
+        store.Set("case-out", State("case-out", [Item("out", "records-investigation", "technical-reviewer", -500, "case-out") ]));
+        using var factory = CreateFactory(store);
+        using var client = factory.CreateClient();
+        var cookie = AddSession(factory, "executive", ["case-a", "case-b", "case-missing"]);
+
+        using var response = await GetAsync(client, "/api/v1/workspace/portfolio", cookie);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = json.RootElement;
+        Assert.True(root.EnumerateObject().Select(x => x.Name).ToHashSet().SetEquals(["contractVersion", "cases", "unavailableCaseIds"]));
+        Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
+        Assert.Equal(["case-a", "case-b"], root.GetProperty("cases").EnumerateArray().Select(x => x.GetProperty("caseId").GetString()));
+        Assert.Equal(["case-missing"], root.GetProperty("unavailableCaseIds").EnumerateArray().Select(x => x.GetString()));
+        var rows = root.GetProperty("cases").EnumerateArray().ToArray();
+        foreach (var row in rows)
+        {
+            Assert.True(row.EnumerateObject().Select(x => x.Name).ToHashSet().SetEquals(["caseId", "openItemsByRole", "nextDecisionOwner", "oldestOpenAgeSeconds", "latestActivity"]));
+            Assert.True(row.GetProperty("openItemsByRole").EnumerateObject().Select(x => x.Name).ToHashSet().SetEquals(["technical-reviewer", "finance-reviewer", "legal-reviewer", "presenter"]));
+        }
+        Assert.Equal(1, rows[0].GetProperty("openItemsByRole").GetProperty("technical-reviewer").GetInt32());
+        Assert.Equal(0, rows[0].GetProperty("openItemsByRole").GetProperty("finance-reviewer").GetInt32());
+        Assert.Equal(0, rows[0].GetProperty("openItemsByRole").GetProperty("legal-reviewer").GetInt32());
+        Assert.Equal(0, rows[0].GetProperty("openItemsByRole").GetProperty("presenter").GetInt32());
+        foreach (var role in new[] { "technical-reviewer", "finance-reviewer", "legal-reviewer", "presenter" })
+            Assert.Equal(0, rows[1].GetProperty("openItemsByRole").GetProperty(role).GetInt32());
+    }
+
+    [Fact]
+    public async Task Portfolio_owner_age_activity_contract()
+    {
+        var store = new WorkspaceStore();
+        var tiedA = Item("item-a", "records-investigation", "finance-reviewer", -100, "case-a");
+        var tiedB = Item("item-b", "records-investigation", "legal-reviewer", -100, "case-a");
+        var audit = new AuditEvent(7, 2, "reviewer-1", "technical-review-review.decided", "sensitive-detail", Now);
+        store.Set("case-a", State("case-a", [tiedA, tiedB], [audit]));
+        store.Set("case-b", State("case-b", []));
+        using var factory = CreateFactory(store);
+        using var client = factory.CreateClient();
+        var cookie = AddSession(factory, "executive", ["case-a", "case-b"]);
+
+        using var response = await GetAsync(client, "/api/v1/workspace/portfolio", cookie);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var rows = json.RootElement.GetProperty("cases").EnumerateArray().ToArray();
+        Assert.Equal("finance-reviewer", rows[0].GetProperty("nextDecisionOwner").GetString());
+        Assert.Equal(100, rows[0].GetProperty("oldestOpenAgeSeconds").GetInt64());
+        var activity = rows[0].GetProperty("latestActivity");
+        Assert.True(activity.EnumerateObject().Select(x => x.Name).ToHashSet().SetEquals(["sequence", "actor", "label", "outcome"]));
+        Assert.Equal(7, activity.GetProperty("sequence").GetInt64());
+        Assert.Equal("reviewer-1", activity.GetProperty("actor").GetString());
+        Assert.Equal("Unknown", activity.GetProperty("label").GetString());
+        Assert.Equal("technical-review-review.decided", activity.GetProperty("outcome").GetString());
+        Assert.True(rows[1].GetProperty("nextDecisionOwner").ValueKind is JsonValueKind.Null);
+        Assert.True(rows[1].GetProperty("oldestOpenAgeSeconds").ValueKind is JsonValueKind.Null);
+        Assert.True(rows[1].GetProperty("latestActivity").ValueKind is JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Portfolio_contains_no_sensitive_detail()
+    {
+        var store = new WorkspaceStore();
+        store.Set("case-a", State("case-a", [Item("item-a", "records-investigation", "technical-reviewer", -10, "case-a")]));
+        store.Set("case-out", State("case-out", [Item("secret-item", "records-investigation", "legal-reviewer", -500, "case-out") ]));
+        using var factory = CreateFactory(store);
+        using var client = factory.CreateClient();
+        var cookie = AddSession(factory, "executive", ["case-a"]);
+
+        using var response = await GetAsync(client, "/api/v1/workspace/portfolio", cookie);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("item-a", text);
+        Assert.DoesNotContain("secret-item", text);
+        Assert.DoesNotContain("evidence", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("draft", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"itemId\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"evidence\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"draft\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"decisionText\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"noticeText\"", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, store.Reads);
+        Assert.Equal(["case-a"], store.ReadCaseIds);
+    }
+
+    [Fact]
+    public async Task Portfolio_role_and_session_guards()
+    {
+        var store = new WorkspaceStore();
+        store.Set("case-a", State("case-a", []));
+        using var factory = CreateFactory(store);
+        using var client = factory.CreateClient();
+        using var noSession = await client.GetAsync("/api/v1/workspace/portfolio");
+        Assert.Equal(HttpStatusCode.Unauthorized, noSession.StatusCode);
+        Assert.Equal(0, store.Reads);
+
+        foreach (var role in new[] { "technical-reviewer", "finance-reviewer", "legal-reviewer" })
+        {
+            var cookie = AddSession(factory, role, ["case-a"]);
+            using var forbidden = await GetAsync(client, "/api/v1/workspace/portfolio", cookie);
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+            Assert.Equal("{\"error\":\"Role not permitted.\"}", await forbidden.Content.ReadAsStringAsync());
+        }
+        Assert.Equal(0, store.Reads);
+
+        var presenter = AddSession(factory, "presenter", ["case-a"]);
+        using var permitted = await GetAsync(client, "/api/v1/workspace/portfolio", presenter);
+        Assert.Equal(HttpStatusCode.OK, permitted.StatusCode);
+        Assert.Equal(1, store.Reads);
+    }
+
+    [Fact]
+    public async Task Portfolio_scope_order_and_unavailable_cases()
+    {
+        var store = new WorkspaceStore();
+        store.Set("case-b", State("case-b", []));
+        store.Set("case-a", State("case-a", []));
+        using var factory = CreateFactory(store);
+        using var client = factory.CreateClient();
+        var cookie = AddSession(factory, "executive", ["case-b", "case-missing", "case-a"]);
+        using var response = await GetAsync(client, "/api/v1/workspace/portfolio", cookie);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(["case-b", "case-a"], json.RootElement.GetProperty("cases").EnumerateArray().Select(x => x.GetProperty("caseId").GetString()));
+        Assert.Equal(["case-missing"], json.RootElement.GetProperty("unavailableCaseIds").EnumerateArray().Select(x => x.GetString()));
+    }
+
+    [Fact]
     public async Task Worklist_five_case_capacity_stays_within_budget()
     {
         var store = new WorkspaceStore();
@@ -150,7 +278,7 @@ public sealed class WorkspaceEndpointTests
         return client.SendAsync(request);
     }
 
-    private static CaseState State(string caseId, IReadOnlyList<WorkItem> items) => new(caseId, "owner", 0, [], [], [], new Dictionary<string, string>(), items);
+    private static CaseState State(string caseId, IReadOnlyList<WorkItem> items, IReadOnlyList<AuditEvent>? audit = null) => new(caseId, "owner", 0, [], [], audit ?? [], new Dictionary<string, string>(), items);
     private static WorkItem Item(string id, string capability, string owner, int ageSeconds, string caseId) =>
         new(caseId, id, capability, "open", owner, Now.AddSeconds(ageSeconds));
 
@@ -158,10 +286,11 @@ public sealed class WorkspaceEndpointTests
     {
         private readonly Dictionary<string, CaseState> _states = new(StringComparer.Ordinal);
         public int Reads { get; private set; }
+        public List<string> ReadCaseIds { get; } = [];
         public void Set(string caseId, CaseState state) => _states[caseId] = state;
         public string? OwnerOf(string caseId) => _states.TryGetValue(caseId, out var state) ? state.Owner : null;
         public CaseScope AuthorizeCase(string caseId, string owner) => OwnerOf(caseId) == owner ? new CaseScope(caseId) : throw new CaseAccessDeniedException();
-        public CaseState Read(CaseScope scope) { Reads++; return _states[scope.CaseId]; }
+        public CaseState Read(CaseScope scope) { Reads++; ReadCaseIds.Add(scope.CaseId); return _states[scope.CaseId]; }
         public CaseScope CreateCase(string caseId, string owner) => throw new NotSupportedException();
         public BasisVersion GetBasisVersion(CaseScope scope, int version) => throw new NotSupportedException();
         public IReadOnlyList<AuditEvent> ReadAudit(CaseScope scope) => throw new NotSupportedException();

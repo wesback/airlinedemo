@@ -1,0 +1,249 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 644,
+  "branch": "ai-sdlc/issue-644",
+  "commitSha": "0adf4457558885929d94247fcbbdb7818786a838",
+  "round": 0,
+  "pipelineVersion": "fdef8fa",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint follows the stated scope and role guards in the diff. Two named tests leave required response values unchecked, so broken count or activity data could pass the suite.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 128,
+          "message": "The named test does not assert the role count values. Assert exact expected counts for each role.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Portfolio_returns_exact_scoped_case_rows checks the keys in openItemsByRole but never checks their values.",
+            "failureScenario": "If the endpoint returns zero for every role count despite open items in case-a, this test still passes, so the acceptance criterion for server-owned counts is unproven."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 158,
+          "message": "The named test does not verify the required latest activity actor, label, and outcome. Assert their exact expected values.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Portfolio_owner_age_activity_contract checks only latestActivity.sequence for the populated case; it does not assert actor, label, or outcome.",
+            "failureScenario": "If the endpoint returns an incorrect actor, label, or outcome while preserving sequence 7, the test still passes despite violating the activity contract."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint’s tests cover response shape, tie-breaking, role guards, and scope order, but they do not verify exact role counts, all latest-activity fields, or the identity of the case read from the store.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 127,
+          "message": "The criterion requires role counts, but the named test checks only their keys. Assert exact counts for fixture cases with open items.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Portfolio_returns_exact_scoped_case_rows asserts that openItemsByRole has the four required keys, but does not assert any count values. The other portfolio tests also do not assert those values.",
+            "failureScenario": "If the endpoint returns zero for every role even when a case has open items, the tests still pass, so the server-owned counts behavior is unverified."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 147,
+          "message": "The activity contract is only partially tested. Assert the exact actor, label, and outcome as well as the sequence.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Portfolio_owner_age_activity_contract asserts latestActivity.sequence but does not assert its actor, label, or outcome.",
+            "failureScenario": "If the endpoint returns the wrong actor, label, or outcome while preserving sequence 7, this test passes despite the criterion requiring all three fields."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs",
+          "line": 168,
+          "message": "The test does not prove that no out-of-scope case state was read. Track the case IDs passed to the store and assert that only the scoped case was read.",
+          "confidence": 0.95,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Portfolio_contains_no_sensitive_detail seeds an out-of-scope case and checks store.Reads == 1, but WorkspaceStore.Reads does not identify which case was read.",
+            "failureScenario": "If the endpoint reads case-out instead of case-a once, the read-count assertion still passes; the response can also omit sensitive strings while containing data derived from the wrong case."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The endpoint checks the session and permitted roles before reading case state, and reads only distinct case IDs from the session scope. Its response uses an explicit projection and does not include work item IDs or audit details.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/WorkspaceEndpointTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 73,
+      "total": 75,
+      "percent": 97.3,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Workspace/WorkspaceEndpoints.cs",
+          "covered": 73,
+          "total": 75,
+          "missed": [
+            89,
+            99
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
