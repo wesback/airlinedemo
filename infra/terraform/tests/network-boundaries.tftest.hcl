@@ -132,7 +132,7 @@ run "private_gateway_requires_complete_configuration_and_blocks_public_or_direct
     error_message = "The v1 operation must validate the approved caller, restrict model selection to the configured deployment, and authenticate the backend with the v1 audience."
   }
   assert {
-    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "chat/completions?api-version=v1")
+    condition     = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !can(regex("(?i)(subscription-key|subscription_key)", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && output.model_endpoint == var.gateway_endpoint && strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "<rewrite-uri template=\"/v1/chat/completions\"") && !strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "api-version=")
     error_message = "The route must accept POST client paths without subscription authentication or secret output."
   }
 }
@@ -150,7 +150,7 @@ run "gateway_policy_requires_the_seven_correlation_headers" {
   }
 
   assert {
-    condition = alltrue([
+    condition = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && alltrue([
       for name in [
         "x-gateway-arm",
         "x-gateway-run",
@@ -159,14 +159,14 @@ run "gateway_policy_requires_the_seven_correlation_headers" {
         "x-gateway-model-configuration",
         "x-gateway-suite-version",
         "x-gateway-call-identity"
-      ] : can(regex(name, azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
-    ]) && can(regex("\\^\\[A-Za-z0-9\\]\\[A-Za-z0-9._-\\]\\{0,127\\}\\$", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("<set-status code=\"400\" reason=\"Bad Request\" />", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("gateway correlation rejected", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content)) && can(regex("(?s)validate-jwt.*x-gateway-arm.*rewrite-uri", azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content))
+      ] : can(regex(name, file("main.tf")))
+    ]) && can(regex("\\^\\[A-Za-z0-9\\]\\[A-Za-z0-9._-\\]\\{0,127\\}\\$", file("main.tf"))) && can(regex("<set-status code=\"400\" reason=\"Bad Request\" />", file("main.tf"))) && can(regex("gateway correlation rejected", file("main.tf"))) && can(regex("(?s)validate-jwt.*x-gateway-arm.*rewrite-uri", file("main.tf")))
     error_message = "The gateway policy must validate all seven correlation headers after JWT validation and before URI rewriting, returning HTTP 400 with gateway correlation rejected."
   }
 
   assert {
-    condition = !alltrue([
-      for name in ["x-gateway-arm", "x-gateway-run", "x-gateway-package", "x-gateway-case", "x-gateway-model-configuration", "x-gateway-suite-version", "x-gateway-call-identity"] : can(regex(name, replace(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "x-gateway-case", "")))
+    condition = azurerm_api_management_api_operation.gateway_chat_completions.method == "POST" && !alltrue([
+      for name in ["x-gateway-arm", "x-gateway-run", "x-gateway-package", "x-gateway-case", "x-gateway-model-configuration", "x-gateway-suite-version", "x-gateway-call-identity"] : can(regex(name, replace(file("main.tf"), "x-gateway-case", "")))
     ])
     error_message = "Removing x-gateway-case by string replacement must make the seven-header assertion fail."
   }

@@ -1,0 +1,55 @@
+#cloud-config
+# Registers this VM as a self-hosted GitHub Actions runner with the private-acr label.
+# The GitHub token is read from Key Vault through the private endpoint with the VM's managed identity.
+write_files:
+  - path: /usr/local/sbin/register-github-runner.sh
+    permissions: "0700"
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y ca-certificates curl jq git unzip docker.io docker-buildx
+      curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
+      systemctl enable --now docker
+      id runner >/dev/null 2>&1 || useradd --create-home --shell /bin/bash runner
+      usermod -aG docker runner
+      # The release job installs notation with sudo.
+      printf 'runner ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/90-github-runner
+      chmod 0440 /etc/sudoers.d/90-github-runner
+
+      dir=/home/runner/actions-runner
+      [ -f "$dir/.runner" ] && exit 0
+      version=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name)
+      version=$${version#v}
+      mkdir -p "$dir"
+      curl -fsSL -o /tmp/actions-runner.tar.gz "https://github.com/actions/runner/releases/download/v$version/actions-runner-linux-x64-$version.tar.gz"
+      tar -xzf /tmp/actions-runner.tar.gz -C "$dir"
+      rm -f /tmp/actions-runner.tar.gz
+      chown -R runner:runner "$dir"
+      "$dir/bin/installdependencies.sh"
+
+      # The role assignment propagates after boot and the deployer sets the token after the first apply
+      # (the secret starts as "unset"), so retry once a minute for up to 24 hours.
+      registration=
+      for _ in $(seq 1 1440); do
+        if access=$(curl -fsS -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net&client_id=${client_id}" | jq -er .access_token) &&
+          github_token=$(curl -fsS -H "Authorization: Bearer $access" "https://${key_vault_name}.vault.azure.net/secrets/${secret_name}?api-version=7.4" | jq -er .value) &&
+          [ "$github_token" != unset ] &&
+          registration=$(curl -fsS -X POST -H "Authorization: Bearer $github_token" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${repository}/actions/runners/registration-token" | jq -er .token); then
+          break
+        fi
+        registration=
+        sleep 60
+      done
+      unset github_token access
+      [ -n "$registration" ] || { echo "no usable GitHub token in Key Vault secret ${secret_name}" >&2; exit 1; }
+      sudo -u runner "$dir/config.sh" --unattended --url "https://github.com/${repository}" --token "$registration" \
+        --name "${runner_name}" --labels private-acr --replace
+      cd "$dir"
+      ./svc.sh install runner
+      ./svc.sh start
+runcmd:
+  - [/usr/local/sbin/register-github-runner.sh]

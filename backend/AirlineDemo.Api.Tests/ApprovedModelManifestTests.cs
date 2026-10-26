@@ -50,16 +50,15 @@ public class ApprovedModelManifestTests
     }
 
     [Fact]
-    public void Shipped_manifest_is_stub_unapproved_and_refused()
+    public void Shipped_manifest_is_approved_candidate_and_usable()
     {
         var manifest = ApprovedModelManifest.Load(ShippedManifestPath());
 
-        Assert.False(manifest.Approved);
-        Assert.Equal("STUB", manifest.DeploymentName);
+        Assert.True(manifest.Approved);
+        Assert.Equal("gpt-6-luna", manifest.DeploymentName);
         var errors = manifest.Validate();
-        Assert.Contains("manifest is not approved", errors);
-        Assert.Contains("deploymentName is still a stub value", errors);
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
+        Assert.Empty(errors);
+        manifest.RequireUsable();
     }
 
     [Fact]
@@ -380,19 +379,19 @@ public class ApprovedModelManifestTests
     }
 
     [Fact]
-    public void Shipped_manifest_remains_stubbed_and_refused()
+    public void Shipped_manifest_matches_approved_candidate_values()
     {
         var manifest = ApprovedModelManifest.Load(ShippedManifestPath());
 
-        Assert.False(manifest.Approved);
-        Assert.Equal("STUB", manifest.Arm);
-        Assert.Equal("STUB", manifest.DeploymentName);
-        Assert.Equal("STUB", manifest.Model);
-        Assert.Equal("STUB", manifest.ModelVersion);
-        Assert.Equal("STUB", manifest.ApiVersion);
-        Assert.Equal("STUB", manifest.Region);
-        Assert.Equal("STUB", manifest.ContentFilter);
-        Assert.Throws<ModelGateException>(() => ModelCallGate.Authorize(manifest, Synthetic(), Registry()));
+        Assert.True(manifest.Approved);
+        Assert.Equal("investigation-live", manifest.Arm);
+        Assert.Equal("gpt-6-luna", manifest.DeploymentName);
+        Assert.Equal("gpt-6-luna", manifest.Model);
+        Assert.Equal("2026-09-22", manifest.ModelVersion);
+        Assert.Equal("v1", manifest.ApiVersion);
+        Assert.Equal("swedencentral", manifest.Region);
+        Assert.Equal("enabled", manifest.ContentFilter);
+        Assert.Empty(manifest.Validate());
     }
 
     [Fact]
