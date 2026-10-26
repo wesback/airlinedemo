@@ -25,8 +25,9 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
-  <!-- Publish builds the React client and stages frontend/dist into the published wwwroot (DD-013). -->
-  <Target Name="BuildAndStageClient" AfterTargets="ComputeResolvedFilesToPublishList">
+  <!-- Publish builds the React client and stages frontend/dist into the published wwwroot (DD-013).
+       The container build already stages the client into wwwroot from its node stage and sets SkipClientBuild=true. -->
+  <Target Name="BuildAndStageClient" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(SkipClientBuild)' != 'true'">
     <Exec Command="npm --prefix &quot;$(MSBuildProjectDirectory)/../../frontend&quot; run build" />
     <ItemGroup>
       <ClientBuildFile Include="$(MSBuildProjectDirectory)/../../frontend/dist/**/*" />

@@ -9,7 +9,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0.100 AS build
 WORKDIR /src
 COPY . .
 COPY --from=frontend /src/frontend/dist/ ./backend/AirlineDemo.Api/wwwroot/
-RUN dotnet publish backend/AirlineDemo.Api/AirlineDemo.Api.csproj -c Release -o /out
+RUN dotnet publish backend/AirlineDemo.Api/AirlineDemo.Api.csproj -c Release -o /out -p:SkipClientBuild=true
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.0 AS runtime
 WORKDIR /app
