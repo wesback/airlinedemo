@@ -109,7 +109,7 @@ resource "azurerm_role_assignment" "release_signing_key" {
 }
 
 resource "azurerm_role_assignment" "release_signing_certificate" {
-  scope                = azurerm_key_vault_certificate.signing.resource_manager_id
+  scope                = azurerm_key_vault_certificate.signing.resource_manager_versionless_id
   role_definition_name = "Key Vault Certificate User"
   principal_id         = azurerm_user_assigned_identity.release.principal_id
   principal_type       = "ServicePrincipal"
