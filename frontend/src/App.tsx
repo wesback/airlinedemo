@@ -546,7 +546,7 @@ export default function App({
             <p>No cases are assigned to your account.</p>
           ) : (
             <>
-              {session.caseScopes?.length > 1 && (
+              {session.caseScopes.length > 1 && (
                 <label>
                   Case
                   <select value={selectedCaseId ?? ''} onChange={(event) => {
