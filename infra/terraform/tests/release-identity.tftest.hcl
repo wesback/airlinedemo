@@ -352,6 +352,11 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
+    condition     = azurerm_key_vault_certificate.signing.certificate_policy[0].x509_certificate_properties[0].subject == "CN=airline-demo-release-signing, O=Airline Demo, ST=Brussels, C=BE"
+    error_message = "The signing certificate subject must carry the C, ST and O attributes a Notation trust policy requires."
+  }
+
+  assert {
     condition     = azurerm_role_assignment.release_container_app[0].role_definition_name == "Container Apps Contributor" && azurerm_role_assignment.release_container_app[0].scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test" && azurerm_role_assignment.release_container_app[0].principal_id == azurerm_user_assigned_identity.release.principal_id
     error_message = "The release identity must hold Container Apps Contributor scoped to the application only."
   }
