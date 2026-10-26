@@ -9,6 +9,8 @@ public sealed record SignInRequest(string? UserId, string? Passcode);
 
 public sealed record PasscodeRequest(string? Passcode);
 
+public sealed record SwitchUserRequest(string? UserId);
+
 public static class DemoAuthEndpoints
 {
     public const string CookieName = "__Host-demo-session";
@@ -32,6 +34,7 @@ public static class DemoAuthEndpoints
                 : Unauthenticated());
         app.MapPost("/api/auth/passcode", PasscodeStep);
         app.MapPost("/api/auth/sign-in", SignIn);
+        app.MapPost("/api/auth/switch-user", SwitchUser);
         app.MapPost("/api/auth/sign-out", SignOut);
         return app;
     }
@@ -81,6 +84,22 @@ public static class DemoAuthEndpoints
         var session = sessions.Create(user);
         http.Response.Cookies.Append(CookieName, session.Id, SessionCookie);
         return Results.Ok(SessionView(session));
+    }
+
+    private static IResult SwitchUser(SwitchUserRequest request, HttpContext http, DemoSessionStore sessions)
+    {
+        var oldSession = CurrentSession(http, sessions);
+        if (oldSession is null) return Unauthenticated();
+        if (!HasValidAntiForgery(http, oldSession)) return AntiForgeryFailed();
+
+        var user = DemoFixture.Find(request.UserId);
+        if (user is null)
+            return Results.Json(new { error = "Unknown user." }, statusCode: StatusCodes.Status400BadRequest);
+
+        sessions.Remove(oldSession.Id);
+        var newSession = sessions.Create(user);
+        http.Response.Cookies.Append(CookieName, newSession.Id, SessionCookie);
+        return Results.Ok(SessionView(newSession));
     }
 
     private static IResult PasscodeStep(PasscodeRequest request, HttpContext http, IConfiguration config, PasscodeThrottle throttle, TimeProvider time, ILogger<DemoSessionStore> logger)
