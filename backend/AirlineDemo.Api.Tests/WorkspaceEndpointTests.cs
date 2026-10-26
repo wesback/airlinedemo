@@ -33,6 +33,7 @@ public sealed class WorkspaceEndpointTests
         Assert.Equal(1, root.GetProperty("contractVersion").GetInt32());
         Assert.Equal(new[] { "case-missing" }, root.GetProperty("unavailableCaseIds").EnumerateArray().Select(x => x.GetString()));
         Assert.False(root.GetProperty("truncated").GetBoolean());
+        Assert.Equal(2, store.Reads);
     }
 
     [Fact]
@@ -67,6 +68,15 @@ public sealed class WorkspaceEndpointTests
         Assert.Equal(200, json.RootElement.GetProperty("items").GetArrayLength());
         Assert.True(json.RootElement.GetProperty("truncated").GetBoolean());
         Assert.Equal(new[] { "case-missing" }, json.RootElement.GetProperty("unavailableCaseIds").EnumerateArray().Select(x => x.GetString()));
+
+        var items200 = Enumerable.Range(1, 200).Select(i => Item($"exact-{i:000}", "records-investigation", "technical-reviewer", -i, "case-a")).ToArray();
+        store.Set("case-a", State("case-a", items200));
+        using var boundaryResponse = await GetAsync(client, "/api/v1/workspace/worklist", cookie);
+        using var boundaryJson = JsonDocument.Parse(await boundaryResponse.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, boundaryResponse.StatusCode);
+        Assert.Equal(200, boundaryJson.RootElement.GetProperty("items").GetArrayLength());
+        Assert.False(boundaryJson.RootElement.GetProperty("truncated").GetBoolean());
+        Assert.Equal(new[] { "case-missing" }, boundaryJson.RootElement.GetProperty("unavailableCaseIds").EnumerateArray().Select(x => x.GetString()));
     }
 
     [Fact]
@@ -78,13 +88,21 @@ public sealed class WorkspaceEndpointTests
         using var client = factory.CreateClient();
         using var unauthenticated = await client.GetAsync("/api/v1/workspace/worklist");
         Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+        Assert.Equal(0, store.Reads);
 
         var executive = AddSession(factory, "executive", ["case-a"]);
         using var forbidden = await GetAsync(client, "/api/v1/workspace/worklist", executive);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         Assert.Equal("{\"error\":\"Role not permitted.\"}", await forbidden.Content.ReadAsStringAsync());
+        Assert.Equal(0, store.Reads);
         using var v2 = await GetAsync(client, "/api/v2/workspace/worklist", executive);
         Assert.Equal(HttpStatusCode.NotFound, v2.StatusCode);
+        Assert.Equal(0, store.Reads);
+
+        var technicalReviewer = AddSession(factory, "technical-reviewer", ["case-a"]);
+        using var permitted = await GetAsync(client, "/api/v1/workspace/worklist", technicalReviewer);
+        Assert.Equal(HttpStatusCode.OK, permitted.StatusCode);
+        Assert.Equal(1, store.Reads);
     }
 
     [Fact]
