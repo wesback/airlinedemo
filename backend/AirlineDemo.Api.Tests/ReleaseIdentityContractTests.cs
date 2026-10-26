@@ -33,6 +33,7 @@ public sealed class ReleaseIdentityContractTests
                 "app_passcode_secret",
                 "app_telemetry",
                 "build_acr_push",
+                "build_runner_token_secret",
                 "gateway_cognitive_services",
                 "migration_sql",
                 "release_acr_push",
