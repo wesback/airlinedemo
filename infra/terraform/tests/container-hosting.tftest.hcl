@@ -213,7 +213,7 @@ run "app_seeds_demo_cases" {
   command = plan
 
   assert {
-    condition     = length([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Demo__SeedCases" && e.value == "true"]) == 1
+    condition     = length([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Demo__SeedCases"]) == 1 && length([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Demo__SeedCases" && e.value == "true"]) == 1
     error_message = "The app container must set Demo__SeedCases to true so the demo cases exist."
   }
 }
