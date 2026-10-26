@@ -398,12 +398,12 @@ public sealed class TelemetryPrivacyTests
         var cookie = signIn.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
         var csrf = (await signIn.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("csrfToken").GetString()!;
 
-        foreach (var scenario in new[] { "no-token", "wrong-token", "unknown-user", "empty-user" })
+        foreach (var scenario in new[] { "no-token", "wrong-token", "unknown-user", "empty-user", "malformed-json" })
         {
             object body = scenario == "unknown-user" ? new { userId = "nobody" }
                 : scenario == "empty-user" ? new { userId = "" } : new { userId = "exec-1" };
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user")
-            { Content = JsonContent.Create(body) };
+            { Content = scenario == "malformed-json" ? new StringContent("{ not-json", Encoding.UTF8, "application/json") : JsonContent.Create(body) };
             request.Headers.Add("Cookie", cookie);
             if (scenario != "no-token") request.Headers.Add("X-CSRF-Token", scenario == "wrong-token" ? "wrong-token" : csrf);
             using var response = await client.SendAsync(request, ct);
@@ -414,8 +414,8 @@ public sealed class TelemetryPrivacyTests
         }
 
         var events = logger.States.Select(ToProperties).Where(p => p.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.RoleSwitch).ToList();
-        Assert.Equal(5, events.Count);
-        Assert.Equal(new[] { "unauthorized", "anti_forgery_failed", "anti_forgery_failed", "unknown_user", "unknown_user" }, events.Select(p => p["event.outcome"]!).ToArray());
+        Assert.Equal(6, events.Count);
+        Assert.Equal(new[] { "unauthorized", "anti_forgery_failed", "anti_forgery_failed", "unknown_user", "unknown_user", "unknown_user" }, events.Select(p => p["event.outcome"]!).ToArray());
         Assert.Equal("unknown", events[0]["fixture.role"]);
         Assert.All(events.Skip(1), p => Assert.Equal("presenter", p["fixture.role"]));
     }

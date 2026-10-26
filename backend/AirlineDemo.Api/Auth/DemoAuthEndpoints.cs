@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AirlineDemo.Api.Diagnostics;
 
 namespace AirlineDemo.Api.Auth;
@@ -86,7 +87,7 @@ public static class DemoAuthEndpoints
         return Results.Ok(SessionView(session));
     }
 
-    private static IResult SwitchUser(SwitchUserRequest request, HttpContext http, IConfiguration config, DemoSessionStore sessions, ILogger<DemoSessionStore> logger)
+    private static async Task<IResult> SwitchUser(HttpContext http, IConfiguration config, DemoSessionStore sessions, ILogger<DemoSessionStore> logger)
     {
         var oldSession = CurrentSession(http, sessions);
         if (oldSession is null)
@@ -102,7 +103,17 @@ public static class DemoAuthEndpoints
             return AntiForgeryFailed();
         }
 
-        var user = DemoFixture.Find(request.UserId);
+        SwitchUserRequest? request;
+        try
+        {
+            request = await http.Request.ReadFromJsonAsync<SwitchUserRequest>(http.RequestAborted);
+        }
+        catch (JsonException)
+        {
+            request = null;
+        }
+
+        var user = request is not null ? DemoFixture.Find(request.UserId) : null;
         if (user is null)
         {
             TelemetryRedaction.EmitRoleSwitchEvent(logger, "unknown_user", oldSession.User.Role, oldSession.Id,
