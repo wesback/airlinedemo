@@ -214,6 +214,101 @@ public sealed class AuthBoundaryTests
     }
 
     [Fact]
+    public async Task Switch_user_with_session_and_token_issues_a_session_for_the_target_user()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        var presenter = await SignInAsync(client, "presenter", ct);
+
+        using var switchResponse = await SendAsync(client, HttpMethod.Post, "/api/auth/switch-user",
+            presenter, true, new { userId = "exec-1" }, ct);
+        Assert.Equal(HttpStatusCode.OK, switchResponse.StatusCode);
+
+        var setCookie = switchResponse.Headers.GetValues("Set-Cookie").Single();
+        var cookieValue = setCookie.Split(';')[0];
+        var attributes = setCookie.ToLowerInvariant();
+        Assert.StartsWith("__host-demo-session=", attributes);
+        Assert.Contains("httponly", attributes);
+        Assert.Contains("secure", attributes);
+        Assert.Contains("samesite=strict", attributes);
+        Assert.Contains("path=/", attributes);
+
+        var body = await switchResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal("exec-1", body.GetProperty("id").GetString());
+        Assert.Equal("Executive observer", body.GetProperty("displayName").GetString());
+        Assert.Equal("executive", body.GetProperty("role").GetString());
+        Assert.Equal(new[] { "cp-case-a", "cp-case-b", "cp-case-c" },
+            body.GetProperty("caseScopes").EnumerateArray().Select(x => x.GetString()).ToArray());
+        var csrfToken = body.GetProperty("csrfToken").GetString();
+        Assert.False(string.IsNullOrEmpty(csrfToken));
+
+        var executive = new Session(cookieValue, csrfToken!);
+        using var denied = await SendAsync(client, HttpMethod.Get, "/api/cases/case-001",
+            executive, false, null, ct);
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+
+        using var signOut = await SendAsync(client, HttpMethod.Post, "/api/auth/sign-out",
+            executive, true, null, ct);
+        Assert.Equal(HttpStatusCode.NoContent, signOut.StatusCode);
+    }
+
+    [Fact]
+    public async Task Switch_user_invalidates_the_previous_session()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        var oldPresenter = await SignInAsync(client, "presenter", ct);
+
+        using var switched = await SendAsync(client, HttpMethod.Post, "/api/auth/switch-user",
+            oldPresenter, true, new { userId = "exec-1" }, ct);
+        Assert.Equal(HttpStatusCode.OK, switched.StatusCode);
+
+        using var oldRequest = await SendAsync(client, HttpMethod.Get, "/api/cases/case-001",
+            oldPresenter, false, null, ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, oldRequest.StatusCode);
+        Assert.Equal("{\"error\":\"Not signed in.\"}", await oldRequest.Content.ReadAsStringAsync(ct));
+    }
+
+    [Theory]
+    [InlineData("no-session", 401, "{\"error\":\"Not signed in.\"}")]
+    [InlineData("no-token", 403, "{\"error\":\"Anti-forgery validation failed.\"}")]
+    [InlineData("wrong-token", 403, "{\"error\":\"Anti-forgery validation failed.\"}")]
+    [InlineData("unknown-user", 400, "{\"error\":\"Unknown user.\"}")]
+    [InlineData("empty-user", 400, "{\"error\":\"Unknown user.\"}")]
+    public async Task Switch_user_rejections_keep_the_current_session(string scenario, int status, string expectedJson)
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        Session? presenter = null;
+        object body = new { userId = "exec-1" };
+
+        if (scenario != "no-session") presenter = await SignInAsync(client, "presenter", ct);
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user");
+        if (presenter is not null) request.Headers.Add("Cookie", presenter.Cookie);
+        if (scenario == "wrong-token") request.Headers.Add("X-CSRF-Token", "wrong-token");
+        if (scenario == "unknown-user") body = new { userId = "nobody" };
+        if (scenario == "empty-user") body = new { userId = "" };
+        if (scenario != "no-session" && scenario != "no-token" && scenario != "wrong-token")
+            request.Headers.Add("X-CSRF-Token", presenter!.Csrf);
+        request.Content = JsonContent.Create(body);
+
+        using var response = await client.SendAsync(request, ct);
+        Assert.Equal((HttpStatusCode)status, response.StatusCode);
+        Assert.Equal(expectedJson, await response.Content.ReadAsStringAsync(ct));
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+
+        if (presenter is not null)
+        {
+            using var stillOriginal = await SendAsync(client, HttpMethod.Get, "/api/cases/case-001",
+                presenter, false, null, ct);
+            Assert.Equal(HttpStatusCode.OK, stillOriginal.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Switching_users_while_signed_in_is_refused()
     {
         using var factory = CreateFactory();
