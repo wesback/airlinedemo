@@ -2,7 +2,7 @@
 prd_id: "role-workspaces"
 title: "Altivane Asset Transitions: Role Workspaces"
 status: "draft"
-version: "0.1.0"
+version: "0.2.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
 created_date: "2026-10-26"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Altivane Asset Transitions: Role Workspaces
 
-> **role-workspaces** | Status: draft | Version: 0.1.0 | Last Updated: 2026-10-26
+> **role-workspaces** | Status: draft | Version: 0.2.0 | Last Updated: 2026-10-26
 
 ## Executive Summary
 
@@ -51,24 +51,32 @@ The release horizon is the next demo cycle. The primary success metric is that a
 
 ## Research Readiness
 
-Research status: `Not required`
+Research status: `Required`
 
-Rationale: Every fact the requirements depend on is in this repository and was read while drafting:
+Rationale: The UI uses Fluent UI React v9 (`@fluentui/react-components`). It inserts `<style>` elements at runtime, which the current CSP `style-src 'self'` blocks. Whether a per-response nonce is enough depends on third-party package behaviour, so it was researched.
 
-- The content security policy is `style-src 'self'` (`backend/AirlineDemo.Api/Security/TransportSecurity.cs`).
+Facts read in this repository:
+
+- The CSP is one constant on every response (`backend/AirlineDemo.Api/Security/TransportSecurity.cs`), and `index.html` is served as a static file (`backend/AirlineDemo.Api/StaticClient.cs`).
 - The per-case read APIs exist: dashboard, technical reviews, reserve, obligations, requests, history and readiness.
 - The dashboard queue projection is role-filtered (`CapabilityProjection.Build` keeps open items whose owner is the session role).
 - The demo users and their case scopes are in `demo-users-v1.json`.
 
-Fluent 2 is implemented as a static, project-authored CSS token sheet and plain React components (DD-002). This adds no new package, no runtime style injection and no external API, so no third-party behaviour has to be researched. The brand colours were sampled from the user-supplied brand slide. Their contrast ratios were computed and are recorded in DD-003.
+The brand colours were sampled from the user-supplied brand slide. Their contrast ratios were computed and are recorded in DD-003.
 
-Research artifact: Not applicable.
+Research artifact: `docs/research/2026-10-26/role-workspaces-fluent-csp-research.md`.
 
 Planning blockers: None
 
 ### Research Finding Dispositions
 
-No research was required. No findings to dispose.
+| Finding | Evidence | Disposition |
+|---|---|---|
+| Griffel's `createDOMRenderer` passes `styleElementAttributes` (including `nonce`) to every `<style>` it creates | Research E-1, E-2 | Adopted: DD-010, FR-016 |
+| The `FluentProvider` theme `<style>` tag uses the same renderer attributes | Research E-3 | Adopted: DD-010, AC-022 |
+| `@fluentui/react-components` 9.74.11 supports React 19 and is MIT licensed | Research E-4 | Adopted: DD-002, NFR-006 |
+| `index.html` is a static file today | Research E-5 | Adopted: FR-016 serves it per response; AC-020 |
+| Three tests pin the CSP literally | Research E-7 | Adopted: AC-020 names the one assertion that changes; the constant stays for non-document responses |
 
 ---
 
@@ -99,14 +107,15 @@ All reviewer roles are simulated. Decisions affect synthetic workflow state only
 | ID | Decision |
 |---|---|
 | DD-001 | Branding: the shell is branded "Altivane Aviation Capital", product name "Asset Transitions". It uses the logo and colours from the user-supplied brand slide. Altivane is a fictional company; no real customer branding is used. |
-| DD-002 | Fluent 2 is applied through a project-authored CSS token sheet (`frontend/src/styles/tokens.css`) and project components. `@fluentui/react-components` is not added: its Griffel engine inserts `<style>` elements at runtime, which the existing CSP `style-src 'self'` blocks, and relaxing the CSP is out of scope (CON-001). |
-| DD-003 | Brand tokens, with contrast ratios computed on the stated surface (WCAG 2.2 relative luminance). Light theme: `--brand-navy #19223F` (text on `#F7F7F8`, 14.62:1); `--brand-green #639A5E` (non-text UI and large text only, 3.11:1); `--brand-green-text #3D7339` (green text, 5.29:1 on `#F7F7F8`); `--text-secondary #565C71` (6.2:1); `--surface-page #F7F7F8`; `--surface-card #FFFFFF`; `--accent-rule #71B06C`. Top bar: navy background `#19223F` with white text (15.65:1). Dark theme: `--surface-page #1B1F2B`, text `#E6E8EE` (13.42:1), green `#8CC487` (8.11:1). |
-| DD-004 | Type and spacing follow Fluent 2: font stack `"Segoe UI Variable", "Segoe UI", system-ui, sans-serif`. The 4 px spacing grid uses tokens `--space-1` to `--space-8` = 4, 8, 12, 16, 20, 24, 32, 40 px. Radii are `--radius-sm 4px` and `--radius-md 8px`. Elevation is `--shadow-2` and `--shadow-8`. No web font is downloaded. |
+| DD-002 | Fluent 2 is implemented with Fluent UI React v9: `@fluentui/react-components` 9.74.11 and `@fluentui/react-icons` 2.0.344, both MIT, added to `frontend/package.json` with the lockfile. Components (Toolbar, Nav, DataGrid, Dialog, Menu, Toast, Badge, Field) come from the library; project CSS is limited to layout. The brand is applied as a Fluent theme (DD-003). |
+| DD-003 | Brand colours, applied as overrides of `createLightTheme` and `createDarkTheme` in `frontend/src/theme/altivaneTheme.ts`, with contrast ratios computed on the stated surface (WCAG 2.2 relative luminance). Light theme: `--brand-navy #19223F` (text on `#F7F7F8`, 14.62:1); `--brand-green #639A5E` (non-text UI and large text only, 3.11:1); `--brand-green-text #3D7339` (green text, 5.29:1 on `#F7F7F8`); `--text-secondary #565C71` (6.2:1); `--surface-page #F7F7F8`; `--surface-card #FFFFFF`; `--accent-rule #71B06C`. Top bar: navy background `#19223F` with white text (15.65:1). Dark theme: `--surface-page #1B1F2B`, text `#E6E8EE` (13.42:1), green `#8CC487` (8.11:1). |
+| DD-004 | Type, spacing, radii, elevation and focus indicators are Fluent's own theme tokens (`tokens.*` from `@fluentui/react-components`), unchanged. The font stack is Fluent's default (`"Segoe UI Variable", "Segoe UI", ...`); no web font is downloaded. |
 | DD-005 | Role switching uses the server endpoint from #634 (`POST /api/auth/switch-user`). The browser never impersonates a role; the server issues the new session. |
 | DD-006 | Client routing uses the History API (the server already serves the SPA for non-file paths). Client route guards are a usability aid only; every API call is still authorised by the server. |
 | DD-007 | Role homes read two new server projections (FR-011, FR-012). Counts, ages, owners and labels are never computed in the browser. |
 | DD-008 | Supersedes open stories #635 (header role switcher) and #636 (Fluent-style stylesheet). They are closed; their intent is in FR-003 and FR-002. #631, #632, #633 and #634 stay open and are prerequisites. |
 | DD-009 | The existing 3D hangar is kept as the "Hangar" module inside the shell for all roles. Its behaviour is unchanged and governed by `aircraft-hangar-3d`. |
+| DD-010 | The CSP for HTML document responses adds a per-response nonce to `style-src` (FR-016). This supersedes, for document responses only, the `style-src 'self'` of DD-028 in `aircraft-return-readiness`; every other response keeps that policy unchanged. `'unsafe-inline'` is not used: injected markup still cannot add styles. |
 
 ---
 
@@ -128,7 +137,7 @@ Priority: MUST. KPI: AC-004 passes; persona switch completes in at most 2 clicks
 | ID | Requirement | Actor | Trigger | Expected outcome | AC | Goal |
 |---|---|---|---|---|---|---|
 | FR-001 | Application shell: a 48 px navy top bar shows the Altivane logo, the product name "Asset Transitions", case search (FR-010) and the user menu. A left navigation is 240 px wide and collapses to 48 px; its collapsed state is remembered. Breadcrumbs sit above the page content. | Any signed-in user | Any route | All authenticated pages render inside the shell | AC-001, AC-002 | GOAL-002 |
-| FR-002 | Design tokens and themes: `tokens.css` defines the DD-003 and DD-004 tokens for light and dark themes. The user menu offers Light, Dark and System. The choice is stored in `localStorage` key `altivane.theme` (values `light`, `dark` or `system`; any other value is treated as `system`). | Any user | Theme menu | `data-theme` on `<html>` matches the choice | AC-003 | GOAL-002 |
+| FR-002 | Theme: `altivaneTheme.ts` exports `altivaneLightTheme` and `altivaneDarkTheme` (DD-003, DD-004), applied by one `FluentProvider` at the app root. The user menu offers Light, Dark and System. The choice is stored in `localStorage` key `altivane.theme` (values `light`, `dark` or `system`; any other value is treated as `system`). | Any user | Theme menu | `data-theme` on `<html>` matches the choice | AC-003 | GOAL-002 |
 | FR-003 | Role switcher: the user menu shows the display name and role, and lists "Switch role" with every other fixture persona. Choosing one calls the #634 endpoint. On success the app navigates to that role's home. | Any signed-in user | User menu | New role active without the passcode | AC-004 | GOAL-003 |
 | FR-004 | Sign-in: a branded split page. The left panel shows the brand tagline. The right panel has step 1 (passcode) and step 2 (persona cards with display name, role and a one-line job description from the Personas table). The last chosen user id is preselected from `localStorage` key `altivane.lastUserId`; only the id is stored, never the passcode. | Unauthenticated user | Opening any route | Signed in and taken to the target route (FR-005) | AC-005 | GOAL-001 |
 | FR-005 | Routing and deep links: routes `/work`, `/portfolio`, `/demo`, `/cases`, `/cases/:caseId/:tab`, `/hangar`. An unauthenticated visit is sent to sign-in with `returnTo`, and after sign-in the user returns there if the route belongs to their role. Otherwise they land on their role home. `returnTo` is accepted only as a same-origin path (contract table in AC-006). | Any user | Navigation | Correct page or role home | AC-006, AC-007 | GOAL-001 |
@@ -142,6 +151,10 @@ Priority: MUST. KPI: AC-004 passes; persona switch completes in at most 2 clicks
 | FR-013 | Executive portfolio page (`/portfolio`): KPI tiles (cases in scope, cases with open items, total open items, oldest open-item age) and a portfolio table (case, open items per role, next decision owner, oldest age, latest activity). Rows open a read-only case summary. No decision controls are rendered anywhere for the executive. | Executive, presenter | Home | Read-only overview | AC-016, AC-017 | GOAL-001 |
 | FR-014 | Demo control centre (`/demo`): lists the presenter's cases with the existing reset actions, a "View as" button per persona (uses FR-003), and a guided-path checklist of links into each role's main working view. | Presenter | Home | Demo run from one page | AC-004, AC-018 | GOAL-003 |
 | FR-015 | Shared states: every data region has a loading skeleton, an empty state with a one-line explanation, and an error banner. A 401 response returns the user to sign-in with `returnTo`. A 403 shows "You do not have permission for this action." A 404 on a case shows "Case not found or not in your scope." A 503 shows "Service temporarily unavailable" with a Retry button. After a decision, a toast ("Decision recorded") is announced through `role="status"`. | Any user | API responses | Consistent feedback | AC-019 | GOAL-002 |
+| AC-020 | Through the application test host with a test `wwwroot` whose `index.html` contains the FR-016 meta tag: `GET /`, `GET /index.html` and `GET /work` each return the FR-016 CSP with a nonce of exactly 24 Base64 characters, a body whose `csp-nonce` meta equals that nonce, and `Cache-Control: no-store`; two requests to `/` return different nonces. Negative: `GET /api/health` and a static asset return exactly `TransportSecurity.ContentSecurityPolicy` with no `nonce-`. `StaticClientTests.AssertSecurityHeaders` is updated in this story to expect the FR-016 form for document responses; `TransportSecurityTests.Csp_matches_dd_028` and `Csp_matches_hangar_baseline` stay unchanged and pass. | FR-016, NFR-003 |
+| AC-021 | Client nonce contract (unit test over the function that reads the meta): meta `content="q83vEjRWeJq83vEjRWeJqw=="` → renderer attributes `{ nonce: "q83vEjRWeJq83vEjRWeJqw==" }`; `content="__CSP_NONCE__"` → `{}`; `content=""` → `{}`; no meta → `{}`. Other inputs are out of scope. Negative: the `__CSP_NONCE__` case never yields a `nonce` attribute. | FR-016 |
+| AC-022 | A unit test renders the signed-in shell through the app root with nonce `test-nonce`; every `<style>` element in the document has `nonce="test-nonce"` and at least one exists. Negative: the same check over a render with a renderer without a nonce reports the unmarked `<style>` elements and fails. | FR-016, NFR-003 |
+| FR-016 | Nonce CSP for documents: for `/`, `/index.html` and the client-route fallback, the server generates a nonce of 16 bytes from a cryptographic random generator, Base64 encoded, new for every response. It sends `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'nonce-<nonce>'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'` and `Cache-Control: no-store`, and replaces the token `__CSP_NONCE__` in `<meta name="csp-nonce" content="__CSP_NONCE__">` of `index.html` with the same nonce. All other responses keep `TransportSecurity.ContentSecurityPolicy` exactly. The client reads the meta value and creates the Griffel renderer with `createDOMRenderer(document, { styleElementAttributes: { nonce } })` inside a `RendererProvider`; a missing meta, an empty value or the literal `__CSP_NONCE__` (Vite dev server) gives a renderer without a nonce. | Browser loading the app | Any document request | Fluent styles apply; other inline styles stay blocked | AC-020, AC-021, AC-022 | GOAL-002 |
 
 ### Role navigation
 
@@ -195,7 +208,7 @@ NFR-002: A failing data region shows its FR-015 error state without blanking the
 
 ### Security
 
-NFR-003: The server enforces session, role and scope on both new endpoints (AC-013 to AC-016). The browser holds no authority: navigation guards, hidden buttons and themes are usability features only. The CSP is unchanged (`style-src 'self'`). No inline `style` attributes and no runtime `<style>` elements are added. Protected text (notice drafts, findings, labels) is rendered as text. `returnTo` is validated as in AC-006. The anti-forgery header is sent on every state-changing command, as today.
+NFR-003: The server enforces session, role and scope on both new endpoints (AC-013 to AC-016). The browser holds no authority: navigation guards, hidden buttons and themes are usability features only. Document responses use the nonce CSP of FR-016 and every other response keeps the existing CSP. Every runtime `<style>` element carries the response nonce (AC-022); `'unsafe-inline'` is never used and no `style` attribute is written into HTML markup. Protected text (notice drafts, findings, labels) is rendered as text. `returnTo` is validated as in AC-006. The anti-forgery header is sent on every state-changing command, as today.
 
 ### Privacy
 
@@ -207,7 +220,7 @@ NFR-005: No change; single Consumption replica as deployed.
 
 ### Maintainability and Operability
 
-NFR-006: Colours, spacing, radii, shadows and fonts are referenced only through `tokens.css` custom properties. A unit test fails when another CSS file uses a colour literal (`#hex`, `rgb(`, `hsl(`). No new runtime npm dependency.
+NFR-006: Colours, spacing, radii, shadows and fonts are referenced only through Fluent `tokens.*`. Colour literals appear only in `altivaneTheme.ts`; a unit test fails when another file under `frontend/src` (`.ts`, `.tsx`, `.css`) contains a colour literal (`#` followed by 3, 4, 6 or 8 hex digits, `rgb(`, `hsl(`). The only new runtime npm dependencies are the two packages in DD-002, at the pinned versions.
 
 ### Observability
 
@@ -215,7 +228,7 @@ NFR-007: No new telemetry. The new endpoints use the existing request logging; t
 
 ### Usability and Accessibility
 
-NFR-008: WCAG 2.2 AA. Every interactive element is reachable and operable by keyboard, with a visible focus ring (`--focus-ring`, 2 px, at least 3:1). Tables use `<th scope>` and `aria-sort`. The navigation is a `<nav aria-label="Primary">`. Toasts use `role="status"`. Text contrast is at least 4.5:1 and non-text contrast at least 3:1 in both themes, proven by the token contract test (AC-003), not by browser pixel sampling. `prefers-reduced-motion` disables transitions.
+NFR-008: WCAG 2.2 AA. Every interactive element is reachable and operable by keyboard, with Fluent's visible focus indicator (at least 3:1). Tables use `<th scope>` and `aria-sort`. The navigation is a `<nav aria-label="Primary">`. Toasts use `role="status"`. Text contrast is at least 4.5:1 and non-text contrast at least 3:1 in both themes, proven by the theme contract test (AC-003), not by browser pixel sampling. `prefers-reduced-motion` disables transitions (Fluent motion honours it).
 
 ### Compatibility and Interoperability
 
@@ -231,7 +244,7 @@ NFR-010: No change to hosting.
 
 | ID | Constraint | Source | Boundary | Non-negotiable because | Category | Impact |
 |---|---|---|---|---|---|---|
-| CON-001 | The CSP stays `default-src 'self'; script-src 'self'; style-src 'self'; ...` | `TransportSecurity.cs`, NFR-001 of `aircraft-return-readiness` | Technology | Security baseline already reviewed and tested | Technical | Rules out CSS-in-JS libraries (DD-002) |
+| CON-001 | `script-src` stays `'self'` and `'unsafe-inline'` is forbidden in every directive; only document responses get a style nonce (DD-010) | `TransportSecurity.cs`, DD-028 of `aircraft-return-readiness`, product owner decision of 2026-10-26 | Technology | Keeps the reviewed injection protection | Technical | Fluent's runtime styles are allowed only through the nonce |
 | CON-002 | Server-derived labels, counts and allowed decisions; the client never substitutes them | `aircraft-return-readiness` Scope Boundaries | Design | Existing AC-020 | Technical | Workspaces render projections only |
 | CON-003 | Synthetic data only; Altivane is fictional | `aircraft-return-readiness` Security Notes | Scope | Privacy baseline | Organizational | Brand assets are demo-only |
 
@@ -260,7 +273,7 @@ flowchart LR
 |---|---|---|
 | AC-001 | Given a signed-in session, when any authenticated route renders, then the top bar contains the logo image with alt "Altivane Aviation Capital", the text "Asset Transitions", the search box and the user menu. A `<nav aria-label="Primary">` and a breadcrumb `<nav aria-label="Breadcrumb">` are present. Negative: on the sign-in page, no Primary nav is rendered. | FR-001 |
 | AC-002 | Given the navigation is collapsed, when the page reloads, then it is still collapsed (`altivane.navCollapsed` = `true`). Negative: a stored value other than `true` or `false` renders the navigation expanded. | FR-001 |
-| AC-003 | `tokens.css` defines every DD-003 and DD-004 token for `[data-theme="light"]` and `[data-theme="dark"]`. A unit test parses the file and computes contrast for the listed text/surface pairs (≥ 4.5:1) and non-text pairs (≥ 3:1) in both themes. A theme choice sets `data-theme` and persists. Negative: a stored theme `purple` is treated as `system`; a CSS file other than `tokens.css` containing a colour literal fails the token test. | FR-002, NFR-006, NFR-008 |
+| AC-003 | A unit test imports `altivaneLightTheme` and `altivaneDarkTheme`, checks every DD-003 colour override, and computes contrast for `colorNeutralForeground1`, `colorNeutralForeground2` and `colorBrandForeground1` on `colorNeutralBackground1` (≥ 4.5:1) and `colorBrandBackground` on `colorNeutralBackground1` (≥ 3:1) in both themes. A theme choice sets `data-theme` and persists. Negative: a stored theme `purple` is treated as `system`; a file other than `altivaneTheme.ts` containing a colour literal fails the NFR-006 test. | FR-002, NFR-006, NFR-008 |
 | AC-004 | Given the presenter is signed in, when they choose "Switch role → Finance reviewer" (user menu) or "View as" on the demo page, then `POST /api/auth/switch-user` is called with the anti-forgery header and the app shows `/work` for the finance reviewer, without the passcode page. Negative: when the endpoint answers 403, the role is unchanged and the FR-015 permission message is shown. | FR-003, FR-014 |
 | AC-005 | Given no session, the sign-in page shows the passcode step and then one card per fixture persona, with display name, role and job line. The card matching `altivane.lastUserId` is preselected. Negative: after sign-in, `localStorage` contains no key whose value equals the passcode. | FR-004, NFR-004 |
 | AC-006 | `returnTo` contract (unit test over the validation function and one sign-in flow): `/cases/cp-case-a/findings` → accepted; `/work?x=1` → accepted; `//evil.example/x` → rejected (role home); `https:` + `//evil.example` → rejected; `/\evil.example` → rejected; `javascript:alert(1)` → rejected; empty → role home. Other inputs are out of scope. | FR-005, NFR-003 |
@@ -305,18 +318,19 @@ No feasibility handoff was consumed.
 | FR-013 | AC-016, AC-017 |
 | FR-014 | AC-004, AC-018 |
 | FR-015 | AC-009, AC-019 |
+| FR-016 | AC-020, AC-021, AC-022 |
 
-Coverage: 15 / 15 = 100%.
+Coverage: 16 / 16 = 100%.
 
 ### FR-to-GOAL Alignment
 
 | FR | Goal |
 |---|---|
-| FR-001, FR-002, FR-015 | GOAL-002 |
+| FR-001, FR-002, FR-015, FR-016 | GOAL-002 |
 | FR-003, FR-014 | GOAL-003 |
 | FR-004 to FR-013 | GOAL-001 |
 
-Coverage: 15 / 15 = 100%.
+Coverage: 16 / 16 = 100%.
 
 ---
 
@@ -326,7 +340,7 @@ Everything above is in the first release. Prerequisites already filed: #631 and 
 
 The suggested delivery order lets independent slices build in parallel; the planner decides the final stories:
 
-1. Tokens and themes (FR-002), the worklist API (FR-011) and the portfolio API (FR-012), all independent.
+1. The nonce CSP and Fluent packages with the theme (FR-016, FR-002), the worklist API (FR-011) and the portfolio API (FR-012), all independent.
 2. The shell, routing and navigation (FR-001, FR-005, FR-006, FR-015), then sign-in (FR-004) and the role switcher (FR-003).
 3. The role workspaces (FR-007, FR-008, FR-009, FR-013, FR-014) and search (FR-010), in parallel.
 
@@ -337,7 +351,7 @@ Out of scope:
 - Aircraft registration and type metadata on cases (cases are labelled by case id).
 - Notifications.
 - Real identity providers.
-- Any change to decision rules, labels, the CSP or the hangar behaviour.
+- Any change to decision rules, labels or the hangar behaviour, and any CSP change beyond FR-016.
 
 ---
 
@@ -366,7 +380,8 @@ Out of scope:
 |---|---|---|---|
 | Rebuilding the UI breaks existing frontend tests that assert old markup | High | Medium | Each story lists the existing tests it updates (repo rule); behaviour assertions are kept |
 | Stories exceed the size limit | Medium | Medium | Split per workspace; API contract tests as separate tests-only stories where needed |
-| A self-authored Fluent look drifts from Fluent 2 | Medium | Low | DD-003 and DD-004 fix the token values; design reviewed on the release walkthrough |
+| A cached `index.html` reuses a nonce | Low | Medium | `Cache-Control: no-store` on document responses (AC-020) |
+| Fluent adds bundle size to first load | Medium | Low | Import components individually; NFR-001 first-paint budget checked on the walkthrough |
 
 ---
 
@@ -394,7 +409,7 @@ None.
 
 ### Handoff Readiness
 
-Research status `Not required`; planning blockers `None`; 15 FR, 10 NFR, 3 CON, 19 AC; FR-to-AC 100%, FR-to-GOAL 100%.
+Research status `Required`, artifact committed; planning blockers `None`; 16 FR, 10 NFR, 3 CON, 22 AC; FR-to-AC 100%, FR-to-GOAL 100%.
 
 ---
 
