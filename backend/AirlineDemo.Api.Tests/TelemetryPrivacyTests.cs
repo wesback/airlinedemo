@@ -336,6 +336,106 @@ public sealed class TelemetryPrivacyTests
         Assert.DoesNotContain("synthetic-analyst-01", string.Join("|", properties.Values));
     }
 
+    [Fact]
+    public async Task Role_switch_success_event_is_redacted()
+    {
+        var logger = new CapturingLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Demo:Passcode"] = AppPasscode,
+            }));
+            builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
+        });
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        using var signIn = await client.PostAsJsonAsync("/api/auth/sign-in", new { userId = "presenter", passcode = AppPasscode }, ct);
+        var oldCookie = signIn.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var oldSessionId = oldCookie.Split('=', 2)[1];
+        var csrf = (await signIn.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("csrfToken").GetString()!;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user")
+        { Content = JsonContent.Create(new { userId = "exec-1" }) };
+        request.Headers.Add("Cookie", oldCookie);
+        request.Headers.Add("X-CSRF-Token", csrf);
+        using var response = await client.SendAsync(request, ct);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var newCookie = response.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var newSessionId = newCookie.Split('=', 2)[1];
+
+        var properties = Assert.Single(logger.States.Select(ToProperties)
+            .Where(p => p.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.RoleSwitch));
+        Assert.Equal("role-switch", properties["action"]);
+        Assert.Equal("success", properties["event.outcome"]);
+        Assert.Equal("executive", properties["fixture.role"]);
+        Assert.Matches("^actor-[0-9a-f]{16}$", properties["enduser.pseudo.id"]!);
+        Assert.Matches("^trace-[0-9a-f]{16}$", properties["trace.id"]!);
+        var payload = string.Join("|", properties.Values);
+        Assert.DoesNotContain(oldSessionId, payload);
+        Assert.DoesNotContain(newSessionId, payload);
+        Assert.DoesNotContain(oldCookie, payload);
+        Assert.DoesNotContain(csrf, payload);
+    }
+
+    [Fact]
+    public async Task Role_switch_rejection_events_carry_the_exact_outcome()
+    {
+        var logger = new CapturingLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+            builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
+        });
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+
+        using var unauthenticated = await client.PostAsJsonAsync("/api/auth/switch-user", new { userId = "exec-1" }, ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+        Assert.Equal("{\"error\":\"Not signed in.\"}", await unauthenticated.Content.ReadAsStringAsync(ct));
+
+        using var signIn = await client.PostAsJsonAsync("/api/auth/sign-in", new { userId = "presenter", passcode = AppPasscode }, ct);
+        var cookie = signIn.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var csrf = (await signIn.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("csrfToken").GetString()!;
+
+        foreach (var scenario in new[] { "no-token", "wrong-token", "unknown-user", "empty-user" })
+        {
+            object body = scenario == "unknown-user" ? new { userId = "nobody" }
+                : scenario == "empty-user" ? new { userId = "" } : new { userId = "exec-1" };
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user")
+            { Content = JsonContent.Create(body) };
+            request.Headers.Add("Cookie", cookie);
+            if (scenario != "no-token") request.Headers.Add("X-CSRF-Token", scenario == "wrong-token" ? "wrong-token" : csrf);
+            using var response = await client.SendAsync(request, ct);
+            var expectedStatus = scenario.Contains("token") ? HttpStatusCode.Forbidden : HttpStatusCode.BadRequest;
+            Assert.Equal(expectedStatus, response.StatusCode);
+            if (scenario.Contains("token")) Assert.Equal("{\"error\":\"Anti-forgery validation failed.\"}", await response.Content.ReadAsStringAsync(ct));
+            else Assert.Equal("{\"error\":\"Unknown user.\"}", await response.Content.ReadAsStringAsync(ct));
+        }
+
+        var events = logger.States.Select(ToProperties).Where(p => p.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.RoleSwitch).ToList();
+        Assert.Equal(5, events.Count);
+        Assert.Equal(new[] { "unauthorized", "anti_forgery_failed", "anti_forgery_failed", "unknown_user", "unknown_user" }, events.Select(p => p["event.outcome"]!).ToArray());
+        Assert.Equal("unknown", events[0]["fixture.role"]);
+        Assert.All(events.Skip(1), p => Assert.Equal("presenter", p["fixture.role"]));
+    }
+
+    [Fact]
+    public void Role_switch_events_are_redacted()
+    {
+        var logger = new CapturingLogger();
+        TelemetryRedaction.EmitRoleSwitchEvent(logger, "success", "executive", "session-secret-123", "1.2.3", "demo");
+        var properties = Assert.Single(logger.States.Select(ToProperties));
+        var redacted = TelemetryRedaction.Redact(new KeyValuePair<string, object?>[]
+        {
+            new("passcode", AppPasscode), new("cookie", "__Host-demo-session=secret"), new("token", "csrf-secret"),
+            new("document.text", "item text"), new("prompt", "notice draft"), new("outside.allowlist", "canary"),
+        });
+        Assert.Empty(redacted);
+        var payload = string.Join("|", properties.Values.Concat(redacted.Values));
+        foreach (var secret in new[] { AppPasscode, "session-secret-123", "csrf-secret", "item text", "notice draft", "canary" }) Assert.DoesNotContain(secret, payload);
+    }
+
     [Theory]
     [InlineData(TelemetryRedaction.SecurityEvents.AuthScopeFailure)]
     [InlineData(TelemetryRedaction.SecurityEvents.IntegritySignatureFailure)]

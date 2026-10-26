@@ -86,19 +86,35 @@ public static class DemoAuthEndpoints
         return Results.Ok(SessionView(session));
     }
 
-    private static IResult SwitchUser(SwitchUserRequest request, HttpContext http, DemoSessionStore sessions)
+    private static IResult SwitchUser(SwitchUserRequest request, HttpContext http, IConfiguration config, DemoSessionStore sessions, ILogger<DemoSessionStore> logger)
     {
         var oldSession = CurrentSession(http, sessions);
-        if (oldSession is null) return Unauthenticated();
-        if (!HasValidAntiForgery(http, oldSession)) return AntiForgeryFailed();
+        if (oldSession is null)
+        {
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "unauthorized", "unknown", null,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return Unauthenticated();
+        }
+        if (!HasValidAntiForgery(http, oldSession))
+        {
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "anti_forgery_failed", oldSession.User.Role, oldSession.Id,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return AntiForgeryFailed();
+        }
 
         var user = DemoFixture.Find(request.UserId);
         if (user is null)
+        {
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "unknown_user", oldSession.User.Role, oldSession.Id,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
             return Results.Json(new { error = "Unknown user." }, statusCode: StatusCodes.Status400BadRequest);
+        }
 
         sessions.Remove(oldSession.Id);
         var newSession = sessions.Create(user);
         http.Response.Cookies.Append(CookieName, newSession.Id, SessionCookie);
+        TelemetryRedaction.EmitRoleSwitchEvent(logger, "success", user.Role, newSession.Id,
+            TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
         return Results.Ok(SessionView(newSession));
     }
 
