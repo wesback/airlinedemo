@@ -53,7 +53,7 @@ scripts/deploy.sh --presenter-cidrs 84.196.152.13/32 \
 The first run creates the platform only: the network, registry, Key Vault, data services, model gateway and identities, but no Container App, because the image must be pushed into this deployment's private registry first. At the end it prints the next steps:
 
 1. Store the demo passcode in the vault (`az keyvault secret set --vault-name kv-<prefix>-<suffix> --name demo-passcode ...`) and, with `--build-runner`, the GitHub runner token as `github-runner-token`.
-2. Run the build and release workflows on the `private-acr` runner to push and sign the first image.
+2. Run the build workflow on the `private-acr` runner to push the first image, then run the protected release workflow with `bootstrap_only=true` to sign and verify it without updating the not-yet-created Container App. Product-owner approval and every provenance and signature check still apply.
 3. Run the same command again with `--image-digest sha256:<64 hex> --passcode-secret-uri https://kv-<prefix>-<suffix>.vault.azure.net/secrets/demo-passcode` to create the Container App.
 
 Give both options or neither. After the app exists, the release workflow deploys each new signed digest (`az containerapp update`), and Terraform ignores the running image so a later apply does not roll it back.
