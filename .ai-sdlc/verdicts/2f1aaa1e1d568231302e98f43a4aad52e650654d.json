@@ -1,0 +1,241 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 647,
+  "branch": "ai-sdlc/issue-647",
+  "commitSha": "2f1aaa1e1d568231302e98f43a4aad52e650654d",
+  "round": 1,
+  "pipelineVersion": "e89363e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix now exercises AltivaneRoot and scans source files for color literals, but the named tests still leave the selected Fluent theme and Fluent-token usage unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneTheme.test.tsx",
+          "line": 61,
+          "message": "The named test still does not verify that AltivaneRoot selects the expected Fluent theme for each choice.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "FluentProvider_theme_selection_contract renders AltivaneRoot and checks data-theme and localStorage, but the className assertion only checks that useThemeClassName returns a nonempty value.",
+            "failureScenario": "If AltivaneRoot always passes the light theme while setting data-theme to dark for a stored dark choice, the test still passes without verifying the selected Fluent theme."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 65,
+          "message": "The named audit still does not verify that UI spacing, radii, elevation, font, and motion use Fluent tokens.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract scans for color literals, then only checks that at least one source file imports Fluent components.",
+            "failureScenario": "Adding a UI style with a hard-coded spacing, radius, elevation, font, or motion value leaves the import check satisfied and the color-literal scan unchanged, so the test passes despite violating the Fluent-token requirement."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The root is now exercised for theme and nonce behavior, but the theme test cannot detect selection of the wrong Fluent theme. The NFR-006 audit still checks color literals without checking the required Fluent token usage.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneTheme.test.tsx",
+          "line": 60,
+          "message": "The theme selection test still does not verify the selected Fluent theme. Assert a theme-specific value or class for each expected theme.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "FluentProvider_theme_selection_contract renders AltivaneRoot and checks data-theme and persisted choice, but its only probe assertion is that the theme class is nonempty.",
+            "failureScenario": "If AltivaneRoot always passes the light theme to FluentProvider while setting data-theme to dark, the dark cases still pass; the test never distinguishes which Fluent theme was selected."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 71,
+          "message": "The NFR-006 test still does not verify that UI spacing, radii, elevation, font, and motion use Fluent tokens.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract scans source for color literals and only checks that at least one source file imports Fluent components; it does not inspect spacing, radii, elevation, font, or motion values.",
+            "failureScenario": "Adding a styled component with hard-coded spacing or motion values leaves the literal scan clean and the Fluent import check satisfied, so the test passes despite violating NFR-006."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two changes migrate hangar colors into shared theme data and strengthen regression tests. I found no concrete security vulnerability reachable in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AltivaneRenderer.test.tsx",
+      "frontend/tests/AltivaneTheme.test.tsx",
+      "frontend/tests/DependencyAudit.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
