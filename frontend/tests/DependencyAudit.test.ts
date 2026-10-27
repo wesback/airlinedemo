@@ -80,10 +80,29 @@ describe('dependency audit versions', () => {
       tokens.fontFamilyBase,
       tokens.durationNormal,
     ]);
-    const uiNumericStyle = /(padding|margin|gap|border-radius|box-shadow|font-size|line-height|transition|animation)\s*[:=]\s*["'`]?\d+(?:px|rem|em|ms|s)?/i;
+    const uiProperty = '(?:padding(?:Top|Right|Bottom|Left|Inline|Block)?|margin(?:Top|Right|Bottom|Left|Inline|Block)?|gap|borderRadius(?:TopLeft|TopRight|BottomRight|BottomLeft)?|border-radius(?:-(?:top-left|top-right|bottom-right|bottom-left))?|boxShadow|box-shadow|fontSize|font-size|fontFamily|font-family|lineHeight|line-height|transition(?:Property|Duration|TimingFunction|Delay)?|transition-(?:property|duration|timing-function|delay)|animation(?:Name|Duration|TimingFunction|Delay|IterationCount)?|animation-(?:name|duration|timing-function|delay|iteration-count))';
     const forbiddenUiStyles = Object.entries(sourceFiles).flatMap(([file, source]) => {
-      if (!file.endsWith('.tsx') && !file.endsWith('.css')) return [];
-      return source.split('\n').flatMap((line: string, index: number) => uiNumericStyle.test(line) ? [`${file}:${index + 1}:${line.trim()}`] : []);
+      if (!file.endsWith('.tsx') && !file.endsWith('.ts') && !file.endsWith('.css')) return [];
+      const numericDeclarations = new Map<string, string>();
+      const declarationPattern = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:([+-]?\d+(?:\.\d+)?)|(["'`]\s*\d+(?:\.\d+)?(?:px|rem|em|%|ms|s)?\s*["'`]))/g;
+      for (const match of source.matchAll(declarationPattern)) {
+        numericDeclarations.set(match[1], match[2] ?? match[3] ?? '');
+      }
+
+      return source.split('\n').flatMap((line: string, index: number) => {
+        const propertyPattern = new RegExp(`(?:["'']?${uiProperty}["'']?)\\s*[:=]\\s*([^,;}\\n]+)`, 'gi');
+        const violations: string[] = [];
+        for (const match of line.matchAll(propertyPattern)) {
+          const value = match[1].trim().replace(/["'`]/g, '');
+          const isNumericLiteral = /^[+-]?\d+(?:\.\d+)?(?:px|rem|em|%|ms|s)?$/.test(value);
+          const isNumericVariable = numericDeclarations.has(value);
+          const isFluentToken = value.includes('tokens.') || value.includes('altivaneUiTokens.');
+          if ((isNumericLiteral || isNumericVariable) && !isFluentToken) {
+            violations.push(`${file}:${index + 1}:${line.trim()}`);
+          }
+        }
+        return violations;
+      });
     });
     expect(forbiddenUiStyles).toEqual([]);
   });
