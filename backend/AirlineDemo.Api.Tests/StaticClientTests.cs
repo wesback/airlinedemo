@@ -25,6 +25,7 @@ public sealed class StaticClientTests : IDisposable
         Directory.CreateDirectory(Path.Combine(wwwroot, "assets"));
         File.WriteAllText(Path.Combine(wwwroot, "index.html"), "<!doctype html><meta name=\"csp-nonce\" content=\"__CSP_NONCE__\"><title>reviewer</title><div id=\"root\"></div>");
         File.WriteAllText(Path.Combine(wwwroot, "assets", "app-3f9c1a.js"), "console.log('client');");
+        File.WriteAllText(Path.Combine(wwwroot, "assets", "manifest"), "extensionless-asset-body");
     }
 
     public void Dispose()
@@ -104,7 +105,7 @@ public sealed class StaticClientTests : IDisposable
 
             Assert.Equal(TransportSecurity.ContentSecurityPolicy, response.Headers.GetValues("Content-Security-Policy").Single());
             Assert.DoesNotContain("nonce-", response.Headers.GetValues("Content-Security-Policy").Single());
-            Assert.DoesNotContain("__CSP_NONCE__", await response.Content.ReadAsStringAsync());
+            Assert.Equal(html, await response.Content.ReadAsStringAsync());
         }
 
         File.Delete(Path.Combine(wwwroot, "index.html"));
@@ -125,6 +126,8 @@ public sealed class StaticClientTests : IDisposable
         var html = await response.Content.ReadAsStringAsync();
         Assert.Contains("<title>reviewer</title>", html);
         Assert.Matches("<meta\\b[^>]*name=[\"']csp-nonce[\"'][^>]*content=[\"'][A-Za-z0-9+/]{22}==[\"'][^>]*>", html);
+        var nonce = Regex.Match(html, "<meta\\b[^>]*name=[\"']csp-nonce[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>", RegexOptions.IgnoreCase).Groups[1].Value;
+        Assert.Equal(TransportSecurity.CreateDocumentContentSecurityPolicy(nonce), response.Headers.GetValues("Content-Security-Policy").Single());
     }
 
     [Fact]
@@ -161,11 +164,16 @@ public sealed class StaticClientTests : IDisposable
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        foreach (var path in new[] { "/assets/app-3f9c1a.js", "/api/does-not-exist" })
+        foreach (var path in new[] { "/assets/app-3f9c1a.js", "/assets/manifest", "/api/health", "/api/does-not-exist" })
         {
             using var response = await client.GetAsync(path);
 
             AssertSecurityHeaders(response);
+            if (path == "/assets/manifest")
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal("extensionless-asset-body", await response.Content.ReadAsStringAsync());
+            }
         }
 
         foreach (var path in new[] { "/", "/index.html", "/cases/42/review" })

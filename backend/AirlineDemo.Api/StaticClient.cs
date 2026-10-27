@@ -20,10 +20,24 @@ public static class StaticClient
         app.Use(async (context, next) =>
         {
             var path = context.Request.Path.Value ?? "";
+            var relativeStaticPath = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+            var assetPath = string.IsNullOrEmpty(app.Environment.WebRootPath)
+                ? null
+                : Path.Combine(app.Environment.WebRootPath, relativeStaticPath);
+            var isExistingExtensionlessAsset = !path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) &&
+                                              !Path.HasExtension(path) &&
+                                              assetPath is not null && File.Exists(assetPath);
             var isDocument = context.Request.Method == HttpMethods.Get &&
                              (path.Equals("/", StringComparison.OrdinalIgnoreCase) ||
                               path.Equals("/index.html", StringComparison.OrdinalIgnoreCase) ||
-                              (!path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) && !Path.HasExtension(path)));
+                              (!path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) && !Path.HasExtension(path) && !isExistingExtensionlessAsset));
+
+            if (context.Request.Method == HttpMethods.Get && isExistingExtensionlessAsset && assetPath is not null)
+            {
+                context.Response.ContentType = "application/octet-stream";
+                await context.Response.SendFileAsync(assetPath);
+                return;
+            }
 
             if (!isDocument)
             {
@@ -53,7 +67,7 @@ public static class StaticClient
             await context.Response.WriteAsync(html);
         });
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        app.UseStaticFiles(new StaticFileOptions { ServeUnknownFileTypes = true });
         app.MapFallback(async context =>
         {
             if (context.Request.Path.StartsWithSegments("/api"))

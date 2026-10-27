@@ -58,7 +58,7 @@ public static class TransportSecurity
 
     public static string CreateDocumentContentSecurityPolicy(string nonce)
     {
-        return $"default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'nonce-{nonce}'; " +
+        return $"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{nonce}'; " +
                "img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'";
     }
 }
