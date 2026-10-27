@@ -26,6 +26,7 @@ public sealed class StaticClientTests : IDisposable
         File.WriteAllText(Path.Combine(wwwroot, "index.html"), "<!doctype html><meta name=\"csp-nonce\" content=\"__CSP_NONCE__\"><title>reviewer</title><div id=\"root\"></div>");
         File.WriteAllText(Path.Combine(wwwroot, "assets", "app-3f9c1a.js"), "console.log('client');");
         File.WriteAllText(Path.Combine(wwwroot, "assets", "manifest"), "extensionless-asset-body");
+        File.WriteAllText(Path.Combine(_contentRoot, "outside-sentinel"), "outside-root-sentinel");
     }
 
     public void Dispose()
@@ -156,11 +157,12 @@ public sealed class StaticClientTests : IDisposable
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("/%2e%2e/StaticClient.cs", UriKind.Relative));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/..%2foutside-sentinel");
         using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.DoesNotContain("public static class StaticClient", await response.Content.ReadAsStringAsync());
+        Assert.DoesNotContain("outside-root-sentinel", body);
+        Assert.True(response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.NotFound);
     }
 
     [Fact]
