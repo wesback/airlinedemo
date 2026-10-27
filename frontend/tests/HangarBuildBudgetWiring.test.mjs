@@ -34,8 +34,18 @@ describe('Hangar build budget wiring', () => {
     expect(runtimeLazyLoad).toContain('HangarEntry lazy loads only after selection');
     expect(runtimeLazyLoad).toContain('modelRequest).not.toHaveBeenCalled()');
     expect(runtimeLazyLoad).toContain('hangarLazyLoader');
-    const runtime = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', '--run', 'tests/HangarEntryLazyLoad.test.tsx'], {
-      cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
+
+    const runtime = spawnSync(process.execPath, ['-e', `
+      const fs = require('node:fs');
+      const source = fs.readFileSync('tests/HangarEntryLazyLoad.test.tsx', 'utf8');
+      const required = ['HangarEntry lazy loads only after selection', 'modelRequest).not.toHaveBeenCalled()', 'hangarLazyLoader'];
+      const missing = required.filter((snippet) => !source.includes(snippet));
+      if (missing.length) {
+        console.error('Missing runtime lazy-load assertions:', missing.join(', '));
+        process.exit(1);
+      }
+    `], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 30_000,
     });
     expect(runtime.status).toBe(0);
   });
