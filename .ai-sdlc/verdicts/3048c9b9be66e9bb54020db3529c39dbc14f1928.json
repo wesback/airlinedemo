@@ -1,0 +1,265 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 647,
+  "branch": "ai-sdlc/issue-647",
+  "commitSha": "3048c9b9be66e9bb54020db3529c39dbc14f1928",
+  "round": 0,
+  "pipelineVersion": "e89363e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation adds the theme and renderer, but the named tests do not exercise the production root wiring or fully verify the theme and NFR-006 contracts. Each listed failure scenario can pass the current tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneTheme.test.tsx",
+          "line": 26,
+          "message": "The test does not exercise the production root, so it cannot verify the theme selection and root-provider behavior required by this criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "FluentProvider_theme_selection_contract renders a standalone FluentProvider; it never renders AltivaneRoot from main.tsx.",
+            "failureScenario": "If AltivaneRoot stops applying the stored choice, setting data-theme, or wrapping the app with exactly one provider, this test still passes because it sets those storage and document values itself."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneRenderer.test.tsx",
+          "line": 17,
+          "message": "The renderer tests do not cover the production root wiring. They cannot prove that the root reads the document nonce and applies it to the signed-in app’s Griffel styles.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "signed_in_shell_marks_every_griffel_style constructs a renderer directly with a hard-coded nonce and renders its own providers; it never calls AltivaneRoot or getRendererAttributes.",
+            "failureScenario": "If AltivaneRoot ignores the nonce meta or omits the RendererProvider, this test still passes because its locally created renderer supplies the nonce."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneTheme.test.tsx",
+          "line": 7,
+          "message": "The theme contract test does not assert every colour override required by the criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Altivane_theme_contract asserts only a subset of the theme overrides in altivaneTheme.ts.",
+            "failureScenario": "Changing colorBrandBackgroundHover, colorBrandBackgroundPressed, colorNeutralStroke1, or other unasserted overrides leaves this test passing, despite the criterion requiring every DD-003 colour override."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 43,
+          "message": "This test does not verify the NFR-006 source colour-literal or Fluent-token contract.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract checks only manifest dependency names; it does not inspect files under frontend/src or styled component values.",
+            "failureScenario": "Adding a hex colour literal outside altivaneTheme.ts, or hard-coded spacing or motion values in a styled component, does not change the manifest and the test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The dependency pin test checks its stated package versions, but several behavior criteria are represented by tests that bypass the app-root wiring or do not inspect the behavior they name. Those criteria can regress while the new tests still pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneTheme.test.tsx",
+          "line": 27,
+          "message": "The test does not exercise the app-root theme selection required by the acceptance criterion. Render AltivaneRoot and assert its resolved theme, data-theme, and stored choice.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test renders FluentProvider directly and sets data-theme and localStorage itself; it never renders AltivaneRoot from main.tsx.",
+            "failureScenario": "If AltivaneRoot stops resolving the selected theme, writing data-theme, or persisting only valid choices, this test still passes because it supplies the provider and stored values directly."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneRenderer.test.tsx",
+          "line": 20,
+          "message": "The test does not prove that styles produced through the signed-in app root receive the document nonce, as required by the acceptance criterion.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The style test creates its own renderer with a hard-coded nonce and renders its own RendererProvider and FluentProvider; it does not use the renderer or root wiring in main.tsx.",
+            "failureScenario": "If the app root omits the nonce, fails to pass it to the renderer, or stops wrapping the signed-in app in RendererProvider, this test still passes using its independently configured renderer."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 44,
+          "message": "The named test does not cover the NFR-006 colour-literal and Fluent-token contract.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract only filters manifest dependency names; it does not inspect frontend/src files or styling values.",
+            "failureScenario": "Adding a new hex, rgb(), or hsl() colour literal outside altivaneTheme.ts, or adding raw spacing or font values instead of Fluent tokens, leaves the dependency list unchanged and the test passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is reachable in the changed code. The renderer accepts only the specified nonce shape and passes it to the root Griffel renderer.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AltivaneRenderer.test.tsx",
+      "frontend/tests/AltivaneTheme.test.tsx",
+      "frontend/tests/DependencyAudit.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
