@@ -1,0 +1,259 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 647,
+  "branch": "ai-sdlc/issue-647",
+  "commitSha": "365c6fd68dc2e92ea41f9a6c91118967018a3107",
+  "round": 0,
+  "pipelineVersion": "e89363e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The nonce helper and dependency pin tests cover their stated cases. The root theme, root nonce wiring, and NFR-006 styling requirements can regress while the corresponding named tests still pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneTheme.test.tsx",
+          "line": 26,
+          "message": "The test does not cover the production AltivaneRoot behavior required by the theme selection criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "FluentProvider_theme_selection_contract renders FluentProvider directly and sets the document theme and localStorage itself; it never renders AltivaneRoot.",
+            "failureScenario": "If AltivaneRoot stops resolving the stored choice, setting data-theme, or persisting the resolved choice, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneRenderer.test.tsx",
+          "line": 17,
+          "message": "The renderer test does not exercise the production root wiring required by the nonce style criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "signed_in_shell_marks_every_griffel_style creates its own renderer with a hard-coded nonce and renders its own providers; it never renders AltivaneRoot.",
+            "failureScenario": "If AltivaneRoot omits the RendererProvider or fails to apply the document nonce, this test still passes using its independently configured renderer."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 43,
+          "message": "The named test does not verify the NFR-006 color-literal and Fluent-token criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract only inspects manifest dependency names and does not inspect frontend/src files or style values.",
+            "failureScenario": "Adding a hex, rgb(), or hsl() color literal outside altivaneTheme.ts, or using raw spacing, radii, elevation, font, or motion values, leaves the manifest unchanged and the test passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The dependency pin test checks the requested package versions and dependency list. The app-root theme, nonce renderer, and source color/token contracts can regress while their named tests still pass.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneTheme.test.tsx",
+          "line": 27,
+          "message": "The named test does not cover the production AltivaneRoot behavior required by the theme selection criterion.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "FluentProvider_theme_selection_contract renders FluentProvider directly and sets localStorage and document.documentElement.dataset.theme itself; it does not render the exported AltivaneRoot.",
+            "failureScenario": "If AltivaneRoot ignores the stored choice, resolves the wrong theme, or fails to persist the resolved choice, this test still passes because it supplies the provider and state itself."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/AltivaneRenderer.test.tsx",
+          "line": 17,
+          "message": "The named style test bypasses AltivaneRoot, so it does not verify that the production root applies the document nonce to every emitted style.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "signed_in_shell_marks_every_griffel_style creates a renderer with a hard-coded nonce and renders its own RendererProvider and FluentProvider; it does not render AltivaneRoot.",
+            "failureScenario": "If AltivaneRoot fails to read the document nonce or omits the renderer provider, this test still passes using its independently configured renderer."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 43,
+          "message": "The named audit does not test the NFR-006 color-literal and Fluent-token criterion, including the required hangar color migration.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract inspects only manifest dependency names and does not inspect frontend/src files or style values.",
+            "failureScenario": "Adding a hex, rgb(), or hsl() color literal under frontend/src outside altivaneTheme.ts, or using raw spacing or motion values, leaves the manifest unchanged and the test passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is reachable in the changed code. Theme choices are restricted to fixed values, and the nonce is read from the document and passed to the Griffel renderer.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AltivaneRenderer.test.tsx",
+      "frontend/tests/AltivaneTheme.test.tsx",
+      "frontend/tests/DependencyAudit.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
