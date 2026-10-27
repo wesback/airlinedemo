@@ -15,6 +15,7 @@ export type WorkspaceRegionProps = {
   error?: WorkspaceRegionError | Error | number | null;
   emptyMessage?: string;
   loadingMessage?: string;
+  currentPath?: string | null;
   onRetry?: () => void;
   children?: ReactNode;
 };
@@ -49,6 +50,7 @@ export default function WorkspaceRegion({
   error,
   emptyMessage = 'No data is available for this workspace.',
   loadingMessage = 'Loading…',
+  currentPath,
   onRetry,
   children,
 }: WorkspaceRegionProps) {
@@ -59,9 +61,9 @@ export default function WorkspaceRegion({
 
   useEffect(() => {
     if (statusCode === 401 && typeof window !== 'undefined') {
-      window.location.assign(buildReturnToPath(`${window.location.pathname}${window.location.search}${window.location.hash}`));
+      window.location.assign(buildReturnToPath(currentPath ?? `${window.location.pathname}${window.location.search}${window.location.hash}`));
     }
-  }, [statusCode]);
+  }, [statusCode, currentPath]);
 
   if (effectiveStatus === 'loading' || loading) {
     return <div role="status" aria-live="polite" data-testid="workspace-region-loading">{loadingMessage}</div>;

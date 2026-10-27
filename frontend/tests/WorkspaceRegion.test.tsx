@@ -20,9 +20,18 @@ describe('workspace region contract', () => {
 
   it('retry_reloads_region_once_per_click', () => {
     const onRetry = vi.fn();
-    const { getAllByRole } = render(<WorkspaceRegion status="unavailable" error={{ status: 503, message: 'Service temporarily unavailable' }} onRetry={onRetry} />);
+    const { rerender, getAllByRole } = render(
+      <WorkspaceRegion status="unavailable" error={{ status: 503, message: 'Service temporarily unavailable' }} onRetry={onRetry} />,
+    );
     fireEvent.click(getAllByRole('button', { name: 'Retry' })[0]);
     expect(onRetry).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <WorkspaceRegion status="ready" error={null}>
+        <div>Recovered region data</div>
+      </WorkspaceRegion>,
+    );
+    expect(screen.getByText('Recovered region data')).toBeTruthy();
   });
 
   it('returnTo_and_error_text_contracts_are_exact', () => {

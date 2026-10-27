@@ -330,7 +330,7 @@ describe('reviewer workspace', () => {
 
   it('AC_019_mixed_region_error_contract', async () => {
     const scenarios = [
-      { status: 401, expectedText: 'Signing in…' },
+      { status: 401, expectedText: 'Signing in…', expectedHref: '/sign-in?returnTo=%2Fcases%2Fcase-001' },
       { status: 403, expectedText: 'You do not have permission for this action.' },
       { status: 404, expectedText: 'Case not found or not in your scope.' },
       { status: 503, expectedText: 'Service temporarily unavailable Retry' },
@@ -356,9 +356,9 @@ describe('reviewer workspace', () => {
       if (scenario.status === 503) {
         expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
       }
-
-      vi.unstubAllGlobals();
     }
+
+    vi.unstubAllGlobals();
   });
 
   it('AC_019_mixed_region_isolation', async () => {
@@ -384,6 +384,8 @@ describe('reviewer workspace', () => {
     expect(alert.textContent).not.toContain('csrf');
     expect(alert.textContent).not.toContain('item-42');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByText('Signed in as Ada Reviewer.')).toBeTruthy();
+    expect(screen.getByText('Case case-001')).toBeTruthy();
   });
 
   it('reports an unavailable API without claiming it is connected', async () => {

@@ -569,7 +569,12 @@ export default function App({
             </>
           )}
           {loadingCase && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
-          {caseError && <WorkspaceRegion status={caseError.includes('permission') ? 'permission' : caseError.includes('Case not found') ? 'missing' : caseError.includes('temporarily unavailable') ? 'unavailable' : caseError.includes('Sign in again') ? 'permission' : 'error'} error={caseError.includes('temporarily unavailable') ? { status: 503, message: 'Service temporarily unavailable' } : caseError.includes('permission') ? { status: 403, message: 'You do not have permission for this action.' } : caseError.includes('Case not found') ? { status: 404, message: 'Case not found or not in your scope.' } : caseError.includes('Sign in again') ? { status: 401, message: 'Sign in again to continue.' } : { status: 500, message: caseError }} onRetry={() => setRefresh((value) => value + 1)} />}
+          {caseError && <WorkspaceRegion
+            status={caseError.includes('permission') ? 'permission' : caseError.includes('Case not found') ? 'missing' : caseError.includes('temporarily unavailable') ? 'unavailable' : caseError.includes('Sign in again') ? 'permission' : 'error'}
+            error={caseError.includes('temporarily unavailable') ? { status: 503, message: 'Service temporarily unavailable' } : caseError.includes('permission') ? { status: 403, message: 'You do not have permission for this action.' } : caseError.includes('Case not found') ? { status: 404, message: 'Case not found or not in your scope.' } : caseError.includes('Sign in again') ? { status: 401, message: 'Sign in again to continue.' } : { status: 500, message: caseError }}
+            currentPath={selectedCaseId ? `/cases/${encodeURIComponent(selectedCaseId)}` : undefined}
+            onRetry={() => setRefresh((value) => value + 1)}
+          />}
           {data && (
             <>
               <p>Revision: {data.caseState.revision}</p>
