@@ -1,0 +1,255 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 646,
+  "branch": "ai-sdlc/issue-646",
+  "commitSha": "40ff4a91e72c278153754ca89a606434202489a0",
+  "round": 0,
+  "pipelineVersion": "e89363e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation includes path containment checks, but the traversal regression test does not verify them against an existing outside-root file. This leaves the stated traversal protection without an effective regression test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/StaticClientTests.cs",
+          "line": 153,
+          "message": "The traversal test does not exercise the acceptance criterion. Create `_contentRoot/outside-sentinel` with body `outside-root-sentinel`, send `GET /..%2foutside-sentinel` with request construction that preserves the encoded target, and assert the response body does not contain that sentinel.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Extensionless_asset_path_cannot_traverse_outside_wwwroot sends a request for /%2e%2e/StaticClient.cs, but does not create the required outside-root sentinel or verify that the encoded target reaches the server unchanged.",
+            "failureScenario": "If the path containment check is removed, this request can still return 404 because the test has no file at its traversal target or the request is normalized. The test passes even if a traversal request can serve an existing file outside wwwroot."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The nonce, CSP, fallback, and static-response tests correspond to the listed criteria. The traversal test does not fail when the containment protection is broken because it omits the outside-root sentinel and targets a different path.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/StaticClientTests.cs",
+          "line": 153,
+          "message": "The traversal test does not exercise the acceptance criterion’s existing-file scenario. Create `_contentRoot/outside-sentinel`, send `GET /..%2foutside-sentinel` with request construction that preserves the encoded target, and assert the response does not contain `outside-root-sentinel`.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Extensionless_asset_path_cannot_traverse_outside_wwwroot requests /%2e%2e/StaticClient.cs but does not create the required outside-root sentinel. Without the containment check, that target still has no file to serve.",
+            "failureScenario": "If path containment is removed, the test can still receive 404 because its target file is absent, so it passes even though a traversal request could disclose an existing file outside wwwroot. The OWASP A01:2025 path traversal criterion is not proven."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed code generates a fresh cryptographic nonce for document responses and checks canonical paths and resolved symlinks before serving extensionless assets. I found no concrete, reachable security vulnerability in the diff.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/StaticClientTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 118,
+      "total": 132,
+      "percent": 89.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Security/TransportSecurity.cs",
+          "covered": 8,
+          "total": 8,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/StaticClient.cs",
+          "covered": 110,
+          "total": 124,
+          "missed": [
+            83,
+            84,
+            85,
+            86,
+            89,
+            101,
+            102,
+            113,
+            114,
+            126,
+            127,
+            137,
+            138,
+            139
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

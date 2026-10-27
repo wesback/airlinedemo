@@ -1,0 +1,253 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 646,
+  "branch": "ai-sdlc/issue-646",
+  "commitSha": "78e9e947d6e498dc450ed4cbae5b55fb02c9d6e8",
+  "round": 1,
+  "pipelineVersion": "fdef8fa",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous CSP mismatch is fixed, and the extensionless asset fixture is now served as expected. The new direct file lookup introduces a reachable path traversal that can disclose files outside wwwroot.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/StaticClient.cs",
+          "line": 23,
+          "message": "The extensionless asset lookup can serve files outside wwwroot. Canonicalize the candidate path and reject it unless it remains under the web root.",
+          "confidence": 0.88,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The middleware combines the request path with WebRootPath without checking that the resolved file stays inside wwwroot, then sends it when File.Exists succeeds.",
+            "failureScenario": "A GET to an extensionless traversal path such as /%2e%2e/%2e%2e/etc/passwd can resolve outside wwwroot; if the file exists, the middleware returns its contents. This is an OWASP A01:2025 Broken Access Control path traversal."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix addresses the prior CSP implementation mismatch and extensionless asset interception, but the CSP regression remains unguarded by an independent test. The new asset path lookup also permits traversal outside the web root.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/StaticClient.cs",
+          "line": 23,
+          "message": "The extensionless asset lookup allows paths outside wwwroot. Canonicalize and constrain the resolved path to the web root before checking or sending the file.",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The middleware builds assetPath from the request path, checks whether that path exists, then sends the file without verifying that the resolved path remains under WebRootPath.",
+            "failureScenario": "A raw GET request for an extensionless traversal path such as /../../etc/passwd can resolve to an existing file outside wwwroot and return its contents. This is an OWASP A01:2025 Broken Access Control path traversal."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/StaticClientTests.cs",
+          "line": 82,
+          "message": "The named nonce contract test still does not independently assert the required exact document CSP. Assert the literal policy with that response's nonce so the test fails if the helper adds a script nonce or changes another directive.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "document_response_nonce_contract compares the response CSP with CreateDocumentContentSecurityPolicy(nonce), so both the implementation and expected value come from the same helper.",
+            "failureScenario": "If the helper adds a nonce to script-src, the test derives that same incorrect CSP and still passes, despite the criterion requiring exactly script-src 'self'."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 1,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two changes fix the previously reported CSP mismatch and extensionless asset interception. The new asset path check enables a reachable path traversal that can expose files outside wwwroot.",
+      "findingList": [
+        {
+          "severity": "critical",
+          "file": "backend/AirlineDemo.Api/StaticClient.cs",
+          "line": 26,
+          "message": "An unauthenticated caller can traverse out of wwwroot and read server files. Resolve the path and reject it unless it remains within the web root (OWASP A01:2025 Broken Access Control).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The middleware combines the web root with the request path without canonicalizing it or checking that the result remains inside the web root. For extensionless paths, it then serves any existing file at that combined path.",
+            "failureScenario": "A remote caller sends a GET for an extensionless path containing enough `../` segments to reach a readable server file, such as an application configuration file. File.Exists succeeds and the middleware returns that file through SendFileAsync."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/StaticClientTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 81,
+      "total": 86,
+      "percent": 94.2,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Security/TransportSecurity.cs",
+          "covered": 8,
+          "total": 8,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/StaticClient.cs",
+          "covered": 73,
+          "total": 78,
+          "missed": [
+            80,
+            81,
+            82,
+            83,
+            86
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

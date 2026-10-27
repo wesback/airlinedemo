@@ -1,0 +1,242 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 646,
+  "branch": "ai-sdlc/issue-646",
+  "commitSha": "8355fae63fdcdf8ed7547bb8c55d953cb913f26d",
+  "round": 0,
+  "pipelineVersion": "fdef8fa",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The document CSP adds a script nonce that the acceptance criteria exclude, and the document middleware intercepts existing extensionless static assets. The current tests do not catch either defect.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Security/TransportSecurity.cs",
+          "line": 61,
+          "message": "The document CSP does not match the required policy: remove the nonce from script-src. The current test derives its expected CSP from this same helper, so it does not catch the mismatch.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "CreateDocumentContentSecurityPolicy adds the generated nonce to both script-src and style-src.",
+            "failureScenario": "For a document with nonce N, the response CSP contains `script-src 'self' 'nonce-N'`; the acceptance criterion requires exactly `script-src 'self'`."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/StaticClient.cs",
+          "line": 19,
+          "message": "Existing extensionless static assets are intercepted as SPA documents, violating the requirement that they reach their normal handlers and retain the base CSP.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The middleware treats every GET path without an extension, except paths beginning with `/api`, as a document before static-file middleware runs. It does not check whether the requested path is an existing static asset.",
+            "failureScenario": "When `wwwroot/assets/manifest` exists, GET `/assets/manifest` returns index.html with document headers instead of the asset with the base CSP. The test fixture does not create or assert the extensionless asset required by the criterion."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The document middleware returns index.html for existing extensionless assets, and the generated document CSP does not match the exact policy in the acceptance criteria. The named tests do not catch either mismatch.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/StaticClient.cs",
+          "line": 19,
+          "message": "The document path check intercepts existing extensionless static assets, violating the acceptance criterion that they pass through to their normal handlers.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The middleware treats every GET path without an extension outside /api as a document and returns index.html before static-file handling.",
+            "failureScenario": "With an extensionless static asset at /assets/manifest, GET /assets/manifest returns the HTML document with document headers instead of the asset and its existing CSP."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Security/TransportSecurity.cs",
+          "line": 59,
+          "message": "The document CSP adds a nonce to script-src, contrary to the exact CSP required by the acceptance criterion. The named test derives its expected CSP from this helper, so it will not catch this mismatch.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "CreateDocumentContentSecurityPolicy adds the nonce to both script-src and style-src.",
+            "failureScenario": "For a document response with nonce abc, the CSP contains `script-src 'self' 'nonce-abc'`, while the acceptance criterion requires exactly `script-src 'self'`."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff generates a fresh nonce for document responses and keeps the base CSP on responses without the nonce template. I found no concrete, reachable security vulnerability in the changed code.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/StaticClientTests.cs"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 72,
+      "total": 73,
+      "percent": 98.6,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Security/TransportSecurity.cs",
+          "covered": 8,
+          "total": 8,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/StaticClient.cs",
+          "covered": 64,
+          "total": 65,
+          "missed": [
+            72
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

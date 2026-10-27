@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AirlineDemo.Api.Security;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -22,8 +23,10 @@ public sealed class StaticClientTests : IDisposable
     {
         var wwwroot = Path.Combine(_contentRoot, "wwwroot");
         Directory.CreateDirectory(Path.Combine(wwwroot, "assets"));
-        File.WriteAllText(Path.Combine(wwwroot, "index.html"), "<!doctype html><title>reviewer</title><div id=\"root\"></div>");
+        File.WriteAllText(Path.Combine(wwwroot, "index.html"), "<!doctype html><meta name=\"csp-nonce\" content=\"__CSP_NONCE__\"><title>reviewer</title><div id=\"root\"></div>");
         File.WriteAllText(Path.Combine(wwwroot, "assets", "app-3f9c1a.js"), "console.log('client');");
+        File.WriteAllText(Path.Combine(wwwroot, "assets", "manifest"), "extensionless-asset-body");
+        File.WriteAllText(Path.Combine(_contentRoot, "outside-sentinel"), "outside-root-sentinel");
     }
 
     public void Dispose()
@@ -60,6 +63,66 @@ public sealed class StaticClientTests : IDisposable
     }
 
     [Fact]
+    public async Task document_response_nonce_contract()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        string? firstNonce = null;
+        foreach (var path in new[] { "/", "/index.html", "/work" })
+        {
+            using var response = await client.GetAsync(path);
+            var html = await response.Content.ReadAsStringAsync();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("no-store", response.Headers.GetValues("Cache-Control").Single());
+            var nonceMatch = Regex.Match(html, "<meta\\b[^>]*name=[\"']csp-nonce[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>", RegexOptions.IgnoreCase);
+            Assert.True(nonceMatch.Success);
+            var nonce = nonceMatch.Groups[1].Value;
+            Assert.Matches("^[A-Za-z0-9+/]{22}==$", nonce);
+            Assert.Equal(24, nonce.Length);
+            Assert.Equal(
+                $"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{nonce}'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+                response.Headers.GetValues("Content-Security-Policy").Single());
+            firstNonce ??= nonce;
+        }
+
+        using var secondRoot = await client.GetAsync("/");
+        var secondHtml = await secondRoot.Content.ReadAsStringAsync();
+        var secondMatch = Regex.Match(secondHtml, "<meta\\b[^>]*name=[\"']csp-nonce[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>", RegexOptions.IgnoreCase);
+        Assert.True(secondMatch.Success);
+        var secondNonce = secondMatch.Groups[1].Value;
+        Assert.NotEqual(firstNonce, secondNonce);
+        Assert.Equal("no-store", secondRoot.Headers.GetValues("Cache-Control").Single());
+        Assert.Equal(
+            $"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{secondNonce}'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            secondRoot.Headers.GetValues("Content-Security-Policy").Single());
+    }
+
+    [Fact]
+    public async Task Document_nonce_fallback_contract()
+    {
+        using var factory = CreateFactory();
+        var wwwroot = Path.Combine(_contentRoot, "wwwroot");
+
+        foreach (var html in new[] { "<!doctype html><title>reviewer</title>", "<!doctype html><meta name=\"csp-nonce\" content=\"\"><title>reviewer</title>" })
+        {
+            File.WriteAllText(Path.Combine(wwwroot, "index.html"), html);
+            using var client = factory.CreateClient();
+            using var response = await client.GetAsync("/");
+
+            Assert.Equal(TransportSecurity.ContentSecurityPolicy, response.Headers.GetValues("Content-Security-Policy").Single());
+            Assert.DoesNotContain("nonce-", response.Headers.GetValues("Content-Security-Policy").Single());
+            Assert.Equal(html, await response.Content.ReadAsStringAsync());
+        }
+
+        File.Delete(Path.Combine(wwwroot, "index.html"));
+        using var missingFactoryClient = factory.CreateClient();
+        using var missing = await missingFactoryClient.GetAsync("/");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    [Fact]
     public async Task Client_route_falls_back_to_index_html()
     {
         using var factory = CreateFactory();
@@ -68,7 +131,11 @@ public sealed class StaticClientTests : IDisposable
         using var response = await client.GetAsync("/cases/42/review");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("<title>reviewer</title>", await response.Content.ReadAsStringAsync());
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("<title>reviewer</title>", html);
+        Assert.Matches("<meta\\b[^>]*name=[\"']csp-nonce[\"'][^>]*content=[\"'][A-Za-z0-9+/]{22}==[\"'][^>]*>", html);
+        var nonce = Regex.Match(html, "<meta\\b[^>]*name=[\"']csp-nonce[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>", RegexOptions.IgnoreCase).Groups[1].Value;
+        Assert.Equal(TransportSecurity.CreateDocumentContentSecurityPolicy(nonce), response.Headers.GetValues("Content-Security-Policy").Single());
     }
 
     [Fact]
@@ -82,6 +149,20 @@ public sealed class StaticClientTests : IDisposable
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.DoesNotContain("<title>reviewer</title>", body);
+    }
+
+    [Fact]
+    public async Task Extensionless_asset_path_cannot_traverse_outside_wwwroot()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/..%2foutside-sentinel");
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain("outside-root-sentinel", body);
+        Assert.True(response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -105,11 +186,23 @@ public sealed class StaticClientTests : IDisposable
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        foreach (var path in new[] { "/", "/index.html", "/cases/42/review", "/assets/app-3f9c1a.js", "/api/does-not-exist" })
+        foreach (var path in new[] { "/assets/app-3f9c1a.js", "/assets/manifest", "/api/health", "/api/does-not-exist" })
         {
             using var response = await client.GetAsync(path);
 
             AssertSecurityHeaders(response);
+            if (path == "/assets/manifest")
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal("extensionless-asset-body", await response.Content.ReadAsStringAsync());
+            }
+        }
+
+        foreach (var path in new[] { "/", "/index.html", "/cases/42/review" })
+        {
+            using var response = await client.GetAsync(path);
+
+            AssertDocumentSecurityHeaders(response);
         }
 
         using var preflight = new HttpRequestMessage(HttpMethod.Options, "/api/health");
@@ -140,12 +233,23 @@ public sealed class StaticClientTests : IDisposable
         "Transfer-Encoding",
     };
 
+    private static void AssertDocumentSecurityHeaders(HttpResponseMessage response)
+    {
+        var csp = response.Headers.GetValues("Content-Security-Policy").Single();
+        Assert.Contains("nonce-", csp);
+        Assert.Equal("no-store", response.Headers.GetValues("Cache-Control").Single());
+        Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
+    }
+
     private static void AssertSecurityHeaders(HttpResponseMessage response)
     {
         // Literal Hangar policy, so the test fails if the constant drifts from the PRD.
+        var csp = response.Headers.GetValues("Content-Security-Policy").Single();
         Assert.Equal(
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
-            response.Headers.GetValues("Content-Security-Policy").Single());
+            csp);
+        Assert.DoesNotContain("nonce-", csp);
+        Assert.False(response.Headers.TryGetValues("Cache-Control", out var cacheControl) && cacheControl.Contains("no-store"));
         Assert.Equal(TransportSecurity.StrictTransportSecurity, response.Headers.GetValues("Strict-Transport-Security").Single());
         // DD-028: exactly two security headers (CSP and HSTS). Any response header that is neither framework-produced
         // nor one of those two fails, so no other security header can slip in.

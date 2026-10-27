@@ -49,7 +49,16 @@ public static class TransportSecurity
 
     private static void ApplyHeaders(IHeaderDictionary headers)
     {
-        headers["Content-Security-Policy"] = ContentSecurityPolicy;
+        if (!headers.ContainsKey("Content-Security-Policy"))
+        {
+            headers["Content-Security-Policy"] = ContentSecurityPolicy;
+        }
         headers["Strict-Transport-Security"] = StrictTransportSecurity;
+    }
+
+    public static string CreateDocumentContentSecurityPolicy(string nonce)
+    {
+        return $"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{nonce}'; " +
+               "img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'";
     }
 }
