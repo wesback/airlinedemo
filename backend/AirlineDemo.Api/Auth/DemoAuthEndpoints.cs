@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using AirlineDemo.Api.Diagnostics;
 
 namespace AirlineDemo.Api.Auth;
@@ -86,19 +87,50 @@ public static class DemoAuthEndpoints
         return Results.Ok(SessionView(session));
     }
 
-    private static IResult SwitchUser(SwitchUserRequest request, HttpContext http, DemoSessionStore sessions)
+    private static async Task<IResult> SwitchUser(HttpContext http, IConfiguration config, DemoSessionStore sessions, ILogger<DemoSessionStore> logger)
     {
         var oldSession = CurrentSession(http, sessions);
-        if (oldSession is null) return Unauthenticated();
-        if (!HasValidAntiForgery(http, oldSession)) return AntiForgeryFailed();
+        if (oldSession is null)
+        {
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "unauthorized", "unknown", null,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return Unauthenticated();
+        }
+        if (!HasValidAntiForgery(http, oldSession))
+        {
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "anti_forgery_failed", oldSession.User.Role, oldSession.Id,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return AntiForgeryFailed();
+        }
 
-        var user = DemoFixture.Find(request.UserId);
+        // Binding answered 415 for a non-JSON body before this handler read it by hand; ReadFromJsonAsync would throw (500).
+        if (!http.Request.HasJsonContentType()) return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+
+        SwitchUserRequest? request;
+        try
+        {
+            request = await http.Request.ReadFromJsonAsync<SwitchUserRequest>(http.RequestAborted);
+        }
+        catch (JsonException)
+        {
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "unknown_user", oldSession.User.Role, oldSession.Id,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return Results.BadRequest();
+        }
+
+        var user = request is not null ? DemoFixture.Find(request.UserId) : null;
         if (user is null)
+        {
+            TelemetryRedaction.EmitRoleSwitchEvent(logger, "unknown_user", oldSession.User.Role, oldSession.Id,
+                TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
             return Results.Json(new { error = "Unknown user." }, statusCode: StatusCodes.Status400BadRequest);
+        }
 
         sessions.Remove(oldSession.Id);
         var newSession = sessions.Create(user);
         http.Response.Cookies.Append(CookieName, newSession.Id, SessionCookie);
+        TelemetryRedaction.EmitRoleSwitchEvent(logger, "success", user.Role, newSession.Id,
+            TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
         return Results.Ok(SessionView(newSession));
     }
 

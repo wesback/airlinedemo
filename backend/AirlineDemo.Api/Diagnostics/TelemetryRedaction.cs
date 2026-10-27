@@ -25,7 +25,7 @@ public static partial class TelemetryRedaction
         "investigation.basis_version", "gen_ai.request.model", "investigation.model", "investigation.tools",
         "investigation.citations", "investigation.decision", "enduser.pseudo.id",
         "investigation.outcome", "error.type", "severity.text", "severity.number",
-        "source.id", "case.id", "event.outcome", "duration",
+        "source.id", "case.id", "event.outcome", "duration", "action", "fixture.role",
     };
 
     public static class SecurityEvents
@@ -33,6 +33,7 @@ public static partial class TelemetryRedaction
         public const string AuthScopeFailure = "security.auth_scope_failure";
         public const string IntegritySignatureFailure = "security.integrity_signature_failure";
         public const string BudgetExhausted = "security.budget_exhausted";
+        public const string RoleSwitch = "security.role_switch";
     }
 
     public static class SourceEvents
@@ -50,7 +51,7 @@ public static partial class TelemetryRedaction
 
     private static readonly HashSet<string> SecurityEventNames = new(StringComparer.Ordinal)
     {
-        SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+        SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted, SecurityEvents.RoleSwitch,
     };
 
     private static readonly HashSet<string> SourceEventNames = new(StringComparer.Ordinal)
@@ -100,7 +101,7 @@ public static partial class TelemetryRedaction
 
     private static readonly HashSet<string> AllowedEventNames = new(StringComparer.Ordinal)
     {
-        "investigation.completed", "review.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted,
+        "investigation.completed", "review.completed", SecurityEvents.AuthScopeFailure, SecurityEvents.IntegritySignatureFailure, SecurityEvents.BudgetExhausted, SecurityEvents.RoleSwitch,
         SourceEvents.ModeChangeAccepted, SourceEvents.CrossCaseReadDenied, SourceEvents.OutOfRoleReadDenied, SourceEvents.FixtureRejected,
         SourceEvents.SourceUnavailable, SourceEvents.ReadLimited, SourceEvents.RecordLimitRejected, SourceEvents.ReadTimedOut, SourceEvents.AuditWriteFailed,
     };
@@ -136,8 +137,14 @@ public static partial class TelemetryRedaction
     private static readonly Regex EnvironmentRule = new(@"^[a-z][a-z0-9\-]{0,31}$", RegexOptions.CultureInvariant);
     private static readonly Regex ErrorTypeRule = new(@"^[a-z][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
     private static readonly Regex CaseIdRule = new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> AllowedFixtureRoles = new(StringComparer.Ordinal)
+    {
+        "presenter", "technical-reviewer", "finance-reviewer", "legal-reviewer", "executive", "unknown",
+    };
+    private static readonly byte[] SessionPseudonymKey = RandomNumberGenerator.GetBytes(32);
 
     public static bool IsAllowedErrorType(string value) => ErrorTypeRule.IsMatch(value);
+    private static bool DemoFixtureRole(string value) => AllowedFixtureRoles.Contains(value);
 
     internal static bool IsSourceSpecificAttribute(string key) =>
         key.StartsWith("source.", StringComparison.OrdinalIgnoreCase)
@@ -167,8 +174,10 @@ public static partial class TelemetryRedaction
         ["severity.number"] = v => v is "9" or "13" or "17",
         ["source.id"] = v => AllowedSourceIds.Contains(v),
         ["case.id"] = v => CaseIdRule.IsMatch(v),
-        ["event.outcome"] = v => AllowedSourceOutcomes.Contains(v),
+        ["event.outcome"] = v => AllowedSourceOutcomes.Contains(v) || v is "success" or "unauthorized" or "anti_forgery_failed" or "unknown_user",
         ["duration"] = v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var duration) && duration >= 0,
+        ["action"] = v => v == "role-switch",
+        ["fixture.role"] = v => v == "unknown" || DemoFixtureRole(v),
     };
 
     // Keeps only allowlisted keys, drops denylisted keys and replaces values that fail their key's rule.
@@ -255,6 +264,42 @@ public static partial class TelemetryRedaction
             ["event.name"] = eventName,
         };
         Emit(logger, LogLevel.Warning, attributes);
+    }
+
+    public static void EmitRoleSwitchEvent(
+        ILogger logger,
+        string outcome,
+        string fixtureRole,
+        string? sessionId,
+        string serviceVersion,
+        string environment)
+    {
+        if (outcome is not ("success" or "unauthorized" or "anti_forgery_failed" or "unknown_user"))
+        {
+            throw new ArgumentException("Unknown role-switch outcome.", nameof(outcome));
+        }
+        if (!AllowedFixtureRoles.Contains(fixtureRole))
+        {
+            throw new ArgumentException("Unknown fixture role.", nameof(fixtureRole));
+        }
+
+        var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+        var pseudonym = OpaqueActor(sessionId ?? "anonymous-no-session", SessionPseudonymKey);
+        var attributes = Redact(new KeyValuePair<string, object?>[]
+        {
+            new("event.name", SecurityEvents.RoleSwitch),
+            new("trace.id", traceId),
+            new("action", "role-switch"),
+            new("fixture.role", fixtureRole),
+            new("event.outcome", outcome),
+            new("enduser.pseudo.id", pseudonym),
+        });
+        var merged = attributes.ToDictionary(attribute => attribute.Key, attribute => (object?)attribute.Value, StringComparer.Ordinal);
+        foreach (var (key, value) in ResourceAttributes(serviceVersion, environment))
+        {
+            merged[key] = value;
+        }
+        Emit(logger, LogLevel.Information, merged, "INFO", 9);
     }
 
     public static void EmitSourceSystemEvent(
