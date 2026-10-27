@@ -18,7 +18,7 @@ describe('WorkspaceShell contract', () => {
       </WorkspaceShell>
     );
 
-    expect(screen.getByLabelText('Altivane Aviation Capital')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Altivane Aviation Capital' })).toBeTruthy();
     expect(screen.getByText('ALTIVANE')).toBeTruthy();
     expect(screen.getByText('Asset Transitions')).toBeTruthy();
     expect(screen.getByRole('searchbox', { name: 'Case search' })).toBeTruthy();
