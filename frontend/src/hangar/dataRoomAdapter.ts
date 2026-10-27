@@ -1,13 +1,14 @@
 import { HANGAR_ASSET_INVALID, type HangarAssetRecord } from './assetPolicy';
 import { loadValidatedHangarAsset } from './hangarAssetLoader';
 import sceneManifest from './sceneManifest.json';
+import { hangarSceneColors } from '../theme/altivaneTheme';
 import { HANGAR_SCENE_THEME, hangarLabelContrastRatio } from './sceneTheme';
 
 export { HANGAR_ASSET_INVALID };
 export const HANGAR_RACK_SOURCES = ['technical', 'maintenance', 'finance', 'records', 'contracts'] as const;
 export const HANGAR_MANIFEST_ERROR = 'scene_manifest_invalid';
 export const HANGAR_AVATAR_HARD_HAT = 'HardHat';
-export const HANGAR_HARD_HAT_COLOR = '#FFD400';
+export const HANGAR_HARD_HAT_COLOR = hangarSceneColors.hardHat;
 
 export type RackManifestResult = { valid: true; units: ReadonlyArray<{ node: string; source: string }> } | { valid: false; reason: typeof HANGAR_MANIFEST_ERROR };
 
@@ -49,7 +50,7 @@ export function validateHangarRackAvatarManifest(input: unknown = sceneManifest)
   const hat = hardHat as Record<string, unknown>;
   if (hat.node !== HANGAR_AVATAR_HARD_HAT || hat.color !== HANGAR_HARD_HAT_COLOR) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   if (avatarValue.synthetic !== true || avatarValue.realPerson !== false || avatarValue.brandMarks !== false) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
-  const approved = {background:'#E8EDF2',floor:'#C3CBD4',floorMarking:'#F2F4F6',aircraftBody:'#F5F7F9',aircraftTrim:'#9AA5B1',partsStand:'#5A6573',component:'#B7C0CA',rack:'#2F3A47',rackUnit:'#4C5866',avatarBody:'#3D6E9E',groundShadow:'#000000',guideLine:'#0E7C66',selection:'#1F6FEB',labelBackground:'#FFFFFF',labelText:'#1B2430',labelMuted:'#4A5563'};
+  const approved = HANGAR_SCENE_THEME;
   if (Object.keys(approved).some(key => (HANGAR_SCENE_THEME as any)[key] !== (approved as any)[key])) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   if (hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelText, HANGAR_SCENE_THEME.labelBackground) < 4.5 || hangarLabelContrastRatio(HANGAR_SCENE_THEME.labelMuted, HANGAR_SCENE_THEME.labelBackground) < 4.5) return { valid: false, reason: HANGAR_MANIFEST_ERROR };
   return { valid: true, units: normalized };

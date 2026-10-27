@@ -1,0 +1,229 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 647,
+  "branch": "ai-sdlc/issue-647",
+  "commitSha": "674100569b3b3e59bbbfe05a260a027d2abbc3e4",
+  "round": 0,
+  "pipelineVersion": "e89363e",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-2-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The theme and nonce tests exercise AltivaneRoot, and the dependency pin test checks the declared versions. The NFR-006 audit criterion is not demonstrated by the named test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 83,
+          "message": "The NFR-006 criterion requires a TypeScript compiler API audit and the listed fixtures, but the named test uses source scans and does not exercise those fixtures. Add the fixture cases to the test so non-token values and expressions fail.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract scans checked-in source with regular expressions; it does not parse TypeScript or TSX style objects or run the listed fixtures through the audit.",
+            "failureScenario": "If the audit accepts `fontFamily: \"Segoe UI\"`, an identifier holding that value, or `gap: calcSpacing()`, the current test still passes when the repository source contains no matching violation because none of those fixtures is exercised."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The theme, root selection, nonce, and dependency-pin tests address their named contracts. The NFR-006 audit has a concrete bypass for a listed fixture, so the change does not satisfy that acceptance criterion.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/DependencyAudit.test.ts",
+          "line": 97,
+          "message": "The NFR-006 criterion is not covered as specified: the test omits the TypeScript compiler API audit and fixtures, and permits non-token expressions such as `gap: calcSpacing()`.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "Colour_literals_and_fluent_tokens_contract scans source lines with a regex and flags only numeric literals or variables detected by a numeric-only declaration pattern. It does not parse TypeScript style objects or run the audit against the listed fixtures.",
+            "failureScenario": "If a component uses `<div style={{ gap: calcSpacing() }} />`, the value is neither numeric nor a recognized numeric variable, so the audit reports no violation even though the acceptance criterion requires this non-token expression to be rejected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is reachable in the changed code. The nonce is restricted to a fixed base64-shaped value before being passed to the renderer, and the changed theme and color data introduce no evident injection, authorization, or credential exposure path.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AltivaneRenderer.test.tsx",
+      "frontend/tests/AltivaneTheme.test.tsx",
+      "frontend/tests/DependencyAudit.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
