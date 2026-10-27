@@ -80,7 +80,9 @@ public sealed class StaticClientTests : IDisposable
             var nonce = nonceMatch.Groups[1].Value;
             Assert.Matches("^[A-Za-z0-9+/]{22}==$", nonce);
             Assert.Equal(24, nonce.Length);
-            Assert.Equal(TransportSecurity.CreateDocumentContentSecurityPolicy(nonce), response.Headers.GetValues("Content-Security-Policy").Single());
+            Assert.Equal(
+                $"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{nonce}'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+                response.Headers.GetValues("Content-Security-Policy").Single());
             firstNonce ??= nonce;
         }
 
@@ -88,7 +90,12 @@ public sealed class StaticClientTests : IDisposable
         var secondHtml = await secondRoot.Content.ReadAsStringAsync();
         var secondMatch = Regex.Match(secondHtml, "<meta\\b[^>]*name=[\"']csp-nonce[\"'][^>]*content=[\"']([^\"']+)[\"'][^>]*>", RegexOptions.IgnoreCase);
         Assert.True(secondMatch.Success);
-        Assert.NotEqual(firstNonce, secondMatch.Groups[1].Value);
+        var secondNonce = secondMatch.Groups[1].Value;
+        Assert.NotEqual(firstNonce, secondNonce);
+        Assert.Equal("no-store", secondRoot.Headers.GetValues("Cache-Control").Single());
+        Assert.Equal(
+            $"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{secondNonce}'; img-src 'self' data: blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            secondRoot.Headers.GetValues("Content-Security-Policy").Single());
     }
 
     [Fact]
@@ -141,6 +148,18 @@ public sealed class StaticClientTests : IDisposable
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.DoesNotContain("<title>reviewer</title>", body);
+    }
+
+    [Fact]
+    public async Task Extensionless_asset_path_cannot_traverse_outside_wwwroot()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/../StaticClient.cs");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain("public static class StaticClient", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

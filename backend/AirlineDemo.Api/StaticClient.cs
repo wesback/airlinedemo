@@ -21,12 +21,15 @@ public static class StaticClient
         {
             var path = context.Request.Path.Value ?? "";
             var relativeStaticPath = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+            var relativeStaticPathNormalized = relativeStaticPath.Replace('\\', Path.DirectorySeparatorChar);
             var assetPath = string.IsNullOrEmpty(app.Environment.WebRootPath)
                 ? null
-                : Path.Combine(app.Environment.WebRootPath, relativeStaticPath);
+                : TryGetExtensionlessAssetPath(app.Environment.WebRootPath, relativeStaticPathNormalized, out var safeAssetPath)
+                    ? safeAssetPath
+                    : null;
             var isExistingExtensionlessAsset = !path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) &&
                                               !Path.HasExtension(path) &&
-                                              assetPath is not null && File.Exists(assetPath);
+                                              assetPath is not null;
             var isDocument = context.Request.Method == HttpMethods.Get &&
                              (path.Equals("/", StringComparison.OrdinalIgnoreCase) ||
                               path.Equals("/index.html", StringComparison.OrdinalIgnoreCase) ||
@@ -86,6 +89,64 @@ public static class StaticClient
             context.Response.StatusCode = StatusCodes.Status404NotFound;
         });
         return app;
+    }
+
+    private static bool TryGetExtensionlessAssetPath(string webRootPath, string relativeStaticPath, out string assetPath)
+    {
+        assetPath = "";
+        var root = Path.GetFullPath(webRootPath);
+        var candidate = Path.GetFullPath(Path.Combine(root, relativeStaticPath));
+
+        if (!IsPathWithinRoot(root, candidate))
+        {
+            return false;
+        }
+
+        if (!File.Exists(candidate))
+        {
+            return false;
+        }
+
+        var resolvedRoot = ResolveExistingPath(root);
+        var resolvedCandidate = ResolveExistingPath(candidate);
+        if (!IsPathWithinRoot(resolvedRoot, resolvedCandidate))
+        {
+            return false;
+        }
+
+        assetPath = candidate;
+        return true;
+    }
+
+    private static string ResolveExistingPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath);
+        if (string.IsNullOrEmpty(root))
+        {
+            return fullPath;
+        }
+
+        var current = root;
+        foreach (var segment in fullPath[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            var resolved = info.ResolveLinkTarget(true);
+            if (resolved is not null)
+            {
+                current = resolved.FullName;
+            }
+        }
+        return Path.GetFullPath(current);
+    }
+
+    private static bool IsPathWithinRoot(string root, string candidate)
+    {
+        var relative = Path.GetRelativePath(root, candidate);
+        return !Path.IsPathRooted(relative) &&
+               !relative.Equals("..", StringComparison.Ordinal) &&
+               !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     private static string? TryGetNonce(string html)
