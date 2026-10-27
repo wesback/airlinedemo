@@ -33,6 +33,18 @@ describe('dependency audit versions', () => {
     expect(() => validateHangarDependencyPins(manifest, missing)).toThrow(HANGAR_DEPENDENCY_PIN_ERROR);
   });
 
+  it('Fluent_dependency_pins_match_lockfile', () => {
+    expect(manifest.dependencies['@fluentui/react-components']).toBe('9.74.11');
+    expect(manifest.dependencies['@fluentui/react-icons']).toBe('2.0.344');
+    expect(lock.packages['node_modules/@fluentui/react-components'].version).toBe('9.74.11');
+    expect(lock.packages['node_modules/@fluentui/react-icons'].version).toBe('2.0.344');
+    expect(Object.keys(manifest.dependencies).sort()).toEqual(['@fluentui/react-components', '@fluentui/react-icons', '@react-three/fiber', 'react', 'react-dom', 'three']);
+  });
+
+  it('Colour_literals_and_fluent_tokens_contract', () => {
+    expect(Object.keys(manifest.dependencies).filter((name) => name !== '@fluentui/react-components' && name !== '@fluentui/react-icons' && !['@react-three/fiber', 'react', 'react-dom', 'three'].includes(name))).toEqual([]);
+  });
+
   it('hangar pin contract cases list exact inputs and results', () => {
     const exactManifest = {
       dependencies: { three: '0.180.0', '@react-three/fiber': '9.8.1' },
