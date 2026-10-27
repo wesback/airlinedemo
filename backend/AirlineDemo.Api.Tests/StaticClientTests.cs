@@ -156,7 +156,8 @@ public sealed class StaticClientTests : IDisposable
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
 
-        using var response = await client.GetAsync("/../StaticClient.cs");
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("/%2e%2e/StaticClient.cs", UriKind.Relative));
+        using var response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.DoesNotContain("public static class StaticClient", await response.Content.ReadAsStringAsync());
