@@ -79,7 +79,7 @@ export default function WorkspaceRegion({
     if (statusCode === 503) {
       return (
         <div role="alert" data-testid="workspace-region-error">
-          <span>{message}</span>
+          <span>{message}</span>{' '}
           <button type="button" onClick={onRetry} aria-label="Retry" style={{ marginLeft: '0.5rem' }}>Retry</button>
         </div>
       );

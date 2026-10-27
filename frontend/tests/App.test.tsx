@@ -328,6 +328,64 @@ describe('reviewer workspace', () => {
     expect(screen.getByRole('button', { name: 'Reset blocked variant' })).toBeTruthy();
   });
 
+  it('AC_019_mixed_region_error_contract', async () => {
+    const scenarios = [
+      { status: 401, expectedText: 'Signing in…' },
+      { status: 403, expectedText: 'You do not have permission for this action.' },
+      { status: 404, expectedText: 'Case not found or not in your scope.' },
+      { status: 503, expectedText: 'Service temporarily unavailable Retry' },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      cleanup();
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/health') return json({ status: 'ok' });
+        if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+        if (url === '/api/auth/users') return json(users);
+        if (url === '/api/auth/sign-in') return json(signedIn);
+        if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') return json({ error: 'request failed' }, scenario.status);
+        return json({});
+      }));
+
+      render(<App />);
+      await signIn();
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe(scenario.expectedText);
+      if (scenario.status === 503) {
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+      }
+
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('AC_019_mixed_region_isolation', async () => {
+    const secretText = 'stack trace for passcode session csrf item-42';
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/health') return json({ status: 'ok' });
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json(users);
+      if (url === '/api/auth/sign-in') return json(signedIn);
+      if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') return json({ error: secretText }, 503);
+      return json({});
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    render(<App />);
+    await signIn();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Service temporarily unavailable');
+    expect(alert.textContent).not.toContain('stack');
+    expect(alert.textContent).not.toContain('passcode');
+    expect(alert.textContent).not.toContain('session');
+    expect(alert.textContent).not.toContain('csrf');
+    expect(alert.textContent).not.toContain('item-42');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
   it('reports an unavailable API without claiming it is connected', async () => {
     setupApi({ healthStatus: 503 });
     render(<App />);
