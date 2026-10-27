@@ -1,3 +1,4 @@
+import { tokens } from '@fluentui/react-components';
 import { useEffect, useState, type ReactNode } from 'react';
 
 export const NAV_EXPANDED_WIDTH = 240;
@@ -78,7 +79,21 @@ export default function WorkspaceShell({
         <div aria-label="User menu" style={{ position: 'relative' }}>
           <button type="button" onClick={() => setMenuOpen((value) => !value)}>{userLabel}</button>
           {menuOpen && menuOptions.length > 0 && (
-            <div role="menu" aria-label="Switch role" style={{ position: 'absolute', right: 0, top: 'calc(100% + 0.5rem)', background: '#fff', border: '1px solid #d9e2f2', borderRadius: '8px', padding: '0.5rem', minWidth: '220px', zIndex: 1 }}>
+            <div
+              role="menu"
+              aria-label="Switch role"
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: `calc(100% + ${tokens.spacingHorizontalXS})`,
+                background: tokens.colorNeutralBackground1,
+                border: `1px solid ${tokens.colorNeutralStroke1}`,
+                borderRadius: tokens.borderRadiusMedium,
+                padding: tokens.spacingHorizontalS,
+                minWidth: '220px',
+                zIndex: 1,
+              }}
+            >
               {menuOptions.map((option) => (
                 <button
                   key={option.id}
@@ -88,7 +103,15 @@ export default function WorkspaceShell({
                     setMenuOpen(false);
                     onRoleSelect?.(option.id);
                   }}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.5rem 0.75rem', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: `${tokens.spacingHorizontalXS} ${tokens.spacingHorizontalS}`,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                  }}
                 >
                   Switch role: {option.label}
                 </button>

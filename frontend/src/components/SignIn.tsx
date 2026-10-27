@@ -1,3 +1,4 @@
+import { tokens } from '@fluentui/react-components';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 type SeededUser = { id: string; displayName: string; role: string; description?: string };
@@ -162,18 +163,18 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
   }
 
   return (
-    <section aria-labelledby="signin-heading" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.1fr) minmax(320px, 1.7fr)', gap: '1.5rem', background: '#f5f7fb', border: '1px solid #d9e2f2', borderRadius: '16px', padding: '1.5rem', maxWidth: '980px', margin: '0 auto' }}>
-      <aside aria-label="Altivane brand" style={{ background: 'linear-gradient(180deg, #0c2746 0%, #173c66 100%)', color: '#fff', borderRadius: '12px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+    <section aria-labelledby="signin-heading" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.1fr) minmax(320px, 1.7fr)', gap: tokens.spacingHorizontalL, background: tokens.colorNeutralBackground2, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusLarge, padding: tokens.spacingHorizontalL, maxWidth: '980px', margin: '0 auto' }}>
+      <aside aria-label="Altivane brand" style={{ background: `linear-gradient(180deg, ${tokens.colorBrandBackground} 0%, ${tokens.colorBrandBackgroundHover} 100%)`, color: tokens.colorNeutralForegroundInverted, borderRadius: tokens.borderRadiusMedium, padding: tokens.spacingHorizontalL, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontSize: '0.8rem', letterSpacing: '0.2rem', fontWeight: 700 }}>ALTIVANE</div>
-          <h2 id="signin-heading" style={{ margin: '0.5rem 0 1rem', fontSize: '2rem' }}>Asset Transitions</h2>
+          <div style={{ fontSize: tokens.fontSizeBase200, letterSpacing: '0.2rem', fontWeight: 700 }}>ALTIVANE</div>
+          <h2 id="signin-heading" style={{ margin: '0.5rem 0 1rem', fontSize: tokens.fontSizeHero700 }}>Asset Transitions</h2>
           <p style={{ margin: 0, lineHeight: 1.5, opacity: 0.88 }}>Review aircraft readiness through the role-based workspace your stakeholders use every day.</p>
         </div>
-        <div style={{ marginTop: '1.5rem', display: 'grid', gap: '0.75rem' }}>
+        <div style={{ marginTop: tokens.spacingVerticalL, display: 'grid', gap: tokens.spacingVerticalS }}>
           {Object.values(PERSONAS).map((persona) => (
-            <div key={persona.role} style={{ background: 'rgba(255,255,255,0.08)', padding: '0.75rem 0.9rem', borderRadius: '10px' }}>
+            <div key={persona.role} style={{ background: tokens.colorBrandBackgroundInverted, padding: '0.75rem 0.9rem', borderRadius: tokens.borderRadiusMedium }}>
               <div style={{ fontWeight: 700 }}>{persona.displayName}</div>
-              <div style={{ opacity: 0.85, fontSize: '0.9rem' }}>{persona.role}</div>
+              <div style={{ opacity: 0.85, fontSize: tokens.fontSizeBase200 }}>{persona.role}</div>
             </div>
           ))}
         </div>
@@ -190,7 +191,7 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
               autoComplete="off"
               value={passcode}
               onChange={(event) => setPasscode(event.target.value)}
-              style={{ display: 'block', width: '100%', marginTop: '0.5rem', marginBottom: '1rem', padding: '0.75rem' }}
+              style={{ display: 'block', width: '100%', marginTop: '0.5rem', marginBottom: '1rem', padding: tokens.spacingHorizontalS }}
             />
             <button type="submit" disabled={busy}>Continue</button>
           </form>
@@ -198,9 +199,9 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
           <form onSubmit={signIn}>
             <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
               <legend style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem' }}>Choose a user</legend>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: tokens.spacingHorizontalM }}>
                 {users.map((user) => (
-                  <div key={user.id} style={{ border: selectedId === user.id ? '2px solid #214d8d' : '1px solid #d9e2f2', borderRadius: '12px', padding: '1rem', background: selectedId === user.id ? '#edf4ff' : '#fff' }}>
+                  <div key={user.id} style={{ border: selectedId === user.id ? `2px solid ${tokens.colorBrandStroke1}` : `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, padding: tokens.spacingHorizontalM, background: selectedId === user.id ? tokens.colorBrandBackground2 : tokens.colorNeutralBackground1 }}>
                     <input
                       id={`user-${user.id}`}
                       type="radio"
@@ -211,8 +212,8 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
                     />
                     <label htmlFor={`user-${user.id}`} style={{ display: 'block', marginTop: '0.75rem', cursor: 'pointer' }}>
                       <div style={{ fontWeight: 700 }}>{user.displayName}</div>
-                      <div style={{ color: '#456', marginTop: '0.15rem' }}>({user.role})</div>
-                      <div aria-hidden="true" style={{ marginTop: '0.5rem', color: '#556', fontSize: '0.9rem', lineHeight: 1.4 }}>{user.description}</div>
+                      <div style={{ color: tokens.colorNeutralForeground2, marginTop: '0.15rem' }}>({user.role})</div>
+                      <div aria-hidden="true" style={{ marginTop: '0.5rem', color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200, lineHeight: 1.4 }}>{user.description}</div>
                     </label>
                   </div>
                 ))}

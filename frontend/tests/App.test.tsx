@@ -137,6 +137,77 @@ afterEach(() => {
 });
 
 describe('reviewer workspace', () => {
+  it('AC_004_switch_role_behavior', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer' }, { id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }, { id: 'legal-1', displayName: 'Legal reviewer', role: 'legal-reviewer' }, { id: 'exec-1', displayName: 'Executive observer', role: 'executive' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/auth/switch-user') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        return json({ id: body.userId, displayName: 'Finance reviewer', role: 'finance-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-next-token' }, 200);
+      }
+      if (url === '/api/cases/case-001') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/case-001/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/case-001/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/case-001/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Technical reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Technical reviewer.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Technical reviewer' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Switch role: Finance reviewer' }));
+
+    await waitFor(() => expect(calls.some(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST')).toBe(true));
+    const switchCall = calls.find(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST');
+    expect(JSON.parse(String(switchCall?.init?.body))).toEqual({ userId: 'fin-1' });
+    expect((switchCall?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+    expect(screen.getByText('Finance reviewer')).toBeTruthy();
+  });
+
+  it('AC_004_switch_role_failure', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer' }, { id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/auth/switch-user') return json({ error: 'You do not have permission for this action.' }, 403);
+      if (url === '/api/cases/case-001') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/case-001/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/case-001/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/case-001/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Technical reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Technical reviewer.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Technical reviewer' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Switch role: Finance reviewer' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('You do not have permission for this action.');
+    expect(screen.getByText('Technical reviewer')).toBeTruthy();
+    expect(screen.getByText('Case case-001')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
+  });
+
   it('shows no trace when the dashboard has no stored trace links', async () => {
     setupApi();
     render(<App />);

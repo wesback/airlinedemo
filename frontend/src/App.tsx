@@ -27,10 +27,10 @@ type Projections = { caseState: CaseProjection; dashboard: DashboardData; review
 
 const PERSONA_OPTIONS = [
   { id: 'presenter', label: 'Demo presenter', role: 'presenter' },
-  { id: 'technical-reviewer', label: 'Technical reviewer', role: 'technical-reviewer' },
-  { id: 'finance-reviewer', label: 'Finance reviewer', role: 'finance-reviewer' },
-  { id: 'legal-reviewer', label: 'Legal reviewer', role: 'legal-reviewer' },
-  { id: 'executive', label: 'Executive observer', role: 'executive' },
+  { id: 'reviewer', label: 'Technical reviewer', role: 'technical-reviewer' },
+  { id: 'fin-1', label: 'Finance reviewer', role: 'finance-reviewer' },
+  { id: 'legal-1', label: 'Legal reviewer', role: 'legal-reviewer' },
+  { id: 'exec-1', label: 'Executive observer', role: 'executive' },
 ] as const;
 
 const ROLE_HOME_PATHS: Record<string, string> = {
