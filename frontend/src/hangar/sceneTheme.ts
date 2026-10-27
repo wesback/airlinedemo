@@ -1,20 +1,22 @@
+import { hangarSceneColors } from '../theme/altivaneTheme';
+
 export const HANGAR_SCENE_THEME = {
-  background: '#E8EDF2',
-  floor: '#C3CBD4',
-  floorMarking: '#F2F4F6',
-  aircraftBody: '#F5F7F9',
-  aircraftTrim: '#9AA5B1',
-  partsStand: '#5A6573',
-  component: '#B7C0CA',
-  rack: '#2F3A47',
-  rackUnit: '#4C5866',
-  avatarBody: '#3D6E9E',
-  groundShadow: '#000000',
-  guideLine: '#0E7C66',
-  selection: '#1F6FEB',
-  labelBackground: '#FFFFFF',
-  labelText: '#1B2430',
-  labelMuted: '#4A5563',
+  background: hangarSceneColors.background,
+  floor: hangarSceneColors.floor,
+  floorMarking: hangarSceneColors.floorMarking,
+  aircraftBody: hangarSceneColors.aircraftBody,
+  aircraftTrim: hangarSceneColors.aircraftTrim,
+  partsStand: hangarSceneColors.partsStand,
+  component: hangarSceneColors.component,
+  rack: hangarSceneColors.rack,
+  rackUnit: hangarSceneColors.rackUnit,
+  avatarBody: hangarSceneColors.avatarBody,
+  groundShadow: hangarSceneColors.groundShadow,
+  guideLine: hangarSceneColors.guideLine,
+  selection: hangarSceneColors.selection,
+  labelBackground: hangarSceneColors.labelBackground,
+  labelText: hangarSceneColors.labelText,
+  labelMuted: hangarSceneColors.labelMuted,
 } as const;
 
 export const background = HANGAR_SCENE_THEME.background;

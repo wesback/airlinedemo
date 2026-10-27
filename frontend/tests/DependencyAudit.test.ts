@@ -3,6 +3,12 @@ import manifest from '../package.json';
 import lock from '../package-lock.json';
 import { HANGAR_DEPENDENCY_PIN_ERROR, validateHangarDependencyPins } from '../src/hangar/dependencyPins';
 
+declare global {
+  interface ImportMeta {
+    glob: (pattern: string, options: { eager: boolean; query: string; import: string }) => Record<string, string>;
+  }
+}
+
 describe('dependency audit versions', () => {
   it('keeps the manifest and lockfile on a Vite version outside the affected range', () => {
     const manifestVersion = manifest.devDependencies.vite;
@@ -39,10 +45,25 @@ describe('dependency audit versions', () => {
     expect(lock.packages['node_modules/@fluentui/react-components'].version).toBe('9.74.11');
     expect(lock.packages['node_modules/@fluentui/react-icons'].version).toBe('2.0.344');
     expect(Object.keys(manifest.dependencies).sort()).toEqual(['@fluentui/react-components', '@fluentui/react-icons', '@react-three/fiber', 'react', 'react-dom', 'three']);
+    const mismatch = structuredClone(manifest);
+    mismatch.dependencies['@fluentui/react-components'] = '9.74.10';
+    expect(mismatch.dependencies['@fluentui/react-components']).not.toBe(lock.packages['node_modules/@fluentui/react-components'].version);
+    const extra = structuredClone(manifest);
+    (extra.dependencies as Record<string, string>)['example-runtime'] = '1.0.0';
+    expect(Object.keys(extra.dependencies).filter((name) => !['@fluentui/react-components', '@fluentui/react-icons', '@react-three/fiber', 'react', 'react-dom', 'three'].includes(name))).toEqual(['example-runtime']);
   });
 
   it('Colour_literals_and_fluent_tokens_contract', () => {
-    expect(Object.keys(manifest.dependencies).filter((name) => name !== '@fluentui/react-components' && name !== '@fluentui/react-icons' && !['@react-three/fiber', 'react', 'react-dom', 'three'].includes(name))).toEqual([]);
+    const sourceFiles = import.meta.glob('../src/**/*.{ts,tsx,css}', { eager: true, query: '?raw', import: 'default' });
+    const literalPattern = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i;
+    const violations = Object.entries(sourceFiles).flatMap(([file, source]) => {
+      if (file.endsWith('/src/theme/altivaneTheme.ts')) return [];
+      return source.split('\n').flatMap((line: string, index: number) => literalPattern.test(line) ? [`${file}:${index + 1}:${line.trim()}`] : []);
+    });
+    expect(violations).toEqual([]);
+
+    const fluentImports = Object.entries(sourceFiles).filter(([, source]) => source.includes('@fluentui/react-components'));
+    expect(fluentImports.length).toBeGreaterThan(0);
   });
 
   it('hangar pin contract cases list exact inputs and results', () => {

@@ -1,7 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { altivaneDarkTheme, altivaneLightTheme, contrastRatio, resolveAltivaneThemeChoice } from '../src/theme/altivaneTheme';
-import { FluentProvider } from '@fluentui/react-components';
-import { render } from '@testing-library/react';
+import { useThemeClassName } from '@fluentui/react-components';
+import { cleanup, render } from '@testing-library/react';
+import { AltivaneRoot } from '../src/main';
+
+function ThemeProbe() {
+  const themeClass = useThemeClassName();
+  return <div data-testid="theme-probe" className={themeClass}>theme</div>;
+}
+
+function setSystemDark(dark: boolean) {
+  vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+    matches: query === '(prefers-color-scheme: dark)' ? dark : false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })));
+}
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); document.documentElement.removeAttribute('data-theme'); });
 
 describe('Altivane theme contract', () => {
   it('Altivane_theme_contract', () => {
@@ -25,15 +46,21 @@ describe('Altivane theme contract', () => {
   });
 
   it('FluentProvider_theme_selection_contract', () => {
-    document.documentElement.dataset.theme = 'light';
-    localStorage.setItem('altivane.theme', 'light');
-    const { container } = render(<FluentProvider theme={altivaneLightTheme}><div>theme</div></FluentProvider>);
-    expect(container.querySelectorAll('[data-theme], [class*="FluentProvider"]')).toBeTruthy();
-    expect(document.documentElement.dataset.theme).toBe('light');
-    expect(localStorage.getItem('altivane.theme')).toBe('light');
-    for (const choice of ['purple', '', 'system', 'light', 'dark']) {
-      expect(['light', 'dark', 'system']).toContain(resolveAltivaneThemeChoice(choice));
+    for (const [stored, dark, expectedChoice, expectedTheme] of [
+      ['light', true, 'light', 'light'],
+      ['dark', false, 'dark', 'dark'],
+      ['system', true, 'system', 'dark'],
+      ['purple', false, 'system', 'light'],
+    ] as const) {
+      cleanup();
+      setSystemDark(dark);
+      localStorage.setItem('altivane.theme', stored);
+      const view = render(<AltivaneRoot><ThemeProbe /></AltivaneRoot>);
+      expect(document.documentElement.dataset.theme).toBe(expectedTheme);
+      expect(localStorage.getItem('altivane.theme')).toBe(expectedChoice);
+      expect(view.getByTestId('theme-probe').className.length).toBeGreaterThan(0);
+      if (expectedChoice === 'system') expect(resolveAltivaneThemeChoice(stored)).toBe('system');
+      localStorage.removeItem('altivane.theme');
     }
-    localStorage.removeItem('altivane.theme');
   });
 });

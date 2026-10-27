@@ -27,6 +27,26 @@ export const altivaneLightTheme: Theme = {
   colorNeutralStroke1: brand.accentRule,
 };
 
+export const hangarSceneColors = {
+  background: '#E8EDF2',
+  floor: '#C3CBD4',
+  floorMarking: '#F2F4F6',
+  aircraftBody: '#F5F7F9',
+  aircraftTrim: '#9AA5B1',
+  partsStand: '#5A6573',
+  component: '#B7C0CA',
+  rack: '#2F3A47',
+  rackUnit: '#4C5866',
+  avatarBody: '#3D6E9E',
+  groundShadow: '#000000',
+  guideLine: '#0E7C66',
+  selection: '#1F6FEB',
+  labelBackground: '#FFFFFF',
+  labelText: '#1B2430',
+  labelMuted: '#4A5563',
+  hardHat: '#FFD400',
+} as const;
+
 export const altivaneDarkTheme: Theme = {
   ...webDarkTheme,
   colorNeutralForeground1: brand.darkText,
