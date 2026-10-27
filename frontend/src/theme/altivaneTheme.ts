@@ -1,4 +1,4 @@
-import { webDarkTheme, webLightTheme, type Theme } from '@fluentui/react-components';
+import { tokens, webDarkTheme, webLightTheme, type Theme } from '@fluentui/react-components';
 
 const brand = {
   navy: '#19223F',
@@ -45,6 +45,14 @@ export const hangarSceneColors = {
   labelText: '#1B2430',
   labelMuted: '#4A5563',
   hardHat: '#FFD400',
+} as const;
+
+export const altivaneUiTokens = {
+  spacing: tokens.spacingHorizontalM,
+  radius: tokens.borderRadiusMedium,
+  elevation: tokens.shadow4,
+  font: tokens.fontFamilyBase,
+  motion: tokens.durationNormal,
 } as const;
 
 export const altivaneDarkTheme: Theme = {

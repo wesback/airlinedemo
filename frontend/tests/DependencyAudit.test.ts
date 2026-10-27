@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import manifest from '../package.json';
 import lock from '../package-lock.json';
+import { tokens } from '@fluentui/react-components';
+import { altivaneUiTokens } from '../src/theme/altivaneTheme';
 import { HANGAR_DEPENDENCY_PIN_ERROR, validateHangarDependencyPins } from '../src/hangar/dependencyPins';
 
 declare global {
@@ -64,6 +66,26 @@ describe('dependency audit versions', () => {
 
     const fluentImports = Object.entries(sourceFiles).filter(([, source]) => source.includes('@fluentui/react-components'));
     expect(fluentImports.length).toBeGreaterThan(0);
+    expect(altivaneUiTokens).toEqual({
+      spacing: tokens.spacingHorizontalM,
+      radius: tokens.borderRadiusMedium,
+      elevation: tokens.shadow4,
+      font: tokens.fontFamilyBase,
+      motion: tokens.durationNormal,
+    });
+    expect(Object.values(altivaneUiTokens)).toEqual([
+      tokens.spacingHorizontalM,
+      tokens.borderRadiusMedium,
+      tokens.shadow4,
+      tokens.fontFamilyBase,
+      tokens.durationNormal,
+    ]);
+    const uiNumericStyle = /(padding|margin|gap|border-radius|box-shadow|font-size|line-height|transition|animation)\s*[:=]\s*["'`]?\d+(?:px|rem|em|ms|s)?/i;
+    const forbiddenUiStyles = Object.entries(sourceFiles).flatMap(([file, source]) => {
+      if (!file.endsWith('.tsx') && !file.endsWith('.css')) return [];
+      return source.split('\n').flatMap((line: string, index: number) => uiNumericStyle.test(line) ? [`${file}:${index + 1}:${line.trim()}`] : []);
+    });
+    expect(forbiddenUiStyles).toEqual([]);
   });
 
   it('hangar pin contract cases list exact inputs and results', () => {

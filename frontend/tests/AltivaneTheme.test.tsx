@@ -58,7 +58,12 @@ describe('Altivane theme contract', () => {
       const view = render(<AltivaneRoot><ThemeProbe /></AltivaneRoot>);
       expect(document.documentElement.dataset.theme).toBe(expectedTheme);
       expect(localStorage.getItem('altivane.theme')).toBe(expectedChoice);
-      expect(view.getByTestId('theme-probe').className.length).toBeGreaterThan(0);
+      const probe = view.getByTestId('theme-probe');
+      expect(probe.className.length).toBeGreaterThan(0);
+      const computed = window.getComputedStyle(probe);
+      expect(computed.getPropertyValue('--colorNeutralBackground1').trim()).toBe(expectedTheme === 'light' ? '#F7F7F8' : '#1B1F2B');
+      expect(computed.getPropertyValue('--colorNeutralForeground1').trim()).toBe(expectedTheme === 'light' ? '#19223F' : '#E6E8EE');
+      expect(computed.getPropertyValue('--colorBrandBackground').trim()).toBe(expectedTheme === 'light' ? '#639A5E' : '#8CC487');
       if (expectedChoice === 'system') expect(resolveAltivaneThemeChoice(stored)).toBe('system');
       localStorage.removeItem('altivane.theme');
     }
