@@ -12,10 +12,10 @@ declare global {
   }
 }
 
-function scanCompilerTokens(source: string): string[] {
-  const scanner = createScanner(false, LanguageVariant.Standard, source);
+function scanCompilerTokens(source: string, fileName: string): string[] {
+  const scanner = createScanner(true, LanguageVariant.Standard, source);
   const found: string[] = [];
-  for (let index = 0; index < 1000; index += 1) {
+  while (true) {
     const kind = scanner.scan();
     if (kind === SyntaxKind.EndOfFile) break;
     found.push(scanner.getTokenText());
@@ -28,7 +28,7 @@ function directFluentStyleValue(value: string): boolean {
 }
 
 function compilerStyleViolations(source: string, fileName: string): string[] {
-  const compilerTokens = scanCompilerTokens(source);
+  const compilerTokens = scanCompilerTokens(source, fileName);
   const violations: string[] = [];
   const coveredNames = new Set([
     'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'paddingInline', 'paddingBlock',
@@ -40,17 +40,22 @@ function compilerStyleViolations(source: string, fileName: string): string[] {
   ]);
 
   for (let index = 0; index < compilerTokens.length - 2; index += 1) {
-    if (!coveredNames.has(compilerTokens[index]) || compilerTokens[index + 1] !== ':') continue;
+    const property = compilerTokens[index].replace(/^(["'])(.*)\1$/, '$2');
+    if (!coveredNames.has(property) || compilerTokens[index + 1] !== ':') continue;
     const valueTokens: string[] = [];
     for (let valueIndex = index + 2; valueIndex < compilerTokens.length; valueIndex += 1) {
       const token = compilerTokens[valueIndex];
       if ([',', ';', '}'].includes(token)) break;
       valueTokens.push(token);
     }
-    const value = valueTokens.join('').replace(/^["']|["']$/g, '').trim();
-    if (!value.startsWith('{') && !directFluentStyleValue(value)) violations.push(`${fileName}:${value}`);
+    const value = valueTokens.join('').trim();
+    if (!directFluentStyleValue(value)) violations.push(`${fileName}:${value}`);
   }
   return violations;
+}
+
+function directFluentCssValue(value: string): boolean {
+  return /^var\(--(?:color|font|spacing|borderRadius|stroke|shadow|duration|curve|lineHeight|zIndex)[A-Za-z0-9]+\)$/.test(value);
 }
 
 describe('dependency audit versions', () => {
@@ -115,12 +120,12 @@ describe('dependency audit versions', () => {
       }
 
       if (file.endsWith('.css')) {
-        source.split('\n').forEach((line: string, index: number) => {
-          const declaration = /^\s*([\w-]+)\s*:\s*([^;]+);/.exec(line);
-          if (declaration && coveredProperty(declaration[1]) && !/^var\(--[\w-]+\)$/.test(declaration[2].trim())) {
-            violations.push(`${file}:${index + 1}:non-token CSS value ${declaration[2].trim()}`);
+        const declarationPattern = /([\w-]+)\s*:\s*([^;{}]+);/g;
+        for (const declaration of source.matchAll(declarationPattern)) {
+          if (coveredProperty(declaration[1]) && !directFluentCssValue(declaration[2].trim())) {
+            violations.push(`${file}:non-token CSS value ${declaration[2].trim()}`);
           }
-        });
+        }
       }
     }
 
@@ -132,14 +137,20 @@ describe('dependency audit versions', () => {
       { name: 'font-variable.tsx', source: 'const font = "Segoe UI"; <div style={{ fontFamily: font }} />' },
       { name: 'gap-expression.tsx', source: '<div style={{ gap: calcSpacing() }} />' },
       { name: 'color-literal.tsx', source: 'const approved = false; const outside = "#abc";' },
+      { name: 'quoted-property.tsx', source: '<div style={{ "padding": "8px" }} />' },
       { name: 'fixture.css', source: '.example { font-family: "Segoe UI"; }' },
+      { name: 'custom-css.css', source: '.example { padding: var(--customPadding); }' },
     ];
 
     const fixtureViolations = fixtures.flatMap(({ name, source }) => {
       const found = name.endsWith('.css') ? [] : compilerStyleViolations(source, name);
       if (name.endsWith('.css')) {
-        const declaration = /^\.\w+\s*\{\s*([\w-]+):\s*([^;}]+);/.exec(source);
-        if (declaration && !/^var\(--[\w-]+\)$/.test(declaration[2].trim())) found.push(`${name}:non-token CSS value ${declaration[2].trim()}`);
+        const declarationPattern = /([\w-]+)\s*:\s*([^;}]+);/g;
+        for (const declaration of source.matchAll(declarationPattern)) {
+          if (/^(?:padding|margin|gap|borderRadius|border-radius|boxShadow|box-shadow|font|font-|lineHeight|line-height|transition|transition-|animation|animation-)/i.test(declaration[1]) && !directFluentCssValue(declaration[2].trim())) {
+            found.push(`${name}:non-token CSS value ${declaration[2].trim()}`);
+          }
+        }
       }
       if (name === 'color-literal.tsx' && /#[0-9a-f]{3,8}\b/i.test(source)) found.push(`${name}:color literal`);
       return found;
@@ -150,7 +161,9 @@ describe('dependency audit versions', () => {
       'font-variable.tsx:font',
       'gap-expression.tsx:calcSpacing()',
       'color-literal.tsx:color literal',
+      'quoted-property.tsx:"8px"',
       'fixture.css:non-token CSS value "Segoe UI"',
+      'custom-css.css:non-token CSS value var(--customPadding)',
     ]);
 
     const fluentImports = Object.entries(sourceFiles).filter(([, source]) => source.includes('@fluentui/react-components'));
