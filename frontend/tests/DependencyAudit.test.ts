@@ -4,11 +4,53 @@ import lock from '../package-lock.json';
 import { tokens } from '@fluentui/react-components';
 import { altivaneUiTokens } from '../src/theme/altivaneTheme';
 import { HANGAR_DEPENDENCY_PIN_ERROR, validateHangarDependencyPins } from '../src/hangar/dependencyPins';
+import { createScanner, LanguageVariant, SyntaxKind } from 'typescript/unstable/ast';
 
 declare global {
   interface ImportMeta {
     glob: (pattern: string, options: { eager: boolean; query: string; import: string }) => Record<string, string>;
   }
+}
+
+function scanCompilerTokens(source: string): string[] {
+  const scanner = createScanner(false, LanguageVariant.Standard, source);
+  const found: string[] = [];
+  for (let index = 0; index < 1000; index += 1) {
+    const kind = scanner.scan();
+    if (kind === SyntaxKind.EndOfFile) break;
+    found.push(scanner.getTokenText());
+  }
+  return found;
+}
+
+function directFluentStyleValue(value: string): boolean {
+  return /^\s*(?:tokens|altivaneUiTokens)\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?\s*$/.test(value);
+}
+
+function compilerStyleViolations(source: string, fileName: string): string[] {
+  const compilerTokens = scanCompilerTokens(source);
+  const violations: string[] = [];
+  const coveredNames = new Set([
+    'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'paddingInline', 'paddingBlock',
+    'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'marginInline', 'marginBlock',
+    'gap', 'borderRadius', 'borderRadiusTopLeft', 'borderRadiusTopRight', 'borderRadiusBottomRight', 'borderRadiusBottomLeft',
+    'boxShadow', 'fontSize', 'fontFamily', 'lineHeight', 'transitionProperty', 'transitionDuration',
+    'transitionTimingFunction', 'transitionDelay', 'animationName', 'animationDuration', 'animationTimingFunction',
+    'animationDelay', 'animationIterationCount',
+  ]);
+
+  for (let index = 0; index < compilerTokens.length - 2; index += 1) {
+    if (!coveredNames.has(compilerTokens[index]) || compilerTokens[index + 1] !== ':') continue;
+    const valueTokens: string[] = [];
+    for (let valueIndex = index + 2; valueIndex < compilerTokens.length; valueIndex += 1) {
+      const token = compilerTokens[valueIndex];
+      if ([',', ';', '}'].includes(token)) break;
+      valueTokens.push(token);
+    }
+    const value = valueTokens.join('').replace(/^["']|["']$/g, '').trim();
+    if (!value.startsWith('{') && !directFluentStyleValue(value)) violations.push(`${fileName}:${value}`);
+  }
+  return violations;
 }
 
 describe('dependency audit versions', () => {
@@ -57,12 +99,59 @@ describe('dependency audit versions', () => {
 
   it('Colour_literals_and_fluent_tokens_contract', () => {
     const sourceFiles = import.meta.glob('../src/**/*.{ts,tsx,css}', { eager: true, query: '?raw', import: 'default' });
-    const literalPattern = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i;
-    const violations = Object.entries(sourceFiles).flatMap(([file, source]) => {
-      if (file.endsWith('/src/theme/altivaneTheme.ts')) return [];
-      return source.split('\n').flatMap((line: string, index: number) => literalPattern.test(line) ? [`${file}:${index + 1}:${line.trim()}`] : []);
-    });
+    const colorPattern = /#[0-9a-f]{3,8}\b|(?:rgba?|hsla?)\([^)]*\)/i;
+    const coveredProperty = (name: string) => /^(padding|margin|gap|borderRadius|border-radius|boxShadow|box-shadow|font|font-|lineHeight|line-height|transition|transition-|animation|animation-)/i.test(name);
+    const violations: string[] = [];
+
+    for (const [file, source] of Object.entries(sourceFiles)) {
+      if (!file.endsWith('/src/theme/altivaneTheme.ts') && colorPattern.test(source)) {
+        source.split('\n').forEach((line: string, index: number) => {
+          if (colorPattern.test(line)) violations.push(`${file}:${index + 1}:color literal`);
+        });
+      }
+
+      if (file.endsWith('.tsx') || file.endsWith('.ts')) {
+        for (const violation of compilerStyleViolations(source, file)) violations.push(`${file}:${violation}`);
+      }
+
+      if (file.endsWith('.css')) {
+        source.split('\n').forEach((line: string, index: number) => {
+          const declaration = /^\s*([\w-]+)\s*:\s*([^;]+);/.exec(line);
+          if (declaration && coveredProperty(declaration[1]) && !/^var\(--[\w-]+\)$/.test(declaration[2].trim())) {
+            violations.push(`${file}:${index + 1}:non-token CSS value ${declaration[2].trim()}`);
+          }
+        });
+      }
+    }
+
     expect(violations).toEqual([]);
+
+    const fixtures: Array<{ name: string; source: string }> = [
+      { name: 'token.tsx', source: '<div style={{ padding: tokens.spacingHorizontalM, borderRadius: tokens.borderRadiusMedium }} />' },
+      { name: 'font-literal.tsx', source: '<div style={{ fontFamily: "Segoe UI" }} />' },
+      { name: 'font-variable.tsx', source: 'const font = "Segoe UI"; <div style={{ fontFamily: font }} />' },
+      { name: 'gap-expression.tsx', source: '<div style={{ gap: calcSpacing() }} />' },
+      { name: 'color-literal.tsx', source: 'const approved = false; const outside = "#abc";' },
+      { name: 'fixture.css', source: '.example { font-family: "Segoe UI"; }' },
+    ];
+
+    const fixtureViolations = fixtures.flatMap(({ name, source }) => {
+      const found = name.endsWith('.css') ? [] : compilerStyleViolations(source, name);
+      if (name.endsWith('.css')) {
+        const declaration = /^\.\w+\s*\{\s*([\w-]+):\s*([^;}]+);/.exec(source);
+        if (declaration && !/^var\(--[\w-]+\)$/.test(declaration[2].trim())) found.push(`${name}:non-token CSS value ${declaration[2].trim()}`);
+      }
+      if (name === 'color-literal.tsx' && /#[0-9a-f]{3,8}\b/i.test(source)) found.push(`${name}:color literal`);
+      return found;
+    });
+
+    expect(fixtureViolations).toEqual([
+      'font-literal.tsx:"Segoe UI"',
+      'font-variable.tsx:font',
+      'gap-expression.tsx:calcSpacing()',
+      'color-literal.tsx:color literal',
+      'fixture.css:non-token CSS value "Segoe UI"',
+    ]);
 
     const fluentImports = Object.entries(sourceFiles).filter(([, source]) => source.includes('@fluentui/react-components'));
     expect(fluentImports.length).toBeGreaterThan(0);
@@ -73,38 +162,6 @@ describe('dependency audit versions', () => {
       font: tokens.fontFamilyBase,
       motion: tokens.durationNormal,
     });
-    expect(Object.values(altivaneUiTokens)).toEqual([
-      tokens.spacingHorizontalM,
-      tokens.borderRadiusMedium,
-      tokens.shadow4,
-      tokens.fontFamilyBase,
-      tokens.durationNormal,
-    ]);
-    const uiProperty = '(?:padding(?:Top|Right|Bottom|Left|Inline|Block)?|margin(?:Top|Right|Bottom|Left|Inline|Block)?|gap|borderRadius(?:TopLeft|TopRight|BottomRight|BottomLeft)?|border-radius(?:-(?:top-left|top-right|bottom-right|bottom-left))?|boxShadow|box-shadow|fontSize|font-size|fontFamily|font-family|lineHeight|line-height|transition(?:Property|Duration|TimingFunction|Delay)?|transition-(?:property|duration|timing-function|delay)|animation(?:Name|Duration|TimingFunction|Delay|IterationCount)?|animation-(?:name|duration|timing-function|delay|iteration-count))';
-    const forbiddenUiStyles = Object.entries(sourceFiles).flatMap(([file, source]) => {
-      if (!file.endsWith('.tsx') && !file.endsWith('.ts') && !file.endsWith('.css')) return [];
-      const numericDeclarations = new Map<string, string>();
-      const declarationPattern = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:([+-]?\d+(?:\.\d+)?)|(["'`]\s*\d+(?:\.\d+)?(?:px|rem|em|%|ms|s)?\s*["'`]))/g;
-      for (const match of source.matchAll(declarationPattern)) {
-        numericDeclarations.set(match[1], match[2] ?? match[3] ?? '');
-      }
-
-      return source.split('\n').flatMap((line: string, index: number) => {
-        const propertyPattern = new RegExp(`(?:["'']?${uiProperty}["'']?)\\s*[:=]\\s*([^,;}\\n]+)`, 'gi');
-        const violations: string[] = [];
-        for (const match of line.matchAll(propertyPattern)) {
-          const value = match[1].trim().replace(/["'`]/g, '');
-          const isNumericLiteral = /^[+-]?\d+(?:\.\d+)?(?:px|rem|em|%|ms|s)?$/.test(value);
-          const isNumericVariable = numericDeclarations.has(value);
-          const isFluentToken = value.includes('tokens.') || value.includes('altivaneUiTokens.');
-          if ((isNumericLiteral || isNumericVariable) && !isFluentToken) {
-            violations.push(`${file}:${index + 1}:${line.trim()}`);
-          }
-        }
-        return violations;
-      });
-    });
-    expect(forbiddenUiStyles).toEqual([]);
   });
 
   it('hangar pin contract cases list exact inputs and results', () => {
