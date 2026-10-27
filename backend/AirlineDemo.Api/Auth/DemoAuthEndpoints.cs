@@ -103,6 +103,9 @@ public static class DemoAuthEndpoints
             return AntiForgeryFailed();
         }
 
+        // Binding answered 415 for a non-JSON body before this handler read it by hand; ReadFromJsonAsync would throw (500).
+        if (!http.Request.HasJsonContentType()) return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+
         SwitchUserRequest? request;
         try
         {

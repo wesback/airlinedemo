@@ -422,6 +422,31 @@ public sealed class TelemetryPrivacyTests
     }
 
     [Fact]
+    public async Task Role_switch_with_a_non_json_body_is_refused_with_415_and_emits_no_event()
+    {
+        var logger = new CapturingLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:Passcode"] = AppPasscode }));
+            builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(logger)));
+        });
+        using var client = factory.CreateClient();
+        var ct = TestContext.Current.CancellationToken;
+        using var signIn = await client.PostAsJsonAsync("/api/auth/sign-in", new { userId = "presenter", passcode = AppPasscode }, ct);
+        var cookie = signIn.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        var csrf = (await signIn.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("csrfToken").GetString()!;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user")
+        { Content = new StringContent("userId=exec-1", Encoding.UTF8, "text/plain") };
+        request.Headers.Add("Cookie", cookie);
+        request.Headers.Add("X-CSRF-Token", csrf);
+        using var response = await client.SendAsync(request, ct);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.DoesNotContain(logger.States.Select(ToProperties), p => p.GetValueOrDefault("event.name") == TelemetryRedaction.SecurityEvents.RoleSwitch);
+    }
+
+    [Fact]
     public void Role_switch_events_are_redacted()
     {
         var logger = new CapturingLogger();
