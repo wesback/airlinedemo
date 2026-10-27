@@ -16,6 +16,7 @@ describe('CaseSearch contract', () => {
     expect(screen.queryByRole('option', { name: 'cp-case-a' })).toBeNull();
 
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    expect(window.location.pathname).toBe('/cases/cp-case-b/overview');
     expect(onNavigate).toHaveBeenCalledWith('/cases/cp-case-b/overview');
     expect(fetchSpy).not.toHaveBeenCalled();
 

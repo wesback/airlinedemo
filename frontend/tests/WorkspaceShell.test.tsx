@@ -28,7 +28,7 @@ describe('WorkspaceShell contract', () => {
     expect(screen.getByRole('button', { name: 'Collapse navigation' })).toBeTruthy();
     expect(document.querySelectorAll('button[aria-label="Collapse navigation"]').length).toBe(1);
 
-    const nav = screen.getByRole('navigation', { name: 'Primary' }).closest('aside');
+    const nav = screen.getByRole('navigation', { name: 'Primary' }).closest('aside') as HTMLElement | null;
     expect(nav?.style.width).toBe('240px');
   });
 
@@ -39,7 +39,7 @@ describe('WorkspaceShell contract', () => {
         <div>Shell content</div>
       </WorkspaceShell>
     );
-    const collapsed = document.querySelector('aside[aria-label="Navigation"]');
+    const collapsed = document.querySelector('aside[aria-label="Navigation"]') as HTMLElement | null;
     expect(collapsed?.style.width).toBe('48px');
 
     window.localStorage.setItem('altivane.navCollapsed', 'false');
@@ -48,7 +48,7 @@ describe('WorkspaceShell contract', () => {
         <div>Shell content</div>
       </WorkspaceShell>
     );
-    expect(document.querySelector('aside[aria-label="Navigation"]')?.style.width).toBe('240px');
+    expect((document.querySelector('aside[aria-label="Navigation"]') as HTMLElement | null)?.style.width).toBe('240px');
 
     window.localStorage.removeItem('altivane.navCollapsed');
     rerender(
@@ -56,7 +56,7 @@ describe('WorkspaceShell contract', () => {
         <div>Shell content</div>
       </WorkspaceShell>
     );
-    expect(document.querySelector('aside[aria-label="Navigation"]')?.style.width).toBe('240px');
+    expect((document.querySelector('aside[aria-label="Navigation"]') as HTMLElement | null)?.style.width).toBe('240px');
 
     window.localStorage.setItem('altivane.navCollapsed', 'yes');
     rerender(
@@ -64,11 +64,11 @@ describe('WorkspaceShell contract', () => {
         <div>Shell content</div>
       </WorkspaceShell>
     );
-    expect(document.querySelector('aside[aria-label="Navigation"]')?.style.width).toBe('240px');
+    expect((document.querySelector('aside[aria-label="Navigation"]') as HTMLElement | null)?.style.width).toBe('240px');
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse navigation' }));
-    expect(document.querySelector('aside[aria-label="Navigation"]')?.style.width).toBe('48px');
+    expect((document.querySelector('aside[aria-label="Navigation"]') as HTMLElement | null)?.style.width).toBe('48px');
     fireEvent.click(screen.getByRole('button', { name: 'Expand navigation' }));
-    expect(document.querySelector('aside[aria-label="Navigation"]')?.style.width).toBe('240px');
+    expect((document.querySelector('aside[aria-label="Navigation"]') as HTMLElement | null)?.style.width).toBe('240px');
   });
 });

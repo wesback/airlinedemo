@@ -46,7 +46,7 @@ export default function WorkspaceShell({
   return (
     <div>
       <header>
-        <div aria-label="Altivane Aviation Capital">
+        <div role="img" aria-label="Altivane Aviation Capital">
           <span>ALTIVANE</span>
           <span>Asset Transitions</span>
         </div>
