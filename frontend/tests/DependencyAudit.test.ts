@@ -54,8 +54,16 @@ function compilerStyleViolations(source: string, fileName: string): string[] {
   return violations;
 }
 
+const fluentCssVariableNames = new Set([
+  '--colorNeutralBackground1', '--colorNeutralBackground2', '--colorNeutralForeground1', '--colorNeutralForeground2',
+  '--colorBrandBackground', '--colorBrandBackgroundHover', '--colorBrandBackgroundPressed', '--colorBrandForeground1', '--colorBrandStroke1', '--colorNeutralStroke1',
+  '--spacingHorizontalM', '--spacingHorizontalL', '--spacingHorizontalS', '--spacingHorizontalXS',
+  '--borderRadiusMedium', '--borderRadiusLarge', '--shadow4', '--fontFamilyBase', '--durationNormal',
+]);
+
 function directFluentCssValue(value: string): boolean {
-  return /^var\(--(?:color|font|spacing|borderRadius|stroke|shadow|duration|curve|lineHeight|zIndex)[A-Za-z0-9]+\)$/.test(value);
+  const match = /^var\((--[A-Za-z0-9]+)\)$/.exec(value.trim());
+  return !!match && fluentCssVariableNames.has(match[1]);
 }
 
 describe('dependency audit versions', () => {
@@ -140,6 +148,7 @@ describe('dependency audit versions', () => {
       { name: 'quoted-property.tsx', source: '<div style={{ "padding": "8px" }} />' },
       { name: 'fixture.css', source: '.example { font-family: "Segoe UI"; }' },
       { name: 'custom-css.css', source: '.example { padding: var(--customPadding); }' },
+      { name: 'made-up-css-var.css', source: '.example { padding: var(--spacingMadeUp); }' },
     ];
 
     const fixtureViolations = fixtures.flatMap(({ name, source }) => {
@@ -164,6 +173,7 @@ describe('dependency audit versions', () => {
       'quoted-property.tsx:"8px"',
       'fixture.css:non-token CSS value "Segoe UI"',
       'custom-css.css:non-token CSS value var(--customPadding)',
+      'made-up-css-var.css:non-token CSS value var(--spacingMadeUp)',
     ]);
 
     const fluentImports = Object.entries(sourceFiles).filter(([, source]) => source.includes('@fluentui/react-components'));
