@@ -1,0 +1,195 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 648,
+  "branch": "ai-sdlc/issue-648",
+  "commitSha": "07f61edfbb66466c256856b13a14c8ac7619bf60",
+  "round": 0,
+  "pipelineVersion": "e544081",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The components and named tests cover the listed behavior, but the wordmark’s generic container does not reliably expose the required accessible name.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/components/WorkspaceShell.tsx",
+          "line": 52,
+          "message": "Give the wordmark a semantic role or landmark that exposes its accessible name. The current test checks the aria-label attribute, not whether assistive technology receives that name.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "WorkspaceShell renders the wordmark inside a generic div with aria-label but no semantic role.",
+            "failureScenario": "A screen reader encounters the generic container; its aria-label may not be exposed as an accessible name, so the required name “Altivane Aviation Capital” is unavailable."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The components implement the listed behaviors, but the CaseSearch test does not prove the required application path change.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/CaseSearch.test.tsx",
+          "line": 19,
+          "message": "AC_012 does not verify that Enter changes the application path. Assert the resulting pathname so the test fails if the path update is removed.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The Enter handler calls submitMatch, which invokes onNavigate and updates history with pushState. The test asserts the callback but never checks the resulting path.",
+            "failureScenario": "If the history.pushState call is removed, Enter still invokes onNavigate with the expected path and this test passes, even though the application path does not change as AC_012 requires."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security defect is reachable in the changed code. Case search filters the supplied case scopes, renders IDs through React, and does not issue case lookup requests; return-to validation rejects external and protocol-relative URLs.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/CaseSearch.test.tsx",
+      "frontend/tests/RoleNavigation.test.tsx",
+      "frontend/tests/WorkspaceShell.test.tsx",
+      "frontend/tests/returnTo.test.ts"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
