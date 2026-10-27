@@ -1,0 +1,302 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 650,
+  "branch": "ai-sdlc/issue-650",
+  "commitSha": "6bbe202f479c0e12a8c2f8e8eb4c11501561abdb",
+  "round": 2,
+  "pipelineVersion": "e544081",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes add a returnTo expectation value and check shell content for the 503 case, but the assertions still do not verify 401 navigation, request-backed retry recovery, or isolation for 401, 403, and 404.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/WorkspaceRegion.test.tsx",
+          "line": 27,
+          "message": "The retry test still does not prove one request per click or that success replaces only the failed region's error state.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The retry test renders WorkspaceRegion with a mocked onRetry callback, checks that it ran once, then manually rerenders the component with success content. It does not exercise a request or an application response.",
+            "failureScenario": "If a Retry click sends no request, sends duplicate requests, or a successful response leaves the error visible or changes another region, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 355,
+          "message": "AC_019_mixed_region_error_contract still does not verify the required 401 navigation and returnTo behavior.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The 401 case adds an expectedHref value but only asserts alert text; the expectedHref is never checked, and the test does not assert navigation.",
+            "failureScenario": "If a 401 displays “Signing in…” but does not navigate to sign-in with the current path in returnTo, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "AC_019_mixed_region_isolation still does not verify preservation of other rendered regions across the required error statuses.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The isolation test now checks that the signed-in message and case heading remain visible for a 503 response. It still exercises only 503 and does not test preservation of other regions for 401, 403, or 404.",
+            "failureScenario": "If a 401, 403, or 404 error removes another rendered region, the isolation test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes add a currentPath prop and a few assertions, but the previously reported navigation, isolation, and retry request/recovery test gaps remain.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/WorkspaceRegion.test.tsx",
+          "line": 25,
+          "message": "The retry test still does not verify one request per click or that production retry success replaces only the failed region.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test clicks Retry on WorkspaceRegion with a mocked callback, then manually rerenders it with ready children. It does not exercise the App request path or count fetch calls.",
+            "failureScenario": "If one click sends zero or multiple requests, or a successful response changes another region, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 333,
+          "message": "AC_019_mixed_region_error_contract still does not assert 401 navigation with the current path in returnTo.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The 401 scenario defines expectedHref, but the test asserts only the alert text; it never checks navigation or the returnTo value.",
+            "failureScenario": "If a 401 leaves the browser on the protected route or navigates without the current case path in returnTo, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 382,
+          "message": "AC_019_mixed_region_isolation still does not cover unaffected-region preservation and sensitive-content exclusion across the required response statuses.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The isolation test exercises only a 503 response. Its added assertions check shell text and the case heading, but do not test isolation for 401, 403, or 404.",
+            "failureScenario": "If a 401, 403, or 404 error removes another rendered region or exposes sensitive response content, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no direct exploitable security vulnerability in the changed production code. Three previously reported acceptance-test gaps remain.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/WorkspaceRegion.test.tsx",
+          "line": 26,
+          "message": "The prior retry coverage finding remains: `retry_reloads_region_once_per_click` does not exercise a request or verify recovery from its response.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test clicks Retry and counts calls to a mocked callback, then manually rerenders the component with hardcoded recovered content.",
+            "failureScenario": "If Retry sends no request, sends multiple requests, or a successful response fails to update only the affected region, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 333,
+          "message": "The prior 401 navigation coverage finding remains: `AC_019_mixed_region_error_contract` does not assert the expected navigation.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The 401 scenario defines `expectedHref`, but the test only asserts the alert text and never checks navigation.",
+            "failureScenario": "If a 401 displays “Signing in…” without navigating to sign-in with the current path in `returnTo`, the named test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 372,
+          "message": "The prior isolation coverage finding remains for 401, 403, and 404 responses; the updated test verifies isolation only for 503.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "`AC_019_mixed_region_isolation` supplies only a 503 response; its shell-preservation and redaction assertions therefore cover only that status.",
+            "failureScenario": "If a 401, 403, or 404 response from a region hides other rendered regions or exposes sensitive content, this test does not exercise that response."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AccessibleReviewNavigation.test.tsx",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/WorkspaceRegion.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
