@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import SignIn, { type SignedInSession } from './components/SignIn';
+import WorkspaceRegion, { getRegionErrorMessage } from './components/WorkspaceRegion';
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
 import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTraceView } from './InvestigationTrace';
 import HangarLocalDiagnostics from './hangar/localDiagnostics';
@@ -29,9 +30,11 @@ class RequestError extends Error { constructor(readonly status: number) { super(
 async function getProjection<T>(url: string): Promise<T> { const response = await fetch(url); if (!response.ok) throw new RequestError(response.status); return response.json(); }
 
 function loadError(error: unknown): string {
-  return error instanceof RequestError && error.status === 401 ? 'Sign in again to view this case.'
-    : error instanceof RequestError && error.status === 404 ? 'This case is not available to your account.'
-      : 'Unable to load case data. Try again later.';
+  return error instanceof RequestError && error.status === 401 ? 'Sign in again to continue.'
+    : error instanceof RequestError && error.status === 403 ? 'You do not have permission for this action.'
+      : error instanceof RequestError && error.status === 404 ? 'Case not found or not in your scope.'
+        : error instanceof RequestError && error.status === 503 ? 'Service temporarily unavailable'
+          : 'Unable to load case data. Try again later.';
 }
 
 export type HangarEntryAppProps = {
@@ -565,8 +568,8 @@ export default function App({
               {selectedCaseId && <h2 id="case-heading" tabIndex={-1}>Case {selectedCaseId}</h2>}
             </>
           )}
-          {loadingCase && <p role="status">Loading case data…</p>}
-          {caseError && <p role="alert">{caseError}</p>}
+          {loadingCase && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
+          {caseError && <WorkspaceRegion status={caseError.includes('permission') ? 'permission' : caseError.includes('Case not found') ? 'missing' : caseError.includes('temporarily unavailable') ? 'unavailable' : caseError.includes('Sign in again') ? 'permission' : 'error'} error={caseError.includes('temporarily unavailable') ? { status: 503, message: 'Service temporarily unavailable' } : caseError.includes('permission') ? { status: 403, message: 'You do not have permission for this action.' } : caseError.includes('Case not found') ? { status: 404, message: 'Case not found or not in your scope.' } : caseError.includes('Sign in again') ? { status: 401, message: 'Sign in again to continue.' } : { status: 500, message: caseError }} onRetry={() => setRefresh((value) => value + 1)} />}
           {data && (
             <>
               <p>Revision: {data.caseState.revision}</p>
