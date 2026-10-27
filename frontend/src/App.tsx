@@ -37,6 +37,22 @@ function loadError(error: unknown): string {
           : 'Unable to load case data. Try again later.';
 }
 
+function resolveRegionStatus(error: string): 'error' | 'permission' | 'missing' | 'unavailable' {
+  if (error.includes('Sign in again')) return 'permission';
+  if (error.includes('permission')) return 'permission';
+  if (error.includes('Case not found')) return 'missing';
+  if (error.includes('temporarily unavailable')) return 'unavailable';
+  return 'error';
+}
+
+function resolveRegionError(error: string): { status: number; message: string } {
+  if (error.includes('Sign in again')) return { status: 401, message: 'Sign in again to continue.' };
+  if (error.includes('permission')) return { status: 403, message: 'You do not have permission for this action.' };
+  if (error.includes('Case not found')) return { status: 404, message: 'Case not found or not in your scope.' };
+  if (error.includes('temporarily unavailable')) return { status: 503, message: 'Service temporarily unavailable' };
+  return { status: 500, message: error };
+}
+
 export type HangarEntryAppProps = {
   hangarContractVersion?: unknown;
   hangarBrowserSupported?: unknown;
@@ -570,8 +586,8 @@ export default function App({
           )}
           {loadingCase && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
           {caseError && <WorkspaceRegion
-            status={caseError.includes('permission') ? 'permission' : caseError.includes('Case not found') ? 'missing' : caseError.includes('temporarily unavailable') ? 'unavailable' : caseError.includes('Sign in again') ? 'permission' : 'error'}
-            error={caseError.includes('temporarily unavailable') ? { status: 503, message: 'Service temporarily unavailable' } : caseError.includes('permission') ? { status: 403, message: 'You do not have permission for this action.' } : caseError.includes('Case not found') ? { status: 404, message: 'Case not found or not in your scope.' } : caseError.includes('Sign in again') ? { status: 401, message: 'Sign in again to continue.' } : { status: 500, message: caseError }}
+            status={resolveRegionStatus(caseError)}
+            error={resolveRegionError(caseError)}
             currentPath={selectedCaseId ? `/cases/${encodeURIComponent(selectedCaseId)}` : undefined}
             onRetry={() => setRefresh((value) => value + 1)}
           />}

@@ -338,6 +338,18 @@ describe('reviewer workspace', () => {
 
     for (const scenario of scenarios) {
       cleanup();
+      const originalLocation = window.location;
+      const assignSpy = vi.fn();
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: {
+          ...originalLocation,
+          pathname: '/cases/case-001',
+          search: '',
+          hash: '',
+          assign: assignSpy,
+        },
+      });
       vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url === '/api/health') return json({ status: 'ok' });
@@ -353,9 +365,14 @@ describe('reviewer workspace', () => {
 
       const alert = await screen.findByRole('alert');
       expect(alert.textContent).toBe(scenario.expectedText);
+      if (scenario.status === 401) {
+        expect(assignSpy).toHaveBeenCalledWith(scenario.expectedHref);
+      }
       if (scenario.status === 503) {
         expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
       }
+      vi.unstubAllGlobals();
+      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
     }
 
     vi.unstubAllGlobals();
@@ -363,29 +380,54 @@ describe('reviewer workspace', () => {
 
   it('AC_019_mixed_region_isolation', async () => {
     const secretText = 'stack trace for passcode session csrf item-42';
-    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === '/api/health') return json({ status: 'ok' });
-      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-      if (url === '/api/auth/users') return json(users);
-      if (url === '/api/auth/sign-in') return json(signedIn);
-      if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') return json({ error: secretText }, 503);
-      return json({});
-    });
-    vi.stubGlobal('fetch', fetchSpy);
-    render(<App />);
-    await signIn();
+    const statuses = [401, 403, 404, 503] as const;
 
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('Service temporarily unavailable');
-    expect(alert.textContent).not.toContain('stack');
-    expect(alert.textContent).not.toContain('passcode');
-    expect(alert.textContent).not.toContain('session');
-    expect(alert.textContent).not.toContain('csrf');
-    expect(alert.textContent).not.toContain('item-42');
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
-    expect(screen.getByText('Signed in as Ada Reviewer.')).toBeTruthy();
-    expect(screen.getByText('Case case-001')).toBeTruthy();
+    for (const status of statuses) {
+      cleanup();
+      const originalLocation = window.location;
+      const assignSpy = vi.fn();
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: {
+          ...originalLocation,
+          pathname: '/cases/case-001',
+          search: '',
+          hash: '',
+          assign: assignSpy,
+        },
+      });
+      const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/health') return json({ status: 'ok' });
+        if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+        if (url === '/api/auth/users') return json(users);
+        if (url === '/api/auth/sign-in') return json(signedIn);
+        if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') return json({ error: secretText }, status);
+        return json({});
+      });
+      vi.stubGlobal('fetch', fetchSpy);
+      render(<App />);
+      await signIn();
+
+      const alert = await screen.findByRole('alert');
+      const expectedText = status === 401 ? 'Signing in…' : status === 403 ? 'You do not have permission for this action.' : status === 404 ? 'Case not found or not in your scope.' : 'Service temporarily unavailable Retry';
+      expect(alert.textContent).toBe(expectedText);
+      expect(alert.textContent).not.toContain('stack');
+      expect(alert.textContent).not.toContain('passcode');
+      expect(alert.textContent).not.toContain('session');
+      expect(alert.textContent).not.toContain('csrf');
+      expect(alert.textContent).not.toContain('item-42');
+      expect(screen.getByText('Signed in as Ada Reviewer.')).toBeTruthy();
+      expect(screen.getByText('Case case-001')).toBeTruthy();
+      if (status === 401) {
+        expect(assignSpy).toHaveBeenCalledWith('/sign-in?returnTo=%2Fcases%2Fcase-001');
+      }
+      if (status === 503) {
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+      }
+      vi.unstubAllGlobals();
+      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+    }
   });
 
   it('reports an unavailable API without claiming it is connected', async () => {

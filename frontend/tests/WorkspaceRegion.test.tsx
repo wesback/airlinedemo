@@ -13,18 +13,24 @@ describe('workspace region contract', () => {
     rerender(<WorkspaceRegion status="empty" />);
     expect(screen.getByTestId('workspace-region-empty').textContent).toBe('No data is available for this workspace.');
 
-    rerender(<WorkspaceRegion status="unavailable" error={{ status: 503, message: 'Service temporarily unavailable' }} onRetry={vi.fn()} />);
-    expect(screen.getByRole('alert').textContent).toContain('Service temporarily unavailable');
+    const onRetry = vi.fn();
+    rerender(
+      <WorkspaceRegion status="unavailable" error={{ status: 503, message: 'Service temporarily unavailable' }} onRetry={onRetry} />,
+    );
+    expect(screen.getByRole('alert').textContent).toBe('Service temporarily unavailable Retry');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('retry_reloads_region_once_per_click', () => {
     const onRetry = vi.fn();
-    const { rerender, getAllByRole } = render(
+    const { rerender } = render(
       <WorkspaceRegion status="unavailable" error={{ status: 503, message: 'Service temporarily unavailable' }} onRetry={onRetry} />,
     );
-    fireEvent.click(getAllByRole('button', { name: 'Retry' })[0]);
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(2);
 
     rerender(
       <WorkspaceRegion status="ready" error={null}>
@@ -32,6 +38,33 @@ describe('workspace region contract', () => {
       </WorkspaceRegion>,
     );
     expect(screen.getByText('Recovered region data')).toBeTruthy();
+  });
+
+  it('redirects_to_sign_in_with_the_current_path_for_401', () => {
+    const originalLocation = window.location;
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        pathname: '/cases/case-001',
+        search: '?tab=review',
+        hash: '',
+        assign: assignSpy,
+      },
+    });
+
+    render(
+      <WorkspaceRegion
+        status="permission"
+        error={{ status: 401, message: 'Sign in again to continue.' }}
+        currentPath="/cases/cp-case-a/findings?tab=review"
+      />,
+    );
+
+    expect(screen.getByRole('alert').textContent).toBe('Signing in…');
+    expect(assignSpy).toHaveBeenCalledWith('/sign-in?returnTo=%2Fcases%2Fcp-case-a%2Ffindings%3Ftab%3Dreview');
+    Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
   });
 
   it('returnTo_and_error_text_contracts_are_exact', () => {

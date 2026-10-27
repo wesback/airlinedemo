@@ -57,7 +57,8 @@ export default function WorkspaceRegion({
   const effectiveStatus = status === 'pending' ? 'loading' : (status ?? (loading ? 'loading' : empty ? 'empty' : error ? 'error' : 'ready'));
   const regionError = error instanceof Error ? { status: toStatusCode(error), message: error.message } : typeof error === 'number' ? { status: error } : error ?? null;
   const statusCode = toStatusCode(regionError) ?? (effectiveStatus === 'permission' ? 403 : effectiveStatus === 'missing' ? 404 : effectiveStatus === 'unavailable' ? 503 : undefined);
-  const message = regionError?.message ?? getRegionErrorMessage(statusCode, 'Unable to load this region.');
+  const message = regionError?.message?.trim() || getRegionErrorMessage(statusCode, 'Unable to load this region.');
+  const showErrorState = effectiveStatus === 'error' || effectiveStatus === 'permission' || effectiveStatus === 'missing' || effectiveStatus === 'unavailable' || statusCode !== undefined;
 
   useEffect(() => {
     if (statusCode === 401 && typeof window !== 'undefined') {
@@ -77,12 +78,12 @@ export default function WorkspaceRegion({
     return <div role="alert" data-testid="workspace-region-error">Signing in…</div>;
   }
 
-  if (effectiveStatus === 'error' || effectiveStatus === 'permission' || effectiveStatus === 'missing' || effectiveStatus === 'unavailable' || statusCode !== undefined) {
+  if (showErrorState) {
     if (statusCode === 503) {
       return (
         <div role="alert" data-testid="workspace-region-error">
-          <span>{message}</span>{' '}
-          <button type="button" onClick={onRetry} aria-label="Retry" style={{ marginLeft: '0.5rem' }}>Retry</button>
+          <span>{message}</span>{onRetry ? ' ' : null}
+          {onRetry && <button type="button" onClick={onRetry} aria-label="Retry" style={{ marginLeft: '0.5rem' }}>Retry</button>}
         </div>
       );
     }
