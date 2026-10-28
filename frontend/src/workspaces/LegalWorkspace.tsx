@@ -27,6 +27,16 @@ function formatAge(ageSeconds: number): string {
   return `${Math.round(total / 86400)}d`;
 }
 
+function isLegalObligationItem(item: Pick<WorklistItem, 'capabilityId' | 'itemId' | 'label'>): boolean {
+  const capability = item.capabilityId.toLowerCase();
+  const itemId = item.itemId.toUpperCase();
+  const normalizedLabel = typeof item.label === 'string' ? item.label.toLowerCase() : '';
+  const isObligationId = itemId.startsWith('OBL-');
+  const isLegalCapability = capability.includes('obligation');
+  const isFinanceReserve = normalizedLabel.includes('finance reserve') || normalizedLabel.includes('reserve');
+  return (isObligationId || isLegalCapability) && !isFinanceReserve;
+}
+
 export default function LegalWorkspace({
   items = [],
   title = 'Legal My work',
@@ -36,11 +46,12 @@ export default function LegalWorkspace({
   const [capabilityFilter, setCapabilityFilter] = useState('all');
   const [ageSort, setAgeSort] = useState<'server' | 'asc' | 'desc'>('server');
 
-  const caseOptions = useMemo(() => Array.from(new Set(items.map((item) => item.caseId))), [items]);
-  const capabilityOptions = useMemo(() => Array.from(new Set(items.map((item) => item.capabilityId))), [items]);
+  const obligationItems = useMemo(() => items.filter(isLegalObligationItem), [items]);
+  const caseOptions = useMemo(() => Array.from(new Set(obligationItems.map((item) => item.caseId))), [obligationItems]);
+  const capabilityOptions = useMemo(() => Array.from(new Set(obligationItems.map((item) => item.capabilityId))), [obligationItems]);
 
   const visibleItems = useMemo(() => {
-    const filtered = items.filter((item) => {
+    const filtered = obligationItems.filter((item) => {
       const matchesCase = caseFilter === 'all' || item.caseId === caseFilter;
       const matchesCapability = capabilityFilter === 'all' || item.capabilityId === capabilityFilter;
       return matchesCase && matchesCapability;
@@ -51,7 +62,7 @@ export default function LegalWorkspace({
       const delta = left.ageSeconds - right.ageSeconds;
       return ageSort === 'asc' ? delta : -delta;
     });
-  }, [items, caseFilter, capabilityFilter, ageSort]);
+  }, [obligationItems, caseFilter, capabilityFilter, ageSort]);
 
   return (
     <section aria-labelledby="legal-worklist-heading">

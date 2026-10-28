@@ -756,9 +756,7 @@ export default function App({
     }
   }
 
-  function openLegalObligation(caseId: string, itemId: string) {
-    setWorklistSelection({ caseId, itemId });
-    setSelectedCaseId(caseId);
+  async function loadLegalObligationRecord(caseId: string, itemId: string) {
     const nextPath = `/cases/${encodeURIComponent(caseId)}/obligations`;
     setRoutePath(nextPath);
     if (typeof window !== 'undefined') {
@@ -767,25 +765,64 @@ export default function App({
         window.history.pushState({}, '', nextPath);
       }
     }
-    const nextRecord: ObligationRecord = {
-      id: itemId,
-      title: `Obligation ${itemId}`,
-      summary: `Case ${caseId}: ${itemId}`,
-      status: 'Awaiting legal review',
-      basisVersion: 2,
-      expectedRevision: caseState?.revision ?? 0,
-      rows: [
+    try {
+      const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}/obligations`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        setObligationRecord(null);
+        return;
+      }
+      const payload = await response.json() as {
+        state?: string;
+        reasons?: string[];
+        drafts?: Array<{ id: string; body: string; status?: string; evidenceRequirementIds?: string[]; citation?: { sourceId?: string; recordId?: string; recordVersion?: number } }>;
+        newDraft?: { id?: string; body?: string; status?: string; evidenceRequirementIds?: string[]; citation?: { sourceId?: string; recordId?: string; recordVersion?: number } };
+        citation?: { sourceId?: string; recordId?: string; recordVersion?: number };
+        rows?: Array<{ label: string; value: string }>;
+        clauseReferences?: Array<{ id: string; text: string }>;
+        noticeDraft?: string;
+        banner?: string;
+        allowedDecisions?: Array<{ id: string; label: string }>;
+        basisVersion?: number | null;
+        expectedRevision?: number | null;
+      };
+      const record = payload.drafts?.find((draft) => draft.id === itemId || draft.id?.endsWith(`-${itemId}`)) ?? payload.newDraft;
+      const clauseText = payload.clauseReferences?.[0]?.text ?? (record?.citation ? `Clause: ${record.citation.sourceId ?? 'contracts'}/${record.citation.recordId ?? 'unknown'} § ${record.citation.recordVersion ?? 1}` : 'Clause: contracts/con-clause-return-notice-001 § 1');
+      const rows = Array.isArray(payload.rows) && payload.rows.length > 0 ? payload.rows : [
         { label: 'Obligation', value: itemId },
         { label: 'Case', value: caseId },
-        { label: 'Basis version', value: '2' },
-      ],
-      clauseReferences: [{ id: 'clause-1', text: 'Clause: contracts/con-clause-return-notice-001 § 1' }],
-      noticeDraft: '<b>x</b>',
-      banner: 'Simulated — no notice is sent.',
-      allowedDecisions: [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }],
-    };
-    setObligationRecord(nextRecord);
-    setObligationReason('');
+        { label: 'Basis version', value: String(payload.basisVersion ?? caseState?.basis?.length ?? 0) },
+      ];
+      const nextRecord: ObligationRecord = {
+        id: itemId,
+        title: `Obligation ${itemId}`,
+        summary: `Case ${caseId}: ${itemId}`,
+        status: payload.state ?? 'Awaiting legal review',
+        basisVersion: payload.basisVersion ?? caseState?.basis?.length ?? null,
+        expectedRevision: payload.expectedRevision ?? caseState?.revision ?? 0,
+        rows,
+        clauseReferences: payload.clauseReferences && payload.clauseReferences.length > 0 ? payload.clauseReferences : [{ id: 'clause-1', text: clauseText }],
+        noticeDraft: payload.noticeDraft ?? record?.body ?? '<b>x</b>',
+        banner: payload.banner ?? 'Simulated — no notice is sent.',
+        allowedDecisions: Array.isArray(payload.allowedDecisions) && payload.allowedDecisions.length > 0
+          ? payload.allowedDecisions
+          : [
+            { id: 'signed-off', label: 'Signed off' },
+            { id: 'rejected', label: 'Rejected' },
+          ],
+      };
+      setObligationRecord(nextRecord);
+      setObligationReason('');
+    } catch {
+      setObligationRecord(null);
+    }
+  }
+
+  function openLegalObligation(caseId: string, itemId: string) {
+    setWorklistSelection({ caseId, itemId });
+    setSelectedCaseId(caseId);
+    void loadLegalObligationRecord(caseId, itemId);
   }
 
   function navigateTechnicalFinding(direction: 'previous' | 'next') {

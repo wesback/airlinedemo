@@ -15,7 +15,7 @@ describe('legal worklist', () => {
 
     expect(screen.getByText('OBL-1')).toBeTruthy();
     expect(screen.getByText('OBL-2')).toBeTruthy();
-    expect(screen.getByText('OBL-9')).toBeTruthy();
+    expect(screen.queryByText('OBL-9')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('Case'), { target: { value: 'case-001' } });
     expect(screen.getByText('OBL-1')).toBeTruthy();

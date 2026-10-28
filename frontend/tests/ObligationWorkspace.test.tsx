@@ -1,8 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ObligationWorkspace from '../src/workspaces/ObligationWorkspace';
 
 describe('obligation workspace', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it('AC_011_obligation_notice_text_contract', () => {
     const onDecisionSubmit = vi.fn().mockResolvedValue(true);
     const obligation = {
@@ -37,6 +41,36 @@ describe('obligation workspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Signed off' }));
     expect(onDecisionSubmit).toHaveBeenCalledWith('signed-off', '');
+  });
+
+  it('legal_obligation_decision_contract', async () => {
+    const onDecisionSubmit = vi.fn().mockResolvedValue(true);
+    render(
+      <ObligationWorkspace
+        worklist={[{ caseId: 'case-001', itemId: 'OBL-1', capabilityId: 'contract-obligation', state: 'open', owner: 'legal', ageSeconds: 300, label: 'Human decision' }]}
+        caseId="case-001"
+        itemId="OBL-1"
+        obligation={{
+          id: 'OBL-1',
+          title: 'Obligation OBL-1',
+          summary: 'Case case-001: OBL-1',
+          status: 'Awaiting legal review',
+          basisVersion: 2,
+          expectedRevision: 7,
+          rows: [{ label: 'Case', value: 'case-001' }, { label: 'Obligation', value: 'OBL-1' }],
+          clauseReferences: [{ id: 'clause-1', text: 'Clause: contracts/con-clause-return-notice-001 § 1' }],
+          noticeDraft: '<b>x</b>',
+          banner: 'Simulated — no notice is sent.',
+          allowedDecisions: [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }],
+        }}
+        decisionReason="reason text"
+        onDecisionReasonChange={() => {}}
+        onDecisionSubmit={onDecisionSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Signed off' })[0]);
+    await waitFor(() => expect(onDecisionSubmit).toHaveBeenCalledWith('signed-off', 'reason text'));
   });
 
   it('AI_trace_and_obligation_text_remain_inert', () => {
