@@ -1,0 +1,288 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 655,
+  "branch": "ai-sdlc/issue-655",
+  "commitSha": "2f2e3dac0c04bd116233d2e98133058546054af5",
+  "round": 0,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The checklist does not include the required role-specific destinations, and the changed tests exercise component callbacks rather than the production App reset and View as flows.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 12,
+          "message": "The named App test for the scoped reset request is missing. This component callback test does not cover the production App path required by the reset acceptance criterion.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_actions renders PresenterDemoControl with a mock onResetCase callback; it does not render App or exercise handlePresenterReset and submitHangarCaseReset.",
+            "failureScenario": "If the App stops checking presenter case scope or reset eligibility, or omits the CSRF token or expected revision from the reset request, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 30,
+          "message": "The named App test for the production View as flow is missing. The component callback test does not cover the request, CSRF, success-gated navigation, or rejection behavior required by AC_004.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC_004_presenter_view_as_contract supplies a mock onViewAs callback and checks persona IDs; it does not exercise App's switch-user request, session update, or navigation.",
+            "failureScenario": "If the App omits the CSRF header, navigates before a successful response, or changes the session after a 403 or unknown persona, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/PresenterDemoControl.tsx",
+          "line": 32,
+          "message": "The guided checklist omits the five role-specific main-view links required by the criterion, including the exact findings, reserve, and obligations destinations.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "getPresenterGuidedChecklist returns five links, and its Case link targets the generic overview. The defined technical, finance, legal, executive, and presenter main-view paths are not added to the checklist.",
+            "failureScenario": "A presenter follows the guided checklist to reach the technical findings, finance reserve, or legal obligations view; none of those role-specific destinations is linked."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset and View as tests exercise component callbacks rather than the production App paths required by AC1 and AC2. The guided checklist also lacks the role-specific destinations required by AC3.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 9,
+          "message": "AC1's named App-level reset contract is not covered. The component callback test cannot verify the production request or its safeguards.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The reset test renders PresenterDemoControl with a mock callback and checks only that clicking a button passes a case ID. It does not render App or exercise handlePresenterReset and submitHangarCaseReset.",
+            "failureScenario": "If the App stops checking presenter case scope or stops sending the required CSRF token, expected revision, command ID, and variant, this test still passes. The named presenter_scoped_reset_app_request_contract test is absent from the diff."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 30,
+          "message": "AC2's production App handler behavior is untested; the component callback test does not prove the switch-user request or success and rejection behavior.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_004_presenter_view_as_contract supplies a mock onViewAs callback and checks persona IDs; it does not exercise App's switch-user request, session update, or navigation.",
+            "failureScenario": "If App omits the CSRF header, navigates before a successful response, or changes the session after a 403, this test still passes. The named AC_004_demo_view_as_contract test is absent from the diff."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/PresenterDemoControl.tsx",
+          "line": 31,
+          "message": "The guided checklist omits all five required role-specific main-view links, and presenter_guided_path_contract does not assert those destinations.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "getPresenterGuidedChecklist returns five generic links. The role-specific route constants are declared but never used in the checklist, and the test asserts only those five links.",
+            "failureScenario": "A presenter follows the checklist and finds no links to technical findings, finance reserve, legal obligations, or the presenter role's main view, despite AC3 requiring all five role-specific destinations."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed UI code has no directly evident exploitable security vulnerability. The tests do not verify the production reset and persona-switch safeguards required by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 10,
+          "message": "The reset test does not cover the production App path required by the first acceptance criterion.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The reset test renders PresenterDemoControl with a mock callback; it does not render App or exercise handlePresenterReset and the production reset request.",
+            "failureScenario": "If the App reset path stops checking presenter scope or omits the CSRF token or expected revision, this test still passes. The acceptance criterion names frontend/tests/App.test.tsx / presenter_scoped_reset_app_request_contract, which is absent from this change."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 30,
+          "message": "The View as test does not cover the production App path required by the second acceptance criterion.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The View as test supplies a mock onViewAs callback and checks persona IDs; it does not render App or exercise handleRoleSwitch.",
+            "failureScenario": "If the App switch-user path omits CSRF, navigates before a successful response, or changes the session after a 403, this test still passes. The acceptance criterion names frontend/tests/App.test.tsx / AC_004_demo_view_as_contract, which is absent from this change."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/PresenterDemoControl.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
