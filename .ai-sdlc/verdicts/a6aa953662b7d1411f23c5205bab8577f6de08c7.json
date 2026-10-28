@@ -1,0 +1,217 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 673,
+  "branch": "ai-sdlc/issue-673",
+  "commitSha": "a6aa953662b7d1411f23c5205bab8577f6de08c7",
+  "round": 2,
+  "pipelineVersion": "873af5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new test exercises sign-out and sign-in, but it does not verify preservation of an active in-scope case across a session change. The prior test-coverage finding remains unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 255,
+          "message": "The session-change test does not cover retaining an in-scope active case. Sign-out clears that selection, and the next session puts cp-case-b first, so the test passes when selection always falls back to the first scope.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Clicking Sign out calls handleSessionChange(null), which clears selectedCaseId. The subsequent sign-in therefore has no active case to retain and falls back to the first case scope.",
+            "failureScenario": "If session-change handling always selects the first scope, this test still passes: the new session lists cp-case-b first, so the assertion sees Case cp-case-b even though the user’s prior selection was cleared at sign-out."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added test still cannot detect the previously reported regression in production session-change handling. Its sign-out/sign-in sequence clears the selected case before the new session is applied.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 255,
+          "message": "The session-change test does not prove retaining the active in-scope case: it signs out, clearing the selection, then signs in to a session whose first scope is already cp-case-b. Exercise a non-null session change while cp-case-b is selected, with another scope first, and assert cp-case-b remains selected.",
+          "confidence": 0.88,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test selects cp-case-b, then signs out, which calls handleSessionChange(null) and clears the selection. On sign-in, cp-case-b is the first scope in nextSession, so the test does not verify retaining a selected case across a non-null session change.",
+            "failureScenario": "If session changes always selected the first scope, this test would still pass: sign-out clears cp-case-b, and the next session selects its first scope, cp-case-b. A regression that loses an in-scope selected case during a session change therefore remains undetected."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-3 test exercises the session-change flow, but its case ordering lets the reported regression pass undetected. I found no security vulnerability in the changed lines.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 246,
+          "message": "The prior test finding remains: the session-change test does not detect a regression to always choosing the first case scope. Put cp-case-a before cp-case-b in nextSession.caseScopes while cp-case-b is selected, then assert cp-case-b remains active.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The integration test signs in with cp-case-b selected, then changes sessions. Its next session lists cp-case-b first, so a handler that always selects the first scope still produces the asserted result.",
+            "failureScenario": "If the production session-change handler regresses to always selecting the first scope, this test still passes because cp-case-b is first in nextSession.caseScopes. The test therefore does not catch the prior finding’s regression scenario, where cp-case-b remains in scope but cp-case-a is first."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
