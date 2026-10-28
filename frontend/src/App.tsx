@@ -27,6 +27,8 @@ import FinanceWorkspace, { type FinanceWorklistItem } from './workspaces/Finance
 import ReserveWorksheet, { type ReserveWorksheetDraft } from './workspaces/ReserveWorksheet';
 import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
 import FindingWorkspace from './workspaces/FindingWorkspace';
+import ExecutivePortfolio, { type ExecutivePortfolioRow } from './workspaces/ExecutivePortfolio';
+import ExecutiveCaseSummary from './workspaces/ExecutiveCaseSummary';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 type CaseProjection = { revision: number; basis: unknown[] };
@@ -148,6 +150,7 @@ export default function App({
   const [worklistError, setWorklistError] = useState<number | null>(null);
   const [worklistLoaded, setWorklistLoaded] = useState(false);
   const [worklistSelection, setWorklistSelection] = useState<{ caseId: string; itemId: string } | null>(null);
+  const [portfolioRows, setPortfolioRows] = useState<ExecutivePortfolioRow[]>([]);
   const worklistRequestId = useRef(0);
   const worklistOwner = useRef('');
   const [conflictNotice, setConflictNotice] = useState('');
@@ -642,11 +645,29 @@ export default function App({
           setWorklistError(0);
           setWorklistLoaded(true);
         });
+    } else if (session.role === 'executive' || session.role === 'presenter') {
+      worklistRequestId.current += 1;
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(true);
+      fetch('/api/v1/workspace/portfolio')
+        .then(async (response) => {
+          if (!response.ok) {
+            setPortfolioRows([]);
+            return;
+          }
+          const payload = await response.json() as { cases?: ExecutivePortfolioRow[] };
+          setPortfolioRows(Array.isArray(payload.cases) ? payload.cases : []);
+        })
+        .catch(() => {
+          setPortfolioRows([]);
+        });
     } else {
       worklistRequestId.current += 1;
       setWorklist([]);
       setWorklistError(null);
       setWorklistLoaded(true);
+      setPortfolioRows([]);
     }
     const sessionCaseId = resolveSessionCaseId(session, selectedCaseId);
     if (!sessionCaseId) {
@@ -686,6 +707,9 @@ export default function App({
   const { value: readiness } = regions.readiness;
   const financeHomeRoute = session?.role === 'finance-reviewer' && routePath === '/work';
   const financeReserveRoute = session?.role === 'finance-reviewer' && /^\/cases\/[^/]+\/reserve(?:$|\?)/.test(normalizeRoutePath(routePath));
+  const roleHomePath = session ? (ROLE_HOME_PATHS[session.role] ?? '/work') : '/work';
+  const roleHomeLabel = roleHomePath === '/portfolio' ? 'Portfolio' : roleHomePath === '/demo' ? 'Demo control' : 'My work';
+  const routeIsInRole = !session || routeMatchesRole(routePath, session.role);
 
   async function submitFinanceDecision(decision: string) {
     // The expected revision is the case revision the server holds, not the reserve draft's own version.
@@ -985,6 +1009,12 @@ export default function App({
           primaryNavigation={<RoleNavigation role={session.role} />}
         >
           <section aria-labelledby="case-heading">
+            {session && !routeIsInRole && (
+              <section aria-live="polite">
+                <p>This page is not part of your workspace</p>
+                <a href={roleHomePath}>{roleHomeLabel}</a>
+              </section>
+            )}
             {!session.caseScopes?.length ? (
               <p>No cases are assigned to your account.</p>
             ) : (
@@ -1215,6 +1245,23 @@ export default function App({
                 items={worklist}
                 title="Technical My work"
                 onSelect={(caseId, itemId) => openTechnicalFinding(caseId, itemId)}
+              />
+            )}
+            {(session.role === 'executive' || session.role === 'presenter') && routePath === '/portfolio' && (
+              <ExecutivePortfolio
+                rows={portfolioRows}
+                onOpenCase={(caseId) => {
+                  handleCaseNavigate(`/cases/${encodeURIComponent(caseId)}/overview`);
+                }}
+              />
+            )}
+            {session.role === 'executive' && routePath.match(/^\/cases\/[^/]+(?:\/|$)/) && selectedCaseId && (
+              <ExecutiveCaseSummary
+                caseId={selectedCaseId}
+                summary="Executive read-only view"
+                rows={portfolioRows.find((row) => row.caseId === selectedCaseId)?.openItemsByRole ? Object.entries(portfolioRows.find((row) => row.caseId === selectedCaseId)!.openItemsByRole).map(([role, count]) => ({ role, count })) : []}
+                latestActivity={portfolioRows.find((row) => row.caseId === selectedCaseId)?.latestActivity ?? null}
+                showDecisionControls={false}
               />
             )}
             {dashboard && <CapabilityDashboard
