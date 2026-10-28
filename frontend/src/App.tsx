@@ -23,6 +23,8 @@ import HangarNon3dDataRoom from './hangar/non3dDataRoom';
 import WorkspaceShell from './components/WorkspaceShell';
 import RoleNavigation from './components/RoleNavigation';
 import CaseSearch from './components/CaseSearch';
+import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
+import FindingWorkspace from './workspaces/FindingWorkspace';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 type CaseProjection = { revision: number; basis: unknown[] };
@@ -137,6 +139,10 @@ export default function App({
   const requestContext = useRef('');
   const contextCounter = useRef(0);
   const [routePath, setRoutePath] = useState<string>(() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
+  const [worklist, setWorklist] = useState<WorklistItem[]>([]);
+  const [worklistError, setWorklistError] = useState<number | null>(null);
+  const [worklistLoaded, setWorklistLoaded] = useState(false);
+  const [worklistSelection, setWorklistSelection] = useState<{ caseId: string; itemId: string } | null>(null);
   const [returnTo, setReturnTo] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const value = new URLSearchParams(window.location.search).get('returnTo');
@@ -580,7 +586,34 @@ export default function App({
       setCaseError('');
       setReason('');
       setTraceView(null);
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(false);
       return;
+    }
+    if (session.role === 'technical-reviewer') {
+      fetch('/api/v1/workspace/worklist')
+        .then(async (response) => {
+          if (!response.ok) {
+            setWorklistError(response.status);
+            setWorklist([]);
+            setWorklistLoaded(true);
+            return;
+          }
+          const payload = await response.json() as { items?: WorklistItem[] };
+          setWorklist(Array.isArray(payload.items) ? payload.items : []);
+          setWorklistError(null);
+          setWorklistLoaded(true);
+        })
+        .catch(() => {
+          setWorklist([]);
+          setWorklistError(0);
+          setWorklistLoaded(true);
+        });
+    } else {
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(true);
     }
     const sessionCaseId = resolveSessionCaseId(session, selectedCaseId);
     if (!sessionCaseId) {
@@ -593,7 +626,6 @@ export default function App({
       setSelectedCaseId(sessionCaseId);
       return;
     }
-    // A fresh id per load, so a response from an earlier visit to the same session and case cannot become valid again.
     const context = String(++contextCounter.current);
     requestContext.current = context;
     setCaseError('');
@@ -620,14 +652,15 @@ export default function App({
   const { value: review } = regions.review;
   const { value: readiness } = regions.readiness;
 
-  async function submitDecision(capabilityId: string, decision: string) {
+  async function submitDecision(capabilityId: string, decision: string, overrideReason?: string) {
+    const nextReason = (overrideReason ?? reason).trim();
     if (
       capabilityId !== 'technical-review'
       || !['accept', 'reject'].includes(decision)
       || !dashboard?.allowedDecisions.some((action) => action.id === decision)
       || !session || !selectedCaseId || !caseState || !review
       || !Number.isInteger(caseState.revision) || !Number.isInteger(review.basisVersion)
-      || !reason.trim()
+      || !nextReason
     ) return;
 
     setDecisionBusy(true);
@@ -640,7 +673,7 @@ export default function App({
           expectedRevision: caseState.revision,
           expectedBasisVersion: review.basisVersion,
           decision,
-          reason: reason.trim(),
+          reason: nextReason,
         }),
       });
       if (response.status === 403) {
@@ -652,6 +685,7 @@ export default function App({
         return;
       }
       if (!response.ok) throw new RequestError(response.status);
+      setReason(nextReason);
       setRefresh((value) => value + 1);
     } catch {
       setCaseError('Unable to record the decision. Try again later.');
@@ -963,7 +997,7 @@ export default function App({
               onDecisionReasonChange={setReason}
               onTraceSelect={(url) => { void showTrace(url); }}
               onDecision={(capabilityId, decision) => {
-                if (!decisionBusy) void submitDecision(capabilityId, decision);
+                if (!decisionBusy) void submitDecision(capabilityId, decision, reason);
               }}
             />}
             {traceView && <InvestigationTrace view={traceView} />}
