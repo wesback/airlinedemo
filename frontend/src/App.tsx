@@ -28,12 +28,9 @@ import ReserveWorksheet, { type ReserveWorksheetDraft } from './workspaces/Reser
 import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
 import LegalWorkspace from './workspaces/LegalWorkspace';
 import FindingWorkspace from './workspaces/FindingWorkspace';
-<<<<<<< HEAD
 import ExecutivePortfolio, { type ExecutivePortfolioRow } from './workspaces/ExecutivePortfolio';
 import ExecutiveCaseSummary from './workspaces/ExecutiveCaseSummary';
-=======
 import ObligationWorkspace, { type ObligationRecord } from './workspaces/ObligationWorkspace';
->>>>>>> origin/main
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 const LEGAL_DECISIONS = [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }];
@@ -586,15 +583,17 @@ export default function App({
     if (nextSession) {
       const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
       const requestedFromSearch = validateReturnTo(new URLSearchParams(currentSearch).get('returnTo'));
+      const validRequestedFromSearch = requestedFromSearch && routeMatchesRole(requestedFromSearch, nextSession.role) ? requestedFromSearch : null;
       const currentRoleRoute = routeMatchesRole(routePath, nextSession.role) ? normalizeRoutePath(routePath) : null;
-      const requestedPath = requestedFromSearch ?? (returnTo && routeMatchesRole(returnTo, nextSession.role) ? returnTo : currentRoleRoute);
+      const requestedPath = validRequestedFromSearch ?? (returnTo && routeMatchesRole(returnTo, nextSession.role) ? returnTo : null);
       const roleHome = ROLE_HOME_PATHS[nextSession.role] ?? '/work';
-      const resolvedPath = resolveReturnTo(requestedPath, roleHome);
-      const nextRoute = routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome;
-      console.log('handleSessionChange-debug', { currentSearch, routePath, returnTo, requestedFromSearch, requestedPath, roleHome, resolvedPath, nextRoute, role: nextSession.role });
+      const currentNormalizedRoute = normalizeRoutePath(routePath);
+      const executiveDenialRoute = nextSession.role === 'executive' && currentNormalizedRoute === '/work';
+      const resolvedPath = executiveDenialRoute ? '/work' : resolveReturnTo(requestedPath, roleHome);
+      const nextRoute = executiveDenialRoute || routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome;
       if (typeof window !== 'undefined') {
         applyRoutePath(nextRoute);
-        setReturnTo(routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : null);
+        setReturnTo(executiveDenialRoute || routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : null);
       }
     }
   }
@@ -644,12 +643,21 @@ export default function App({
 
     const roleHome = ROLE_HOME_PATHS[session.role] ?? '/work';
     const normalizedRoute = normalizeRoutePath(routePath);
+    const executiveDenialRoute = session.role === 'executive' && normalizedRoute === '/work';
+    if (executiveDenialRoute) {
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(true);
+      setPortfolioRows([]);
+      setReturnTo(null);
+      return;
+    }
     const desiredRoute = routeMatchesRole(normalizedRoute, session.role) ? normalizedRoute : roleHome;
     if (desiredRoute !== normalizedRoute) {
       applyRoutePath(desiredRoute);
       return;
     }
-    if ((session.role === 'executive' || session.role === 'presenter') && normalizedRoute !== '/portfolio' && !normalizedRoute.match(/^\/cases\/[^/]+(?:\/|$)/)) {
+    if ((session.role === 'executive' || session.role === 'presenter') && normalizedRoute !== '/portfolio' && normalizedRoute !== '/work' && !normalizedRoute.match(/^\/cases\/[^/]+(?:\/|$)/)) {
       applyRoutePath('/portfolio');
       return;
     }
@@ -665,16 +673,12 @@ export default function App({
       setWorklistSelection(null);
       setConflictNotice('');
     }
-<<<<<<< HEAD
     if (portfolioOwner.current !== owner) {
       portfolioOwner.current = owner;
       portfolioRequestId.current += 1;
       setPortfolioRows([]);
     }
-    if (session.role === 'technical-reviewer') {
-=======
     if (session.role === 'technical-reviewer' || session.role === 'legal-reviewer') {
->>>>>>> origin/main
       const requestId = ++worklistRequestId.current;
       fetch('/api/v1/workspace/worklist')
         .then(async (response) => {
@@ -761,11 +765,17 @@ export default function App({
   const { value: dashboard } = regions.dashboard;
   const { value: review } = regions.review;
   const { value: readiness } = regions.readiness;
+  const executiveReadOnlyRole = !!session && (session.role === 'executive' || session.role === 'presenter');
   const financeHomeRoute = session?.role === 'finance-reviewer' && routePath === '/work';
   const financeReserveRoute = session?.role === 'finance-reviewer' && /^\/cases\/[^/]+\/reserve(?:$|\?)/.test(normalizeRoutePath(routePath));
   const roleHomePath = session ? (ROLE_HOME_PATHS[session.role] ?? '/work') : '/work';
   const roleHomeLabel = roleHomePath === '/portfolio' ? 'Portfolio' : roleHomePath === '/demo' ? 'Demo control' : 'My work';
+  const normalizedRoute = normalizeRoutePath(routePath);
   const routeIsInRole = !session || routeMatchesRole(routePath, session.role);
+  const executiveRouteDenial = !!session && session.role === 'executive' && normalizedRoute === '/work';
+  const routeIsExecutivePortfolio = !!session && executiveReadOnlyRole && normalizedRoute === '/portfolio';
+  const routeIsExecutiveCase = !!session && executiveReadOnlyRole && /^\/cases\/[^/]+(?:\/|$)/.test(normalizedRoute);
+  const roleDecisionPanelsEnabled = !!session && !['executive', 'presenter'].includes(session.role);
   const portfolioSessionKey = session ? `${session.id}:${session.csrfToken}` : '';
   const visiblePortfolioRows = portfolioOwner.current === portfolioSessionKey ? portfolioRows : [];
 
@@ -1136,6 +1146,12 @@ export default function App({
                 <a href={roleHomePath}>{roleHomeLabel}</a>
               </section>
             )}
+            {executiveRouteDenial && (
+              <section aria-live="polite">
+                <p>This page is not part of your workspace</p>
+                <a href="/portfolio">Portfolio</a>
+              </section>
+            )}
             {!session.caseScopes?.length ? (
               <p>No cases are assigned to your account.</p>
             ) : (
@@ -1368,7 +1384,6 @@ export default function App({
                 onSelect={(caseId, itemId) => openTechnicalFinding(caseId, itemId)}
               />
             )}
-<<<<<<< HEAD
             {(session.role === 'executive' || session.role === 'presenter') && routePath === '/portfolio' && (
               <ExecutivePortfolio
                 rows={visiblePortfolioRows}
@@ -1377,7 +1392,7 @@ export default function App({
                 }}
               />
             )}
-            {((session.role === 'executive' || session.role === 'presenter') && routePath.match(/^\/cases\/[^/]+(?:\/|$)/) && selectedCaseId && (
+            {((session.role === 'executive' || session.role === 'presenter') && normalizeRoutePath(routePath).match(/^\/cases\/[^/]+(?:\/|$)/) && selectedCaseId && (
               <ExecutiveCaseSummary
                 caseId={selectedCaseId}
                 summary="Executive read-only view"
@@ -1386,8 +1401,6 @@ export default function App({
                 showDecisionControls={false}
               />
             ))}
-            {session.role === 'technical-reviewer' && dashboard && <CapabilityDashboard
-=======
             {session.role === 'legal-reviewer' && worklistLoaded && legalObligationRoute && legalObligationRoute.caseId === selectedCaseId && obligationRecord && (
               <ObligationWorkspace
                 worklist={worklist}
@@ -1445,7 +1458,6 @@ export default function App({
               />
             )}
             {dashboard && <CapabilityDashboard
->>>>>>> origin/main
               data={dashboard}
               decisionReason={reason}
               onDecisionReasonChange={setReason}
