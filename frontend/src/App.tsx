@@ -568,10 +568,12 @@ export default function App({
     if (nextSession) {
       const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
       const requestedFromSearch = validateReturnTo(new URLSearchParams(currentSearch).get('returnTo'));
-      const requestedPath = requestedFromSearch ?? returnTo ?? null;
+      const currentRoleRoute = routeMatchesRole(routePath, nextSession.role) ? normalizeRoutePath(routePath) : null;
+      const requestedPath = requestedFromSearch ?? (returnTo && routeMatchesRole(returnTo, nextSession.role) ? returnTo : currentRoleRoute);
       const roleHome = ROLE_HOME_PATHS[nextSession.role] ?? '/work';
       const resolvedPath = resolveReturnTo(requestedPath, roleHome);
       const nextRoute = routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome;
+      console.log('handleSessionChange-debug', { currentSearch, routePath, returnTo, requestedFromSearch, requestedPath, roleHome, resolvedPath, nextRoute, role: nextSession.role });
       if (typeof window !== 'undefined') {
         applyRoutePath(nextRoute);
         setReturnTo(routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : null);
@@ -595,10 +597,10 @@ export default function App({
   }
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const nextPath = window.location.pathname + window.location.search;
-      setRoutePath(nextPath);
-      if (!session) {
+    if (!session) {
+      if (typeof window !== 'undefined') {
+        const nextPath = window.location.pathname + window.location.search;
+        setRoutePath(nextPath);
         const returnParam = new URLSearchParams(window.location.search).get('returnTo');
         if (returnParam && validateReturnTo(returnParam)) {
           setReturnTo(validateReturnTo(returnParam));
@@ -606,8 +608,6 @@ export default function App({
           setReturnTo(null);
         }
       }
-    }
-    if (!session) {
       requestContext.current = '';
       traceRequestId.current += 1;
       setRegions(loadingRegions());
@@ -623,6 +623,19 @@ export default function App({
       setConflictNotice('');
       return;
     }
+
+    const roleHome = ROLE_HOME_PATHS[session.role] ?? '/work';
+    const normalizedRoute = normalizeRoutePath(routePath);
+    const desiredRoute = routeMatchesRole(normalizedRoute, session.role) ? normalizedRoute : roleHome;
+    if (desiredRoute !== normalizedRoute) {
+      applyRoutePath(desiredRoute);
+      return;
+    }
+    if ((session.role === 'executive' || session.role === 'presenter') && normalizedRoute !== '/portfolio' && !normalizedRoute.match(/^\/cases\/[^/]+(?:\/|$)/)) {
+      applyRoutePath('/portfolio');
+      return;
+    }
+
     // A different user must never see the previous session's worklist: drop it before anything is fetched.
     const owner = `${session.id}:${session.csrfToken}`;
     if (worklistOwner.current !== owner) {
@@ -706,7 +719,7 @@ export default function App({
     setCaseError('');
     for (const key of REGION_KEYS) loadRegion(key, sessionCaseId, context);
     return () => { if (requestContext.current === context) requestContext.current = ''; };
-  }, [session, selectedCaseId, refresh]);
+  }, [session, selectedCaseId, refresh, routePath]);
 
   async function showTrace(url: string) {
     const requestId = ++traceRequestId.current;

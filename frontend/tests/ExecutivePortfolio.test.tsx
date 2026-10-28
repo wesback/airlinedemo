@@ -36,9 +36,20 @@ describe('ExecutivePortfolio', () => {
 
   it('executive_portfolio_table_contract', () => {
     const onOpenCase = vi.fn();
+    const rowWithSensitiveExtraProjection = {
+      caseId: 'case-001',
+      openItemsByRole: { 'technical-reviewer': 2, 'finance-reviewer': 1 },
+      nextDecisionOwner: 'exec-1',
+      oldestOpenAgeSeconds: 90000,
+      latestActivity: { sequence: 1, actor: 'Ada Reviewer', label: 'Human decision', outcome: 'technical-review.decided' },
+      itemId: 'SECRET-ITEM-1',
+      evidence: 'SECRET-EVIDENCE',
+      draft: 'SECRET-DRAFT',
+      decisionText: 'SECRET-DECISION',
+    } as any;
     render(<ExecutivePortfolio
       rows={[
-        { caseId: 'case-001', openItemsByRole: { 'technical-reviewer': 2, 'finance-reviewer': 1 }, nextDecisionOwner: 'exec-1', oldestOpenAgeSeconds: 90000, latestActivity: { sequence: 1, actor: 'Ada Reviewer', label: 'Human decision', outcome: 'technical-review.decided' } },
+        rowWithSensitiveExtraProjection,
         { caseId: 'case-002', openItemsByRole: { 'technical-reviewer': 0 }, nextDecisionOwner: null, oldestOpenAgeSeconds: 3600, latestActivity: null },
       ]}
       onOpenCase={onOpenCase}
@@ -50,6 +61,10 @@ describe('ExecutivePortfolio', () => {
     expect(rows[1].textContent).toContain('exec-1');
     expect(rows[1].textContent).toContain('1d 1h');
     expect(rows[1].textContent).toContain('Ada Reviewer: Human decision — technical-review.decided');
+    expect(rows[1].textContent).not.toContain('SECRET-ITEM-1');
+    expect(rows[1].textContent).not.toContain('SECRET-EVIDENCE');
+    expect(rows[1].textContent).not.toContain('SECRET-DRAFT');
+    expect(rows[1].textContent).not.toContain('SECRET-DECISION');
 
     fireEvent.click(rows[1]);
     expect(onOpenCase).toHaveBeenCalledWith('case-001');

@@ -29,10 +29,15 @@ function formatAge(ageSeconds: number | null): string {
   return `${days}d ${hours}h`;
 }
 
+function toDisplayText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return typeof value === 'string' ? value : String(value);
+}
+
 function latestActivityText(activity: PortfolioActivity | null): string {
   if (!activity) return '—';
-  const label = activity.label && activity.label.trim() ? activity.label : 'Unknown';
-  return `${activity.actor}: ${label} — ${activity.outcome}`;
+  const label = activity.label && activity.label.trim() ? toDisplayText(activity.label) : 'Unknown';
+  return `${toDisplayText(activity.actor)}: ${label} — ${toDisplayText(activity.outcome)}`;
 }
 
 export default function ExecutivePortfolio({ rows = [], onOpenCase }: ExecutivePortfolioProps) {

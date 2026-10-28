@@ -398,7 +398,75 @@ describe('reviewer workspace', () => {
     expect(screen.queryByText('This page is not part of your workspace')).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Technical My work' })).toBeNull();
     expect(screen.queryByRole('button', { name: /Accept finding|Reject finding/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /My work/i })).toBeNull();
     expect(screen.getByRole('heading', { name: 'Case case-001' })).toBeTruthy();
+  });
+
+  it('executive_portfolio_row_opens_matching_read_only_summary', async () => {
+    const executiveSession = { ...signedIn, role: 'executive', displayName: 'Executive observer', caseScopes: ['case-001', 'case-002'] };
+    setupApi({ session: executiveSession, users: [{ id: 'exec-1', displayName: 'Executive observer', role: 'executive' }] });
+    const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/workspace/portfolio') {
+        return json({
+          cases: [
+            {
+              caseId: 'case-001',
+              openItemsByRole: { 'technical-reviewer': 2, 'finance-reviewer': 1 },
+              nextDecisionOwner: 'exec-1',
+              oldestOpenAgeSeconds: 90000,
+              latestActivity: { sequence: 1, actor: 'Ada Reviewer', label: 'Human decision', outcome: 'technical-review.decided' },
+            },
+            {
+              caseId: 'case-002',
+              openItemsByRole: { 'technical-reviewer': 1 },
+              nextDecisionOwner: 'exec-2',
+              oldestOpenAgeSeconds: 3600,
+              latestActivity: { sequence: 2, actor: 'Sam Analyst', label: 'Review queued', outcome: 'awaiting-finance-review' },
+            },
+          ],
+        });
+      }
+      return baseFetch(input, init);
+    });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Executive observer.');
+    await screen.findByRole('heading', { name: 'Portfolio' });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('row').find((row) => row.textContent?.includes('case-002'))).toBeTruthy();
+    });
+    const case002Row = screen.getAllByRole('row').find((row) => row.textContent?.includes('case-002'))!;
+    fireEvent.click(case002Row);
+
+    const caseSummary002 = await screen.findByTestId('executive-case-summary');
+    expect(within(caseSummary002).getByRole('heading', { name: 'Case case-002' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-002/overview');
+    expect(within(caseSummary002).queryByText('Case case-001')).toBeNull();
+
+    cleanup();
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('heading', { name: 'Portfolio' });
+
+    const case001Row = screen.getAllByRole('row').find((row) => row.textContent?.includes('case-001'));
+    expect(case001Row).toBeTruthy();
+    fireEvent.click(case001Row!);
+
+    const caseSummary001 = await screen.findByTestId('executive-case-summary');
+    expect(within(caseSummary001).getByRole('heading', { name: 'Case case-001' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-001/overview');
+    expect(within(caseSummary001).queryByText('Case case-002')).toBeNull();
   });
 
   it('AC_001_App_root_shell_and_Hangar_composition', async () => {
