@@ -193,7 +193,8 @@ describe('accessible review navigation', () => {
     setupApi({ dashboardStatus: 503 });
     render(<App />);
     await signIn(user);
-    expect((await screen.findByRole('alert')).textContent).toBe('Unable to load case data. Try again later.');
+    expect((await screen.findByRole('alert')).textContent).toBe('Service temporarily unavailable Retry');
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
 
     cleanup();
     setupApi({ health: json({}, 503) });

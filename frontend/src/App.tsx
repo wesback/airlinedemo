@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
+import WorkspaceRegion from './components/WorkspaceRegion';
 import SignIn, { type SignedInSession } from './components/SignIn';
 import ReadinessSummary, { type ReadinessSummaryData } from './ReadinessSummary';
 import InvestigationTrace, { type InvestigationTraceRecord, type InvestigationTraceView } from './InvestigationTrace';
@@ -26,7 +27,19 @@ import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
-type Projections = { caseState: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection; readiness: ReadinessSummaryData };
+type RegionKey = 'case' | 'dashboard' | 'review' | 'readiness';
+type RegionValues = { case: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection; readiness: ReadinessSummaryData };
+// A data region is one projection request of the case view. Each keeps its own status, value and error, so one failing
+// region never blanks or invents data for another (FR-015, AC-019).
+type RegionState<K extends RegionKey> = { status: 'loading' | 'ready' | 'error'; value: RegionValues[K] | null; error: number | null };
+type Regions = { [K in RegionKey]: RegionState<K> };
+const REGION_KEYS: RegionKey[] = ['case', 'dashboard', 'review', 'readiness'];
+const REGION_SUFFIX: Record<RegionKey, string> = { case: '', dashboard: '/dashboard', review: '/technical-reviews', readiness: '/readiness' };
+const REGION_NAME: Record<RegionKey, string> = { case: 'Case', dashboard: 'Dashboard', review: 'Technical review', readiness: 'Readiness' };
+const loadingRegions = (): Regions => ({
+  case: { status: 'loading', value: null, error: null }, dashboard: { status: 'loading', value: null, error: null },
+  review: { status: 'loading', value: null, error: null }, readiness: { status: 'loading', value: null, error: null },
+});
 
 const PERSONA_OPTIONS = [
   { id: 'presenter', label: 'Demo presenter', role: 'presenter' },
@@ -80,13 +93,15 @@ function routeMatchesRole(pathname: string, role: string): boolean {
 
 class RequestError extends Error { constructor(readonly status: number) { super(`Request failed with status ${status}`); } }
 
-async function getProjection<T>(url: string): Promise<T> { const response = await fetch(url); if (!response.ok) throw new RequestError(response.status); return response.json(); }
+const statusOf = (error: unknown): number => (error instanceof RequestError ? error.status : 0);
 
-function loadError(error: unknown): string {
-  return error instanceof RequestError && error.status === 401 ? 'Sign in again to view this case.'
-    : error instanceof RequestError && error.status === 404 ? 'This case is not available to your account.'
-      : 'Unable to load case data. Try again later.';
-}
+// The shared error text covers 401, 403, 404 and 503; any other failure keeps the generic load message.
+const regionError = (code: number | null) => ({
+  status: code || undefined,
+  message: code !== null && [401, 403, 404, 503].includes(code) ? undefined : 'Unable to load case data. Try again later.',
+});
+
+async function getProjection<T>(url: string): Promise<T> { const response = await fetch(url); if (!response.ok) throw new RequestError(response.status); return response.json(); }
 
 export type HangarEntryAppProps = {
   hangarContractVersion?: unknown;
@@ -110,14 +125,15 @@ export default function App({
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
   const [session, setSession] = useState<SignedInSession | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
-  const [data, setData] = useState<Projections | null>(null);
+  const [regions, setRegions] = useState<Regions>(loadingRegions);
+  // Identifies the signed-in session and selected case a request was made for; a response for any other is dropped.
+  const requestContext = useRef('');
   const [routePath, setRoutePath] = useState<string>(() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
   const [returnTo, setReturnTo] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const value = new URLSearchParams(window.location.search).get('returnTo');
     return validateReturnTo(value);
   });
-  const [loadingCase, setLoadingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
   const [reason, setReason] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
@@ -479,11 +495,12 @@ export default function App({
         return;
       }
       const nextSession: SignedInSession = await response.json();
+      requestContext.current = '';
       resetHangarState();
       setSession(nextSession);
       setSelectedCaseId(nextSession.caseScopes?.[0] ?? null);
       traceRequestId.current += 1;
-      setData(null);
+      setRegions(loadingRegions());
       setReason('');
       setDecisionBusy(false);
       setTraceView(null);
@@ -495,11 +512,12 @@ export default function App({
   }
 
   function handleSessionChange(nextSession: SignedInSession | null) {
+    requestContext.current = '';
     resetHangarState();
     setSession(nextSession);
     setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
     traceRequestId.current += 1;
-    setData(null);
+    setRegions(loadingRegions());
     setReason('');
     setDecisionBusy(false);
     setTraceView(null);
@@ -517,6 +535,21 @@ export default function App({
     }
   }
 
+  // Requests one region. The response is applied only while the session and case it was requested for are still active.
+  function loadRegion(key: RegionKey, caseId: string, context: string) {
+    const apply = (state: Regions[RegionKey]) => { if (requestContext.current === context) setRegions((current) => ({ ...current, [key]: state }) as Regions); };
+    setRegions((current) => ({ ...current, [key]: { status: 'loading', value: current[key].value, error: null } }) as Regions);
+    getProjection(`/api/cases/${encodeURIComponent(caseId)}${REGION_SUFFIX[key]}`).then(
+      (value) => apply({ status: 'ready', value, error: null } as Regions[RegionKey]),
+      (error) => apply({ status: 'error', value: null, error: statusOf(error) }),
+    );
+  }
+
+  // Retry repeats only the failed region's own request, once per click.
+  function retryRegion(key: RegionKey) {
+    if (requestContext.current && selectedCaseId) loadRegion(key, selectedCaseId, requestContext.current);
+  }
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const nextPath = window.location.pathname + window.location.search;
@@ -531,42 +564,25 @@ export default function App({
       }
     }
     if (!session) {
+      requestContext.current = '';
       traceRequestId.current += 1;
-      setData(null);
+      setRegions(loadingRegions());
       setCaseError('');
-      setLoadingCase(false);
       setReason('');
       setTraceView(null);
       return;
     }
     if (!selectedCaseId) {
-      setData(null);
+      requestContext.current = '';
+      setRegions(loadingRegions());
       setCaseError('');
-      setLoadingCase(false);
       return;
     }
-    let active = true;
-    setLoadingCase(true);
+    const context = `${session.id}|${selectedCaseId}|${refresh}`;
+    requestContext.current = context;
     setCaseError('');
-    const encodedCaseId = encodeURIComponent(selectedCaseId);
-    const caseBase = `/api/cases/${encodedCaseId}`;
-    (async () => {
-      try {
-        const caseProjection = await getProjection<CaseProjection>(caseBase);
-        const dashboardProjection = await getProjection<DashboardData>(`${caseBase}/dashboard`);
-        const reviewProjection = await getProjection<TechnicalReviewProjection>(`${caseBase}/technical-reviews`);
-        const readiness = await getProjection<ReadinessSummaryData>(`${caseBase}/readiness`);
-        if (!active) return;
-        setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection, readiness });
-      } catch (error) {
-        if (!active) return;
-        setData(null);
-        setCaseError(loadError(error));
-      } finally {
-        if (active) setLoadingCase(false);
-      }
-    })();
-    return () => { active = false; };
+    for (const key of REGION_KEYS) loadRegion(key, selectedCaseId, context);
+    return () => { if (requestContext.current === context) requestContext.current = ''; };
   }, [session, selectedCaseId, refresh]);
 
   async function showTrace(url: string) {
@@ -583,13 +599,18 @@ export default function App({
     }
   }
 
+  const { value: caseState } = regions.case;
+  const { value: dashboard } = regions.dashboard;
+  const { value: review } = regions.review;
+  const { value: readiness } = regions.readiness;
+
   async function submitDecision(capabilityId: string, decision: string) {
     if (
       capabilityId !== 'technical-review'
       || !['accept', 'reject'].includes(decision)
-      || !data?.dashboard.allowedDecisions.some((action) => action.id === decision)
-      || !session || !selectedCaseId || !data
-      || !Number.isInteger(data.caseState.revision) || !Number.isInteger(data.review.basisVersion)
+      || !dashboard?.allowedDecisions.some((action) => action.id === decision)
+      || !session || !selectedCaseId || !caseState || !review
+      || !Number.isInteger(caseState.revision) || !Number.isInteger(review.basisVersion)
       || !reason.trim()
     ) return;
 
@@ -600,8 +621,8 @@ export default function App({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
         body: JSON.stringify({
-          expectedRevision: data.caseState.revision,
-          expectedBasisVersion: data.review.basisVersion,
+          expectedRevision: caseState.revision,
+          expectedBasisVersion: review.basisVersion,
           decision,
           reason: reason.trim(),
         }),
@@ -623,7 +644,7 @@ export default function App({
     }
   }
 
-  const currentDecision = data?.review.decisions.filter((item) => item.current).at(-1)?.decision;
+  const currentDecision = review?.decisions.filter((item) => item.current).at(-1)?.decision;
   const healthMessage = {
     checking: 'Checking service connection…',
     ready: 'Service connected',
@@ -742,8 +763,9 @@ export default function App({
                   <label>
                     Case
                     <select value={selectedCaseId ?? ''} onChange={(event) => {
+                      requestContext.current = '';
                       resetHangarState();
-                      setData(null);
+                      setRegions(loadingRegions());
                       setReason('');
                       setDecisionBusy(false);
                       setTraceView(null);
@@ -754,17 +776,22 @@ export default function App({
                     </select>
                   </label>
                 )}
-                {data && <ReadinessSummary summary={data.readiness} />}
+                {readiness && <ReadinessSummary summary={readiness} />}
                 {selectedCaseId && <h2 id="case-heading" tabIndex={-1}>Case {selectedCaseId}</h2>}
               </>
             )}
-            {loadingCase && <p role="status">Loading case data…</p>}
+            {REGION_KEYS.some((key) => regions[key].status === 'loading') && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
+            {REGION_KEYS.filter((key) => regions[key].status === 'error').map((key) => (
+              <section key={key} role="region" aria-label={`${REGION_NAME[key]} region`}>
+                <WorkspaceRegion status="error" error={regionError(regions[key].error)} currentPath={routePath} onRetry={() => retryRegion(key)} />
+              </section>
+            ))}
             {caseError && <p role="alert">{caseError}</p>}
-            {data && (
+            {caseState && (
               <>
-                <p>Revision: {data.caseState.revision}</p>
-                <p>Evidence basis: {data.caseState.basis.length}</p>
-                <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
+                <p>Revision: {caseState.revision}</p>
+                <p>Evidence basis: {caseState.basis.length}</p>
+                {review && <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>}
                 <button type="button" onClick={() => { void enterHangar(); }}>Enter Hangar</button>
                 {hangarView === 'regular' && (
                   <HangarNon3dDataRoom
@@ -910,18 +937,18 @@ export default function App({
                     )}
                   </section>
                 )}
-                <CapabilityDashboard
-                  data={data.dashboard}
-                  decisionReason={reason}
-                  onDecisionReasonChange={setReason}
-                  onTraceSelect={(url) => { void showTrace(url); }}
-                  onDecision={(capabilityId, decision) => {
-                    if (!decisionBusy) void submitDecision(capabilityId, decision);
-                  }}
-                />
-                {traceView && <InvestigationTrace view={traceView} />}
               </>
             )}
+            {dashboard && <CapabilityDashboard
+              data={dashboard}
+              decisionReason={reason}
+              onDecisionReasonChange={setReason}
+              onTraceSelect={(url) => { void showTrace(url); }}
+              onDecision={(capabilityId, decision) => {
+                if (!decisionBusy) void submitDecision(capabilityId, decision);
+              }}
+            />}
+            {traceView && <InvestigationTrace view={traceView} />}
           </section>
         </WorkspaceShell>
       )}
