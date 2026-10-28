@@ -64,6 +64,12 @@ function normalizeRoutePath(value: string | null | undefined): string {
   }
 }
 
+function resolveSessionCaseId(session: SignedInSession | null, currentCaseId: string | null): string | null {
+  if (!session) return null;
+  if (currentCaseId && session.caseScopes.includes(currentCaseId)) return currentCaseId;
+  return session.caseScopes[0] ?? null;
+}
+
 function routeMatchesRole(pathname: string, role: string): boolean {
   const normalized = normalizeRoutePath(pathname).split('?')[0];
   const allowed = ROLE_ALLOWED_PATHS[role] ?? [];
@@ -497,7 +503,7 @@ export default function App({
   function handleSessionChange(nextSession: SignedInSession | null) {
     resetHangarState();
     setSession(nextSession);
-    setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
+    setSelectedCaseId(resolveSessionCaseId(nextSession, selectedCaseId));
     traceRequestId.current += 1;
     setData(null);
     setReason('');
@@ -539,16 +545,21 @@ export default function App({
       setTraceView(null);
       return;
     }
-    if (!selectedCaseId) {
+    const sessionCaseId = resolveSessionCaseId(session, selectedCaseId);
+    if (!sessionCaseId) {
       setData(null);
       setCaseError('');
       setLoadingCase(false);
       return;
     }
+    if (selectedCaseId !== sessionCaseId) {
+      setSelectedCaseId(sessionCaseId);
+      return;
+    }
     let active = true;
     setLoadingCase(true);
     setCaseError('');
-    const encodedCaseId = encodeURIComponent(selectedCaseId);
+    const encodedCaseId = encodeURIComponent(sessionCaseId);
     const caseBase = `/api/cases/${encodedCaseId}`;
     (async () => {
       try {
