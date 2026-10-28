@@ -1,0 +1,297 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 654,
+  "branch": "ai-sdlc/issue-654",
+  "commitSha": "8c599e09866ede16434e1b4b3acddf17804383e3",
+  "round": 1,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior `/work` redirect behavior appears addressed in the implementation. Three acceptance criteria still lack tests that exercise the required endpoint loading, App-level role-matched panels, and executive `/work` denial state.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 7,
+          "message": "The named `AC_016_portfolio_kpis_contract` test does not verify that `/portfolio` loads `GET /api/v1/workspace/portfolio` through App.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "`AC_016_portfolio_kpis_contract` renders `ExecutivePortfolio` directly with supplied rows; it does not exercise App loading `/portfolio` or observe a request to `GET /api/v1/workspace/portfolio`.",
+            "failureScenario": "If App stops requesting the portfolio endpoint, the named KPI test still passes, so the endpoint-loading behavior in the acceptance criterion is untested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required App-host test for role-matched decision panels and read-only behavior is missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed App tests cover executive portfolio navigation and opening a portfolio row, but no App-host test named `executive_case_read_only_and_role_matched_decision_panels` checks that technical and finance decision panels appear only for matching roles.",
+            "failureScenario": "If App renders a technical or finance decision panel for the wrong role, the changed tests still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required executive `/work` behavior is not covered by the named `role route navigation` test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The `role route navigation` test signs in as an executive and checks the portfolio view; it does not navigate to `/work` or assert the denial message, absence of worklist data, and absence of decision controls.",
+            "failureScenario": "If executive `/work` renders worklist data or omits `This page is not part of your workspace`, the test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest change preserves the executive `/work` denial route, but its named navigation test still does not exercise that route. App-level role-matched decision-panel behavior also remains untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required executive `/work` behavior remains untested in `role route navigation`.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed `role route navigation` test signs in as an executive and checks `/portfolio`; it does not navigate to `/work` or assert the denial message and absence of worklist data.",
+            "failureScenario": "If executive `/work` redirects or displays worklist data instead of the required denial state, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required App-host test `executive_case_read_only_and_role_matched_decision_panels` is still missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed App tests cover portfolio navigation and row selection, but no App-host test checks that technical and finance decision panels render only for their matching roles.",
+            "failureScenario": "If App renders a technical or finance decision panel for the wrong role, the component-only summary test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The executive `/work` denial behavior appears implemented, but its required App test and the App-host role-matched decision-panel test remain absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required executive `/work` behavior remains untested in `role route navigation`.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The `role route navigation` test checks executive navigation to `/portfolio`, but does not visit `/work` or assert the denial message and absence of worklist data.",
+            "failureScenario": "If executive `/work` displays worklist data or omits `This page is not part of your workspace`, the named test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required App-host test for role-matched decision panels remains missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed App tests do not include `executive_case_read_only_and_role_matched_decision_panels` or otherwise exercise the App host to verify decision panels appear only for their matching roles.",
+            "failureScenario": "If App renders a technical or finance decision panel for the wrong role, the component-only summary test still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/ExecutiveCaseSummary.test.tsx",
+      "frontend/tests/ExecutivePortfolio.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
