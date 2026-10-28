@@ -538,7 +538,7 @@ export default function App({
   // Requests one region. The response is applied only while the session and case it was requested for are still active.
   function loadRegion(key: RegionKey, caseId: string, context: string) {
     const apply = (state: Regions[RegionKey]) => { if (requestContext.current === context) setRegions((current) => ({ ...current, [key]: state }) as Regions); };
-    setRegions((current) => ({ ...current, [key]: { status: 'loading', value: current[key].value, error: null } }) as Regions);
+    setRegions((current) => ({ ...current, [key]: { status: 'loading', value: current[key].value, error: current[key].error } }) as Regions);
     getProjection(`/api/cases/${encodeURIComponent(caseId)}${REGION_SUFFIX[key]}`).then(
       (value) => apply({ status: 'ready', value, error: null } as Regions[RegionKey]),
       (error) => apply({ status: 'error', value: null, error: statusOf(error) }),
@@ -780,10 +780,10 @@ export default function App({
                 {selectedCaseId && <h2 id="case-heading" tabIndex={-1}>Case {selectedCaseId}</h2>}
               </>
             )}
-            {REGION_KEYS.some((key) => regions[key].status === 'loading') && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
-            {REGION_KEYS.filter((key) => regions[key].status === 'error').map((key) => (
+            {REGION_KEYS.some((key) => regions[key].status === 'loading' && regions[key].error === null) && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
+            {REGION_KEYS.filter((key) => regions[key].error !== null).map((key) => (
               <section key={key} role="region" aria-label={`${REGION_NAME[key]} region`}>
-                <WorkspaceRegion status="error" error={regionError(regions[key].error)} currentPath={routePath} onRetry={() => retryRegion(key)} />
+                <WorkspaceRegion status="error" error={regionError(regions[key].error)} currentPath={routePath} retrying={regions[key].status === 'loading'} onRetry={() => retryRegion(key)} />
               </section>
             ))}
             {caseError && <p role="alert">{caseError}</p>}

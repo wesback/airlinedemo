@@ -464,6 +464,30 @@ describe('reviewer workspace', () => {
   const requests = (calls: { url: string; init?: RequestInit }[], url: string) => calls.filter((call) => call.url === url && (call.init?.method ?? 'GET') === 'GET').length;
   const REVIEWS = '/api/cases/case-001/technical-reviews';
 
+  it('AC_019_mixed_region_error_contract', async () => {
+    for (const [status, text] of [[403, FORBIDDEN], [404, 'Case not found or not in your scope.'], [503, UNAVAILABLE]] as const) {
+      cleanup();
+      setupApi({ statuses: { '/api/cases/case-001': [status] } });
+      render(<App />);
+      await signIn();
+      expect(within(regionOf('Case')).getByRole('alert').textContent).toBe(`${text} Retry`);
+      expect(screen.queryByText('Revision: 7')).toBeNull();
+      expect(screen.getByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+      expect(document.body.textContent).not.toMatch(/stack|passcode|csrf|finding-secret/);
+    }
+
+    // 401 leaves for sign-in and keeps the current path in returnTo.
+    cleanup();
+    const assign = vi.fn();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...originalWindowLocation, pathname: '/work', search: '?tab=review', assign } });
+    setupApi({ statuses: { '/api/cases/case-001': [401] } });
+    render(<App />);
+    await signIn();
+    expect(within(regionOf('Case')).getByRole('alert').textContent).toBe('Signing in…');
+    expect(assign).toHaveBeenCalledWith('/sign-in?returnTo=%2Fwork%3Ftab%3Dreview');
+    expect(document.body.textContent).not.toMatch(/stack|passcode|csrf|finding-secret/);
+  });
+
   it('AC_019_simultaneous_region_errors_remain_recoverable', async () => {
     setupApi({ statuses: { '/api/cases/case-001/dashboard': [403, 200], [REVIEWS]: [503, 200] } });
     render(<App />);
@@ -516,11 +540,15 @@ describe('reviewer workspace', () => {
     render(<App />);
     await signIn();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    // While the retry is pending the error and Retry stay, and Retry cannot be clicked again.
+    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(requests(calls, REVIEWS)).toBe(2));
     expect(await screen.findByText(UNAVAILABLE)).toBeTruthy();
     await settle();
     expect(requests(calls, REVIEWS)).toBe(2);
     expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('Technical-review decision: No current decision')).toBeTruthy();
     expect(requests(calls, REVIEWS)).toBe(3);

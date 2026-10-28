@@ -9,6 +9,8 @@ export type WorkspaceRegionProps = {
   loadingMessage?: string;
   currentPath?: string | null;
   onRetry?: () => void;
+  // A retry is in flight: the error and Retry stay visible, and Retry cannot be clicked again until it answers.
+  retrying?: boolean;
   children?: ReactNode;
 };
 
@@ -26,7 +28,7 @@ export function buildReturnToPath(currentPath: string): string {
 }
 
 export default function WorkspaceRegion({
-  status, error, emptyMessage = 'No data is available for this workspace.', loadingMessage = 'Loading…', currentPath, onRetry, children,
+  status, error, emptyMessage = 'No data is available for this workspace.', loadingMessage = 'Loading…', currentPath, onRetry, retrying, children,
 }: WorkspaceRegionProps) {
   const code = status === 'error' ? error?.status : undefined;
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function WorkspaceRegion({
     return (
       <div role="alert" data-testid="workspace-region-error">
         <span>{error?.message?.trim() || getRegionErrorMessage(code)}</span>
-        {onRetry && <> <button type="button" onClick={onRetry}>Retry</button></>}
+        {onRetry && <> <button type="button" onClick={onRetry} disabled={retrying}>Retry</button></>}
       </div>
     );
   }
