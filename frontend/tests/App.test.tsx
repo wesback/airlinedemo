@@ -144,7 +144,7 @@ async function signIn() {
   await screen.findByText('Signed in as Ada Reviewer.');
   await waitFor(() => expect(
     screen.queryByText('Revision: 7')
-    || screen.queryByRole('alert')
+    || screen.queryAllByRole('alert')[0]
     || screen.queryByText('No cases are assigned to your account.')
   ).toBeTruthy());
 }
@@ -514,6 +514,36 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('region', { name: 'Dashboard region' })).toBeNull();
     expect(screen.getByText('Revision: 7')).toBeTruthy();
     expect(screen.getByText('Technical-review decision: No current decision')).toBeTruthy();
+  });
+
+  it('AC_019_every_region_failing_at_once_stays_visible_and_recoverable', async () => {
+    setupApi({ statuses: {
+      '/api/cases/case-001': [503, 200], '/api/cases/case-001/dashboard': [403, 200], [REVIEWS]: [503, 200], '/api/cases/case-001/readiness': [503, 200],
+    } });
+    render(<App />);
+    await signIn();
+
+    for (const [name, text] of [['Case', UNAVAILABLE], ['Dashboard', FORBIDDEN], ['Technical review', UNAVAILABLE], ['Readiness', UNAVAILABLE]]) {
+      expect(within(regionOf(name)).getByRole('alert').textContent).toBe(`${text} Retry`);
+      expect(within(regionOf(name)).getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    }
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(4);
+    expect(screen.queryByText('Revision: 7')).toBeNull();
+    expect(screen.queryByText(/^Return in 9 months\./)).toBeNull();
+    expect(screen.queryByText(/Technical-review decision/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+
+    fireEvent.click(within(regionOf('Case')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Revision: 7')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Case region' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(3);
+
+    fireEvent.click(within(regionOf('Readiness')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText(/^Return in 9 months\./)).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Readiness region' })).toBeNull();
+    expect(within(regionOf('Dashboard')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(within(regionOf('Technical review')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
   });
 
   it('retry_reloads_region_once_per_click', async () => {

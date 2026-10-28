@@ -36,6 +36,7 @@ type Regions = { [K in RegionKey]: RegionState<K> };
 const REGION_KEYS: RegionKey[] = ['case', 'dashboard', 'review', 'readiness'];
 const REGION_SUFFIX: Record<RegionKey, string> = { case: '', dashboard: '/dashboard', review: '/technical-reviews', readiness: '/readiness' };
 const REGION_NAME: Record<RegionKey, string> = { case: 'Case', dashboard: 'Dashboard', review: 'Technical review', readiness: 'Readiness' };
+const REGION_LOADING: Record<RegionKey, string> = { case: 'Loading case data…', dashboard: 'Loading dashboard…', review: 'Loading technical review…', readiness: 'Loading readiness…' };
 const loadingRegions = (): Regions => ({
   case: { status: 'loading', value: null, error: null }, dashboard: { status: 'loading', value: null, error: null },
   review: { status: 'loading', value: null, error: null }, readiness: { status: 'loading', value: null, error: null },
@@ -780,7 +781,9 @@ export default function App({
                 {selectedCaseId && <h2 id="case-heading" tabIndex={-1}>Case {selectedCaseId}</h2>}
               </>
             )}
-            {REGION_KEYS.some((key) => regions[key].status === 'loading' && regions[key].error === null) && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
+            {REGION_KEYS.filter((key) => regions[key].status === 'loading' && regions[key].error === null).map((key) => (
+              <WorkspaceRegion key={key} status="loading" loadingMessage={REGION_LOADING[key]} />
+            ))}
             {REGION_KEYS.filter((key) => regions[key].error !== null).map((key) => (
               <section key={key} role="region" aria-label={`${REGION_NAME[key]} region`}>
                 <WorkspaceRegion status="error" error={regionError(regions[key].error)} currentPath={routePath} retrying={regions[key].status === 'loading'} onRetry={() => retryRegion(key)} />
