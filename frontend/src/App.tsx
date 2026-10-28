@@ -153,6 +153,8 @@ export default function App({
   const [portfolioRows, setPortfolioRows] = useState<ExecutivePortfolioRow[]>([]);
   const worklistRequestId = useRef(0);
   const worklistOwner = useRef('');
+  const portfolioRequestId = useRef(0);
+  const portfolioOwner = useRef('');
   const [conflictNotice, setConflictNotice] = useState('');
   const technicalFindingRoute = useMemo(() => {
     if (!session || session.role !== 'technical-reviewer') return null;
@@ -622,6 +624,11 @@ export default function App({
       setWorklistSelection(null);
       setConflictNotice('');
     }
+    if (portfolioOwner.current !== owner) {
+      portfolioOwner.current = owner;
+      portfolioRequestId.current += 1;
+      setPortfolioRows([]);
+    }
     if (session.role === 'technical-reviewer') {
       const requestId = ++worklistRequestId.current;
       fetch('/api/v1/workspace/worklist')
@@ -650,16 +657,20 @@ export default function App({
       setWorklist([]);
       setWorklistError(null);
       setWorklistLoaded(true);
+      const requestId = ++portfolioRequestId.current;
       fetch('/api/v1/workspace/portfolio')
         .then(async (response) => {
           if (!response.ok) {
+            if (requestId !== portfolioRequestId.current) return;
             setPortfolioRows([]);
             return;
           }
           const payload = await response.json() as { cases?: ExecutivePortfolioRow[] };
+          if (requestId !== portfolioRequestId.current) return;
           setPortfolioRows(Array.isArray(payload.cases) ? payload.cases : []);
         })
         .catch(() => {
+          if (requestId !== portfolioRequestId.current) return;
           setPortfolioRows([]);
         });
     } else {
@@ -1255,7 +1266,7 @@ export default function App({
                 }}
               />
             )}
-            {session.role === 'executive' && routePath.match(/^\/cases\/[^/]+(?:\/|$)/) && selectedCaseId && (
+            {((session.role === 'executive' || session.role === 'presenter') && routePath.match(/^\/cases\/[^/]+(?:\/|$)/) && selectedCaseId && (
               <ExecutiveCaseSummary
                 caseId={selectedCaseId}
                 summary="Executive read-only view"
@@ -1263,7 +1274,7 @@ export default function App({
                 latestActivity={portfolioRows.find((row) => row.caseId === selectedCaseId)?.latestActivity ?? null}
                 showDecisionControls={false}
               />
-            )}
+            ))}
             {dashboard && <CapabilityDashboard
               data={dashboard}
               decisionReason={reason}

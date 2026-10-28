@@ -384,6 +384,21 @@ describe('reviewer workspace', () => {
     expect(invalidCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
   });
 
+  it('role route navigation', async () => {
+    const executiveSession = { ...signedIn, role: 'executive', displayName: 'Executive observer', caseScopes: ['case-001'] };
+    setupApi({ session: executiveSession, users: [{ id: 'exec-1', displayName: 'Executive observer', role: 'executive' }] });
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Executive observer.');
+    expect(window.location.pathname).toBe('/portfolio');
+    expect(screen.getByRole('heading', { name: 'Portfolio' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Accept finding|Reject finding/i })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Case case-001' })).not.toBeNull();
+  });
+
   it('AC_001_App_root_shell_and_Hangar_composition', async () => {
     setupApi({ canReset: true });
     render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
