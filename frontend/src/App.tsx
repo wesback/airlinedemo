@@ -947,6 +947,8 @@ export default function App({
   function openLegalObligation(caseId: string, itemId: string) {
     setWorklistSelection({ caseId, itemId });
     setSelectedCaseId(caseId);
+    setObligationRecord(null);
+    setObligationReason('');
     void loadLegalObligationRecord(caseId, itemId);
   }
 
