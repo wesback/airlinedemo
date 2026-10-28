@@ -35,6 +35,15 @@ describe('ReserveWorksheet', () => {
     expect(screen.getByText('Source')).toBeTruthy();
     expect(screen.getByText('Freshness')).toBeTruthy();
     expect(screen.getByText('Status')).toBeTruthy();
+    expect(screen.getByText('Pax frequency')).toBeTruthy();
+    expect(screen.getByText('Rate')).toBeTruthy();
+    expect(screen.getByText('Amount')).toBeTruthy();
+    expect(screen.getByText('source-a')).toBeTruthy();
+    expect(screen.getByText('source-b')).toBeTruthy();
+    expect(screen.getByText('source-c')).toBeTruthy();
+    expect(screen.getByText('2 days ago')).toBeTruthy();
+    expect(screen.getByText('6 hours ago')).toBeTruthy();
+    expect(screen.getByText('fresh')).toBeTruthy();
     expect(screen.getAllByText('Blocked')).toHaveLength(2);
     expect(screen.getAllByText('Stale')).toHaveLength(1);
     expect(screen.getByText('Not available')).toBeTruthy();
@@ -117,10 +126,12 @@ describe('ReserveWorksheet', () => {
 
     expect(screen.getAllByText('<b>x</b>').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Stale').length).toBeGreaterThan(0);
+    expect(screen.getByText('https://example.test/ok')).toBeTruthy();
     expect(document.querySelector('script')).toBeNull();
     expect(document.querySelector('b')).toBeNull();
     expect(document.querySelector('[href]')).toBeNull();
     expect(document.querySelector('[action]')).toBeNull();
     expect(document.querySelector('[style]')).toBeNull();
+    expect(document.querySelector('[src]')).toBeNull();
   });
 });

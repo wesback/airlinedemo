@@ -19,13 +19,17 @@ export default function FinanceWorkspace({ items = [], onOpenCase }: Props) {
   const [caseFilter, setCaseFilter] = useState('all');
   const [capabilityFilter, setCapabilityFilter] = useState('all');
 
-  const caseOptions = useMemo(() => Array.from(new Set(items.map((item) => item.caseId))).sort(), [items]);
-  const capabilityOptions = useMemo(() => Array.from(new Set(items.map((item) => item.capabilityId))).sort(), [items]);
-  const visibleItems = useMemo(() => items.filter((item) => {
+  const reserveItems = useMemo(
+    () => items.filter((item) => item.owner === 'finance-reviewer' && item.capabilityId === 'reserve'),
+    [items],
+  );
+  const caseOptions = useMemo(() => Array.from(new Set(reserveItems.map((item) => item.caseId))).sort(), [reserveItems]);
+  const capabilityOptions = useMemo(() => Array.from(new Set(reserveItems.map((item) => item.capabilityId))).sort(), [reserveItems]);
+  const visibleItems = useMemo(() => reserveItems.filter((item) => {
     const matchesCase = caseFilter === 'all' || item.caseId === caseFilter;
     const matchesCapability = capabilityFilter === 'all' || item.capabilityId === capabilityFilter;
     return matchesCase && matchesCapability;
-  }), [caseFilter, capabilityFilter, items]);
+  }), [caseFilter, capabilityFilter, reserveItems]);
 
   return (
     <section aria-labelledby="finance-worklist-heading">
