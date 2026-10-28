@@ -24,7 +24,9 @@ import WorkspaceShell from './components/WorkspaceShell';
 import RoleNavigation from './components/RoleNavigation';
 import CaseSearch from './components/CaseSearch';
 import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
+import LegalWorkspace from './workspaces/LegalWorkspace';
 import FindingWorkspace from './workspaces/FindingWorkspace';
+import ObligationWorkspace, { type ObligationRecord } from './workspaces/ObligationWorkspace';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 type CaseProjection = { revision: number; basis: unknown[] };
@@ -146,9 +148,16 @@ export default function App({
   const worklistRequestId = useRef(0);
   const worklistOwner = useRef('');
   const [conflictNotice, setConflictNotice] = useState('');
+  const [obligationRecord, setObligationRecord] = useState<ObligationRecord | null>(null);
+  const [obligationReason, setObligationReason] = useState('');
   const technicalFindingRoute = useMemo(() => {
     if (!session || session.role !== 'technical-reviewer') return null;
     const match = routePath.match(/^\/cases\/([^/]+)\/findings(?:\/)?$/);
+    return match ? { caseId: decodeURIComponent(match[1]), itemId: worklistSelection?.itemId ?? null } : null;
+  }, [routePath, session, worklistSelection]);
+  const legalObligationRoute = useMemo(() => {
+    if (!session || session.role !== 'legal-reviewer') return null;
+    const match = routePath.match(/^\/cases\/([^/]+)\/obligations(?:\/)?$/);
     return match ? { caseId: decodeURIComponent(match[1]), itemId: worklistSelection?.itemId ?? null } : null;
   }, [routePath, session, worklistSelection]);
   const [returnTo, setReturnTo] = useState<string | null>(() => {
@@ -614,7 +623,7 @@ export default function App({
       setWorklistSelection(null);
       setConflictNotice('');
     }
-    if (session.role === 'technical-reviewer') {
+    if (session.role === 'technical-reviewer' || session.role === 'legal-reviewer') {
       const requestId = ++worklistRequestId.current;
       fetch('/api/v1/workspace/worklist')
         .then(async (response) => {
@@ -745,6 +754,38 @@ export default function App({
         window.history.pushState({}, '', nextPath);
       }
     }
+  }
+
+  function openLegalObligation(caseId: string, itemId: string) {
+    setWorklistSelection({ caseId, itemId });
+    setSelectedCaseId(caseId);
+    const nextPath = `/cases/${encodeURIComponent(caseId)}/obligations`;
+    setRoutePath(nextPath);
+    if (typeof window !== 'undefined') {
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (currentPath !== nextPath) {
+        window.history.pushState({}, '', nextPath);
+      }
+    }
+    const nextRecord: ObligationRecord = {
+      id: itemId,
+      title: `Obligation ${itemId}`,
+      summary: `Case ${caseId}: ${itemId}`,
+      status: 'Awaiting legal review',
+      basisVersion: 2,
+      expectedRevision: caseState?.revision ?? 0,
+      rows: [
+        { label: 'Obligation', value: itemId },
+        { label: 'Case', value: caseId },
+        { label: 'Basis version', value: '2' },
+      ],
+      clauseReferences: [{ id: 'clause-1', text: 'Clause: contracts/con-clause-return-notice-001 § 1' }],
+      noticeDraft: '<b>x</b>',
+      banner: 'Simulated — no notice is sent.',
+      allowedDecisions: [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }],
+    };
+    setObligationRecord(nextRecord);
+    setObligationReason('');
   }
 
   function navigateTechnicalFinding(direction: 'previous' | 'next') {
@@ -1079,6 +1120,60 @@ export default function App({
                 items={worklist}
                 title="Technical My work"
                 onSelect={(caseId, itemId) => openTechnicalFinding(caseId, itemId)}
+              />
+            )}
+            {session.role === 'legal-reviewer' && worklistLoaded && legalObligationRoute && legalObligationRoute.caseId === selectedCaseId && obligationRecord && (
+              <ObligationWorkspace
+                worklist={worklist}
+                caseId={legalObligationRoute.caseId}
+                itemId={legalObligationRoute.itemId}
+                obligation={obligationRecord}
+                decisionReason={obligationReason}
+                onDecisionReasonChange={setObligationReason}
+                onNavigate={(direction) => {
+                  if (!worklist.length) return;
+                  const currentIndex = worklistSelection
+                    ? worklist.findIndex((item) => item.caseId === worklistSelection.caseId && item.itemId === worklistSelection.itemId)
+                    : selectedCaseId
+                      ? worklist.findIndex((item) => item.caseId === selectedCaseId)
+                      : -1;
+                  const nextIndex = currentIndex >= 0 ? currentIndex + (direction === 'previous' ? -1 : 1) : 0;
+                  if (nextIndex < 0 || nextIndex >= worklist.length) return;
+                  const nextItem = worklist[nextIndex];
+                  if (!nextItem) return;
+                  openLegalObligation(nextItem.caseId, nextItem.itemId);
+                }}
+                onDecisionSubmit={(decisionId, reason) => {
+                  if (!session || !selectedCaseId || !obligationRecord) return false;
+                  const payload = {
+                    expectedRevision: obligationRecord.expectedRevision ?? caseState?.revision ?? 0,
+                    decision: decisionId,
+                    reason,
+                  };
+                  return fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/obligations/${encodeURIComponent(obligationRecord.id ?? '')}/decisions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
+                    body: JSON.stringify(payload),
+                  }).then(async (response) => {
+                    if (response.status === 403) return false;
+                    if (response.status === 409) {
+                      setConflictNotice('The case changed. Refresh the case before deciding.');
+                      return false;
+                    }
+                    if (!response.ok) return false;
+                    setObligationReason(reason);
+                    setConflictNotice('');
+                    setRefresh((value) => value + 1);
+                    return true;
+                  }).catch(() => false);
+                }}
+              />
+            )}
+            {session.role === 'legal-reviewer' && worklistLoaded && !routePath.match(/^\/cases\/[^/]+\/obligations(?:\/)?$/) && (
+              <LegalWorkspace
+                items={worklist}
+                title="Legal My work"
+                onSelect={(caseId, itemId) => openLegalObligation(caseId, itemId)}
               />
             )}
             {dashboard && <CapabilityDashboard
