@@ -1,0 +1,303 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 654,
+  "branch": "ai-sdlc/issue-654",
+  "commitSha": "055ba088eb7526aaecd0e61fb289beb0284232b3",
+  "round": 0,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The executive `/work` route redirects to `/portfolio`, contrary to the required denial state. The App tests also omit the required `/work` and role-matched decision-panel coverage.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 645,
+          "message": "Executive `/work` redirects to `/portfolio` instead of displaying the required workspace-denial message.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "For an executive on `/work`, `desiredRoute` becomes the role home because `/work` does not match the executive role. The effect redirects before the workspace-denial message can remain visible.",
+            "failureScenario": "An executive opens `/work` and is redirected to `/portfolio` instead of seeing exactly `This page is not part of your workspace`."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required executive `/work` behavior is not covered by the named `role route navigation` test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "`role route navigation` checks executive navigation to `/portfolio`; it does not navigate to `/work` or assert the denial message, absence of worklist data, and absence of decision controls.",
+            "failureScenario": "If executive `/work` redirects or displays worklist data, `role route navigation` still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required App-host test for role-matched decision panels is missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changed App tests cover executive portfolio navigation and row selection, but no App-host test named `executive_case_read_only_and_role_matched_decision_panels` checks role-matched decision panels.",
+            "failureScenario": "If App displays a technical or finance decision panel for the wrong role, the standalone summary test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The executive `/work` route does not meet the specified denial behavior. The endpoint-loading and App-level role-matched panel criteria also lack the required tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 651,
+          "message": "Executive `/work` redirects to `/portfolio` instead of showing the required workspace denial state.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The route effect sends any executive route other than `/portfolio` or a case route to the executive role home, `/portfolio`. Therefore `/work` does not remain active to show the workspace denial message.",
+            "failureScenario": "An executive opens `/work`; the app redirects to `/portfolio` instead of showing exactly `This page is not part of your workspace`, contrary to the acceptance criterion. OWASP A01:2025 Broken Access Control."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 7,
+          "message": "The named AC_016 test does not verify that `/portfolio` loads `GET /api/v1/workspace/portfolio` through App.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`AC_016_portfolio_kpis_contract` renders `ExecutivePortfolio` directly with supplied rows; it does not exercise `/portfolio` through App or assert a request to `GET /api/v1/workspace/portfolio`.",
+            "failureScenario": "If App stops requesting the portfolio endpoint, the component test still passes, so the endpoint-loading behavior in the criterion is untested."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required App-host test for role-matched decision panels and read-only behavior is missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed App tests cover portfolio navigation and row selection, but the required `executive_case_read_only_and_role_matched_decision_panels` test is absent. The standalone summary test does not exercise App's role-specific panel rendering.",
+            "failureScenario": "If App renders a technical or finance decision panel for the wrong role, the changed tests still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The executive route guard redirects `/work` to `/portfolio`, so the required denial state is unreachable. The named route test does not exercise `/work` to catch this behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 644,
+          "message": "Executive `/work` is redirected to `/portfolio` instead of showing the required workspace denial message.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "When an executive visits `/work`, the role-route check replaces a route outside the executive workspace with the role home, `/portfolio`, before the denial message can render.",
+            "failureScenario": "An executive opens `/work` and is redirected to `/portfolio` instead of seeing exactly `This page is not part of your workspace`."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required executive `/work` behavior is not covered by the named `role route navigation` test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The `role route navigation` test signs in as an executive and checks `/portfolio`; it does not visit `/work` or assert the denial message, absence of worklist data, and absence of decision controls required by the acceptance criterion.",
+            "failureScenario": "If executive `/work` displays worklist data or omits the required denial message, this test still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "build",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/ExecutiveCaseSummary.test.tsx",
+      "frontend/tests/ExecutivePortfolio.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
