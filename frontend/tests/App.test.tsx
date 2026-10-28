@@ -281,7 +281,7 @@ describe('reviewer workspace', () => {
       session: financeSession,
       users: financeUsers,
     });
-    window.history.replaceState({}, '', '/cases/case-001/reserve?returnTo=%2Fcases%2Fcase-001%2Freserve');
+    window.history.replaceState({}, '', '/portfolio?returnTo=%2Fcases%2Fcase-001%2Freserve');
     render(<App />);
 
     expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
@@ -291,8 +291,12 @@ describe('reviewer workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await screen.findByText('Signed in as Finance reviewer.');
-    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeTruthy();
+    const primaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const workspaceMain = primaryNavigation.closest('aside')?.parentElement?.querySelector('main');
+    expect(primaryNavigation).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Finance reviewer' })).toBeTruthy();
+    expect(workspaceMain).not.toBeNull();
+    expect(workspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
     expect(window.location.pathname).toBe('/cases/case-001/reserve');
     expect(validCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
 
@@ -301,7 +305,7 @@ describe('reviewer workspace', () => {
       session: financeSession,
       users: financeUsers,
     });
-    window.history.replaceState({}, '', '/work?returnTo=%2Fcases%2Fcase-001%2Ffindings');
+    window.history.replaceState({}, '', '/portfolio?returnTo=%2Fcases%2Fcase-001%2Ffindings');
     render(<App />);
 
     fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
@@ -310,7 +314,11 @@ describe('reviewer workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await screen.findByText('Signed in as Finance reviewer.');
+    const invalidPrimaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const invalidWorkspaceMain = invalidPrimaryNavigation.closest('aside')?.parentElement?.querySelector('main');
     expect(window.location.pathname).toBe('/work');
+    expect(invalidWorkspaceMain).not.toBeNull();
+    expect(invalidWorkspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
     expect(invalidCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
   });
 
@@ -318,11 +326,16 @@ describe('reviewer workspace', () => {
     setupApi({ canReset: true });
     render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
     await signIn();
+    const primaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const workspaceMain = primaryNavigation.closest('aside')?.parentElement?.querySelector('main');
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeTruthy();
-    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeTruthy();
+    expect(primaryNavigation).toBeTruthy();
+    expect(workspaceMain).not.toBeNull();
+    expect(workspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
-    expect(screen.getByRole('heading', { name: 'Hangar' })).toBeTruthy();
+    const hangarHeading = screen.getByRole('heading', { name: 'Hangar' });
+    expect(workspaceMain?.contains(hangarHeading)).toBe(true);
     expect(screen.getByRole('button', { name: 'View Case A' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Overview' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Hangar object selection' })).toBeTruthy();
