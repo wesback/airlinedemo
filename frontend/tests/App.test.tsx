@@ -342,6 +342,20 @@ describe('reviewer workspace', () => {
     expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
   });
 
+  it('resets stale Hangar state when the selected case changes', async () => {
+    setupApi({ canReset: true, session: { ...signedIn, caseScopes: ['case-001', 'cp-case-b'] } });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
+    await signIn();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    expect(screen.getByRole('heading', { name: 'Hangar' })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Hangar' })).toBeNull());
+    expect(screen.getByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+  });
+
   it('Dashboard_waits_for_authorized_server_state', async () => {
     const calls = setupApi();
     render(<App />);
