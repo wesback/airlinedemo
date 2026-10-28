@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App, { resolveSessionCaseId } from '../src/App';
 
@@ -42,6 +42,8 @@ function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = de
 function setupApi(options: {
   healthStatus?: number;
   dashboardStatus?: number;
+  // Per-URL GET answers, consumed in order (the last one repeats); anything but 200 is an error whose body must never be shown.
+  statuses?: Record<string, number[]>;
   decisionStatus?: number;
   allowed?: typeof decisions;
   traces?: { label: string; url: string }[];
@@ -67,6 +69,11 @@ function setupApi(options: {
     const url = String(input);
     const method = init?.method ?? 'GET';
     calls.push({ url, init });
+    const queued = options.statuses?.[url];
+    if (queued && method === 'GET') {
+      const status = queued.length > 1 ? queued.shift()! : queued[0];
+      if (status !== 200) return json({ error: 'stack passcode session csrf finding-secret' }, status);
+    }
     if (url === '/api/health') return json({ status: 'ok' }, options.healthStatus ?? 200);
     if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
     if (url === '/api/auth/users') return json(options.users ?? users);
@@ -137,7 +144,7 @@ async function signIn() {
   await screen.findByText('Signed in as Ada Reviewer.');
   await waitFor(() => expect(
     screen.queryByText('Revision: 7')
-    || screen.queryByRole('alert')
+    || screen.queryAllByRole('alert')[0]
     || screen.queryByText('No cases are assigned to your account.')
   ).toBeTruthy());
 }
@@ -431,14 +438,18 @@ describe('reviewer workspace', () => {
     const summary = screen.getByText('Return in 9 months. 1 records gap found, 1 routine request sent, 1 item held for internal review, 2 documents not processed.');
     expect(summary.parentElement?.firstElementChild).toBe(summary);
 
-    for (const status of [401, 404]) {
+    for (const [status, text] of [[401, 'Signing in…'], [404, 'Case not found or not in your scope. Retry']] as const) {
       cleanup();
+      const assign = vi.fn();
+      Object.defineProperty(window, 'location', { configurable: true, value: { ...originalWindowLocation, pathname: '/work', search: '', assign } });
       setupApi({ dashboardStatus: status });
       render(<App />);
       await signIn();
-      expect(await screen.findByRole('alert')).toBeTruthy();
-      expect(screen.queryByText('Revision: 7')).toBeNull();
+      expect((await screen.findByRole('alert')).textContent).toBe(text);
+      expect(screen.getByText('Revision: 7')).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+      expect(assign.mock.calls.length).toBe(status === 401 ? 1 : 0);
+      if (status === 401) expect(assign).toHaveBeenCalledWith(expect.stringMatching(/^\/sign-in\?returnTo=/));
     }
   });
 
@@ -500,6 +511,208 @@ describe('reviewer workspace', () => {
       '/api/cases/cp-case-b/technical-reviews', '/api/cases/cp-case-b/readiness',
     ])));
     expect(calls.some(({ url }) => url.startsWith('/api/cases/cp-case-a'))).toBe(true);
+  });
+
+  const FORBIDDEN = 'You do not have permission for this action.';
+  const UNAVAILABLE = 'Service temporarily unavailable';
+  const regionOf = (name: string) => screen.getByRole('region', { name: `${name} region` });
+  const requests = (calls: { url: string; init?: RequestInit }[], url: string) => calls.filter((call) => call.url === url && (call.init?.method ?? 'GET') === 'GET').length;
+  const REVIEWS = '/api/cases/case-001/technical-reviews';
+
+  it('AC_019_mixed_region_error_contract', async () => {
+    for (const [status, text] of [[403, FORBIDDEN], [404, 'Case not found or not in your scope.'], [503, UNAVAILABLE]] as const) {
+      cleanup();
+      setupApi({ statuses: { '/api/cases/case-001': [status] } });
+      render(<App />);
+      await signIn();
+      expect(within(regionOf('Case')).getByRole('alert').textContent).toBe(`${text} Retry`);
+      expect(screen.queryByText('Revision: 7')).toBeNull();
+      expect(screen.getByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+      expect(document.body.textContent).not.toMatch(/stack|passcode|csrf|finding-secret/);
+    }
+
+    // 401 leaves for sign-in and keeps the current path in returnTo.
+    cleanup();
+    const assign = vi.fn();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...originalWindowLocation, pathname: '/work', search: '?tab=review', assign } });
+    setupApi({ statuses: { '/api/cases/case-001': [401] } });
+    render(<App />);
+    await signIn();
+    expect(within(regionOf('Case')).getByRole('alert').textContent).toBe('Signing in…');
+    expect(assign).toHaveBeenCalledWith('/sign-in?returnTo=%2Fwork%3Ftab%3Dreview');
+    expect(document.body.textContent).not.toMatch(/stack|passcode|csrf|finding-secret/);
+  });
+
+  it('AC_019_simultaneous_region_errors_remain_recoverable', async () => {
+    setupApi({ statuses: { '/api/cases/case-001/dashboard': [403, 200], [REVIEWS]: [503, 200] } });
+    render(<App />);
+    await signIn();
+
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.getByText(/^Return in 9 months\./)).toBeTruthy();
+    expect(within(regionOf('Dashboard')).getByRole('alert').textContent).toBe(`${FORBIDDEN} Retry`);
+    expect(within(regionOf('Technical review')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(2);
+    expect(screen.queryByText(/Technical-review decision/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/stack|passcode|csrf|finding-secret/);
+
+    fireEvent.click(within(regionOf('Technical review')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Technical-review decision: No current decision')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Technical review region' })).toBeNull();
+    expect(within(regionOf('Dashboard')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+
+    fireEvent.click(within(regionOf('Dashboard')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Dashboard region' })).toBeNull();
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.getByText('Technical-review decision: No current decision')).toBeTruthy();
+    // Case and readiness fail too: all four failures stay visible, each with its own Retry.
+    cleanup();
+    setupApi({ statuses: {
+      '/api/cases/case-001': [503, 200], '/api/cases/case-001/dashboard': [403, 200], [REVIEWS]: [503, 200], '/api/cases/case-001/readiness': [503, 200],
+    } });
+    render(<App />);
+    await signIn();
+
+    for (const [name, text] of [['Case', UNAVAILABLE], ['Dashboard', FORBIDDEN], ['Technical review', UNAVAILABLE], ['Readiness', UNAVAILABLE]]) {
+      expect(within(regionOf(name)).getByRole('alert').textContent).toBe(`${text} Retry`);
+      expect(within(regionOf(name)).getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    }
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(4);
+    expect(screen.queryByText('Revision: 7')).toBeNull();
+    expect(screen.queryByText(/^Return in 9 months\./)).toBeNull();
+    expect(screen.queryByText(/Technical-review decision/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+
+    fireEvent.click(within(regionOf('Case')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Revision: 7')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Case region' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(3);
+
+    fireEvent.click(within(regionOf('Readiness')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText(/^Return in 9 months\./)).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Readiness region' })).toBeNull();
+    expect(within(regionOf('Dashboard')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(within(regionOf('Technical review')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+  });
+
+  it('retry_reloads_region_once_per_click', async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Technical reviews answer 503, then 200.
+    let calls = setupApi({ statuses: { [REVIEWS]: [503, 200] } });
+    render(<App />);
+    await signIn();
+    expect(within(regionOf('Technical review')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+    for (const url of ['/api/cases/case-001', '/api/cases/case-001/dashboard', REVIEWS, '/api/cases/case-001/readiness']) expect(requests(calls, url)).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Technical-review decision: No current decision')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(requests(calls, REVIEWS)).toBe(2);
+    for (const url of ['/api/cases/case-001', '/api/cases/case-001/dashboard', '/api/cases/case-001/readiness']) expect(requests(calls, url)).toBe(1);
+
+    // The retry answers 503 again: one more request, the banner stays, and nothing is requested until the next click.
+    cleanup();
+    calls = setupApi({ statuses: { [REVIEWS]: [503, 503, 200] } });
+    render(<App />);
+    await signIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    // While the retry is pending the error and Retry stay, and Retry cannot be clicked again.
+    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(requests(calls, REVIEWS)).toBe(2));
+    expect(await screen.findByText(UNAVAILABLE)).toBeTruthy();
+    await settle();
+    expect(requests(calls, REVIEWS)).toBe(2);
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Technical-review decision: No current decision')).toBeTruthy();
+    expect(requests(calls, REVIEWS)).toBe(3);
+
+    // The case request answers 503 on first load; its retry fills only the case region.
+    cleanup();
+    calls = setupApi({ statuses: { '/api/cases/case-001': [503, 200] } });
+    render(<App />);
+    await signIn();
+    expect(within(regionOf('Case')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+    expect(screen.queryByText('Revision: 7')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Revision: 7')).toBeTruthy();
+    expect(requests(calls, '/api/cases/case-001')).toBe(2);
+    for (const url of ['/api/cases/case-001/dashboard', REVIEWS, '/api/cases/case-001/readiness']) expect(requests(calls, url)).toBe(1);
+  });
+
+  it('retry_response_is_ignored_after_context_switch', async () => {
+    const holdRetry = () => {
+      let release!: (response: Response) => void;
+      const pending = new Promise<Response>((resolve) => { release = resolve; });
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      let held = false;
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) !== REVIEWS || held) return original(input, init);
+        held = true; // only the retry that is started next waits; later loads are answered normally
+        return pending;
+      });
+      return () => release(json({ basisVersion: 4, decisions: [{ decision: 'reject', current: true }] }));
+    };
+
+    // Case A -> case B while the case A retry is pending.
+    setupApi({ session: { ...signedIn, caseScopes: ['case-001', 'cp-case-b'] }, statuses: { [REVIEWS]: [503] } });
+    render(<App />);
+    await signIn();
+    const resolveCaseA = holdRetry();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    expect(await screen.findByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+    await screen.findByText('Technical-review decision: No current decision');
+    resolveCaseA();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole('combobox', { name: 'Case' })).toHaveProperty('value', 'cp-case-b');
+    expect(screen.queryByText('Technical-review decision: reject')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // Case A -> case B -> case A again: the response of the first visit stays ignored.
+    cleanup();
+    setupApi({ session: { ...signedIn, caseScopes: ['case-001', 'cp-case-b'] }, statuses: { [REVIEWS]: [503] } });
+    render(<App />);
+    await signIn();
+    const resolveFirstVisit = holdRetry();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    await screen.findByRole('heading', { name: 'Case cp-case-b' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'case-001' } });
+    await screen.findByRole('heading', { name: 'Case case-001' });
+    expect(await within(regionOf('Technical review')).findByRole('alert')).toBeTruthy();
+    resolveFirstVisit();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('Technical-review decision: reject')).toBeNull();
+    expect(within(regionOf('Technical review')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+
+    // Session A -> session B while the session A retry is pending.
+    cleanup();
+    setupApi({ signInSessions: [{ ...signedIn, id: 'session-a' }, { ...signedIn, id: 'session-b' }], statuses: { [REVIEWS]: [503, 200] } });
+    render(<App />);
+    await signIn();
+    const resolveSessionA = holdRetry();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await screen.findByText('You are signed out.');
+    await prepareSignIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Technical-review decision: accept');
+    resolveSessionA();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('Technical-review decision: reject')).toBeNull();
+    expect(screen.getByText('Technical-review decision: accept')).toBeTruthy();
   });
 
   it('a new session loads the first case of that session', async () => {

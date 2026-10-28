@@ -1,0 +1,302 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 650,
+  "branch": "ai-sdlc/issue-650",
+  "commitSha": "431b17c19153ee7570edf9c40f63e552a8b7371e",
+  "round": 0,
+  "pipelineVersion": "873af5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The region loading, independent retry, and context-switch behavior have coverage. The required mixed-region error-contract test is absent, leaving the specified case 403 behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 461,
+          "message": "The test required by the error-contract criterion is missing. Add AC_019_mixed_region_error_contract covering a case 403, the exact permission text, and that the response body is not displayed.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names AC_019_mixed_region_error_contract, but the added App tests cover simultaneous dashboard/review errors and retry behavior; none sends a 403 response for the case request.",
+            "failureScenario": "If App displays the case endpoint's 403 response body instead of the required permission message, the current tests still pass because no test exercises that case."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The independent region and retry tests cover their named criteria. The App error contract criterion is not covered by its named test, and its negative case for a 403 on the case request is not exercised.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 458,
+          "message": "The App error contract criterion has no matching named test. Add the named test and exercise the case endpoint’s 403 response, including its exact message and response-body redaction.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names AC_019_mixed_region_error_contract, but no test with that name appears in the changed tests. The added 403 case in AC_019_simultaneous_region_errors_remain_recoverable targets the dashboard URL, not the case URL.",
+            "failureScenario": "If App mishandles a 403 response from /api/cases/case-001 while still handling dashboard 403 responses correctly, the named App-level criterion has no test that would catch the regression."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The change has no evident injection or credential exposure issue, but retry hides a failed region before recovery, and the named mixed-error contract test is missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 539,
+          "message": "Retry clears the failed region's error and Retry control while its request is pending.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "A Retry click calls loadRegion, which immediately changes that region to loading and clears its error before the request succeeds.",
+            "failureScenario": "When a failed region is retried and its request remains pending, its error and Retry control disappear. The acceptance criteria require them to remain visible until the region succeeds or its case/session changes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 383,
+          "message": "The criterion for exact 401, 403, 404, and 503 error behavior lacks its named test; in particular, the specified negative case for a 403 case response is not covered.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names `AC_019_mixed_region_error_contract`, but no test with that name is present in the change. The existing status checks cover dashboard 401/404; the other changed tests do not exercise a 403 response for the case request.",
+            "failureScenario": "If the case endpoint returns 403 and App displays the wrong message or exposes the response body, the named criterion's required test is absent to catch it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AccessibleReviewNavigation.test.tsx",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/WorkspaceRegion.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
