@@ -1,0 +1,273 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 654,
+  "branch": "ai-sdlc/issue-654",
+  "commitSha": "7e3cae82604e30079e1132ad4c485d0eedca3f85",
+  "round": 1,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The presenter case summary and late-response request guard are addressed. The logout path can still retain prior-session portfolio rows, and two required test cases remain uncovered.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 606,
+          "message": "Clear portfolioRows when the session ends, or ensure rows are hidden until they belong to the current session. The logout path leaves A's rows in state, so a subsequent session can render them before the owner-change effect runs.",
+          "confidence": 0.82,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When session becomes null, the effect returns without clearing portfolioRows. A later render with another session can render the portfolio from that state before the effect clears it for the new owner.",
+            "failureScenario": "Executive A logs out while on /portfolio and executive B signs in. If the app renders B's portfolio route before the owner-change effect clears state, B can briefly see A's rows (OWASP A01:2025 Broken Access Control)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 7,
+          "message": "The portfolio table criterion's named test, `executive_portfolio_table_contract`, is missing. Add a test tied to that criterion for the table projection and matching case navigation.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names `executive_portfolio_table_contract`, but the added portfolio tests are named `AC_016_portfolio_kpis_contract`, `renders zeroed KPI values and empty scope state`, and `portfolio_server_text_remains_inert`.",
+            "failureScenario": "A regression in the portfolio table projection or row navigation can pass without the specifically named test that the criterion requires."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 384,
+          "message": "Update the required Hangar case-work composition test for executive navigation. The added role-route test does not cover that acceptance criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new `role route navigation` test covers sign-in to `/portfolio`, but the required `Hangar case-work composition remains in the App host` test is unchanged and does not exercise executive navigation into Hangar.",
+            "failureScenario": "A regression that prevents executive users from entering Hangar without decision controls can pass because the required updated Hangar composition test is absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior presenter-route and stale-response findings are addressed by this diff. A cross-session render can still briefly expose prior portfolio data, and two named acceptance-test requirements remain unmet.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 625,
+          "message": "Clear or gate portfolioRows before rendering them for a different session. Clearing them in this effect leaves a render where the new session can see the previous session's rows.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "A session change renders the app with the new session before this useEffect runs. The portfolio route renders from portfolioRows, which still holds the previous session's data until the effect clears it.",
+            "failureScenario": "Executive A is viewing /portfolio, then the app switches to executive B. On the render before the effect runs, B can see A's portfolio rows and case summary (OWASP A01:2025 Broken Access Control)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 4,
+          "message": "Add the named `executive_portfolio_table_contract` test for the table criterion, including the row-to-matching-read-only-summary behavior.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names `executive_portfolio_table_contract`, but the added test is named `AC_016_portfolio_kpis_contract`. It checks table text and a callback, but does not exercise the App path that opens the matching scoped read-only summary.",
+            "failureScenario": "If clicking a portfolio row stops opening its matching read-only case summary, the named table contract test is absent and the current callback-only assertion can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 388,
+          "message": "The named Hangar composition test is still not updated to cover executive navigation as required by the acceptance criterion.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The change adds `role route navigation`, but the criterion names `Hangar case-work composition remains in the App host` and requires updating that test for executive navigation.",
+            "failureScenario": "If executive role navigation cannot enter Hangar while preserving the case-work composition and omitting decision controls, the added portfolio navigation test will not detect it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The presenter case summary and stale portfolio response findings from the previous round appear fixed. The named portfolio table test and required executive route and Hangar coverage remain incomplete.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 5,
+          "message": "The portfolio table criterion still lacks its named `executive_portfolio_table_contract` test. Add the named test with assertions for the columns and matching case navigation.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names `executive_portfolio_table_contract`, but the changed test file has no test with that name. Its table assertions are inside `AC_016_portfolio_kpis_contract`.",
+            "failureScenario": "A regression that omits a table column or opens the wrong case can pass without the separately named table contract test."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 389,
+          "message": "The added role navigation test does not cover the full executive route behavior criterion, and the required Hangar case-work composition test was not updated to exercise executive navigation. Add assertions for the specified `/work`, out-of-scope case, and Hangar behavior.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new `role route navigation` test signs in as an executive and checks the `/portfolio` route. It does not exercise executive `/work`, an out-of-scope case, or the Hangar composition behavior required by the acceptance criteria.",
+            "failureScenario": "If executive `/work` displays worklist data, an out-of-scope case is rendered, or executive navigation into Hangar exposes decision controls, this test can still pass."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/ExecutiveCaseSummary.test.tsx",
+      "frontend/tests/ExecutivePortfolio.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
