@@ -569,9 +569,8 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('region', { name: 'Dashboard region' })).toBeNull();
     expect(screen.getByText('Revision: 7')).toBeTruthy();
     expect(screen.getByText('Technical-review decision: No current decision')).toBeTruthy();
-  });
-
-  it('AC_019_every_region_failing_at_once_stays_visible_and_recoverable', async () => {
+    // Case and readiness fail too: all four failures stay visible, each with its own Retry.
+    cleanup();
     setupApi({ statuses: {
       '/api/cases/case-001': [503, 200], '/api/cases/case-001/dashboard': [403, 200], [REVIEWS]: [503, 200], '/api/cases/case-001/readiness': [503, 200],
     } });
