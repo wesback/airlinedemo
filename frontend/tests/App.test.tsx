@@ -241,14 +241,16 @@ describe('reviewer workspace', () => {
     expect(resolveSessionCaseId(null, 'cp-case-b')).toBeNull();
   });
 
-  it('retains the selected in-scope case when the session changes', async () => {
-    const firstSession = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] };
+  it('retains the selected in-scope case when the session changes and the new first scope differs', async () => {
+    const firstSession = { ...signedIn, caseScopes: ['cp-case-b', 'cp-case-a'] };
     const nextSession = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'], csrfToken: 'csrf-next-token' };
     setupApi({ session: firstSession, signInSessions: [firstSession, nextSession] });
     render(<App />);
     await signIn();
 
-    expect(await screen.findByRole('heading', { name: 'Case cp-case-a' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-a' } });
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Case cp-case-a' })).toBeTruthy());
     fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy());
 
