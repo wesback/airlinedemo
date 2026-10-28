@@ -34,6 +34,8 @@ public static partial class TelemetryRedaction
         public const string IntegritySignatureFailure = "security.integrity_signature_failure";
         public const string BudgetExhausted = "security.budget_exhausted";
         public const string RoleSwitch = "security.role_switch";
+        public const string CaseReset = "security.case_reset";
+        public const string ResetBlockedVariant = "security.case_reset";
     }
 
     public static class SourceEvents
