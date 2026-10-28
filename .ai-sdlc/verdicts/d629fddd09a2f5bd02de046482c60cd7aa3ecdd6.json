@@ -1,0 +1,350 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 655,
+  "branch": "ai-sdlc/issue-655",
+  "commitSha": "d629fddd09a2f5bd02de046482c60cd7aa3ecdd6",
+  "round": 0,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The presenter page can show a fabricated case when the session has no scopes, and reset denials can bypass the required audit event. The added tests also leave specified scope, pending-switch, unknown-persona, and production telemetry cases unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/PresenterDemoControl.tsx",
+          "line": 56,
+          "message": "The empty-case fallback displays a case that is not in session.caseScopes.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "App passes presenterCaseEntries to PresenterDemoControl; when the presenter has no case scopes, that array is empty and resolvedCases inserts a demo-case fallback.",
+            "failureScenario": "A presenter with an empty session.caseScopes opens /demo and sees a demo-case row, even though it is outside the session's scoped cases."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 202,
+          "message": "Case reset requests rejected before command execution are not audited. The same gap affects other early denials and unexpected reset exceptions, contrary to the requirement for one event per non-cancelled request.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The case-reset event is emitted after reset execution or in the typed reset-exception catch. Earlier endpoint rejection returns do not reach either call.",
+            "failureScenario": "An out-of-scope presenter submits a reset; the endpoint returns 404 before this event call, so no security.case_reset event records the denied request (OWASP A09:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 300,
+          "message": "The named reset test does not prove the criterion's out-of-scope listing behavior; it also uses a different test name from the one specified in the criterion.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The reset test's out-of-scope setup checks that no reset button or request exists, but does not assert that Case C is absent from the rendered list.",
+            "failureScenario": "If App renders an out-of-scope Case C row without a reset button, the test still passes, although the criterion requires Case C to be absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 301,
+          "message": "The View as test does not cover the required pending-response or unknown-persona cases.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The View as success stubs return immediately, and the rejection test covers only a 403 for a known persona; neither invokes the production handler with an unknown ID.",
+            "failureScenario": "If App navigates before a pending switch succeeds, or submits an unknown persona ID, these tests still pass despite the criterion requiring delayed navigation and rejection of unknown IDs."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+          "line": 466,
+          "message": "The required production reset and role-switch telemetry behavior is not tested through the application host as the criterion specifies.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added inline cases exercise the existing generic security-event test; the diff does not add the named production-endpoint test or assertions for EmitCaseResetEvent's fields and secret redaction.",
+            "failureScenario": "If the reset endpoint omits the event or EmitCaseResetEvent includes a CSRF token or request content, the added test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The guided checklist destinations are covered, but the reset and View as tests leave required negative and timing cases unverified. Reset telemetry also misses required early rejection outcomes, and the changed telemetry test does not exercise the production emitters or endpoints.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 243,
+          "message": "The reset test does not prove the required out-of-scope listing behavior. The criterion names `presenter_case_scope_and_reset_eligibility_contract`; the changed test is `presenter_scoped_reset_app_request_contract` and does not assert that Case C is absent.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The negative reset setup scopes the presenter to cp-case-a while the case response also includes cp-case-c. Its assertions check only for a reset button and POST request; they do not check whether Case C is listed.",
+            "failureScenario": "If App displays out-of-scope Case C but hides its reset action, the test still passes, although the criterion requires Case C to be absent."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 301,
+          "message": "The named View as test does not cover AC_004's pending-response and unknown-persona cases.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The successful switch stubs return immediately, and the rejection test covers a 403 for a known persona. Neither test holds the response pending nor invokes the production handler with an unknown persona ID.",
+            "failureScenario": "If App navigates before a pending switch succeeds or accepts an unknown persona ID, these tests still pass, despite AC_004 requiring success-gated navigation and rejection of unknown IDs."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 313,
+          "message": "Reset audit events do not cover required early rejection outcomes. Emit one event for every non-cancelled reset request, including unauthenticated and invalid-CSRF requests, and allow the required outcomes.",
+          "confidence": 0.97,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The new reset emitter accepts only success, replayed, denied, validation_failed, conflict, invalid, rate_limited, and failed. The acceptance criteria require unauthorized and anti_forgery_failed outcomes. The endpoint additions emit only after a successful command or a caught typed reset exception.",
+            "failureScenario": "An unauthenticated or invalid-CSRF reset request is rejected before those emission calls; wiring the required event with outcome unauthorized or anti_forgery_failed would also throw ArgumentException. The request therefore has no required audit event (OWASP A09:2025)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+          "line": 469,
+          "message": "The changed telemetry test does not verify the required production endpoint events, exact fields, or redaction. Add the named endpoint event test and the required canary assertions.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed test adds CaseReset to a generic event-name test; it does not invoke EmitCaseResetEvent or exercise the production reset and role-switch endpoints. The named Demo_reset_and_role_switch_events test is not present in the diff.",
+            "failureScenario": "If the reset emitter omits required fields, exposes a canary secret, or the endpoint stops emitting events, this changed test can still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset event covers successful commands and caught command failures, but reachable early rejection paths omit the required audit event.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 202,
+          "message": "Reset requests rejected before command execution are not audited, contrary to the requirement to emit one redacted event for every non-cancelled request (OWASP A09:2025, Security Logging and Alerting Failures).",
+          "confidence": 0.98,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The new case-reset event is emitted after a successful reset and in the caught reset-command exception path. Earlier endpoint returns, including authorization and anti-forgery rejections, do not call the emitter.",
+            "failureScenario": "A presenter submits a reset for an out-of-scope case. The endpoint returns 404 without emitting the required security.case_reset event with event.outcome denied, leaving the attempted unauthorized reset unaudited."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/PresenterDemoControl.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 28,
+      "total": 32,
+      "percent": 87.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 26,
+          "total": 30,
+          "missed": [
+            318,
+            319,
+            322,
+            323
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
