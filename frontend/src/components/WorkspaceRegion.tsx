@@ -1,18 +1,10 @@
 import { useEffect, type ReactNode } from 'react';
 
-export type WorkspaceRegionStatus = 'loading' | 'empty' | 'ready' | 'error' | 'permission' | 'missing' | 'unavailable';
-
-export type WorkspaceRegionError = {
-  status?: number;
-  message?: string;
-  retryable?: boolean;
-};
+export type WorkspaceRegionError = { status?: number; message?: string };
 
 export type WorkspaceRegionProps = {
-  status?: WorkspaceRegionStatus | 'pending';
-  loading?: boolean;
-  empty?: boolean;
-  error?: WorkspaceRegionError | Error | number | null;
+  status: 'loading' | 'empty' | 'error' | 'ready';
+  error?: WorkspaceRegionError | null;
   emptyMessage?: string;
   loadingMessage?: string;
   currentPath?: string | null;
@@ -20,14 +12,7 @@ export type WorkspaceRegionProps = {
   children?: ReactNode;
 };
 
-function toStatusCode(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (value && typeof value === 'object' && 'status' in value && typeof (value as { status?: unknown }).status === 'number') {
-    return (value as { status: number }).status;
-  }
-  return undefined;
-}
-
+// One text per status, shared by every data region. Response bodies are never shown.
 export function getRegionErrorMessage(status: number | undefined, fallback = 'Unable to load this region.') {
   if (status === 401) return 'Sign in again to continue.';
   if (status === 403) return 'You do not have permission for this action.';
@@ -36,59 +21,29 @@ export function getRegionErrorMessage(status: number | undefined, fallback = 'Un
   return fallback;
 }
 
-export function buildReturnToPath(currentPath?: string | null): string {
-  if (typeof window === 'undefined') return '/work';
-  const path = typeof currentPath === 'string' && currentPath.trim() ? currentPath : `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  const safePath = path.startsWith('/') ? path : `/${path}`;
-  return `/sign-in?returnTo=${encodeURIComponent(safePath)}`;
+export function buildReturnToPath(currentPath: string): string {
+  return `/sign-in?returnTo=${encodeURIComponent(currentPath.startsWith('/') ? currentPath : `/${currentPath}`)}`;
 }
 
 export default function WorkspaceRegion({
-  status,
-  loading,
-  empty,
-  error,
-  emptyMessage = 'No data is available for this workspace.',
-  loadingMessage = 'Loading…',
-  currentPath,
-  onRetry,
-  children,
+  status, error, emptyMessage = 'No data is available for this workspace.', loadingMessage = 'Loading…', currentPath, onRetry, children,
 }: WorkspaceRegionProps) {
-  const effectiveStatus = status === 'pending' ? 'loading' : (status ?? (loading ? 'loading' : empty ? 'empty' : error ? 'error' : 'ready'));
-  const regionError = error instanceof Error ? { status: toStatusCode(error), message: error.message } : typeof error === 'number' ? { status: error } : error ?? null;
-  const statusCode = toStatusCode(regionError) ?? (effectiveStatus === 'permission' ? 403 : effectiveStatus === 'missing' ? 404 : effectiveStatus === 'unavailable' ? 503 : undefined);
-  const message = regionError?.message?.trim() || getRegionErrorMessage(statusCode, 'Unable to load this region.');
-  const showErrorState = effectiveStatus === 'error' || effectiveStatus === 'permission' || effectiveStatus === 'missing' || effectiveStatus === 'unavailable' || statusCode !== undefined;
-
+  const code = status === 'error' ? error?.status : undefined;
   useEffect(() => {
-    if (statusCode === 401 && typeof window !== 'undefined') {
-      window.location.assign(buildReturnToPath(currentPath ?? `${window.location.pathname}${window.location.search}${window.location.hash}`));
-    }
-  }, [statusCode, currentPath]);
+    // A 401 sends the person to sign-in, keeping the page they were on.
+    if (code === 401) window.location.assign(buildReturnToPath(currentPath || `${window.location.pathname}${window.location.search}`));
+  }, [code, currentPath]);
 
-  if (effectiveStatus === 'loading' || loading) {
-    return <div role="status" aria-live="polite" data-testid="workspace-region-loading">{loadingMessage}</div>;
+  if (status === 'loading') return <div role="status" aria-live="polite" data-testid="workspace-region-loading">{loadingMessage}</div>;
+  if (status === 'empty') return <p data-testid="workspace-region-empty">{emptyMessage}</p>;
+  if (status === 'error') {
+    if (code === 401) return <div role="alert" data-testid="workspace-region-error">Signing in…</div>;
+    return (
+      <div role="alert" data-testid="workspace-region-error">
+        <span>{error?.message?.trim() || getRegionErrorMessage(code)}</span>
+        {onRetry && <> <button type="button" onClick={onRetry}>Retry</button></>}
+      </div>
+    );
   }
-
-  if (effectiveStatus === 'empty' || empty) {
-    return <p data-testid="workspace-region-empty">{emptyMessage}</p>;
-  }
-
-  if (statusCode === 401) {
-    return <div role="alert" data-testid="workspace-region-error">Signing in…</div>;
-  }
-
-  if (showErrorState) {
-    if (statusCode === 503) {
-      return (
-        <div role="alert" data-testid="workspace-region-error">
-          <span>{message}</span>{onRetry ? ' ' : null}
-          {onRetry && <button type="button" onClick={onRetry} aria-label="Retry" style={{ marginLeft: '0.5rem' }}>Retry</button>}
-        </div>
-      );
-    }
-    return <div role="alert" data-testid="workspace-region-error">{message}</div>;
-  }
-
   return <>{children}</>;
 }

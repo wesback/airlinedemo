@@ -8,6 +8,8 @@ const decisions = [{ id: 'accept', label: 'Accept finding' }, { id: 'reject', la
 
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
 
+const originalWindowLocation = window.location;
+
 beforeAll(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
@@ -15,6 +17,14 @@ beforeAll(() => {
     disconnect() {}
   });
 });
+
+function resetWindowLocation() {
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: originalWindowLocation,
+  });
+  window.history.replaceState({}, '', '/');
+}
 
 function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = decisions, traces: { label: string; url: string }[] = []) {
   return {
@@ -32,6 +42,8 @@ function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = de
 function setupApi(options: {
   healthStatus?: number;
   dashboardStatus?: number;
+  // Per-URL GET answers, consumed in order (the last one repeats); anything but 200 is an error whose body must never be shown.
+  statuses?: Record<string, number[]>;
   decisionStatus?: number;
   allowed?: typeof decisions;
   traces?: { label: string; url: string }[];
@@ -42,6 +54,7 @@ function setupApi(options: {
   session?: typeof signedIn;
   signInSessions?: typeof signedIn[];
   pendingCaseId?: string;
+  users?: Array<{ id: string; displayName: string; role: string }>;
 } = {}) {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -56,9 +69,14 @@ function setupApi(options: {
     const url = String(input);
     const method = init?.method ?? 'GET';
     calls.push({ url, init });
+    const queued = options.statuses?.[url];
+    if (queued && method === 'GET') {
+      const status = queued.length > 1 ? queued.shift()! : queued[0];
+      if (status !== 200) return json({ error: 'stack passcode session csrf finding-secret' }, status);
+    }
     if (url === '/api/health') return json({ status: 'ok' }, options.healthStatus ?? 200);
     if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-    if (url === '/api/auth/users') return json(users);
+    if (url === '/api/auth/users') return json(options.users ?? users);
     if (url === '/api/auth/sign-in') {
       const session = options.signInSessions?.[signInSessionIndex++] ?? options.session ?? signedIn;
       return json(session);
@@ -134,9 +152,94 @@ async function signIn() {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  resetWindowLocation();
 });
 
 describe('reviewer workspace', () => {
+  it('AC_004_switch_role_behavior', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer' }, { id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }, { id: 'legal-1', displayName: 'Legal reviewer', role: 'legal-reviewer' }, { id: 'exec-1', displayName: 'Executive observer', role: 'executive' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/auth/switch-user') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        return json({ id: body.userId, displayName: 'Finance reviewer', role: 'finance-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-next-token' }, 200);
+      }
+      if (url === '/api/cases/case-001') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/case-001/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/case-001/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/case-001/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Technical reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Technical reviewer.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Technical reviewer' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Switch role: Finance reviewer' }));
+
+    await waitFor(() => expect(calls.some(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST')).toBe(true));
+    const switchCall = calls.find(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST');
+    expect(JSON.parse(String(switchCall?.init?.body))).toEqual({ userId: 'fin-1' });
+    expect((switchCall?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+    expect(assignSpy).toHaveBeenCalledWith('/work');
+    expect(screen.getByText('Finance reviewer')).toBeTruthy();
+  });
+
+  it('AC_004_switch_role_failure', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer' }, { id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/auth/switch-user') return json({ error: 'You do not have permission for this action.' }, 403);
+      if (url === '/api/cases/case-001') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/case-001/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/case-001/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/case-001/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Technical reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Technical reviewer.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Technical reviewer' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Switch role: Finance reviewer' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('You do not have permission for this action.');
+    expect(calls.filter(({ url }) => url === '/api/auth/switch-user')).toHaveLength(1);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Technical reviewer')).toBeTruthy();
+    expect(screen.getByText('Case case-001')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
+  });
+
   it('shows no trace when the dashboard has no stored trace links', async () => {
     setupApi();
     render(<App />);
@@ -177,7 +280,94 @@ describe('reviewer workspace', () => {
       .toEqual(['Citation check — Outcome: verified', 'Tool call — search-manual — Outcome: requested']);
   });
 
-  it('Dashboard_preserves_case_data_when_another_region_fails', async () => {
+  it('AC_006_returnTo_and_role_route_integration', async () => {
+    const financeSession = { ...signedIn, role: 'finance-reviewer', displayName: 'Finance reviewer', caseScopes: ['case-001'] };
+    const financeUsers = [{ id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }];
+
+    const validCalls = setupApi({
+      session: financeSession,
+      users: financeUsers,
+    });
+    window.history.replaceState({}, '', '/portfolio?returnTo=%2Fcases%2Fcase-001%2Freserve');
+    render(<App />);
+
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Finance reviewer (finance-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Finance reviewer.');
+    const primaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const workspaceMain = primaryNavigation.closest('aside')?.parentElement?.querySelector('main');
+    expect(primaryNavigation).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Finance reviewer' })).toBeTruthy();
+    expect(workspaceMain).not.toBeNull();
+    expect(workspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
+    expect(window.location.pathname).toBe('/cases/case-001/reserve');
+    expect(validCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+
+    cleanup();
+    const invalidCalls = setupApi({
+      session: financeSession,
+      users: financeUsers,
+    });
+    window.history.replaceState({}, '', '/portfolio?returnTo=%2Fcases%2Fcase-001%2Ffindings');
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Finance reviewer (finance-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Finance reviewer.');
+    const invalidPrimaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const invalidWorkspaceMain = invalidPrimaryNavigation.closest('aside')?.parentElement?.querySelector('main');
+    expect(window.location.pathname).toBe('/work');
+    expect(invalidWorkspaceMain).not.toBeNull();
+    expect(invalidWorkspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
+    expect(invalidCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+  });
+
+  it('AC_001_App_root_shell_and_Hangar_composition', async () => {
+    setupApi({ canReset: true });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
+    await signIn();
+    const primaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const workspaceMain = primaryNavigation.closest('aside')?.parentElement?.querySelector('main');
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeTruthy();
+    expect(primaryNavigation).toBeTruthy();
+    expect(workspaceMain).not.toBeNull();
+    expect(workspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
+    expect(screen.queryByRole('heading', { name: 'Hangar' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    const hangarHeading = screen.getByRole('heading', { name: 'Hangar' });
+    expect(workspaceMain?.contains(hangarHeading)).toBe(true);
+    const hangarSceneControl = screen.getByRole('button', { name: 'View Case A' });
+    const hangarOverviewControl = screen.getByRole('button', { name: 'Overview' });
+    expect(hangarSceneControl.textContent).toBe('View Case A');
+    expect(hangarOverviewControl.textContent).toBe('Overview');
+    expect(screen.getByRole('button', { name: 'Open local diagnostics' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Hangar object selection' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
+  });
+
+  it('resets stale Hangar state when the selected case changes', async () => {
+    setupApi({ canReset: true, session: { ...signedIn, caseScopes: ['case-001', 'cp-case-b'] } });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
+    await signIn();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    expect(screen.getByRole('heading', { name: 'Hangar' })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Hangar' })).toBeNull());
+    expect(screen.getByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+  });
+
+  it('Dashboard_waits_for_authorized_server_state', async () => {
     const calls = setupApi();
     render(<App />);
 
@@ -193,15 +383,18 @@ describe('reviewer workspace', () => {
     const summary = screen.getByText('Return in 9 months. 1 records gap found, 1 routine request sent, 1 item held for internal review, 2 documents not processed.');
     expect(summary.parentElement?.firstElementChild).toBe(summary);
 
-    for (const status of [401, 404]) {
+    for (const [status, text] of [[401, 'Signing in…'], [404, 'Case not found or not in your scope. Retry']] as const) {
       cleanup();
+      const assign = vi.fn();
+      Object.defineProperty(window, 'location', { configurable: true, value: { ...originalWindowLocation, pathname: '/work', search: '', assign } });
       setupApi({ dashboardStatus: status });
       render(<App />);
       await signIn();
-      expect(await screen.findByRole('alert')).toBeTruthy();
+      expect((await screen.findByRole('alert')).textContent).toBe(text);
       expect(screen.getByText('Revision: 7')).toBeTruthy();
-      expect(screen.getByRole('heading', { name: 'Case case-001' })).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+      expect(assign.mock.calls.length).toBe(status === 401 ? 1 : 0);
+      if (status === 401) expect(assign).toHaveBeenCalledWith(expect.stringMatching(/^\/sign-in\?returnTo=/));
     }
   });
 
@@ -263,6 +456,134 @@ describe('reviewer workspace', () => {
       '/api/cases/cp-case-b/technical-reviews', '/api/cases/cp-case-b/readiness',
     ])));
     expect(calls.some(({ url }) => url.startsWith('/api/cases/cp-case-a'))).toBe(true);
+  });
+
+  const FORBIDDEN = 'You do not have permission for this action.';
+  const UNAVAILABLE = 'Service temporarily unavailable';
+  const regionOf = (name: string) => screen.getByRole('region', { name: `${name} region` });
+  const requests = (calls: { url: string; init?: RequestInit }[], url: string) => calls.filter((call) => call.url === url && (call.init?.method ?? 'GET') === 'GET').length;
+  const REVIEWS = '/api/cases/case-001/technical-reviews';
+
+  it('AC_019_simultaneous_region_errors_remain_recoverable', async () => {
+    setupApi({ statuses: { '/api/cases/case-001/dashboard': [403, 200], [REVIEWS]: [503, 200] } });
+    render(<App />);
+    await signIn();
+
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.getByText(/^Return in 9 months\./)).toBeTruthy();
+    expect(within(regionOf('Dashboard')).getByRole('alert').textContent).toBe(`${FORBIDDEN} Retry`);
+    expect(within(regionOf('Technical review')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(2);
+    expect(screen.queryByText(/Technical-review decision/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/stack|passcode|csrf|finding-secret/);
+
+    fireEvent.click(within(regionOf('Technical review')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Technical-review decision: No current decision')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Technical review region' })).toBeNull();
+    expect(within(regionOf('Dashboard')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
+
+    fireEvent.click(within(regionOf('Dashboard')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Dashboard region' })).toBeNull();
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.getByText('Technical-review decision: No current decision')).toBeTruthy();
+  });
+
+  it('retry_reloads_region_once_per_click', async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Technical reviews answer 503, then 200.
+    let calls = setupApi({ statuses: { [REVIEWS]: [503, 200] } });
+    render(<App />);
+    await signIn();
+    expect(within(regionOf('Technical review')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+    for (const url of ['/api/cases/case-001', '/api/cases/case-001/dashboard', REVIEWS, '/api/cases/case-001/readiness']) expect(requests(calls, url)).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Technical-review decision: No current decision')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(requests(calls, REVIEWS)).toBe(2);
+    for (const url of ['/api/cases/case-001', '/api/cases/case-001/dashboard', '/api/cases/case-001/readiness']) expect(requests(calls, url)).toBe(1);
+
+    // The retry answers 503 again: one more request, the banner stays, and nothing is requested until the next click.
+    cleanup();
+    calls = setupApi({ statuses: { [REVIEWS]: [503, 503, 200] } });
+    render(<App />);
+    await signIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(requests(calls, REVIEWS)).toBe(2));
+    expect(await screen.findByText(UNAVAILABLE)).toBeTruthy();
+    await settle();
+    expect(requests(calls, REVIEWS)).toBe(2);
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Technical-review decision: No current decision')).toBeTruthy();
+    expect(requests(calls, REVIEWS)).toBe(3);
+
+    // The case request answers 503 on first load; its retry fills only the case region.
+    cleanup();
+    calls = setupApi({ statuses: { '/api/cases/case-001': [503, 200] } });
+    render(<App />);
+    await signIn();
+    expect(within(regionOf('Case')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+    expect(screen.queryByText('Revision: 7')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Records investigation' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Revision: 7')).toBeTruthy();
+    expect(requests(calls, '/api/cases/case-001')).toBe(2);
+    for (const url of ['/api/cases/case-001/dashboard', REVIEWS, '/api/cases/case-001/readiness']) expect(requests(calls, url)).toBe(1);
+  });
+
+  it('retry_response_is_ignored_after_context_switch', async () => {
+    const holdRetry = () => {
+      let release!: (response: Response) => void;
+      const pending = new Promise<Response>((resolve) => { release = resolve; });
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      let held = false;
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) !== REVIEWS || held) return original(input, init);
+        held = true; // only the retry that is started next waits; later loads are answered normally
+        return pending;
+      });
+      return () => release(json({ basisVersion: 4, decisions: [{ decision: 'reject', current: true }] }));
+    };
+
+    // Case A -> case B while the case A retry is pending.
+    setupApi({ session: { ...signedIn, caseScopes: ['case-001', 'cp-case-b'] }, statuses: { [REVIEWS]: [503] } });
+    render(<App />);
+    await signIn();
+    const resolveCaseA = holdRetry();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    expect(await screen.findByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+    await screen.findByText('Technical-review decision: No current decision');
+    resolveCaseA();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole('combobox', { name: 'Case' })).toHaveProperty('value', 'cp-case-b');
+    expect(screen.queryByText('Technical-review decision: reject')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // Session A -> session B while the session A retry is pending.
+    cleanup();
+    setupApi({ signInSessions: [{ ...signedIn, id: 'session-a' }, { ...signedIn, id: 'session-b' }], statuses: { [REVIEWS]: [503, 200] } });
+    render(<App />);
+    await signIn();
+    const resolveSessionA = holdRetry();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await screen.findByText('You are signed out.');
+    await prepareSignIn();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Technical-review decision: accept');
+    resolveSessionA();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('Technical-review decision: reject')).toBeNull();
+    expect(screen.getByText('Technical-review decision: accept')).toBeTruthy();
   });
 
   it('a new session loads the first case of that session', async () => {
@@ -327,151 +648,6 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('button', { name: 'Move avatar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Reset blocked variant' })).toBeTruthy();
-  });
-
-  it('AC_019_mixed_region_error_contract', async () => {
-    const scenarios = [
-      { status: 401, expectedText: 'Signing in…', expectedHref: '/sign-in?returnTo=%2Fcases%2Fcase-001' },
-      { status: 403, expectedText: 'You do not have permission for this action.' },
-      { status: 404, expectedText: 'Case not found or not in your scope.' },
-      { status: 503, expectedText: 'Service temporarily unavailable Retry' },
-    ] as const;
-
-    for (const scenario of scenarios) {
-      cleanup();
-      const originalLocation = window.location;
-      const assignSpy = vi.fn();
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: {
-          ...originalLocation,
-          pathname: '/cases/case-001',
-          search: '',
-          hash: '',
-          assign: assignSpy,
-        },
-      });
-      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url === '/api/health') return json({ status: 'ok' });
-        if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-        if (url === '/api/auth/users') return json(users);
-        if (url === '/api/auth/sign-in') return json(signedIn);
-        if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') return json({ error: 'request failed' }, scenario.status);
-        return json({});
-      }));
-
-      render(<App />);
-      await signIn();
-
-      const alert = await screen.findByRole('alert');
-      expect(alert.textContent).toBe(scenario.expectedText);
-      if (scenario.status === 401) {
-        expect(assignSpy).toHaveBeenCalledWith(scenario.expectedHref);
-      }
-      if (scenario.status === 503) {
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
-      }
-      vi.unstubAllGlobals();
-      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
-    }
-
-    vi.unstubAllGlobals();
-  });
-
-  it('AC_019_mixed_region_isolation', async () => {
-    const secretText = 'stack trace for passcode session csrf item-42';
-    const statuses = [401, 403, 404, 503] as const;
-
-    for (const status of statuses) {
-      cleanup();
-      const originalLocation = window.location;
-      const assignSpy = vi.fn();
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: {
-          ...originalLocation,
-          pathname: '/cases/case-001',
-          search: '',
-          hash: '',
-          assign: assignSpy,
-        },
-      });
-      const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url === '/api/health') return json({ status: 'ok' });
-        if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-        if (url === '/api/auth/users') return json(users);
-        if (url === '/api/auth/sign-in') return json(signedIn);
-        if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') return json({ error: secretText }, status);
-        return json({});
-      });
-      vi.stubGlobal('fetch', fetchSpy);
-      render(<App />);
-      await signIn();
-
-      const alert = await screen.findByRole('alert');
-      const expectedText = status === 401 ? 'Signing in…' : status === 403 ? 'You do not have permission for this action.' : status === 404 ? 'Case not found or not in your scope.' : 'Service temporarily unavailable Retry';
-      expect(alert.textContent).toBe(expectedText);
-      expect(alert.textContent).not.toContain('stack');
-      expect(alert.textContent).not.toContain('passcode');
-      expect(alert.textContent).not.toContain('session');
-      expect(alert.textContent).not.toContain('csrf');
-      expect(alert.textContent).not.toContain('item-42');
-      expect(screen.getByText('Signed in as Ada Reviewer.')).toBeTruthy();
-      expect(screen.getByText('Case case-001')).toBeTruthy();
-      if (status === 401) {
-        expect(assignSpy).toHaveBeenCalledWith('/sign-in?returnTo=%2Fcases%2Fcase-001');
-      }
-      if (status === 503) {
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
-      }
-      vi.unstubAllGlobals();
-      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
-    }
-  });
-
-  it('retry_reloads_region_once_per_click', async () => {
-    const originalLocation = window.location;
-    Object.defineProperty(window, 'location', {
-      configurable: true,
-      value: {
-        ...originalLocation,
-        pathname: '/cases/case-001',
-        search: '',
-        hash: '',
-        assign: vi.fn(),
-      },
-    });
-
-    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === '/api/health') return json({ status: 'ok' });
-      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-      if (url === '/api/auth/users') return json(users);
-      if (url === '/api/auth/sign-in') return json(signedIn);
-      if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') {
-        const count = fetchSpy.mock.calls.filter(([candidate]) => String(candidate) === url).length;
-        return count === 1 ? json({ error: 'request failed' }, 503) : json({ revision: 7, basis: [{ version: 4 }] });
-      }
-      return json({});
-    });
-    vi.stubGlobal('fetch', fetchSpy);
-    render(<App />);
-    await signIn();
-
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe('Service temporarily unavailable Retry');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    await waitFor(() => {
-      expect(fetchSpy.mock.calls.filter(([candidate]) => String(candidate) === '/api/cases/case-001')).toHaveLength(2);
-      expect(screen.getByText('Revision: 7')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-    });
-
-    vi.unstubAllGlobals();
-    Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
   });
 
   it('reports an unavailable API without claiming it is connected', async () => {

@@ -113,15 +113,15 @@ describe('accessible review navigation', () => {
         : active.getAttribute('aria-label') ?? active.textContent?.trim() ?? '');
     }
     expect(focusOrder).toEqual([
-      'Sign out', 'Enter Hangar', 'Case A, narrow-body', 'Case B, regional',
-      'Case C, wide-body', 'Investigation trace', 'Reason for decision',
-      'Accept finding', 'Reject finding',
+      'Sign out', 'Case search', 'Ada Reviewer', 'Collapse navigation', 'Enter Hangar',
+      'Case A, narrow-body', 'Case B, regional', 'Case C, wide-body',
+      'Investigation trace',
     ]);
     const lastDecision = screen.getByRole('button', { name: 'Reject finding' });
     await user.tab();
     expect(document.activeElement).not.toBe(lastDecision);
     await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sign out' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Accept finding' }));
   });
 
   it('AccessibleReviewNavigationTest.ControlsAndStatusUpdatesExposeAccessibleText', async () => {
@@ -194,6 +194,7 @@ describe('accessible review navigation', () => {
     render(<App />);
     await signIn(user);
     expect((await screen.findByRole('alert')).textContent).toBe('Service temporarily unavailable Retry');
+    expect(screen.getByText('Revision: 7')).toBeTruthy();
 
     cleanup();
     setupApi({ health: json({}, 503) });

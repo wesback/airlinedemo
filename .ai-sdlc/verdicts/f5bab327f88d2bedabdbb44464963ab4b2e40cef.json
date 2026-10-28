@@ -1,10 +1,10 @@
 {
   "schema": "ep-pipeline/verdicts/v1",
   "repo": "wesback/airlinedemo",
-  "issue": 650,
-  "branch": "ai-sdlc/issue-650",
-  "commitSha": "66cfba2610a8d7723b28b37154fdcc998fa1a50b",
-  "round": 3,
+  "issue": 662,
+  "branch": "ai-sdlc/issue-662",
+  "commitSha": "f5bab327f88d2bedabdbb44464963ab4b2e40cef",
+  "round": 1,
   "pipelineVersion": "e544081",
   "tokenKind": "app",
   "writers": [
@@ -16,18 +16,6 @@
     },
     {
       "step": "fix-1",
-      "harness": "copilot",
-      "version": "1.0.95",
-      "model": "mai-code-1.1-flash"
-    },
-    {
-      "step": "fix-2",
-      "harness": "copilot",
-      "version": "1.0.95",
-      "model": "mai-code-1.1-flash"
-    },
-    {
-      "step": "fix-3",
       "harness": "copilot",
       "version": "1.0.95",
       "model": "mai-code-1.1-flash"
@@ -47,18 +35,18 @@
         "minor": 0,
         "suggestion": 0
       },
-      "summary": "The latest tests add assertions for 401 navigation and exercise isolation for 401, 403, 404, and 503 responses. The retry test still does not verify the request and recovery behavior required by the acceptance criterion.",
+      "summary": "The allowed returnTo route is now exercised, the shell contains signed-in content, and the duplicate history entry is fixed. The AC_006 test still does not prove that route content remains inside the shell.",
       "findingList": [
         {
           "severity": "major",
-          "file": "frontend/tests/WorkspaceRegion.test.tsx",
-          "line": 26,
-          "message": "The previously raised retry coverage gap remains: `retry_reloads_region_once_per_click` does not verify one request per click or production recovery of only the failed region.",
-          "confidence": 0.99,
+          "file": "frontend/tests/App.test.tsx",
+          "line": 276,
+          "message": "AC_006 still lacks an assertion that signed-in route content is inside WorkspaceShell. Add a DOM containment assertion; the test currently passes if the content is rendered outside the shell.",
+          "confidence": 0.94,
           "category": "other",
           "evidence": {
-            "codePathTraced": "The test supplies a mocked onRetry callback, counts its calls, then manually rerenders WorkspaceRegion with hardcoded success content. It does not exercise a request or the production retry path.",
-            "failureScenario": "If Retry sends zero or multiple requests, or a successful response fails to replace only the affected region's error, the test still passes."
+            "codePathTraced": "AC_006_returnTo_and_role_route_integration checks navigation visibility and final paths, but never checks whether signed-in route content is inside WorkspaceShell.",
+            "failureScenario": "If case content is moved back outside WorkspaceShell while the shell and route handling remain intact, this test still passes, so it does not prove AC_006's shell-containment requirement."
           }
         }
       ]
@@ -72,22 +60,34 @@
       "approved": false,
       "findings": {
         "critical": 0,
-        "major": 1,
+        "major": 2,
         "minor": 0,
         "suggestion": 0
       },
-      "summary": "The updated tests now assert 401 navigation and check shell content and error redaction for each listed status. Retry coverage still tests only a mocked callback and a manually supplied success state, leaving the request and recovery behavior unverified.",
+      "summary": "The shell now wraps signed-in content, and the duplicate case-search history entry is fixed. The tests still do not prove valid returnTo restoration or that route content remains inside the shell.",
       "findingList": [
         {
           "severity": "major",
-          "file": "frontend/tests/WorkspaceRegion.test.tsx",
-          "line": 20,
-          "message": "The retry test does not prove the acceptance criterion's request count or request-backed recovery. Exercise the App request path and assert one request per click and that success replaces only the failed region's error.",
-          "confidence": 0.97,
+          "file": "frontend/tests/App.test.tsx",
+          "line": 284,
+          "message": "AC_006 still does not prove valid returnTo restoration because the starting pathname already equals the expected destination. Start from a different route and assert that sign-in restores the allowed reserve path.",
+          "confidence": 0.94,
           "category": "testing",
           "evidence": {
-            "codePathTraced": "`retry_reloads_region_once_per_click` renders `WorkspaceRegion` with a mocked `onRetry`, counts callback calls, then manually rerenders success content. It does not exercise App's refresh request or response handling.",
-            "failureScenario": "If clicking Retry sends no request, sends multiple requests, or a successful response fails to update only the affected region, this test still passes."
+            "codePathTraced": "The test starts at /cases/case-001/reserve, then asserts only that the final pathname is /cases/case-001/reserve. It does not assert that the unauthenticated route was saved or restored.",
+            "failureScenario": "If the unauthenticated route guard and sign-in return handling are both absent, the browser stays on the starting path and the final-path assertion still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 325,
+          "message": "AC_001 does not assert that signed-in route content is inside WorkspaceShell. Add an assertion that the Hangar route content is contained in the shell's main region.",
+          "confidence": 0.91,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_001 checks for the Hangar heading and controls independently, without checking that the route content is a descendant of WorkspaceShell's main region.",
+            "failureScenario": "If the case and Hangar content is rendered beside WorkspaceShell instead of inside it, all current AC_001 assertions can still pass."
           }
         }
       ]
@@ -98,28 +98,15 @@
       "harness": "codex",
       "harnessVersion": "0.162.0",
       "model": "gpt-6-luna",
-      "approved": false,
+      "approved": true,
       "findings": {
         "critical": 0,
-        "major": 1,
+        "major": 0,
         "minor": 0,
         "suggestion": 0
       },
-      "summary": "The new assertions cover 401 navigation and isolation across the listed error statuses. The previously reported retry test gap remains; I found no direct security vulnerability in the changes.",
-      "findingList": [
-        {
-          "severity": "major",
-          "file": "frontend/tests/WorkspaceRegion.test.tsx",
-          "line": 27,
-          "message": "Acceptance criterion `retry_reloads_region_once_per_click` still does not verify request-backed retry or recovery of only the failed region.",
-          "confidence": 0.99,
-          "category": "other",
-          "evidence": {
-            "codePathTraced": "The test counts calls to a mocked onRetry callback, then manually rerenders the component with hardcoded success content. It does not exercise a request or its response.",
-            "failureScenario": "If a Retry click sends zero or multiple requests, or a successful response fails to replace only the affected region's error, this test still passes."
-          }
-        }
-      ]
+      "summary": "The fix restores the allowed-route test and places signed-in content inside the shell. I found no exploitable security vulnerability in the reviewed changes; route handling remains a client-side usability aid, with server endpoints authoritative.",
+      "findingList": []
     }
   ],
   "independence": {
@@ -181,7 +168,7 @@
       "tdd-green": 1,
       "tdd-red": 1,
       "diff-coverage": 1,
-      "reviewer-failures": 3,
+      "reviewer-failures": 2,
       "independence-violations": 0,
       "human-approval-required": 0
     },
@@ -200,14 +187,12 @@
     "green": true,
     "red": true,
     "redWaived": "",
-    "redKind": "build",
+    "redKind": "assertion",
     "greenKind": "",
     "greenExit": 0,
     "redExit": 1,
     "testFiles": [
-      "frontend/tests/AccessibleReviewNavigation.test.tsx",
-      "frontend/tests/App.test.tsx",
-      "frontend/tests/WorkspaceRegion.test.tsx"
+      "frontend/tests/App.test.tsx"
     ],
     "testUser": "tester",
     "reason": "",
@@ -227,7 +212,7 @@
   "semgrep": {
     "blocking": [],
     "elsewhere": 0,
-    "total": 26,
+    "total": 27,
     "ran": true,
     "version": "1.178.0",
     "config": "p-default-2026-10-11.yml",

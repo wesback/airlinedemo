@@ -90,10 +90,10 @@ export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, 
   return createElement('section', { id: 'non-3d-data-room', 'aria-labelledby': 'non-3d-data-room-heading', 'data-hangar-data-room-non3d': 'true' },
     createElement('h3', { id: 'non-3d-data-room-heading' }, 'Data Room aircraft'),
     invalidBrowserIdentifier ? createElement('p', { role: 'alert' }, HANGAR_NON_3D_DATA_ROOM_INVALID_ENTRY) : null,
-    createElement('ul', { 'aria-label': 'Data Room in-scope cases' }, entries.map(entry => {
+    createElement('ul', { 'aria-label': 'Data Room in-scope cases' }, entries.map((entry, index) => {
       const unavailable = entry.unavailable || !entry.sources;
       const accessibleName = `${entry.name}, ${entry.category}${unavailable ? `, ${SOURCE_UNAVAILABLE_TEXT}` : ''}`;
-      return createElement('li', { key: entry.caseId, 'data-case-id': entry.caseId },
+      return createElement('li', { key: entry.caseId, 'data-case-id': entry.caseId, 'data-case-index': String(index) },
         createElement('button', {
           type: 'button', 'aria-label': accessibleName, disabled: unavailable,
           onClick: () => controller.activate(entry.caseId),

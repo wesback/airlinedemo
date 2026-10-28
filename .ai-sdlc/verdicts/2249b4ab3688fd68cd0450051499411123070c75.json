@@ -1,0 +1,229 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 662,
+  "branch": "ai-sdlc/issue-662",
+  "commitSha": "2249b4ab3688fd68cd0450051499411123070c75",
+  "round": 0,
+  "pipelineVersion": "e544081",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 1,
+        "suggestion": 0
+      },
+      "summary": "The shell and navigation composition is present, but AC_006's test can pass without proving the required route handling. Case search also creates a duplicate browser history entry.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 281,
+          "message": "AC_006 does not prove route handling: its starting pathname already equals the expected finance home, so the required behavior can be absent while the path assertion passes. Use a starting route different from the role home and assert the expected final path.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC_006 starts at /work and later asserts that the final pathname is /work. If the unauthenticated redirect and sign-in return handling are removed, the browser can remain at /work and that pathname assertion still passes.",
+            "failureScenario": "With no route guard or return handling, sign in from /work?returnTo=...; the test still sees pathname /work, so it does not prove the required allowed-route restoration or role-home fallback."
+          }
+        },
+        {
+          "severity": "minor",
+          "file": "frontend/src/App.tsx",
+          "line": 617,
+          "message": "Case search adds the same history entry in both the App callback and CaseSearch, so one Back action leaves the user on the same case route.",
+          "confidence": 0.91,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "CaseSearch.submitMatch calls onNavigate(path) and then pushes that path itself. The new App callback handleCaseNavigate also calls history.pushState with the same path.",
+            "failureScenario": "Submitting a case search pushes the case overview twice; pressing Back once returns to the same overview URL instead of the previous route."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The signed-in case content is rendered outside WorkspaceShell, contrary to the routing acceptance criterion. The AC_006 test also does not exercise restoration of an allowed returnTo path.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 708,
+          "message": "The shell does not contain the signed-in route content. Pass the case content into WorkspaceShell and add an assertion that the route content is inside its main region.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When a session exists, App renders WorkspaceShell with an empty fragment as its child; the signed-in case section starts after WorkspaceShell closes at line 711.",
+            "failureScenario": "A signed-in user opens a case route and sees the case content outside WorkspaceShell, so signed-in routes do not render inside the shell as required."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 281,
+          "message": "AC_006 requires restoring a valid route allowed for the signed-in role, but its named test covers only the disallowed-route fallback. Add a valid finance-reviewer returnTo case and assert the exact final path.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_006_returnTo_and_role_route_integration supplies a returnTo path for findings, which is outside the finance-reviewer allowlist, and only asserts the /work fallback at line 293.",
+            "failureScenario": "If sign-in always sends finance reviewers to /work, the named test still passes even when a valid allowed returnTo such as /cases/case-001/reserve is not restored."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed code includes role-based fallback handling, but the named integration test does not verify the allowed-route restoration required by AC_006. I found no concrete exploitable security vulnerability in the reviewed diff.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 276,
+          "message": "AC_006 requires restoring a valid route allowed for the signed-in role, but the named test covers only the disallowed-route fallback. Add a test case that starts from a valid finance-reviewer route and asserts the exact restored path.",
+          "confidence": 0.9,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC_006_returnTo_and_role_route_integration starts with an explicit returnTo to a findings route that is disallowed for the finance reviewer, then checks only that the final path is /work.",
+            "failureScenario": "If the App drops a valid returnTo route that the signed-in role is allowed to access, this test still passes because it never exercises or asserts restoration of an allowed route."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

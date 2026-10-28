@@ -1,0 +1,257 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 649,
+  "branch": "ai-sdlc/issue-649",
+  "commitSha": "c8d8f480514267101bcb1817039326a400b661e8",
+  "round": 0,
+  "pipelineVersion": "e544081",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The role-switch path may send a role name where the endpoint requires a fixture ID. The diff also omits the acceptance-criteria test changes named by the issue.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 590,
+          "message": "The behavior criteria lack tests in this change. Add the named tests for AC_005_branded_signin_persona_contract, local_storage_and_sign_in_secrets, AC_004_switch_role_behavior, and AC_004_switch_role_failure; the named existing-test updates are also absent.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The diff adds sign-in, local-storage, and role-switch behavior, but includes no changes to either named test file.",
+            "failureScenario": "If persona selection stops preselecting the saved fixture, or role switching omits the CSRF header, the changed code has no acceptance-criteria test in this change to detect it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 24,
+          "message": "Role-switch options use role names as user IDs. Populate each option with the corresponding fixture ID so the request targets the selected fixture.",
+          "confidence": 0.76,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "PERSONA_OPTIONS assigns role names such as `technical-reviewer` as option IDs; WorkspaceShell passes the selected option ID to handleRoleSwitch, which posts it as `userId`.",
+            "failureScenario": "When a persona's seeded fixture ID differs from its role name, selecting that persona posts the role name to `/api/auth/switch-user` instead of the fixture ID, so the server cannot switch to the selected user."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff changes sign-in, localStorage, and role-switch behavior, but includes none of the tests required by the issue. The required behavior and failure-state assertions therefore are not verified by tests in this change.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 163,
+          "message": "AC_005_branded_signin_persona_contract is named by the issue but no test for it is included in the diff.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed sign-in UI renders the branded passcode form and persona cards, and initializes the selected persona from localStorage.",
+            "failureScenario": "If the branded layout omits a required persona description or selects the wrong card, no test added in this change exercises AC_005_branded_signin_persona_contract to catch it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 101,
+          "message": "The issue requires local_storage_and_sign_in_secrets and the localStorage contract test, but neither test is included in the diff.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "After successful sign-in, this code writes selectedId to localStorage.",
+            "failureScenario": "If a future change also stores the passcode or CSRF token, no test added in this change exercises local_storage_and_sign_in_secrets or the required storage-key scan."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 372,
+          "message": "AC_004_switch_role_behavior is named by the issue, but its required test is absent from the diff.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "handleRoleSwitch posts the selected user ID with the session CSRF token, then updates the session and navigates according to the returned role.",
+            "failureScenario": "If the request omits the CSRF header or navigates using the selected persona instead of the server-returned role, no test added in this change exercises AC_004_switch_role_behavior."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 382,
+          "message": "AC_004_switch_role_failure is named by the issue, but its required test is absent from the diff.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "A non-OK switch response sets an error message and returns before updating session state or navigating.",
+            "failureScenario": "If a 403 response changes the visible role or navigates away, no test added in this change exercises AC_004_switch_role_failure to assert the exact unchanged state."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "I found no direct exploitable vulnerability in the changed code. The required tests for local storage secrecy and role-switch behavior are absent from the diff, leaving those security-relevant criteria unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/components/SignIn.tsx",
+          "line": 101,
+          "message": "The change has no test for the sign-in storage criteria. Add the named `frontend/tests/SignIn.test.tsx` cases; the issue requires these behaviors to be tested in this change.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Successful sign-in writes selectedId to localStorage, while the acceptance criteria require tests to verify that no passcode, session ID, or CSRF token is stored.",
+            "failureScenario": "If a future change stores the session or CSRF token alongside the selected ID, the diff contains no `AC_005_branded_signin_persona_contract` or `local_storage_and_sign_in_secrets` test to detect it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 369,
+          "message": "The change has no tests for the role-switch success and failure criteria. Add the named `frontend/tests/App.test.tsx` cases; the issue requires these behaviors to be tested in this change.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Role switching posts to `/api/auth/switch-user`, updates session state from the response, and navigates according to the returned role.",
+            "failureScenario": "If the request omits the CSRF header, updates the visible role before server success, or changes state after a 403, the diff contains no `AC_004_switch_role_behavior` or `AC_004_switch_role_failure` test to detect it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "tdd-red",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 0,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": false,
+    "reason": "no test files added or changed in this branch"
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
