@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ExecutivePortfolio from '../src/workspaces/ExecutivePortfolio';
 
 describe('ExecutivePortfolio', () => {
+  afterEach(() => cleanup());
   it('AC_016_portfolio_kpis_contract', () => {
     const onOpenCase = vi.fn();
     render(<ExecutivePortfolio
@@ -29,7 +30,28 @@ describe('ExecutivePortfolio', () => {
     expect(rows[1].textContent).toContain('1d 1h');
     expect(rows[1].textContent).toContain('Ada Reviewer: Human decision — technical-review.decided');
 
-    fireEvent.click(screen.getByText('case-001'));
+    fireEvent.click(screen.getAllByRole('cell')[0]);
+    expect(onOpenCase).toHaveBeenCalledWith('case-001');
+  });
+
+  it('executive_portfolio_table_contract', () => {
+    const onOpenCase = vi.fn();
+    render(<ExecutivePortfolio
+      rows={[
+        { caseId: 'case-001', openItemsByRole: { 'technical-reviewer': 2, 'finance-reviewer': 1 }, nextDecisionOwner: 'exec-1', oldestOpenAgeSeconds: 90000, latestActivity: { sequence: 1, actor: 'Ada Reviewer', label: 'Human decision', outcome: 'technical-review.decided' } },
+        { caseId: 'case-002', openItemsByRole: { 'technical-reviewer': 0 }, nextDecisionOwner: null, oldestOpenAgeSeconds: 3600, latestActivity: null },
+      ]}
+      onOpenCase={onOpenCase}
+    />);
+
+    const rows = screen.getAllByRole('row');
+    expect(rows[1].textContent).toContain('case-001');
+    expect(rows[1].textContent).toContain('technical-reviewer: 2, finance-reviewer: 1');
+    expect(rows[1].textContent).toContain('exec-1');
+    expect(rows[1].textContent).toContain('1d 1h');
+    expect(rows[1].textContent).toContain('Ada Reviewer: Human decision — technical-review.decided');
+
+    fireEvent.click(screen.getAllByRole('cell')[0]);
     expect(onOpenCase).toHaveBeenCalledWith('case-001');
   });
 

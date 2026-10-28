@@ -395,7 +395,8 @@ describe('reviewer workspace', () => {
     await screen.findByText('Signed in as Executive observer.');
     expect(window.location.pathname).toBe('/portfolio');
     expect(screen.getByRole('heading', { name: 'Portfolio' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Accept finding|Reject finding/i })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Technical My work' })).toBeNull();
+    expect(screen.queryAllByRole('button', { name: /Accept finding|Reject finding/i })).toHaveLength(0);
     expect(screen.queryByRole('heading', { name: 'Case case-001' })).not.toBeNull();
   });
 

@@ -81,11 +81,11 @@ export default function ExecutivePortfolio({ rows = [], onOpenCase }: ExecutiveP
           <tbody>
             {rows.map((row) => (
               <tr key={row.caseId} onClick={() => onOpenCase?.(row.caseId)} style={{ cursor: onOpenCase ? 'pointer' : undefined }}>
-                <td>{row.caseId}</td>
-                <td>{Object.entries(row.openItemsByRole ?? {}).map(([role, count]) => `${role}: ${count}`).join(', ') || '0'}</td>
-                <td>{row.nextDecisionOwner ?? '—'}</td>
-                <td>{formatAge(row.oldestOpenAgeSeconds)}</td>
-                <td>{latestActivityText(row.latestActivity)}</td>
+                <td onClick={() => onOpenCase?.(row.caseId)}>{row.caseId}</td>
+                <td onClick={() => onOpenCase?.(row.caseId)}>{Object.entries(row.openItemsByRole ?? {}).map(([role, count]) => `${role}: ${count}`).join(', ') || '0'}</td>
+                <td onClick={() => onOpenCase?.(row.caseId)}>{row.nextDecisionOwner ?? '—'}</td>
+                <td onClick={() => onOpenCase?.(row.caseId)}>{formatAge(row.oldestOpenAgeSeconds)}</td>
+                <td onClick={() => onOpenCase?.(row.caseId)}>{latestActivityText(row.latestActivity)}</td>
               </tr>
             ))}
           </tbody>

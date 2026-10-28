@@ -544,6 +544,9 @@ export default function App({
   }
 
   function handleSessionChange(nextSession: SignedInSession | null) {
+    const nextOwner = nextSession ? `${nextSession.id}:${nextSession.csrfToken}` : '';
+    portfolioOwner.current = nextOwner;
+    setPortfolioRows([]);
     requestContext.current = '';
     resetHangarState();
     setSession(nextSession);
@@ -721,6 +724,8 @@ export default function App({
   const roleHomePath = session ? (ROLE_HOME_PATHS[session.role] ?? '/work') : '/work';
   const roleHomeLabel = roleHomePath === '/portfolio' ? 'Portfolio' : roleHomePath === '/demo' ? 'Demo control' : 'My work';
   const routeIsInRole = !session || routeMatchesRole(routePath, session.role);
+  const portfolioSessionKey = session ? `${session.id}:${session.csrfToken}` : '';
+  const visiblePortfolioRows = portfolioOwner.current === portfolioSessionKey ? portfolioRows : [];
 
   async function submitFinanceDecision(decision: string) {
     // The expected revision is the case revision the server holds, not the reserve draft's own version.
@@ -1260,7 +1265,7 @@ export default function App({
             )}
             {(session.role === 'executive' || session.role === 'presenter') && routePath === '/portfolio' && (
               <ExecutivePortfolio
-                rows={portfolioRows}
+                rows={visiblePortfolioRows}
                 onOpenCase={(caseId) => {
                   handleCaseNavigate(`/cases/${encodeURIComponent(caseId)}/overview`);
                 }}
@@ -1270,12 +1275,12 @@ export default function App({
               <ExecutiveCaseSummary
                 caseId={selectedCaseId}
                 summary="Executive read-only view"
-                rows={portfolioRows.find((row) => row.caseId === selectedCaseId)?.openItemsByRole ? Object.entries(portfolioRows.find((row) => row.caseId === selectedCaseId)!.openItemsByRole).map(([role, count]) => ({ role, count })) : []}
-                latestActivity={portfolioRows.find((row) => row.caseId === selectedCaseId)?.latestActivity ?? null}
+                rows={visiblePortfolioRows.find((row) => row.caseId === selectedCaseId)?.openItemsByRole ? Object.entries(visiblePortfolioRows.find((row) => row.caseId === selectedCaseId)!.openItemsByRole).map(([role, count]) => ({ role, count })) : []}
+                latestActivity={visiblePortfolioRows.find((row) => row.caseId === selectedCaseId)?.latestActivity ?? null}
                 showDecisionControls={false}
               />
             ))}
-            {dashboard && <CapabilityDashboard
+            {session.role === 'technical-reviewer' && dashboard && <CapabilityDashboard
               data={dashboard}
               decisionReason={reason}
               onDecisionReasonChange={setReason}
