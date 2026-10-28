@@ -22,8 +22,8 @@ export default function RoleNavigation({ role = 'technical-reviewer', items }: R
     <nav aria-label="Primary" data-role={role}>
       <ul>
         {resolvedItems.map((item) => (
-          <li key={item}>
-            <a href="#">{item}</a>
+          <li key={item} role="presentation">
+            <a href="#" tabIndex={-1}>{item}</a>
           </li>
         ))}
       </ul>

@@ -8,6 +8,8 @@ const decisions = [{ id: 'accept', label: 'Accept finding' }, { id: 'reject', la
 
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
 
+const originalWindowLocation = window.location;
+
 beforeAll(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
@@ -15,6 +17,14 @@ beforeAll(() => {
     disconnect() {}
   });
 });
+
+function resetWindowLocation() {
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: originalWindowLocation,
+  });
+  window.history.replaceState({}, '', '/');
+}
 
 function dashboard(queue: unknown[] = [], activity: unknown[] = [], allowed = decisions, traces: { label: string; url: string }[] = []) {
   return {
@@ -42,6 +52,7 @@ function setupApi(options: {
   session?: typeof signedIn;
   signInSessions?: typeof signedIn[];
   pendingCaseId?: string;
+  users?: Array<{ id: string; displayName: string; role: string }>;
 } = {}) {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -58,7 +69,7 @@ function setupApi(options: {
     calls.push({ url, init });
     if (url === '/api/health') return json({ status: 'ok' }, options.healthStatus ?? 200);
     if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
-    if (url === '/api/auth/users') return json(users);
+    if (url === '/api/auth/users') return json(options.users ?? users);
     if (url === '/api/auth/sign-in') {
       const session = options.signInSessions?.[signInSessionIndex++] ?? options.session ?? signedIn;
       return json(session);
@@ -134,6 +145,7 @@ async function signIn() {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  resetWindowLocation();
 });
 
 describe('reviewer workspace', () => {
@@ -259,6 +271,75 @@ describe('reviewer workspace', () => {
     expect(calls.some((call) => call.url === url && (call.init?.method ?? 'GET') === 'GET')).toBe(true);
     expect(Array.from(list.querySelectorAll('li')).map((item) => item.textContent))
       .toEqual(['Citation check — Outcome: verified', 'Tool call — search-manual — Outcome: requested']);
+  });
+
+  it('AC_006_returnTo_and_role_route_integration', async () => {
+    const financeSession = { ...signedIn, role: 'finance-reviewer', displayName: 'Finance reviewer', caseScopes: ['case-001'] };
+    const financeUsers = [{ id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }];
+
+    const validCalls = setupApi({
+      session: financeSession,
+      users: financeUsers,
+    });
+    window.history.replaceState({}, '', '/portfolio?returnTo=%2Fcases%2Fcase-001%2Freserve');
+    render(<App />);
+
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Finance reviewer (finance-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Finance reviewer.');
+    const primaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const workspaceMain = primaryNavigation.closest('aside')?.parentElement?.querySelector('main');
+    expect(primaryNavigation).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Finance reviewer' })).toBeTruthy();
+    expect(workspaceMain).not.toBeNull();
+    expect(workspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
+    expect(window.location.pathname).toBe('/cases/case-001/reserve');
+    expect(validCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+
+    cleanup();
+    const invalidCalls = setupApi({
+      session: financeSession,
+      users: financeUsers,
+    });
+    window.history.replaceState({}, '', '/portfolio?returnTo=%2Fcases%2Fcase-001%2Ffindings');
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Finance reviewer (finance-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Finance reviewer.');
+    const invalidPrimaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const invalidWorkspaceMain = invalidPrimaryNavigation.closest('aside')?.parentElement?.querySelector('main');
+    expect(window.location.pathname).toBe('/work');
+    expect(invalidWorkspaceMain).not.toBeNull();
+    expect(invalidWorkspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
+    expect(invalidCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+  });
+
+  it('AC_001_App_root_shell_and_Hangar_composition', async () => {
+    setupApi({ canReset: true });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
+    await signIn();
+    const primaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
+    const workspaceMain = primaryNavigation.closest('aside')?.parentElement?.querySelector('main');
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeTruthy();
+    expect(primaryNavigation).toBeTruthy();
+    expect(workspaceMain).not.toBeNull();
+    expect(workspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    const hangarHeading = screen.getByRole('heading', { name: 'Hangar' });
+    expect(workspaceMain?.contains(hangarHeading)).toBe(true);
+    expect(screen.getByRole('button', { name: 'View Case A' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Overview' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Hangar object selection' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
   });
 
   it('Dashboard_waits_for_authorized_server_state', async () => {
