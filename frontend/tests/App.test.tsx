@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import App from '../src/App';
+import App, { resolveSessionCaseId } from '../src/App';
 
 const users = [{ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer' }];
 const signedIn = { id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-session-token' };
@@ -231,6 +231,14 @@ describe('reviewer workspace', () => {
     expect(screen.getByText('Technical reviewer')).toBeTruthy();
     expect(screen.getByText('Case case-001')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
+  });
+
+  it('keeps the active case when it stays in scope and falls back otherwise', () => {
+    const session = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] };
+    expect(resolveSessionCaseId(session, 'cp-case-b')).toBe('cp-case-b');
+    expect(resolveSessionCaseId(session, 'case-001')).toBe('cp-case-a');
+    expect(resolveSessionCaseId({ ...session, caseScopes: ['case-001'] }, 'cp-case-b')).toBe('case-001');
+    expect(resolveSessionCaseId(null, 'cp-case-b')).toBeNull();
   });
 
   it('shows no trace when the dashboard has no stored trace links', async () => {

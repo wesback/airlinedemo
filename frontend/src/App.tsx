@@ -64,7 +64,7 @@ function normalizeRoutePath(value: string | null | undefined): string {
   }
 }
 
-function resolveSessionCaseId(session: SignedInSession | null, currentCaseId: string | null): string | null {
+export function resolveSessionCaseId(session: SignedInSession | null, currentCaseId: string | null): string | null {
   if (!session) return null;
   if (currentCaseId && session.caseScopes.includes(currentCaseId)) return currentCaseId;
   return session.caseScopes[0] ?? null;
@@ -487,7 +487,7 @@ export default function App({
       const nextSession: SignedInSession = await response.json();
       resetHangarState();
       setSession(nextSession);
-      setSelectedCaseId(nextSession.caseScopes?.[0] ?? null);
+      setSelectedCaseId(resolveSessionCaseId(nextSession, selectedCaseId));
       traceRequestId.current += 1;
       setData(null);
       setReason('');
