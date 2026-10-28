@@ -777,10 +777,12 @@ export default function App({
                   <section aria-labelledby="hangar-heading">
                     <h2 id="hangar-heading">Hangar</h2>
                     {hangarSnapshot && <p aria-label="Hangar retained snapshot">Revision: {hangarSnapshot.revision}; Labels: {String(hangarSnapshot.owner)}; {String(hangarSnapshot.capabilityLabel)}</p>}
-                    <HangarLocalDiagnostics
-                      session={session}
-                      {...hangarDiagnostics}
-                    />
+                    <div aria-label="Hangar diagnostics">
+                      <HangarLocalDiagnostics
+                        session={session}
+                        {...hangarDiagnostics}
+                      />
+                    </div>
                     {hangarView === '3d' && hangarSceneLoaded && (
                       <div aria-label="Hangar 3D scene">
                         <button type="button" onClick={() => { void refreshHangarSnapshot(); }}>Refresh Hangar scene</button>

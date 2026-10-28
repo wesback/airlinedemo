@@ -337,8 +337,11 @@ describe('reviewer workspace', () => {
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
     const hangarHeading = screen.getByRole('heading', { name: 'Hangar' });
     expect(workspaceMain?.contains(hangarHeading)).toBe(true);
-    expect(screen.getByRole('button', { name: 'View Case A' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Overview' })).toBeTruthy();
+    const hangarSceneControl = screen.getByRole('button', { name: 'View Case A' });
+    const hangarOverviewControl = screen.getByRole('button', { name: 'Overview' });
+    expect(hangarSceneControl.textContent).toBe('View Case A');
+    expect(hangarOverviewControl.textContent).toBe('Overview');
+    expect(screen.getByRole('button', { name: 'Open local diagnostics' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Hangar object selection' })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Case A guided journey' })).toBeTruthy();
   });
