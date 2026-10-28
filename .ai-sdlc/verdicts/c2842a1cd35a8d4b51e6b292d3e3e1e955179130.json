@@ -1,0 +1,251 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 673,
+  "branch": "ai-sdlc/issue-673",
+  "commitSha": "c2842a1cd35a8d4b51e6b292d3e3e1e955179130",
+  "round": 0,
+  "pipelineVersion": "873af5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-4",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added rendered-flow test covers retaining an in-scope case across sign-out and sign-in. It misses the required empty-scope resolver input and the rendered-flow fallback case.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 236,
+          "message": "Acceptance criterion 2 requires the case cp-case-b with next session scopes [] to resolve to null. Add that exact case to this test.",
+          "confidence": 0.92,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The test checks a retained case, a fallback to a nonempty scope list, and a null session, but never calls the resolver with an authenticated session whose caseScopes array is empty.",
+            "failureScenario": "If empty caseScopes incorrectly resolve to the current case instead of null, every assertion in this test still passes, leaving an input explicitly required by acceptance criterion 2 uncovered."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 245,
+          "message": "Acceptance criterion 1's negative case is not exercised through the rendered App and production SignIn flow. Add a sign-out/sign-in case where the next session scopes are ['cp-case-a'] and assert cp-case-a is selected.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The rendered App test exercises sign-out followed by sign-in only when cp-case-b remains in the incoming session's scopes. Its fallback assertion is in a separate resolver unit test, not through the rendered App and production SignIn flow.",
+            "failureScenario": "If the production sign-in path retains cp-case-b when the incoming scopes contain only cp-case-a, the rendered-flow test still passes because it tests only the in-scope case; the required negative session-change behavior is not checked through that path."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new tests cover retaining an in-scope case across the reachable sign-out/sign-in flow, but omit both the required empty-scope unit input and the integration negative case where the selected case is no longer in scope.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 237,
+          "message": "The named unit test omits the required empty-scopes case. Add an assertion that a signed-in session with caseScopes [] resolves to null.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named unit test checks an in-scope case, an out-of-scope case with a nonempty scope list, and a null session. It never passes a signed-in session with an empty caseScopes array.",
+            "failureScenario": "If case selection resolution returns the first scope or an incorrect fallback for an empty scope list, the named test still passes; the criterion requires that input to return null."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 246,
+          "message": "The rendered App test covers the positive retention path but not the required negative case. Exercise sign-out/sign-in with next session scopes ['cp-case-a'] and assert cp-case-a is selected and cp-case-b is not retained.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The rendered App test changes sessions through sign-out and sign-in, but only asserts retention when the next session includes cp-case-b. It does not exercise the criterion’s negative case where the next session contains only cp-case-a.",
+            "failureScenario": "If the sign-in flow incorrectly retains cp-case-b when the incoming session scopes are ['cp-case-a'], the test still passes because its incoming session includes cp-case-b."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed case-selection logic retains a case only while it remains in the incoming session’s scopes, and URL-encodes the case ID before requesting it. I found no concrete security vulnerability in the in-scope changes.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

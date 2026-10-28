@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import App from '../src/App';
+import App, { resolveSessionCaseId } from '../src/App';
 
 const users = [{ id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer' }];
 const signedIn = { id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-session-token' };
@@ -231,6 +231,61 @@ describe('reviewer workspace', () => {
     expect(screen.getByText('Technical reviewer')).toBeTruthy();
     expect(screen.getByText('Case case-001')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
+  });
+
+  it('keeps the active case when it stays in scope and falls back otherwise', () => {
+    const session = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] };
+    expect(resolveSessionCaseId(session, 'cp-case-b')).toBe('cp-case-b');
+    expect(resolveSessionCaseId(session, 'cp-case-a')).toBe('cp-case-a');
+    expect(resolveSessionCaseId({ ...session, caseScopes: ['cp-case-a'] }, 'cp-case-b')).toBe('cp-case-a');
+    expect(resolveSessionCaseId({ ...session, caseScopes: [] }, 'cp-case-b')).toBeNull();
+    expect(resolveSessionCaseId(null, 'cp-case-b')).toBeNull();
+  });
+
+  it('retains the selected in-scope case when the session changes and the new first scope differs', async () => {
+    const firstSession = { ...signedIn, caseScopes: ['cp-case-b', 'cp-case-a'] };
+    const nextSession = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'], csrfToken: 'csrf-next-token' };
+    setupApi({ session: firstSession, signInSessions: [firstSession, nextSession] });
+    render(<App />);
+    await signIn();
+
+    expect(await screen.findByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-a' } });
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Case cp-case-a' })).toBeTruthy());
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(screen.getByLabelText('Demo passcode')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Ada Reviewer.');
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy());
+  });
+
+  it('falls back to the first in-scope case when the selected case is no longer available after sign-in', async () => {
+    const firstSession = { ...signedIn, caseScopes: ['cp-case-b', 'cp-case-a'] };
+    const nextSession = { ...signedIn, caseScopes: ['cp-case-a'], csrfToken: 'csrf-next-token' };
+    setupApi({ session: firstSession, signInSessions: [firstSession, nextSession] });
+    render(<App />);
+    await signIn();
+
+    expect(await screen.findByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(screen.getByLabelText('Demo passcode')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Ada Reviewer.');
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Case cp-case-a' })).toBeTruthy());
+    expect(screen.queryByRole('heading', { name: 'Case cp-case-b' })).toBeNull();
   });
 
   it('shows no trace when the dashboard has no stored trace links', async () => {
