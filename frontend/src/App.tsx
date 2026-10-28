@@ -62,6 +62,8 @@ const PERSONA_OPTIONS = [
   { id: 'exec-1', label: 'Executive observer', role: 'executive' },
 ] as const;
 
+const PERSONA_BY_ID = new Map<string, (typeof PERSONA_OPTIONS)[number]>(PERSONA_OPTIONS.map((persona) => [persona.id, persona]));
+
 const ROLE_HOME_PATHS: Record<string, string> = {
   'technical-reviewer': '/work',
   'finance-reviewer': '/work',
@@ -525,6 +527,11 @@ export default function App({
 
   async function handleRoleSwitch(userId: string) {
     if (!session) return;
+    const persona = PERSONA_BY_ID.get(userId);
+    if (!persona) {
+      setCaseError('You do not have permission for this action.');
+      return;
+    }
     try {
       const response = await fetch('/api/auth/switch-user', {
         method: 'POST',

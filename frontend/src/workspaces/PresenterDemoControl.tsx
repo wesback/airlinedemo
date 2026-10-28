@@ -19,12 +19,20 @@ export const PRESENTER_PERSONAS: PresenterPersona[] = [
   { id: 'exec-1', label: 'Executive observer', role: 'executive' },
 ];
 
+const PRESENTER_GUIDED_MAIN_VIEWS = {
+  technical: '/cases/:caseId/findings',
+  finance: '/cases/:caseId/reserve',
+  legal: '/cases/:caseId/obligations',
+  executive: '/portfolio',
+  presenter: '/demo',
+} as const;
+
 export function getPresenterGuidedChecklist(caseId?: string): Array<{ label: string; route: string; description: string }> {
   const caseRoute = caseId ? `/cases/${encodeURIComponent(caseId)}/overview` : '/cases';
   return [
-    { label: 'My work', route: '/work', description: 'Open the queued work and role home.' },
-    { label: 'Portfolio', route: '/portfolio', description: 'Review the executive portfolio.' },
-    { label: 'Demo control', route: '/demo', description: 'Stay on the presenter control centre.' },
+    { label: 'My work', route: '/work', description: 'Navigate to the technical findings queue.' },
+    { label: 'Portfolio', route: PRESENTER_GUIDED_MAIN_VIEWS.executive, description: 'Review the executive portfolio overview.' },
+    { label: 'Demo control', route: PRESENTER_GUIDED_MAIN_VIEWS.presenter, description: 'Stay on the presenter control centre.' },
     { label: 'Case', route: caseRoute, description: 'Open the selected case overview.' },
     { label: 'Hangar', route: '/hangar', description: 'Review the aircraft view.' },
   ];
