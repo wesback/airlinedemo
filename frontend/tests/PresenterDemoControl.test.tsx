@@ -23,8 +23,10 @@ describe('PresenterDemoControl', () => {
     expect(screen.getByText('Case A')).toBeTruthy();
     expect(screen.getByText('Case C')).toBeTruthy();
     expect(screen.getByText('Not eligible')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Reset blocked variant' }));
     expect(onReset).toHaveBeenCalledWith('cp-case-c');
+    expect(onReset).toHaveBeenCalledTimes(1);
   });
 
   it('AC_004_presenter_view_as_contract', () => {
@@ -36,6 +38,7 @@ describe('PresenterDemoControl', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: /View as Finance reviewer/i })[0]);
     expect(onViewAs).toHaveBeenCalledWith('fin-1');
+    expect(onViewAs.mock.calls).toEqual([['presenter'], ['fin-1']]);
   });
 
   it('presenter_guided_path_contract', () => {
@@ -44,6 +47,9 @@ describe('PresenterDemoControl', () => {
     const links = screen.getAllByRole('link');
     expect(links).toHaveLength(5);
     expect(links.map((link) => link.textContent)).toEqual(['My work', 'Portfolio', 'Demo control', 'Case', 'Hangar']);
+    expect(screen.getByRole('link', { name: 'My work' }).getAttribute('href')).toBe('/work');
+    expect(screen.getByRole('link', { name: 'Portfolio' }).getAttribute('href')).toBe('/portfolio');
+    expect(screen.getByRole('link', { name: 'Demo control' }).getAttribute('href')).toBe('/demo');
     expect(screen.getByRole('link', { name: 'Case' }).getAttribute('href')).toBe('/cases/cp-case-c/overview');
     expect(screen.getByRole('link', { name: 'Hangar' }).getAttribute('href')).toBe('/hangar');
   });
