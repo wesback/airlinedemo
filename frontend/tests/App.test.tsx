@@ -453,6 +453,45 @@ describe('reviewer workspace', () => {
     }
   });
 
+  it('legal reviewer workspace opens the obligation record route from the worklist', async () => {
+    const legalSession = { id: 'legal-1', displayName: 'Ava Legal', role: 'legal-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-session-token' };
+    const legalCalls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      legalCalls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'legal-1', displayName: 'Ava Legal', role: 'legal-reviewer' }]);
+      if (url === '/api/auth/sign-in') return json(legalSession);
+      if (url === '/api/v1/workspace/worklist') return json({
+        contractVersion: 1,
+        items: [{ caseId: 'case-001', itemId: 'OBL-1', capabilityId: 'contract-obligation', state: 'open', owner: 'legal', ageSeconds: 300, label: 'Human decision' }],
+        unavailableCaseIds: [],
+        truncated: false,
+      });
+      if (url === '/api/cases/case-001') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/case-001/dashboard') return json({ allowedDecisions: [], capabilities: [], queue: [], activity: [] });
+      if (url === '/api/cases/case-001/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/case-001/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      if (url === '/api/cases/case-001/obligations/OBL-1/decisions' && method === 'POST') return json({ decision: 'signed-off', simulated: true, noticeSent: false }, 200);
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Ava Legal (legal-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Ava Legal.');
+    fireEvent.click(await screen.findByText('OBL-1'));
+    expect(await screen.findByRole('heading', { name: 'Obligation workspace' })).toBeTruthy();
+    expect(screen.getByText('Simulated — no notice is sent.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /send notice/i })).toBeNull();
+    expect(window.location.pathname).toBe('/cases/case-001/obligations');
+    expect(legalCalls.some(({ url, init }) => url === '/api/cases/case-001/obligations/OBL-1/decisions' && init?.method === 'POST')).toBe(false);
+  });
+
   it('loads the first case in the session scope and encodes its id', async () => {
     const calls = setupApi({ session: { ...signedIn, caseScopes: ['cp/case a', 'cp-case-b'] } });
     render(<App />);

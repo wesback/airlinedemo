@@ -1,0 +1,231 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 653,
+  "branch": "ai-sdlc/issue-653",
+  "commitSha": "7c4664235c5982ce4572f2f4a3df1401c6d03156",
+  "round": 2,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added request guards prevent late responses from replacing the current record, but selecting another obligation can still leave the prior record actionable while the new one loads. The decision contract test also still checks only a mocked component callback, leaving App's request wiring unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 763,
+          "message": "Clear or otherwise hide the prior obligation record when the selection changes. A pending load for B can leave A's decisions available and submit A's ID against B's case.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "loadLegalObligationRecord updates the active selection and request ID but leaves the previous obligationRecord in state until the new request completes. The workspace renders that record for the new route, and onDecisionSubmit combines its ID with selectedCaseId.",
+            "failureScenario": "After opening obligation A, a reviewer selects obligation B. While B's request is pending, A's allowed decisions remain visible under B's route; submitting one posts to case B with obligation ID A."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The named decision contract test still does not cover App's production submission path or the request and refresh behavior required by the criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named legal_obligation_decision_contract test renders ObligationWorkspace with a mocked onDecisionSubmit callback and checks only that the callback receives an ID and reason. It does not exercise App's POST wiring, request fields, rejection behavior, or worklist refresh.",
+            "failureScenario": "If App omits the CSRF header or expected revision, submits an unsupported decision, or skips the worklist refresh, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior finding about client-defined decision actions is fixed, and the obligation response now checks that its request is current. The decision submission test gap remains.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The legal decision submission criterion still lacks a test of App's production request path, including request fields and post-success worklist refresh.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named test renders ObligationWorkspace with a mocked onDecisionSubmit callback. It does not exercise App's POST request or worklist refresh; the App test only asserts that no POST occurs.",
+            "failureScenario": "If App omits the CSRF header or expected revision, or does not re-read the worklist after a successful decision, the named test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest fix removes client-defined decision fallbacks and guards against stale obligation fetches. The previously reported gap in testing App's decision submission and refresh path remains.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The previously reported decision contract test gap remains: the named test does not cover the production request wiring or post-success worklist refresh.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named legal_obligation_decision_contract test renders ObligationWorkspace with a mocked onDecisionSubmit callback. It does not exercise App's POST request or worklist refresh.",
+            "failureScenario": "If App omits the CSRF token or expected revision, or does not re-read the worklist after a successful decision, this test still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "assertion",
+    "greenExit": 1,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/LegalWorkspace.test.tsx",
+      "frontend/tests/ObligationWorkspace.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": ""
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

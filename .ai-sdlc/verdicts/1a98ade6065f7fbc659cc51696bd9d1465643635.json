@@ -1,0 +1,266 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 653,
+  "branch": "ai-sdlc/issue-653",
+  "commitSha": "1a98ade6065f7fbc659cc51696bd9d1465643635",
+  "round": 3,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous-record selection issue remains reachable, and the named decision test still verifies only a mocked component callback. Both previously reported findings remain unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 883,
+          "message": "Clear or hide the previous obligation record when the selection changes so its decisions cannot be submitted for the newly selected case.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "loadLegalObligationRecord updates the active selection but leaves obligationRecord unchanged until the new fetch completes. The workspace can render the old record for the new selection, and its submit handler uses that record ID with the newly selected case ID.",
+            "failureScenario": "After opening obligation A, a reviewer selects obligation B while B's request is pending. A's decision actions remain available under B's route; submitting one can post A's obligation ID to case B."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The named decision contract test still does not cover App's production submission path and the request and refresh behavior required by the acceptance criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "legal_obligation_decision_contract renders ObligationWorkspace with a mocked onDecisionSubmit callback and checks only the decision ID and reason. It does not exercise App's POST request, CSRF token, expected revision, rejection behavior, or worklist refresh.",
+            "failureScenario": "If App omits the CSRF header or revision, sends an incorrect request, or fails to re-read the worklist after success, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior-round stale-record issue remains reachable when switching obligations, and the named decision contract test still checks only a mocked component callback. The latest changes do not resolve either finding.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 948,
+          "message": "Clear or hide the prior obligation record when the selection changes so its decisions cannot be submitted against the newly selected case.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "openLegalObligation updates the selected case and starts loading the new record without clearing obligationRecord. The workspace renders that record for the new selection, and its decision handler combines the selected case ID with obligationRecord.id.",
+            "failureScenario": "After opening obligation A, a reviewer selects B. While B's request is pending, A's decisions remain available; submitting one sends obligation A's ID with case B."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The named decision contract test still does not cover App's production submission path or the request and refresh behavior required by the acceptance criterion.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "legal_obligation_decision_contract renders ObligationWorkspace with a mocked onDecisionSubmit callback. It does not exercise App's POST request or verify its fields, rejection behavior, or worklist refresh.",
+            "failureScenario": "If App omits the CSRF header or expected revision, or skips the worklist refresh after success, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The prior stale-record finding remains: selecting another obligation can leave the previous record actionable during loading. The named decision contract test also still does not cover App's request wiring or refresh behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 883,
+          "message": "Clear or hide the prior obligation record when the selection changes so its decisions cannot be submitted for the newly selected case.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Changing the active selection updates the selection and starts a fetch, but leaves the prior obligationRecord in state. The workspace can render that record for the new case, and the decision handler combines its ID with the newly selected case ID.",
+            "failureScenario": "After opening obligation A, a reviewer selects obligation B. While B's fetch is pending, A's allowed decisions remain actionable; submitting one sends A's obligation ID with B's case ID."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The legal decision submission criterion remains unverified through App's production request path; the named test checks only the component callback.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test renders ObligationWorkspace with a mocked onDecisionSubmit callback. It does not exercise App's POST request, request fields, rejection handling, or post-success worklist refresh.",
+            "failureScenario": "If App omits the CSRF header or expected revision, or skips the worklist refresh after success, this test still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/LegalWorkspace.test.tsx",
+      "frontend/tests/ObligationWorkspace.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
