@@ -1,10 +1,65 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import App from '../src/App';
 import ExecutivePortfolio from '../src/workspaces/ExecutivePortfolio';
 
 describe('ExecutivePortfolio', () => {
-  afterEach(() => cleanup());
-  it('AC_016_portfolio_kpis_contract', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    window.history.replaceState({}, '', '/');
+  });
+
+  it.each([
+    { empty: false, expected: ['2', '1', '3', '1d 1h'] },
+    { empty: true, expected: ['0', '0', '0', '—'] },
+  ])('AC_016_portfolio_kpis_contract (empty=$empty)', async ({ empty, expected }) => {
+    const cases = empty ? [] : [
+      { caseId: 'case-001', openItemsByRole: { 'technical-reviewer': 2, 'finance-reviewer': 1 }, nextDecisionOwner: 'exec-1', oldestOpenAgeSeconds: 90000, latestActivity: null },
+      { caseId: 'case-002', openItemsByRole: { 'technical-reviewer': 0 }, nextDecisionOwner: null, oldestOpenAgeSeconds: 3600, latestActivity: null },
+    ];
+    const session = { id: 'exec-1', displayName: 'Executive observer', role: 'executive', caseScopes: cases.map((row) => row.caseId), csrfToken: 'csrf-fixture' };
+    const portfolioMethods: string[] = [];
+    const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/health') return json({ status: 'ok' });
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([session]);
+      if (url === '/api/auth/sign-in') return json(session);
+      if (url === '/api/v1/workspace/portfolio') {
+        portfolioMethods.push(init?.method ?? 'GET');
+        return json({ contractVersion: 1, cases, unavailableCaseIds: [] });
+      }
+      if (url === '/api/cases/case-001') return json({ revision: 7, basis: [] });
+      if (url === '/api/cases/case-001/dashboard') return json({ allowedDecisions: [], capabilities: [], queue: [], activity: [] });
+      if (url === '/api/cases/case-001/technical-reviews') return json({ basisVersion: 1, decisions: [] });
+      if (url === '/api/cases/case-001/readiness') return json({ sentence: 'Portfolio case readiness' });
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    window.history.replaceState({}, '', '/portfolio');
+    render(<App />);
+    expect(portfolioMethods).toEqual([]);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Executive observer.');
+    const tiles = screen.getByLabelText('Portfolio KPI tiles');
+    await waitFor(() => expect(Array.from(tiles.querySelectorAll('strong'), (tile) => tile.textContent)).toEqual(expected));
+    expect(tiles.children).toHaveLength(4);
+    expect(portfolioMethods).toEqual(['GET']);
+    expect(window.location.pathname).toBe('/portfolio');
+    if (empty) {
+      expect(screen.getByText('No cases in your scope.').textContent).toBe('No cases in your scope.');
+      expect(screen.queryByRole('table')).toBeNull();
+    } else {
+      expect(screen.queryByText('No cases in your scope.')).toBeNull();
+    }
+  });
+
+  it('portfolio_component_renders_kpis_and_opens_selected_case', () => {
     const onOpenCase = vi.fn();
     render(<ExecutivePortfolio
       rows={[

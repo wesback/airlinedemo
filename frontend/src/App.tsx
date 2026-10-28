@@ -585,10 +585,10 @@ export default function App({
       const requestedFromSearch = validateReturnTo(new URLSearchParams(currentSearch).get('returnTo'));
       const validRequestedFromSearch = requestedFromSearch && routeMatchesRole(requestedFromSearch, nextSession.role) ? requestedFromSearch : null;
       const currentRoleRoute = routeMatchesRole(routePath, nextSession.role) ? normalizeRoutePath(routePath) : null;
-      const requestedPath = validRequestedFromSearch ?? (returnTo && routeMatchesRole(returnTo, nextSession.role) ? returnTo : null);
+      const requestedPath = validRequestedFromSearch ?? (returnTo && routeMatchesRole(returnTo, nextSession.role) ? returnTo : null) ?? currentRoleRoute;
       const roleHome = ROLE_HOME_PATHS[nextSession.role] ?? '/work';
       const currentNormalizedRoute = normalizeRoutePath(routePath);
-      const executiveDenialRoute = nextSession.role === 'executive' && currentNormalizedRoute === '/work';
+      const executiveDenialRoute = nextSession.role === 'executive' && [currentNormalizedRoute, requestedFromSearch, returnTo].includes('/work');
       const resolvedPath = executiveDenialRoute ? '/work' : resolveReturnTo(requestedPath, roleHome);
       const nextRoute = executiveDenialRoute || routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome;
       if (typeof window !== 'undefined') {
@@ -775,7 +775,7 @@ export default function App({
   const executiveRouteDenial = !!session && session.role === 'executive' && normalizedRoute === '/work';
   const routeIsExecutivePortfolio = !!session && executiveReadOnlyRole && normalizedRoute === '/portfolio';
   const routeIsExecutiveCase = !!session && executiveReadOnlyRole && /^\/cases\/[^/]+(?:\/|$)/.test(normalizedRoute);
-  const roleDecisionPanelsEnabled = !!session && !['executive', 'presenter'].includes(session.role);
+  const technicalDecisionPanelEnabled = session?.role === 'technical-reviewer';
   const portfolioSessionKey = session ? `${session.id}:${session.csrfToken}` : '';
   const visiblePortfolioRows = portfolioOwner.current === portfolioSessionKey ? portfolioRows : [];
 
@@ -1140,16 +1140,10 @@ export default function App({
           primaryNavigation={<RoleNavigation role={session.role} />}
         >
           <section aria-labelledby="case-heading">
-            {session && !routeIsInRole && (
+            {session && (!routeIsInRole || executiveRouteDenial) && (
               <section aria-live="polite">
                 <p>This page is not part of your workspace</p>
                 <a href={roleHomePath}>{roleHomeLabel}</a>
-              </section>
-            )}
-            {executiveRouteDenial && (
-              <section aria-live="polite">
-                <p>This page is not part of your workspace</p>
-                <a href="/portfolio">Portfolio</a>
               </section>
             )}
             {!session.caseScopes?.length ? (
@@ -1458,7 +1452,7 @@ export default function App({
               />
             )}
             {dashboard && <CapabilityDashboard
-              data={dashboard}
+              data={technicalDecisionPanelEnabled ? dashboard : { ...dashboard, allowedDecisions: [] }}
               decisionReason={reason}
               onDecisionReasonChange={setReason}
               onTraceSelect={(url) => { void showTrace(url); }}
