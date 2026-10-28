@@ -332,6 +332,7 @@ describe('reviewer workspace', () => {
     expect(primaryNavigation).toBeTruthy();
     expect(workspaceMain).not.toBeNull();
     expect(workspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
+    expect(screen.queryByRole('heading', { name: 'Hangar' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
     const hangarHeading = screen.getByRole('heading', { name: 'Hangar' });
