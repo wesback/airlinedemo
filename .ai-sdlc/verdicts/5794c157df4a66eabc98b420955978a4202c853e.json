@@ -1,0 +1,318 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 651,
+  "branch": "ai-sdlc/issue-651",
+  "commitSha": "5794c157df4a66eabc98b420955978a4202c853e",
+  "round": 3,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round adds a request ID guard, but a worklist response can still repopulate state after logout and be visible to a later technical reviewer. Stale-conflict refresh and the required criterion-linked tests also remain unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 601,
+          "message": "The request ID guard does not invalidate a worklist response when its session ends, so a response can repopulate shared state and expose the previous reviewer's scoped items to the next reviewer.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The request ID check rejects responses only after a newer technical worklist request starts. Logging out clears the worklist but does not invalidate the outstanding request, and entering a technical-reviewer session does not clear the worklist while its new request is pending.",
+            "failureScenario": "Reviewer A's request starts, A signs out, and the response arrives before reviewer B signs in. The response repopulates shared worklist state; when B signs in as a technical reviewer, A's scoped items can remain visible until B's request resolves. This is OWASP A01:2025 Broken Access Control."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 688,
+          "message": "Stale revision handling still does not re-read server state after the conflict, as required by the acceptance criterion.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The 409 branch sets a conflict message and returns before incrementing the refresh state that reloads server projections.",
+            "failureScenario": "A decision is rejected for a stale revision; the UI tells the reviewer to refresh but continues showing the stale worklist and case projections."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/FindingWorkspace.test.tsx",
+          "line": 1,
+          "message": "Required criterion-linked tests remain missing: `AC_008_technical_worklist_contract`, `technical_finding_split_and_worklist_navigation`, `AC_009_technical_decision_contract`, `technical_stale_revision_refresh_contract`, and `AI_trace_and_finding_text_remains_inert`.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The round-4 delta adds no criterion-linked workspace tests; the issue-named tests remain absent from the change.",
+            "failureScenario": "The worklist contract, finding navigation, decision submission, stale-revision refresh, and inert text behavior can regress without the named acceptance-criteria tests detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The request ID check leaves a session transition that can expose a previous reviewer’s scoped worklist. The previously reported stale-conflict refresh defect and missing criterion-linked tests also remain unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 613,
+          "message": "The request ID check does not prevent a completed post-logout response from populating state that a later technical reviewer can see. Invalidate pending requests on logout and clear or mark the worklist unloaded when a new session starts. OWASP A01:2025 Broken Access Control.",
+          "confidence": 0.9,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The logout path clears the worklist but does not increment worklistRequestId. If the old request resolves after logout, its matching ID lets it set the worklist and worklistLoaded=true. A later technical-reviewer session starts a new request without clearing that state, while the render condition can show the loaded worklist.",
+            "failureScenario": "Reviewer A signs out while their worklist request is pending. The response resolves before reviewer B signs in, and B briefly sees A's scoped worklist while B's request is pending."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 693,
+          "message": "Stale-revision handling still does not re-read server state after a conflict, as required by the acceptance criterion.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When the decision POST returns 409, submitDecision sets a conflict message and returns false. It increments refresh only after a successful response, so the conflict does not re-read server projections.",
+            "failureScenario": "A decision with a stale revision is rejected; the UI instructs the reviewer to refresh but continues displaying stale projections."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/FindingWorkspace.test.tsx",
+          "line": 1,
+          "message": "The required criterion-linked tests remain missing: `AC_008_technical_worklist_contract`, `technical_finding_split_and_worklist_navigation`, `AC_009_technical_decision_contract`, `technical_stale_revision_refresh_contract`, and `AI_trace_and_finding_text_remains_inert`.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The round's diff changes App.tsx but adds no criterion-linked tests; the named worklist, finding navigation, decision, stale-revision, and inert-text tests remain absent.",
+            "failureScenario": "Worklist behavior, finding navigation, decision submission, stale-revision refresh, or inert text rendering can regress without the acceptance criteria's required tests detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The worklist request ID check does not invalidate requests on sign-out, leaving a reachable cross-session worklist exposure. The stale-conflict refresh, server-owned fallback data, and required criterion-linked tests also remain unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 612,
+          "message": "A previous session's worklist can still be shown to the next technical reviewer because logout does not invalidate the pending request or clear the loaded state before the next session renders.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "A worklist response is checked against worklistRequestId before updating shared state, but signing out clears the worklist without incrementing that ID. A new technical-reviewer session also leaves the existing worklist visible while its request is pending.",
+            "failureScenario": "Reviewer A signs out while their worklist request is pending. The response then populates shared state. Reviewer B signs in as a technical reviewer and sees A's items while B's worklist request is pending. This is OWASP A01:2025 Broken Access Control."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 693,
+          "message": "Stale-revision handling still does not refresh server projections after a conflict, as required by the acceptance criterion.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The 409 branch sets an error message and returns without incrementing refresh or re-reading the worklist and case projections.",
+            "failureScenario": "A decision with a stale revision receives 409. The UI tells the reviewer to refresh, but continues displaying the stale projections instead of re-reading server state."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 1054,
+          "message": "The finding workspace still substitutes fabricated status and evidence when the dashboard projection is unavailable, so it can show incorrect review context.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "When the dashboard projection is unavailable, FindingWorkspace receives browser-created status and evidence values rather than server-owned projections.",
+            "failureScenario": "A finding page renders while the dashboard projection is loading or failed; it displays “Awaiting review” and generic evidence even if the server's finding status or evidence differs."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/AccessibleReviewNavigation.test.tsx",
+          "line": 108,
+          "message": "The required criterion-linked tests remain absent: `AC_008_technical_worklist_contract`, `technical_finding_split_and_worklist_navigation`, `AC_009_technical_decision_contract`, `technical_stale_revision_refresh_contract`, and `AI_trace_and_finding_text_remains_inert`.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The round 4 delta changes the navigation test but adds none of the acceptance-criteria-named worklist, finding, decision, stale-revision, or inert-text tests.",
+            "failureScenario": "The worklist contract, finding navigation, decision submission, conflict refresh, and inert text behavior can regress without the required criterion-linked tests detecting it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AccessibleReviewNavigation.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

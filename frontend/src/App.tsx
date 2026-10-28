@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import WorkspaceRegion from './components/WorkspaceRegion';
 import SignIn, { type SignedInSession } from './components/SignIn';
@@ -25,6 +25,8 @@ import RoleNavigation from './components/RoleNavigation';
 import CaseSearch from './components/CaseSearch';
 import FinanceWorkspace, { type FinanceWorklistItem } from './workspaces/FinanceWorkspace';
 import ReserveWorksheet, { type ReserveWorksheetDraft } from './workspaces/ReserveWorksheet';
+import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
+import FindingWorkspace from './workspaces/FindingWorkspace';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 type CaseProjection = { revision: number; basis: unknown[] };
@@ -142,6 +144,18 @@ export default function App({
   const requestContext = useRef('');
   const contextCounter = useRef(0);
   const [routePath, setRoutePath] = useState<string>(() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
+  const [worklist, setWorklist] = useState<WorklistItem[]>([]);
+  const [worklistError, setWorklistError] = useState<number | null>(null);
+  const [worklistLoaded, setWorklistLoaded] = useState(false);
+  const [worklistSelection, setWorklistSelection] = useState<{ caseId: string; itemId: string } | null>(null);
+  const worklistRequestId = useRef(0);
+  const worklistOwner = useRef('');
+  const [conflictNotice, setConflictNotice] = useState('');
+  const technicalFindingRoute = useMemo(() => {
+    if (!session || session.role !== 'technical-reviewer') return null;
+    const match = routePath.match(/^\/cases\/([^/]+)\/findings(?:\/)?$/);
+    return match ? { caseId: decodeURIComponent(match[1]), itemId: worklistSelection?.itemId ?? null } : null;
+  }, [routePath, session, worklistSelection]);
   const [returnTo, setReturnTo] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const value = new URLSearchParams(window.location.search).get('returnTo');
@@ -585,7 +599,54 @@ export default function App({
       setCaseError('');
       setReason('');
       setTraceView(null);
+      worklistRequestId.current += 1;
+      worklistOwner.current = '';
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(false);
+      setWorklistSelection(null);
+      setConflictNotice('');
       return;
+    }
+    // A different user must never see the previous session's worklist: drop it before anything is fetched.
+    const owner = `${session.id}:${session.csrfToken}`;
+    if (worklistOwner.current !== owner) {
+      worklistOwner.current = owner;
+      worklistRequestId.current += 1;
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(false);
+      setWorklistSelection(null);
+      setConflictNotice('');
+    }
+    if (session.role === 'technical-reviewer') {
+      const requestId = ++worklistRequestId.current;
+      fetch('/api/v1/workspace/worklist')
+        .then(async (response) => {
+          if (!response.ok) {
+            if (requestId !== worklistRequestId.current) return;
+            setWorklistError(response.status);
+            setWorklist([]);
+            setWorklistLoaded(true);
+            return;
+          }
+          const payload = await response.json() as { items?: WorklistItem[] };
+          if (requestId !== worklistRequestId.current) return;
+          setWorklist(Array.isArray(payload.items) ? payload.items : []);
+          setWorklistError(null);
+          setWorklistLoaded(true);
+        })
+        .catch(() => {
+          if (requestId !== worklistRequestId.current) return;
+          setWorklist([]);
+          setWorklistError(0);
+          setWorklistLoaded(true);
+        });
+    } else {
+      worklistRequestId.current += 1;
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(true);
     }
     const sessionCaseId = resolveSessionCaseId(session, selectedCaseId);
     if (!sessionCaseId) {
@@ -598,7 +659,6 @@ export default function App({
       setSelectedCaseId(sessionCaseId);
       return;
     }
-    // A fresh id per load, so a response from an earlier visit to the same session and case cannot become valid again.
     const context = String(++contextCounter.current);
     requestContext.current = context;
     setCaseError('');
@@ -734,15 +794,16 @@ export default function App({
     return () => { active = false; };
   }, [session, selectedCaseId, financeHomeRoute, financeReserveRoute, refresh]);
 
-  async function submitDecision(capabilityId: string, decision: string) {
+  async function submitDecision(capabilityId: string, decision: string, overrideReason?: string): Promise<boolean> {
+    const nextReason = (overrideReason ?? reason).trim();
     if (
       capabilityId !== 'technical-review'
       || !['accept', 'reject'].includes(decision)
       || !dashboard?.allowedDecisions.some((action) => action.id === decision)
       || !session || !selectedCaseId || !caseState || !review
       || !Number.isInteger(caseState.revision) || !Number.isInteger(review.basisVersion)
-      || !reason.trim()
-    ) return;
+      || !nextReason
+    ) return false;
 
     setDecisionBusy(true);
     setCaseError('');
@@ -754,21 +815,27 @@ export default function App({
           expectedRevision: caseState.revision,
           expectedBasisVersion: review.basisVersion,
           decision,
-          reason: reason.trim(),
+          reason: nextReason,
         }),
       });
       if (response.status === 403) {
         setCaseError('You are not permitted to record this decision.');
-        return;
+        return false;
       }
       if (response.status === 409) {
-        setCaseError('The case changed. Refresh the case before deciding.');
-        return;
+        // Nothing is changed locally; the reload below replaces every projection with what the server holds.
+        setConflictNotice('The case changed. Refresh the case before deciding.');
+        setRefresh((value) => value + 1);
+        return false;
       }
       if (!response.ok) throw new RequestError(response.status);
+      setReason(nextReason);
+      setConflictNotice('');
       setRefresh((value) => value + 1);
+      return true;
     } catch {
       setCaseError('Unable to record the decision. Try again later.');
+      return false;
     } finally {
       setDecisionBusy(false);
     }
@@ -780,6 +847,33 @@ export default function App({
     ready: 'Service connected',
     unavailable: 'Service unavailable. Try again later.',
   }[apiState];
+
+  function openTechnicalFinding(caseId: string, itemId: string) {
+    setWorklistSelection({ caseId, itemId });
+    setSelectedCaseId(caseId);
+    const nextPath = `/cases/${encodeURIComponent(caseId)}/findings`;
+    setRoutePath(nextPath);
+    if (typeof window !== 'undefined') {
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (currentPath !== nextPath) {
+        window.history.pushState({}, '', nextPath);
+      }
+    }
+  }
+
+  function navigateTechnicalFinding(direction: 'previous' | 'next') {
+    if (!worklist.length) return;
+    const currentIndex = worklistSelection
+      ? worklist.findIndex((item) => item.caseId === worklistSelection.caseId && item.itemId === worklistSelection.itemId)
+      : selectedCaseId
+        ? worklist.findIndex((item) => item.caseId === selectedCaseId)
+        : -1;
+    const nextIndex = currentIndex >= 0 ? currentIndex + (direction === 'previous' ? -1 : 1) : 0;
+    if (nextIndex < 0 || nextIndex >= worklist.length) return;
+    const nextItem = worklist[nextIndex];
+    if (!nextItem) return;
+    openTechnicalFinding(nextItem.caseId, nextItem.itemId);
+  }
 
   function handleCaseNavigate(nextPath: string) {
     const match = nextPath.match(/^\/cases\/([^/]+)(?:\/.*)?$/);
@@ -935,6 +1029,7 @@ export default function App({
                 />
               </>
             )}
+            {conflictNotice && <p role="alert">{conflictNotice}</p>}
             {caseState && session?.role !== 'finance-reviewer' && (
               <>
                 <p>Revision: {caseState.revision}</p>
@@ -1087,13 +1182,42 @@ export default function App({
                 )}
               </>
             )}
+            {session.role === 'technical-reviewer' && worklistLoaded && technicalFindingRoute && technicalFindingRoute.caseId === selectedCaseId && dashboard && review && (
+              <FindingWorkspace
+                worklist={worklist}
+                caseId={technicalFindingRoute.caseId}
+                itemId={technicalFindingRoute.itemId}
+                findings={{
+                  title: `Finding for ${technicalFindingRoute.caseId}`,
+                  summary: technicalFindingRoute.itemId ? `Case ${technicalFindingRoute.caseId}: ${technicalFindingRoute.itemId}` : `Case ${technicalFindingRoute.caseId}`,
+                  status: review.decisions.some((item) => item.current) ? 'Decision recorded' : 'Awaiting review',
+                  evidence: dashboard.capabilities.flatMap((capability) => capability.evidence.map((link) => ({
+                    id: `${capability.id}:${link.url}`,
+                    label: capability.name,
+                    text: link.label,
+                  }))),
+                }}
+                allowedDecisions={dashboard.allowedDecisions}
+                decisionReason={reason}
+                onDecisionReasonChange={setReason}
+                onNavigate={(direction) => navigateTechnicalFinding(direction)}
+                onDecisionSubmit={(decisionId, decisionReasonValue) => submitDecision('technical-review', decisionId, decisionReasonValue)}
+              />
+            )}
+            {session.role === 'technical-reviewer' && worklistLoaded && !routePath.match(/^\/cases\/[^/]+\/findings(?:\/)?$/) && (
+              <TechnicalWorkspace
+                items={worklist}
+                title="Technical My work"
+                onSelect={(caseId, itemId) => openTechnicalFinding(caseId, itemId)}
+              />
+            )}
             {dashboard && <CapabilityDashboard
               data={dashboard}
               decisionReason={reason}
               onDecisionReasonChange={setReason}
               onTraceSelect={(url) => { void showTrace(url); }}
               onDecision={(capabilityId, decision) => {
-                if (!decisionBusy) void submitDecision(capabilityId, decision);
+                if (!decisionBusy) void submitDecision(capabilityId, decision, reason);
               }}
             />}
             {traceView && <InvestigationTrace view={traceView} />}

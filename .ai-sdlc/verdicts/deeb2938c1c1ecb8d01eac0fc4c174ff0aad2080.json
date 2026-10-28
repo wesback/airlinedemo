@@ -1,0 +1,245 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 651,
+  "branch": "ai-sdlc/issue-651",
+  "commitSha": "deeb2938c1c1ecb8d01eac0fc4c174ff0aad2080",
+  "round": 0,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The worklist is fetched, but neither new workspace is connected to the app. As a result, the core technical review flow is inaccessible.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 586,
+          "message": "The new workspaces are not wired into the app. Render the technical worklist and finding workspace and connect their selection, navigation, and decision actions.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The technical-reviewer branch fetches and stores the worklist, but App never renders TechnicalWorkspace or FindingWorkspace or connects them to navigation and decisions.",
+            "failureScenario": "When a technical reviewer signs in, the worklist request succeeds, but the app does not show Technical My work or a finding workspace, so the reviewer cannot select or review a finding."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workspace components are not connected to the app, stale revision errors lack the required handling, and boundary navigation controls remain visible. The supplied diff also omits the tests named by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 26,
+          "message": "The new workspaces are not wired into App, leaving the technical reviewer home and finding workflow unavailable.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "App imports TechnicalWorkspace and FindingWorkspace, but the supplied JSX change only updates the existing decision callback; it does not render either component or connect worklist selection/navigation and decision submission to them.",
+            "failureScenario": "A technical reviewer opens the app and receives the worklist request, but no TechnicalWorkspace or FindingWorkspace is rendered, so they cannot see the worklist or use the finding split view and decision panel."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 688,
+          "message": "Stale revision failures do not receive the conflict handling and refresh instruction required by the acceptance criteria.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "submitDecision throws RequestError for non-success responses, then its catch sets the same generic case error for every failure. No stale-revision response gets distinct conflict handling or refresh instructions.",
+            "failureScenario": "The server rejects a decision with a stale revision; the UI shows only “Unable to record the decision. Try again later.” instead of the required conflict handling and instruction to refresh before retry."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/FindingWorkspace.tsx",
+          "line": 75,
+          "message": "Previous and Next remain visible at their respective worklist boundaries instead of disappearing.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The Previous and Next buttons are always rendered; boundary state only sets their disabled property.",
+            "failureScenario": "At the first or last worklist item, the corresponding navigation button remains visible but disabled, contrary to the criterion that it disappear at that boundary."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/TechnicalWorkspace.tsx",
+          "line": 1,
+          "message": "The change omits the required criterion-linked tests, including AC_008_technical_worklist_contract, technical_finding_split_and_worklist_navigation, AC_009_technical_decision_contract, technical_stale_revision_refresh_contract, and AI_trace_and_finding_text_remains_inert.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The supplied diff adds the workspace implementation but includes no changes to the named test files, so the new behavior has no criterion-linked tests in this change.",
+            "failureScenario": "Filtering, age sorting, navigation, decision submission, stale-revision handling, or inert text rendering can regress while this change still has no added tests proving the named acceptance criteria."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The stale revision path does not tell users to refresh or re-read server state. The change also omits the issue-named behavior tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 688,
+          "message": "Stale revision conflicts do not receive the handling required by the acceptance criterion: instruct the user to refresh and re-read server state.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "A failed decision response reaches the generic catch handler, which sets a generic error and does not refresh server state.",
+            "failureScenario": "If the server rejects a stale revision with a conflict response, the user sees “Unable to record the decision. Try again later.” instead of being told to refresh, and the UI does not re-read the projections."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/FindingWorkspace.test.tsx",
+          "line": 1,
+          "message": "The change adds no tests for the behavior criteria. In particular, the issue-named `technical_stale_revision_refresh_contract` test is missing from this change.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The diff adds workspace and decision behavior but includes no test files.",
+            "failureScenario": "A broken split view, navigation boundary, decision submission, or stale revision refresh could be merged without the issue-named behavior tests being added or run."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "tdd-red",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 0,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": false,
+    "reason": "no test files added or changed in this branch"
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
