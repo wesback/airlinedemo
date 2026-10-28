@@ -1,0 +1,296 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 654,
+  "branch": "ai-sdlc/issue-654",
+  "commitSha": "72cdcedbf7235d03c51df5dd707db7ef3953c6ce",
+  "round": 1,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The session owner gate still has a race with pending portfolio requests. The portfolio navigation, Hangar navigation, and executive /work test requirements from the story remain incompletely covered.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 548,
+          "message": "Invalidate pending portfolio requests when changing the session; assigning the new owner before invalidating them can briefly expose the previous session's rows.",
+          "confidence": 0.82,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "handleSessionChange updates portfolioOwner to the new session but does not invalidate portfolioRequestId. The previous session's pending portfolio request can still pass its request ID check and update portfolioRows before the effect starts the new request.",
+            "failureScenario": "Executive A has a portfolio request pending, then the app switches to executive B. If A's response arrives after B's session render but before the effect increments portfolioRequestId, visiblePortfolioRows accepts A's rows under B's owner key and B can see A's case data. OWASP A01:2025 Broken Access Control."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 37,
+          "message": "The named portfolio table test still does not cover row navigation to the matching scoped read-only summary.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test renders ExecutivePortfolio with a mock onOpenCase callback and asserts the callback receives case-001. It does not exercise App navigation or assert that the matching scoped read-only case summary opens.",
+            "failureScenario": "If App routes the row to the wrong case or fails to show its read-only summary, this component-only test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 403,
+          "message": "The required Hangar composition test remains unmodified for executive navigation without decision controls.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The existing Hangar composition test still signs in with the default session. The changed role-route test covers executive sign-in to /portfolio but does not navigate an executive into Hangar.",
+            "failureScenario": "If executive navigation into Hangar breaks or exposes decision controls, neither test detects it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required executive /work route behavior remains untested in role route navigation.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The role route navigation test checks the executive /portfolio route, but does not navigate to /work or assert the out-of-workspace message and absence of worklist data.",
+            "failureScenario": "If executive /work displays worklist data or omits “This page is not part of your workspace,” this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-two changes gate portfolio rows by session owner and add the named table test. The required matching-summary, executive `/work`, and executive Hangar behaviors remain insufficiently tested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 37,
+          "message": "The named table test still does not verify that selecting a row opens its matching scoped read-only case summary.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`executive_portfolio_table_contract` checks the row text and that clicking a cell calls `onOpenCase` with `case-001`; it does not exercise the App navigation that renders the matching scoped read-only summary.",
+            "failureScenario": "If the App maps a row click to the wrong case summary or fails to render the summary, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "Extend `role route navigation` to cover the required executive `/work` state and confirm no worklist data is rendered.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`role route navigation` signs in an executive and checks `/portfolio`; it does not navigate to `/work` or assert the workspace-denial state and absence of worklist data.",
+            "failureScenario": "If executive `/work` displays worklist data or omits `This page is not part of your workspace`, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 403,
+          "message": "Update the Hangar case-work composition test to cover executive navigation into Hangar without decision controls.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed executive route test covers portfolio navigation, while `AC_001_App_root_shell_and_Hangar_composition` still signs in using the default role and does not test executive navigation into Hangar.",
+            "failureScenario": "If an executive cannot enter Hangar with case-work composition intact and without decision controls, the required updated Hangar test does not catch it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A pending portfolio response can repopulate cleared state between the session update and the effect that invalidates the request, exposing the previous session’s rows.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 548,
+          "message": "Invalidate pending portfolio requests synchronously when the session changes so an old response cannot populate rows visible to the new session.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "`handleSessionChange` changes `portfolioOwner` and clears rows, but does not invalidate `portfolioRequestId` until the later effect runs. An in-flight portfolio response can still write its rows during that gap; the new session’s owner key already matches, so `visiblePortfolioRows` can expose them.",
+            "failureScenario": "Executive A has a portfolio request pending, signs out, and executive B signs in. If A’s response resolves after B’s session renders but before the effect increments the request ID, A’s case rows can appear in B’s portfolio. OWASP A01:2025 Broken Access Control."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/ExecutiveCaseSummary.test.tsx",
+      "frontend/tests/ExecutivePortfolio.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
