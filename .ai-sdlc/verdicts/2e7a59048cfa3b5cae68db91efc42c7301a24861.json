@@ -1,0 +1,404 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 650,
+  "branch": "ai-sdlc/issue-650",
+  "commitSha": "2e7a59048cfa3b5cae68db91efc42c7301a24861",
+  "round": 2,
+  "pipelineVersion": "873af5f",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest fix makes errors for multiple failed regions visible with separate Retry controls. Fabricated defaults can still render for projections that have not loaded, and the named App tests for simultaneous failures, complete retry isolation, and stale context responses remain absent or incomplete.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 448,
+          "message": "A successful projection still fabricates values for other unloaded or failed regions. Preserve each projection as absent until its own request succeeds, and render that region's loading or error state.",
+          "confidence": 0.95,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "mergeProjectionData fills every missing projection with defaults. When the case projection succeeds, the render can pass the default dashboard to CapabilityDashboard and render the default readiness summary, even if those requests are still loading or failed.",
+            "failureScenario": "If the case request succeeds while the dashboard returns 403, the app shows the dashboard error but also renders fabricated empty dashboard values. If readiness has not loaded, its default summary can appear as loaded data."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "Acceptance criterion AC_019_simultaneous_region_errors_remain_recoverable still lacks its named App test.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test AC_019_simultaneous_region_errors_remain_recoverable is absent. The existing App tests do not exercise simultaneous failures followed by retries for each failed region.",
+            "failureScenario": "If one region's retry clears or hides another region's failure, no test in this change exercises the acceptance criterion's contract cases."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "The App retry test still omits the acceptance criterion's technical-reviews, unaffected-region, and repeated-503 cases.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "retry_reloads_region_once_per_click covers only a case request that fails once and then succeeds. It does not cover a technical-reviews failure, unaffected-region request counts and content, or a repeated 503 followed by another click.",
+            "failureScenario": "If a technical-reviews retry targets the wrong URL, refetches another region, or triggers another request after a repeated 503 without a click, the named test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "Acceptance criterion retry_response_is_ignored_after_context_switch still lacks its named App test for both case and session changes.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test retry_response_is_ignored_after_context_switch is absent, and the added App tests do not use deferred fetch responses while changing case or session.",
+            "failureScenario": "If a pending retry response updates the view after switching the selected case or session, no test in this change exercises that transition."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest change renders each stored failure, but successful regions can still be hidden behind the case-data condition, and missing projections can still render defaults. The required simultaneous-failure, complete retry, and context-switch App tests remain absent or incomplete.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 847,
+          "message": "Rendering other projections is gated on case data being loaded. Keep successful regions visible when the case projection fails.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The case projection controls whether the content fragment renders. The dashboard and review content are inside that fragment, even though their requests and data are tracked independently.",
+            "failureScenario": "If the case request returns 503 while the dashboard request succeeds, the case data is absent, so this condition hides the dashboard content too. A failure in one region therefore blanks another successful region."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 453,
+          "message": "A successful projection still fills missing projections with defaults, allowing failed or loading regions to show invented data.",
+          "confidence": 0.97,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When the first projection succeeds, mergeProjectionData fills every missing projection with makeDefaultData. The case data condition can then render CapabilityDashboard with its empty fallback even when the dashboard request failed.",
+            "failureScenario": "If the case request succeeds and the dashboard request returns 503, the dashboard failure is shown, but the app also renders default empty dashboard data as if it were loaded."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "The simultaneous-region acceptance criterion still lacks its named App test.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The required AC_019_simultaneous_region_errors_remain_recoverable test is absent; the only App retry test covers a case failure followed by one successful retry.",
+            "failureScenario": "If dashboard and technical reviews both fail and one region's retry succeeds, the tests do not verify that the other error and Retry control remain visible or that only the retried region recovers."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "The App retry test still omits the acceptance criterion's projection-specific, isolation, and repeated-503 cases.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "retry_reloads_region_once_per_click exercises only a case 503 followed by one successful case retry. It does not cover technical-reviews failure, unaffected-region request counts and content, or a repeated 503 followed by another click.",
+            "failureScenario": "If a technical-reviews Retry targets the wrong URL, refetches another projection, or triggers another request without a click after a repeated 503, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "The context-switch acceptance criterion still lacks its named App test for both case and session changes.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The required retry_response_is_ignored_after_context_switch test is absent, and no deferred-fetch case switches the selected case or session before resolving a retry.",
+            "failureScenario": "If a pending retry response updates the view after the case or session changes, no test in this change exercises that transition."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes expose errors for multiple failed regions and synchronously invalidate retry context on selection changes. The previously reported fabricated-default behavior remains, and the required App tests for simultaneous failures, complete retry isolation, and context switches are still absent or incomplete.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 457,
+          "message": "A successful projection still populates other unloaded or failed projections with renderable defaults, so users can see invented data instead of only those regions’ loading or error states.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "mergeProjectionData initializes every missing projection with makeDefaultData. When App receives any successful projection, it stores those defaults in data; the render can then show them for projections that are still loading or failed.",
+            "failureScenario": "If the case request succeeds while the dashboard request fails, the merge supplies an empty dashboard and App renders it as loaded content alongside the dashboard error. If the case request succeeds before readiness, the default readiness summary can also render. This remains the previously reported fabricated-data defect."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "The simultaneous-region criterion still lacks its named App test, AC_019_simultaneous_region_errors_remain_recoverable.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names frontend/tests/App.test.tsx / AC_019_simultaneous_region_errors_remain_recoverable, but the added tests contain no test with that name or its simultaneous dashboard and technical-reviews failures followed by independent recovery.",
+            "failureScenario": "If simultaneous failures hide a region’s error or retry control, or a successful retry clears another region’s failure, the tests added in this change do not exercise that behavior."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "The retry test remains incomplete for the criterion’s listed projection-specific, isolation, and repeated-503 cases.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "retry_reloads_region_once_per_click tests only a case request that fails once and then succeeds. It does not cover a technical-reviews 503, per-URL counts and unchanged content for the other regions, a repeated 503 before another click, or the dashboard and readiness isolation required by the criterion.",
+            "failureScenario": "If a technical-reviews retry targets another URL, refetches another region, changes unaffected content, or automatically retries after a repeated 503, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 434,
+          "message": "The context-switch criterion still lacks its named App test, retry_response_is_ignored_after_context_switch, including both specified switch scenarios.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names frontend/tests/App.test.tsx / retry_response_is_ignored_after_context_switch, but the added tests contain no deferred-fetch scenario that changes the selected case or session before resolving a retry.",
+            "failureScenario": "If a pending retry response updates the view after switching cases or sessions, no test added in this change exercises that behavior."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AccessibleReviewNavigation.test.tsx",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/WorkspaceRegion.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
