@@ -502,10 +502,10 @@ export default function App({
   }
 
   function handleSessionChange(nextSession: SignedInSession | null) {
-    const nextSelectedCaseId = resolveSessionCaseId(nextSession, selectedCaseId);
+    const nextSelectedCaseId = nextSession ? resolveSessionCaseId(nextSession, selectedCaseId) : selectedCaseId;
     resetHangarState();
     setSession(nextSession);
-    setSelectedCaseId(nextSelectedCaseId);
+    if (nextSession) setSelectedCaseId(nextSelectedCaseId);
     traceRequestId.current += 1;
     setData(null);
     setReason('');

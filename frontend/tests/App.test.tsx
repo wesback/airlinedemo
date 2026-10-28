@@ -243,7 +243,7 @@ describe('reviewer workspace', () => {
 
   it('retains the selected in-scope case when the session changes', async () => {
     const firstSession = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] };
-    const nextSession = { ...signedIn, caseScopes: ['cp-case-b', 'cp-case-a'], csrfToken: 'csrf-next-token' };
+    const nextSession = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'], csrfToken: 'csrf-next-token' };
     setupApi({ session: firstSession, signInSessions: [firstSession, nextSession] });
     render(<App />);
     await signIn();
@@ -253,6 +253,8 @@ describe('reviewer workspace', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Case cp-case-b' })).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(screen.getByLabelText('Demo passcode')).toBeTruthy());
+
     fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     fireEvent.click(await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
