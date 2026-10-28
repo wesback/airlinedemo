@@ -23,7 +23,12 @@ import HangarNon3dDataRoom from './hangar/non3dDataRoom';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
-type Projections = { caseState: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection; readiness: ReadinessSummaryData };
+type Projections = {
+  caseState?: CaseProjection;
+  dashboard?: DashboardData;
+  review?: TechnicalReviewProjection;
+  readiness?: ReadinessSummaryData;
+};
 type ProjectionRegion = 'case' | 'dashboard' | 'review' | 'readiness';
 type ProjectionRegionState = {
   status: 'loading' | 'ready' | 'empty' | 'error' | 'permission' | 'missing' | 'unavailable';
@@ -129,6 +134,7 @@ export default function App({
   const [caseError, setCaseError] = useState('');
   const [failedRegion, setFailedRegion] = useState<ProjectionRegion | null>(null);
   const activeFailedRegion = failedRegion ?? (failedRegions[0] ?? null);
+  const failedRegionEntries = projectionRegionsOrder.filter((region) => projectionRegions[region].error !== null);
   const activeCaseContext = useRef<{ sessionId: string | null; caseId: string | null }>({ sessionId: session?.id ?? null, caseId: selectedCaseId ?? null });
   const updateActiveCaseContext = (nextSessionId: string | null, nextCaseId: string | null) => {
     activeCaseContext.current = { sessionId: nextSessionId, caseId: nextCaseId };
@@ -444,7 +450,7 @@ export default function App({
 
   function mergeProjectionData(current: Projections | null | undefined, patch: Partial<Projections>): Projections {
     const defaults = makeDefaultData();
-    const merged = { ...defaults, ...(current ?? {}) };
+    const merged: Projections = { ...defaults, ...(current ?? {}) };
     if (patch.caseState !== undefined) merged.caseState = { ...defaults.caseState, ...(patch.caseState ?? {}) };
     if (patch.dashboard !== undefined) merged.dashboard = { ...defaults.dashboard, ...(patch.dashboard ?? {}) };
     if (patch.review !== undefined) merged.review = { ...defaults.review, ...(patch.review ?? {}) };
@@ -669,9 +675,10 @@ export default function App({
     if (
       capabilityId !== 'technical-review'
       || !['accept', 'reject'].includes(decision)
-      || !data?.dashboard.allowedDecisions.some((action) => action.id === decision)
+      || !data?.dashboard || !data.dashboard.allowedDecisions.some((action) => action.id === decision)
       || !session || !selectedCaseId || !data
-      || !Number.isInteger(data.caseState.revision) || !Number.isInteger(data.review.basisVersion)
+      || !data.caseState || !Number.isInteger(data.caseState.revision)
+      || !data.review || !Number.isInteger(data.review.basisVersion)
       || !reason.trim()
     ) return;
 
@@ -709,6 +716,8 @@ export default function App({
     ? `${window.location.pathname}${window.location.search}${window.location.hash}`
     : selectedCaseId ? `/cases/${encodeURIComponent(selectedCaseId)}` : undefined;
   const currentDecision = data?.review?.decisions?.filter((item) => item.current).at(-1)?.decision;
+  const hasLoadedCaseData = Boolean(data?.caseState && typeof data.caseState.revision === 'number');
+  const hasLoadedReviewData = Boolean(data?.review && Array.isArray(data.review.decisions));
   const healthMessage = {
     checking: 'Checking service connection…',
     ready: 'Service connected',
@@ -815,29 +824,30 @@ export default function App({
                   </select>
                 </label>
               )}
-              {data && <ReadinessSummary summary={data.readiness} />}
+              {data?.readiness && <ReadinessSummary summary={data.readiness} />}
               {selectedCaseId && <h2 id="case-heading" tabIndex={-1}>Case {selectedCaseId}</h2>}
             </>
           )}
           {loadingCase && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
-          {(activeFailedRegion && projectionRegions[activeFailedRegion].error) && (
+          {failedRegionEntries.map((region) => (
             <WorkspaceRegion
-              status={projectionRegions[activeFailedRegion].status}
-              error={projectionRegions[activeFailedRegion].error}
+              key={region}
+              status={projectionRegions[region].status}
+              error={projectionRegions[region].error}
               currentPath={currentCasePath}
-              onRetry={() => { void reloadRegion(activeFailedRegion); }}
+              onRetry={() => { void reloadRegion(region); }}
             />
-          )}
+          ))}
           {caseError && !activeFailedRegion && <WorkspaceRegion
             status={resolveRegionStatus(caseError)}
             error={resolveRegionError(caseError)}
             currentPath={currentCasePath}
             onRetry={() => { void reloadFailedRegion(); }}
           />}
-          {data && (
+          {hasLoadedCaseData && data && (
             <>
-              <p>Revision: {data.caseState.revision}</p>
-              <p>Evidence basis: {data.caseState.basis.length}</p>
+              <p>Revision: {data.caseState?.revision}</p>
+              <p>Evidence basis: {data.caseState?.basis?.length ?? 0}</p>
               <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
               <button type="button" onClick={() => { void enterHangar(); }}>Enter Hangar</button>
               {hangarView === 'regular' && (
