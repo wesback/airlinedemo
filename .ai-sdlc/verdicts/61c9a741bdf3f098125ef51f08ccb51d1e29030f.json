@@ -1,0 +1,290 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 654,
+  "branch": "ai-sdlc/issue-654",
+  "commitSha": "61c9a741bdf3f098125ef51f08ccb51d1e29030f",
+  "round": 0,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The session-change effect can briefly render one executive's portfolio to another. The required portfolio table and Hangar navigation test coverage is also incomplete.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 627,
+          "message": "Gate portfolio rendering on the current session owner, or clear rows before they can be rendered for a different owner. The effect-based clear permits a render that exposes the prior session's data.",
+          "confidence": 0.84,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "On a session change, the effect schedules clearing portfolioRows, but the render for the new session happens before that effect runs. The /portfolio view reads portfolioRows during that render.",
+            "failureScenario": "Executive A is viewing /portfolio when the app switches to executive B. Before the effect clears state, B can see A's portfolio rows and case activity (OWASP A01:2025 Broken Access Control)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 5,
+          "message": "Add the named `executive_portfolio_table_contract` test covering the table projection and row navigation to the matching scoped read-only summary.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The table criterion names `executive_portfolio_table_contract`, but the only added portfolio test is `AC_016_portfolio_kpis_contract`. It checks a component callback, not the App path that opens the matching scoped read-only summary.",
+            "failureScenario": "If clicking a row opens the wrong case summary or fails to open one, the required table contract test is absent and the current callback assertion can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 388,
+          "message": "Update the named Hangar composition test to cover executive navigation into Hangar without decision controls, as required by the acceptance criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new `role route navigation` test checks signing in to /portfolio. The required `Hangar case-work composition remains in the App host` test is unchanged and does not exercise executive navigation into Hangar.",
+            "failureScenario": "If an executive cannot enter Hangar while preserving case-work composition and omitting decision controls, the required updated test is absent and the added portfolio navigation test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The session-change effect can leave prior portfolio data visible during a render for a new session. The diff also omits required tests for the portfolio table, executive `/work` behavior, and executive Hangar navigation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 627,
+          "message": "Gate portfolio rendering on the current session's owner or clear the rows before rendering the new session. Clearing them in this effect can leave a render that exposes the prior session's data.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When the session owner changes, this effect clears portfolioRows. The new session can render first, while portfolioRows still contains the previous session's data; the portfolio route renders those rows.",
+            "failureScenario": "Executive A is on /portfolio when the app switches to executive B. Before the effect clears state, B can see A's portfolio rows and case data (OWASP A01:2025 Broken Access Control)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 5,
+          "message": "Add the named `executive_portfolio_table_contract` test for the portfolio table and matching case navigation.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The portfolio table criterion names `executive_portfolio_table_contract`, but the only table assertions are in `AC_016_portfolio_kpis_contract`.",
+            "failureScenario": "If the table projection or row navigation regresses, the specifically required table contract test is absent and cannot catch it."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 386,
+          "message": "Update `Hangar case-work composition remains in the App host` to cover executive navigation into Hangar without decision controls.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added `role route navigation` test checks the executive portfolio route but does not update or exercise the named Hangar case-work composition test.",
+            "failureScenario": "If executive navigation into Hangar breaks or exposes decision controls, the required updated Hangar composition test is absent and the added portfolio test can still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 386,
+          "message": "Extend `role route navigation` to assert the executive `/work` route state and absence of worklist data.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added `role route navigation` test checks `/portfolio`, but does not assert the executive `/work` denial state or absence of worklist data.",
+            "failureScenario": "If executive `/work` shows worklist data or fails to show `This page is not part of your workspace`, this test can still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "A session change can briefly expose the prior executive's portfolio rows to the next session. The effect-based clearing occurs after the render that can expose them.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 627,
+          "message": "Prevent portfolio rows from rendering when they belong to a prior session. Clearing them in an effect permits a render where the new session can see the previous session's rows.",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The session-owner change clears portfolioRows in an effect, while the portfolio route renders those rows from component state. The new session can therefore render before the effect clears the previous session's data.",
+            "failureScenario": "Executive A has portfolio rows loaded, then the app switches directly to executive B while remaining on /portfolio. B's first render can display A's case data before the effect clears it. OWASP A01:2025 Broken Access Control."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/ExecutiveCaseSummary.test.tsx",
+      "frontend/tests/ExecutivePortfolio.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
