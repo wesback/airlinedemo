@@ -156,6 +156,17 @@ export default function App({
   const hangarEntryStartedAt = useRef<number|null>(null);
   const hangarContextLostRef = useRef(false);
 
+  function resetHangarState() {
+    setHangarView('regular');
+    setHangarFallback(null);
+    setHangarSceneLoaded(false);
+    setHangarSelectedObjectId(null);
+    setHangarActionMessage('');
+    setHangarStale(false);
+    setHangarDiagnostics((current) => ({ ...current, sceneLoadDurationMs: null, fallbackReason: null }));
+    HangarSceneRef.current = null;
+  }
+
   function handleHangarContextLost() {
     if (hangarContextLostRef.current) return;
     hangarContextLostRef.current = true;
@@ -468,6 +479,7 @@ export default function App({
         return;
       }
       const nextSession: SignedInSession = await response.json();
+      resetHangarState();
       setSession(nextSession);
       setSelectedCaseId(nextSession.caseScopes?.[0] ?? null);
       traceRequestId.current += 1;
@@ -483,6 +495,7 @@ export default function App({
   }
 
   function handleSessionChange(nextSession: SignedInSession | null) {
+    resetHangarState();
     setSession(nextSession);
     setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
     traceRequestId.current += 1;
@@ -621,6 +634,7 @@ export default function App({
     const match = nextPath.match(/^\/cases\/([^/]+)(?:\/.*)?$/);
     if (match) {
       const nextCaseId = decodeURIComponent(match[1]);
+      resetHangarState();
       setSelectedCaseId(nextCaseId);
       const normalized = normalizeRoutePath(nextPath);
       setRoutePath(normalized);
@@ -728,6 +742,7 @@ export default function App({
                   <label>
                     Case
                     <select value={selectedCaseId ?? ''} onChange={(event) => {
+                      resetHangarState();
                       setData(null);
                       setReason('');
                       setDecisionBusy(false);
