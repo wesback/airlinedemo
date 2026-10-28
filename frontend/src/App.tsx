@@ -26,10 +26,19 @@ import CaseSearch from './components/CaseSearch';
 import FinanceWorkspace, { type FinanceWorklistItem } from './workspaces/FinanceWorkspace';
 import ReserveWorksheet, { type ReserveWorksheetDraft } from './workspaces/ReserveWorksheet';
 import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
+import LegalWorkspace from './workspaces/LegalWorkspace';
 import FindingWorkspace from './workspaces/FindingWorkspace';
+<<<<<<< HEAD
 import ExecutivePortfolio, { type ExecutivePortfolioRow } from './workspaces/ExecutivePortfolio';
 import ExecutiveCaseSummary from './workspaces/ExecutiveCaseSummary';
+=======
+import ObligationWorkspace, { type ObligationRecord } from './workspaces/ObligationWorkspace';
+>>>>>>> origin/main
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
+
+const LEGAL_DECISIONS = [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }];
+// The server serialises the draft status as its enum number (Current = 0).
+const isCurrentDraft = (status: string | number | undefined) => status === 0 || String(status).toLowerCase() === 'current';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -156,9 +165,18 @@ export default function App({
   const portfolioRequestId = useRef(0);
   const portfolioOwner = useRef('');
   const [conflictNotice, setConflictNotice] = useState('');
+  const [obligationRecord, setObligationRecord] = useState<ObligationRecord | null>(null);
+  const [obligationReason, setObligationReason] = useState('');
+  const obligationRequestId = useRef(0);
+  const activeObligationSelection = useRef<{ caseId: string; itemId: string } | null>(null);
   const technicalFindingRoute = useMemo(() => {
     if (!session || session.role !== 'technical-reviewer') return null;
     const match = routePath.match(/^\/cases\/([^/]+)\/findings(?:\/)?$/);
+    return match ? { caseId: decodeURIComponent(match[1]), itemId: worklistSelection?.itemId ?? null } : null;
+  }, [routePath, session, worklistSelection]);
+  const legalObligationRoute = useMemo(() => {
+    if (!session || session.role !== 'legal-reviewer') return null;
+    const match = routePath.match(/^\/cases\/([^/]+)\/obligations(?:\/)?$/);
     return match ? { caseId: decodeURIComponent(match[1]), itemId: worklistSelection?.itemId ?? null } : null;
   }, [routePath, session, worklistSelection]);
   const [returnTo, setReturnTo] = useState<string | null>(() => {
@@ -647,12 +665,16 @@ export default function App({
       setWorklistSelection(null);
       setConflictNotice('');
     }
+<<<<<<< HEAD
     if (portfolioOwner.current !== owner) {
       portfolioOwner.current = owner;
       portfolioRequestId.current += 1;
       setPortfolioRows([]);
     }
     if (session.role === 'technical-reviewer') {
+=======
+    if (session.role === 'technical-reviewer' || session.role === 'legal-reviewer') {
+>>>>>>> origin/main
       const requestId = ++worklistRequestId.current;
       fetch('/api/v1/workspace/worklist')
         .then(async (response) => {
@@ -925,6 +947,69 @@ export default function App({
         window.history.pushState({}, '', nextPath);
       }
     }
+  }
+
+  async function loadLegalObligationRecord(caseId: string, itemId: string) {
+    const selection = { caseId, itemId };
+    activeObligationSelection.current = selection;
+    const requestId = ++obligationRequestId.current;
+    const nextPath = `/cases/${encodeURIComponent(caseId)}/obligations`;
+    setRoutePath(nextPath);
+    if (typeof window !== 'undefined') {
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (currentPath !== nextPath) {
+        window.history.pushState({}, '', nextPath);
+      }
+    }
+    try {
+      const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}/obligations`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (requestId !== obligationRequestId.current || activeObligationSelection.current !== selection) return;
+      if (!response.ok) {
+        setObligationRecord(null);
+        return;
+      }
+      type Citation = { sourceId?: string; recordId?: string; recordVersion?: number };
+      type Draft = { id: string; obligationId?: string; basisVersion?: number; body?: string; status?: string | number; citation?: Citation };
+      const payload = await response.json() as { state?: string | number; drafts?: Draft[]; newDraft?: Draft; citation?: Citation };
+      if (requestId !== obligationRequestId.current || activeObligationSelection.current !== selection) return;
+      // Only the server's own draft for this obligation is shown. Nothing is filled in when the server sent none.
+      const draft = [...(payload.drafts ?? []), ...(payload.newDraft ? [payload.newDraft] : [])]
+        .find((candidate) => candidate.obligationId === itemId && isCurrentDraft(candidate.status));
+      const citation = draft?.citation ?? payload.citation;
+      const nextRecord: ObligationRecord = {
+        id: itemId,
+        title: `Obligation ${itemId}`,
+        summary: `Case ${caseId}: ${itemId}`,
+        status: payload.state === undefined ? 'Unknown' : String(payload.state),
+        basisVersion: draft?.basisVersion ?? null,
+        rows: [
+          { label: 'Obligation', value: itemId },
+          { label: 'Case', value: caseId },
+          ...(draft?.basisVersion === undefined ? [] : [{ label: 'Basis version', value: String(draft.basisVersion) }]),
+        ],
+        clauseReferences: citation?.sourceId && citation.recordId
+          ? [{ id: `${citation.sourceId}/${citation.recordId}`, text: `Clause: ${citation.sourceId}/${citation.recordId} § ${citation.recordVersion ?? 1}` }]
+          : [],
+        noticeDraft: draft?.body,
+        // The existing command accepts exactly these two decisions, and only for the current draft.
+        allowedDecisions: draft ? LEGAL_DECISIONS : [],
+      };
+      setObligationRecord(nextRecord);
+      setObligationReason('');
+    } catch {
+      if (requestId !== obligationRequestId.current || activeObligationSelection.current !== selection) return;
+      setObligationRecord(null);
+    }
+  }
+
+  function openLegalObligation(caseId: string, itemId: string) {
+    setWorklistSelection({ caseId, itemId });
+    setSelectedCaseId(caseId);
+    setObligationRecord(null);
+    setObligationReason('');
+    void loadLegalObligationRecord(caseId, itemId);
   }
 
   function navigateTechnicalFinding(direction: 'previous' | 'next') {
@@ -1283,6 +1368,7 @@ export default function App({
                 onSelect={(caseId, itemId) => openTechnicalFinding(caseId, itemId)}
               />
             )}
+<<<<<<< HEAD
             {(session.role === 'executive' || session.role === 'presenter') && routePath === '/portfolio' && (
               <ExecutivePortfolio
                 rows={visiblePortfolioRows}
@@ -1301,6 +1387,65 @@ export default function App({
               />
             ))}
             {session.role === 'technical-reviewer' && dashboard && <CapabilityDashboard
+=======
+            {session.role === 'legal-reviewer' && worklistLoaded && legalObligationRoute && legalObligationRoute.caseId === selectedCaseId && obligationRecord && (
+              <ObligationWorkspace
+                worklist={worklist}
+                caseId={legalObligationRoute.caseId}
+                itemId={legalObligationRoute.itemId}
+                obligation={obligationRecord}
+                decisionReason={obligationReason}
+                onDecisionReasonChange={setObligationReason}
+                onNavigate={(direction) => {
+                  if (!worklist.length) return;
+                  const currentIndex = worklistSelection
+                    ? worklist.findIndex((item) => item.caseId === worklistSelection.caseId && item.itemId === worklistSelection.itemId)
+                    : selectedCaseId
+                      ? worklist.findIndex((item) => item.caseId === selectedCaseId)
+                      : -1;
+                  const nextIndex = currentIndex >= 0 ? currentIndex + (direction === 'previous' ? -1 : 1) : 0;
+                  if (nextIndex < 0 || nextIndex >= worklist.length) return;
+                  const nextItem = worklist[nextIndex];
+                  if (!nextItem) return;
+                  openLegalObligation(nextItem.caseId, nextItem.itemId);
+                }}
+                onDecisionSubmit={(decisionId, reason) => {
+                  if (!session || !selectedCaseId || !obligationRecord || !obligationRecord.id) return false;
+                  if (!caseState || !Number.isInteger(caseState.revision)) return false;
+                  const payload = {
+                    expectedRevision: caseState.revision,
+                    decision: decisionId,
+                    reason,
+                  };
+                  return fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/obligations/${encodeURIComponent(obligationRecord.id)}/decisions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
+                    body: JSON.stringify(payload),
+                  }).then(async (response) => {
+                    if (response.status === 403) return false;
+                    if (response.status === 409) {
+                      setConflictNotice('The case changed. Refresh the case before deciding.');
+                      setRefresh((value) => value + 1);
+                      return false;
+                    }
+                    if (!response.ok) return false;
+                    setObligationReason(reason);
+                    setConflictNotice('');
+                    setRefresh((value) => value + 1);
+                    return true;
+                  }).catch(() => false);
+                }}
+              />
+            )}
+            {session.role === 'legal-reviewer' && worklistLoaded && !routePath.match(/^\/cases\/[^/]+\/obligations(?:\/)?$/) && (
+              <LegalWorkspace
+                items={worklist}
+                title="Legal My work"
+                onSelect={(caseId, itemId) => openLegalObligation(caseId, itemId)}
+              />
+            )}
+            {dashboard && <CapabilityDashboard
+>>>>>>> origin/main
               data={dashboard}
               decisionReason={reason}
               onDecisionReasonChange={setReason}

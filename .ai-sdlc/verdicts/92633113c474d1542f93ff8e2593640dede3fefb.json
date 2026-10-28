@@ -1,0 +1,254 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 653,
+  "branch": "ai-sdlc/issue-653",
+  "commitSha": "92633113c474d1542f93ff8e2593640dede3fefb",
+  "round": 0,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The legal list can include non-obligation work, and the obligation record and allowed decisions are hard-coded in the client rather than loaded from server state. The decision submission criterion also lacks its named test for request and rejection behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/LegalWorkspace.tsx",
+          "line": 41,
+          "message": "The legal worklist renders non-obligation items. Filter the source items to obligation work before applying the user-selected filters.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "LegalWorkspace builds visibleItems from every worklist item and filters only by the user's selected case and capability; it does not restrict items to obligations.",
+            "failureScenario": "When the server worklist contains a finance reserve item, the initial legal list includes it under “All cases” and “All capabilities,” contrary to the criterion that the list contains obligation worklist items."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 771,
+          "message": "The obligation record and decision actions are fabricated in the client instead of coming from server-authorized state. Load the server record and render only its allowed decisions.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "openLegalObligation constructs an ObligationRecord locally, including allowedDecisions, and passes it to ObligationWorkspace; no obligation record or allowed decisions are fetched from the server.",
+            "failureScenario": "When a legal reviewer opens an obligation whose server-provided decisions differ from the hard-coded “Signed off” and “Rejected” actions, the UI still offers those hard-coded actions and submits one to the decision endpoint."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 8,
+          "message": "The server-authorized decision submission criterion has no test named `legal_obligation_decision_contract` proving the request fields, rejection behavior, and post-success worklist refresh.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names `legal_obligation_decision_contract`, but the changed test file contains only `AC_011_obligation_notice_text_contract` and `AI_trace_and_obligation_text_remain_inert`. The component test checks a callback, while the App test asserts that no decision POST occurs.",
+            "failureScenario": "If the App submits a decision without the required CSRF token or expected revision, or fails to re-read the worklist after success, the changed tests still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The legal register renders finance reserve items despite the criterion excluding them. The decision submission criterion is not tested through App's request wiring.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/LegalWorkspace.tsx",
+          "line": 45,
+          "message": "The legal register includes finance reserve worklist items, contrary to the criterion's negative case.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "visibleItems filters only by case and capability, then renders every remaining worklist item.",
+            "failureScenario": "When the server worklist contains a Finance reserve item, it remains visible under the default filters. The acceptance criterion says that item must not appear in the legal obligation list; LegalWorkspace.test.tsx also currently asserts that OBL-9 is visible."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 456,
+          "message": "The legal decision acceptance criterion has no test covering the App submission path, request fields, or post-decision worklist re-read.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added App test opens the obligation route and asserts that no decision POST occurred. The ObligationWorkspace test checks only that a callback was invoked; neither exercises App's POST wiring or verifies its request and refresh behavior.",
+            "failureScenario": "If App omits the CSRF header, expected revision, decision request, or worklist re-read, the tests named for the legal decision criterion still pass. The required legal_obligation_decision_contract test is absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The rendered hostile text is interpolated as React text, so this diff does not show an HTML injection path. The legal decision submission contract is not covered by the test named in the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 43,
+          "message": "The legal decision submission criterion has no test that exercises its production request path. Add the named contract test and assert the request URL, CSRF token, revision, allowed decision, and refresh behavior.",
+          "confidence": 1,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The acceptance criterion names frontend/tests/ObligationWorkspace.test.tsx / legal_obligation_decision_contract, but that test is absent. The existing test only checks that a click invokes a mocked callback.",
+            "failureScenario": "If the production submit path omits X-CSRF-Token, sends the wrong revision, or skips the worklist refresh, the named test cannot detect it and still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/LegalWorkspace.test.tsx",
+      "frontend/tests/ObligationWorkspace.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

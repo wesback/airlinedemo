@@ -1,0 +1,272 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 653,
+  "branch": "ai-sdlc/issue-653",
+  "commitSha": "ea0d037f1145229f6ec7137caf10fc1d17a9704d",
+  "round": 1,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix adds a decision callback test, but it still leaves client-defined decision fallbacks and does not test App's request wiring. Asynchronous record loads can also overwrite the currently selected obligation.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 808,
+          "message": "The client still fabricates decision actions when the server provides none. Render no actions unless the response supplies allowed decisions.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The existing obligations endpoint returns an ObligationEvaluation without allowedDecisions. When that field is missing or empty, loadLegalObligationRecord supplies the client-defined signed-off and rejected actions, which ObligationWorkspace renders and submits.",
+            "failureScenario": "When the endpoint provides no allowed decisions, the UI still offers and submits client-defined actions, contrary to the criterion requiring only server-provided decisions."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The named decision contract test still does not cover the production submission path or its required request and response behavior.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test renders ObligationWorkspace with a mocked onDecisionSubmit and asserts only that the callback receives an ID and reason. It does not exercise App's POST request, CSRF header, expected revision, rejection handling, or worklist refresh.",
+            "failureScenario": "If App omits the CSRF token or revision, submits an unsupported decision, or fails to refresh the worklist after success, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 815,
+          "message": "Ignore obligation responses that no longer match the current selection; a late fetch can display and submit against the wrong obligation.",
+          "confidence": 0.94,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Each openLegalObligation call starts an asynchronous record fetch. loadLegalObligationRecord sets obligationRecord when its fetch completes without checking whether that case and item are still selected.",
+            "failureScenario": "If a reviewer opens obligation A and then obligation B before A's fetch resolves, A's late response can overwrite B's record. The workspace then shows A's record while B is selected, and submitting a decision targets the selected case with the stale record ID."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The legal workspace now filters finance reserve items and loads obligation data from the server, but it still invents decision actions when the server provides none. The named decision test checks only a component callback, leaving App's request wiring and refresh behavior unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 808,
+          "message": "An empty or missing server decision list enables client-defined actions. Render no decisions unless the server provides them.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "loadLegalObligationRecord uses the response's allowedDecisions only when the array is nonempty; otherwise it adds the client-defined “Signed off” and “Rejected” actions. ObligationWorkspace renders those actions and passes their IDs to the App submission handler.",
+            "failureScenario": "When the server returns an obligation with an empty allowedDecisions array, the UI still offers and submits “Signed off” and “Rejected,” violating the criterion that only server-provided decisions are submitted."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The named decision contract test still does not cover the production submission path or its request and refresh behavior.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named test renders ObligationWorkspace with a mocked onDecisionSubmit callback and checks only that clicking a button invokes it. It does not exercise App's POST request, CSRF token, revision fields, rejection handling, or worklist refresh.",
+            "failureScenario": "If App omits the CSRF token or expected revision, accepts a decision absent from the server response, or skips the worklist refresh, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The follow-up adds an obligation fetch, but the client still supplies fallback decision actions when the server provides none. The named decision test checks only a mocked component callback and cannot detect defects in App’s request wiring.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 808,
+          "message": "The client still fabricates decision actions when the server provides none. Render no decision actions unless the server supplies them.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "After fetching the obligation payload, the client substitutes hard-coded decisions whenever allowedDecisions is absent or empty, then renders those actions and submits the selected ID.",
+            "failureScenario": "If the server returns an obligation with no allowed decisions, the UI still offers “Signed off” and “Rejected” and can submit either action, contrary to the criterion that only server-provided decisions are offered."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ObligationWorkspace.test.tsx",
+          "line": 46,
+          "message": "The named decision contract test still does not cover the production submission path or the required request and refresh behavior.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named test renders ObligationWorkspace with a mocked callback and asserts only that clicking invokes it. It does not exercise App’s request wiring or verify the request fields, rejection behavior, or worklist refresh.",
+            "failureScenario": "If App omits the CSRF token or expected revision, submits a decision the server did not provide, or fails to re-read the worklist after success, this test still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/LegalWorkspace.test.tsx",
+      "frontend/tests/ObligationWorkspace.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
