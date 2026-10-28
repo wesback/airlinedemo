@@ -1,0 +1,338 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 652,
+  "branch": "ai-sdlc/issue-652",
+  "commitSha": "80613371f62213aa676f65a513d0d33b8a03e3f8",
+  "round": 2,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round-three test edits address filtering and add projection assertions, but the prior findings about order, projected values, decision response handling, and attribute coverage remain unresolved.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/FinanceWorkspace.test.tsx",
+          "line": 40,
+          "message": "The worklist contract test still does not assert server-order preservation.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The new assertions inspect rows only after filtering to case-001, which leaves one reserve row.",
+            "failureScenario": "If the workspace reverses or sorts the two server-provided reserve items, the test still passes, although the criterion requires server order."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 38,
+          "message": "The worksheet contract test still does not verify every projected column value against the server payload.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added assertions check input, source, and freshness text, but do not compare the non-null value cells with the supplied values 12.3 and 125.5.",
+            "failureScenario": "If the worksheet displays an incorrect non-null value for Rate or Amount, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 274,
+          "message": "The decision contract test still omits the previously identified rejection, success-timing, and worklist-refresh cases.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The App decision test uses an immediately successful POST response; it does not exercise forbidden or stale responses, a pending response, or assert that the worklist is re-read.",
+            "failureScenario": "If the handler shows success before the POST resolves, shows success after a 403 or 409, or fails to refresh the worklist after success, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 129,
+          "message": "The inert-text test still does not cover the criterion forbidding server strings in arbitrary HTML attributes.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The inert-text test checks a fixed set of attributes (`href`, `action`, `style`, and `src`) but does not inspect whether server values populate other attributes.",
+            "failureScenario": "If a server value is rendered into an attribute such as `title` or `data-*`, the current assertions still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest fix adds negative worklist assertions and more worksheet value checks, but does not close the previously raised gaps for server ordering, row-to-value correspondence, decision rejection and timing, or arbitrary HTML attributes.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/FinanceWorkspace.test.tsx",
+          "line": 33,
+          "message": "The worklist contract test still does not verify server-order preservation.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test filters to case-001 before checking the rendered rows, leaving only one reserve item to compare.",
+            "failureScenario": "If FinanceWorkspace reverses the server-provided reserve items, the current assertions still pass, although the acceptance criterion requires server order."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 41,
+          "message": "The worksheet contract test does not verify that projected values are rendered in their corresponding rows and columns.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The worksheet test checks that source and freshness strings appear, but does not assert which row or column contains each value.",
+            "failureScenario": "If the worksheet displays source-a for the Rate row and source-b for Pax frequency, all current presence assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 260,
+          "message": "The reserve decision contract remains untested for forbidden and stale responses and success timing.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The App-level test's decision endpoint always returns success; it does not test forbidden or stale responses or hold the response pending. The named test in ReserveWorksheet.test.tsx only checks component callbacks.",
+            "failureScenario": "If the App shows success after a 403 or 409, or before the server responds, the current tests still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 135,
+          "message": "The inert-text test still does not cover arbitrary HTML attributes populated from server values.",
+          "confidence": 0.94,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The inert-text test checks specific attributes such as href, action, style, and src, but does not check whether server values are rendered into other HTML attributes.",
+            "failureScenario": "If a server value is placed in a title or data attribute, the current assertions still pass despite the criterion forbidding server strings in HTML attributes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest changes add filtering assertions, projected-value presence checks, and a src-attribute check. The previously reported gaps in order, exact row projections, decision response and refresh behavior, and arbitrary attribute coverage remain.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/FinanceWorkspace.test.tsx",
+          "line": 33,
+          "message": "The worklist contract test still does not assert server-order preservation.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The worklist test checks that items appear and filters correctly, but after filtering it checks only one row and never compares rendered order with the server-provided order.",
+            "failureScenario": "If FinanceWorkspace sorts the server-provided reserve items, the test still passes despite the criterion requiring server order."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 39,
+          "message": "The worksheet contract test still does not verify the exact server-projected values in each required column.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The worksheet test now checks that projected values appear, but it does not assert the exact value in each row's input, value, source, freshness, and status columns.",
+            "failureScenario": "If a source or freshness value is assigned to the wrong row, or a non-null value is rendered incorrectly, the independent text-presence assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 243,
+          "message": "The decision contract still lacks coverage for forbidden and stale responses, success timing, and worklist refresh.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The App-level decision test still exercises only an immediately successful POST; it does not exercise 403 or 409 responses, hold the request pending, or assert that the worklist projection is re-read.",
+            "failureScenario": "If the handler shows success before the response, shows success after a 403 or 409, or fails to refresh the worklist after success, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 135,
+          "message": "The inert-text test still does not cover arbitrary HTML attributes populated from server values.",
+          "confidence": 0.94,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The inert-text test checks for script and b elements plus href, action, style, and src attributes, but does not detect server values rendered into other HTML attributes.",
+            "failureScenario": "If a server value is rendered into an attribute such as title or data-value, the current assertions still pass despite the criterion forbidding server strings in HTML attributes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/FinanceWorkspace.test.tsx",
+      "frontend/tests/ReserveWorksheet.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
