@@ -150,6 +150,8 @@ export default function App({
   const [conflictNotice, setConflictNotice] = useState('');
   const [obligationRecord, setObligationRecord] = useState<ObligationRecord | null>(null);
   const [obligationReason, setObligationReason] = useState('');
+  const obligationRequestId = useRef(0);
+  const activeObligationSelection = useRef<{ caseId: string; itemId: string } | null>(null);
   const technicalFindingRoute = useMemo(() => {
     if (!session || session.role !== 'technical-reviewer') return null;
     const match = routePath.match(/^\/cases\/([^/]+)\/findings(?:\/)?$/);
@@ -757,6 +759,9 @@ export default function App({
   }
 
   async function loadLegalObligationRecord(caseId: string, itemId: string) {
+    const selection = { caseId, itemId };
+    activeObligationSelection.current = selection;
+    const requestId = ++obligationRequestId.current;
     const nextPath = `/cases/${encodeURIComponent(caseId)}/obligations`;
     setRoutePath(nextPath);
     if (typeof window !== 'undefined') {
@@ -769,6 +774,7 @@ export default function App({
       const response = await fetch(`/api/cases/${encodeURIComponent(caseId)}/obligations`, {
         headers: { Accept: 'application/json' },
       });
+      if (requestId !== obligationRequestId.current || activeObligationSelection.current !== selection) return;
       if (!response.ok) {
         setObligationRecord(null);
         return;
@@ -787,6 +793,7 @@ export default function App({
         basisVersion?: number | null;
         expectedRevision?: number | null;
       };
+      if (requestId !== obligationRequestId.current || activeObligationSelection.current !== selection) return;
       const record = payload.drafts?.find((draft) => draft.id === itemId || draft.id?.endsWith(`-${itemId}`)) ?? payload.newDraft;
       const clauseText = payload.clauseReferences?.[0]?.text ?? (record?.citation ? `Clause: ${record.citation.sourceId ?? 'contracts'}/${record.citation.recordId ?? 'unknown'} § ${record.citation.recordVersion ?? 1}` : 'Clause: contracts/con-clause-return-notice-001 § 1');
       const rows = Array.isArray(payload.rows) && payload.rows.length > 0 ? payload.rows : [
@@ -803,18 +810,16 @@ export default function App({
         expectedRevision: payload.expectedRevision ?? caseState?.revision ?? 0,
         rows,
         clauseReferences: payload.clauseReferences && payload.clauseReferences.length > 0 ? payload.clauseReferences : [{ id: 'clause-1', text: clauseText }],
-        noticeDraft: payload.noticeDraft ?? record?.body ?? '<b>x</b>',
+        noticeDraft: payload.noticeDraft ?? record?.body ?? 'No notice draft recorded.',
         banner: payload.banner ?? 'Simulated — no notice is sent.',
         allowedDecisions: Array.isArray(payload.allowedDecisions) && payload.allowedDecisions.length > 0
           ? payload.allowedDecisions
-          : [
-            { id: 'signed-off', label: 'Signed off' },
-            { id: 'rejected', label: 'Rejected' },
-          ],
+          : [],
       };
       setObligationRecord(nextRecord);
       setObligationReason('');
     } catch {
+      if (requestId !== obligationRequestId.current || activeObligationSelection.current !== selection) return;
       setObligationRecord(null);
     }
   }
@@ -1181,13 +1186,13 @@ export default function App({
                   openLegalObligation(nextItem.caseId, nextItem.itemId);
                 }}
                 onDecisionSubmit={(decisionId, reason) => {
-                  if (!session || !selectedCaseId || !obligationRecord) return false;
+                  if (!session || !selectedCaseId || !obligationRecord || !obligationRecord.id) return false;
                   const payload = {
                     expectedRevision: obligationRecord.expectedRevision ?? caseState?.revision ?? 0,
                     decision: decisionId,
                     reason,
                   };
-                  return fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/obligations/${encodeURIComponent(obligationRecord.id ?? '')}/decisions`, {
+                  return fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/obligations/${encodeURIComponent(obligationRecord.id)}/decisions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
                     body: JSON.stringify(payload),
