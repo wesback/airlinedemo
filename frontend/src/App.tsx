@@ -63,17 +63,61 @@ function hasEmptyProjection(region: ProjectionRegion, value: unknown): boolean {
   if (value == null) return true;
   if (region === 'dashboard') {
     const dashboard = value as Partial<DashboardData> | undefined;
-    return Array.isArray(dashboard?.capabilities) && dashboard.capabilities.length === 0 && Array.isArray(dashboard?.queue) && dashboard.queue.length === 0 && Array.isArray(dashboard?.activity) && dashboard.activity.length === 0;
+    const hasCapabilities = Array.isArray(dashboard?.capabilities) && dashboard.capabilities.length > 0;
+    const hasQueue = Array.isArray(dashboard?.queue) && dashboard.queue.length > 0;
+    const hasActivity = Array.isArray(dashboard?.activity) && dashboard.activity.length > 0;
+    const hasDecisionOptions = Array.isArray(dashboard?.allowedDecisions) && dashboard.allowedDecisions.length > 0;
+    return !hasCapabilities && !hasQueue && !hasActivity && !hasDecisionOptions;
   }
   if (region === 'review') {
     const review = value as Partial<TechnicalReviewProjection> | undefined;
-    return Array.isArray(review?.decisions) && review.decisions.length === 0;
+    const decisions = Array.isArray(review?.decisions) ? review.decisions : [];
+    return decisions.length === 0 && (review?.basisVersion == null || typeof review.basisVersion !== 'number');
   }
   if (region === 'readiness') {
     const readiness = value as Partial<ReadinessSummaryData> | undefined;
-    return typeof readiness?.sentence === 'string' && readiness.sentence.trim().length === 0;
+    return typeof readiness?.sentence !== 'string' || readiness.sentence.trim().length === 0;
   }
-  return false;
+  const caseProjection = value as Partial<CaseProjection> | undefined;
+  return typeof caseProjection?.revision !== 'number' && !Array.isArray(caseProjection?.basis);
+}
+
+function coerceDashboardData(value: unknown): DashboardData {
+  const source = (value && typeof value === 'object' ? value as Partial<DashboardData> : {}) as Partial<DashboardData>;
+  return {
+    allowedDecisions: Array.isArray(source.allowedDecisions) ? source.allowedDecisions : [],
+    capabilities: Array.isArray(source.capabilities) ? source.capabilities : [],
+    queue: Array.isArray(source.queue) ? source.queue : [],
+    activity: Array.isArray(source.activity) ? source.activity : [],
+  };
+}
+
+function coerceReviewData(value: unknown): TechnicalReviewProjection {
+  const source = (value && typeof value === 'object' ? value as Partial<TechnicalReviewProjection> : {}) as Partial<TechnicalReviewProjection>;
+  return {
+    basisVersion: typeof source.basisVersion === 'number' ? source.basisVersion : 0,
+    decisions: Array.isArray(source.decisions) ? source.decisions : [],
+  };
+}
+
+function coerceReadinessData(value: unknown): ReadinessSummaryData {
+  const source = (value && typeof value === 'object' ? value as Partial<ReadinessSummaryData> : {}) as Partial<ReadinessSummaryData>;
+  return {
+    monthsUntilReturn: typeof source.monthsUntilReturn === 'number' ? source.monthsUntilReturn : 0,
+    gapsFound: typeof source.gapsFound === 'number' ? source.gapsFound : 0,
+    requestsSent: typeof source.requestsSent === 'number' ? source.requestsSent : 0,
+    heldForReview: typeof source.heldForReview === 'number' ? source.heldForReview : 0,
+    notProcessed: typeof source.notProcessed === 'number' ? source.notProcessed : 0,
+    sentence: typeof source.sentence === 'string' ? source.sentence : '',
+  };
+}
+
+function coerceCaseData(value: unknown): CaseProjection {
+  const source = (value && typeof value === 'object' ? value as Partial<CaseProjection> : {}) as Partial<CaseProjection>;
+  return {
+    revision: typeof source.revision === 'number' ? source.revision : 0,
+    basis: Array.isArray(source.basis) ? source.basis : [],
+  };
 }
 
 function loadError(error: unknown): string {
@@ -458,6 +502,19 @@ export default function App({
     return merged;
   }
 
+  function normalizeRegionShape<T>(region: ProjectionRegion, value: T | null | undefined, fallback: T): T {
+    if (value == null) return fallback;
+    if (typeof value !== 'object') return fallback;
+    const defaults = makeDefaultData();
+    const template: Record<string, unknown> = {
+      case: defaults.caseState,
+      dashboard: defaults.dashboard,
+      review: defaults.review,
+      readiness: defaults.readiness,
+    }[region] as Record<string, unknown>;
+    return { ...template, ...(value as Record<string, unknown>) } as T;
+  }
+
   function getProjectionUrl(caseId: string, region: ProjectionRegion): string {
     const base = `/api/cases/${encodeURIComponent(caseId)}`;
     return {
@@ -515,10 +572,10 @@ export default function App({
         [region]: nextState,
       }));
       setData((current) => {
-        if (region === 'case') return mergeProjectionData(current, { caseState: nextValue as CaseProjection });
-        if (region === 'dashboard') return mergeProjectionData(current, { dashboard: nextValue as DashboardData });
-        if (region === 'review') return mergeProjectionData(current, { review: nextValue as TechnicalReviewProjection });
-        return mergeProjectionData(current, { readiness: nextValue as ReadinessSummaryData });
+        if (region === 'case') return mergeProjectionData(current, { caseState: coerceCaseData(nextValue) });
+        if (region === 'dashboard') return mergeProjectionData(current, { dashboard: coerceDashboardData(nextValue) });
+        if (region === 'review') return mergeProjectionData(current, { review: coerceReviewData(nextValue) });
+        return mergeProjectionData(current, { readiness: coerceReadinessData(nextValue) });
       });
       setFailedRegion((current) => {
         if (current !== region) return current;
@@ -715,9 +772,13 @@ export default function App({
   const currentCasePath = typeof window !== 'undefined'
     ? `${window.location.pathname}${window.location.search}${window.location.hash}`
     : selectedCaseId ? `/cases/${encodeURIComponent(selectedCaseId)}` : undefined;
-  const currentDecision = data?.review?.decisions?.filter((item) => item.current).at(-1)?.decision;
-  const hasLoadedCaseData = Boolean(data?.caseState && typeof data.caseState.revision === 'number');
-  const hasLoadedReviewData = Boolean(data?.review && Array.isArray(data.review.decisions));
+  const caseProjection = projectionRegions.case.status === 'ready' ? (projectionRegions.case.data as CaseProjection | null) : null;
+  const dashboardProjection = projectionRegions.dashboard.status === 'ready' ? (projectionRegions.dashboard.data as DashboardData | null) : null;
+  const reviewProjection = projectionRegions.review.status === 'ready' ? (projectionRegions.review.data as TechnicalReviewProjection | null) : null;
+  const readinessProjection = projectionRegions.readiness.status === 'ready' ? (projectionRegions.readiness.data as ReadinessSummaryData | null) : null;
+  const currentDecision = reviewProjection?.decisions?.filter((item) => item.current).at(-1)?.decision;
+  const hasLoadedCaseData = Boolean(caseProjection && typeof caseProjection.revision === 'number');
+  const hasLoadedReviewData = Boolean(reviewProjection && Array.isArray(reviewProjection.decisions));
   const healthMessage = {
     checking: 'Checking service connection…',
     ready: 'Service connected',
@@ -824,30 +885,34 @@ export default function App({
                   </select>
                 </label>
               )}
-              {data?.readiness && <ReadinessSummary summary={data.readiness} />}
+              {readinessProjection && <ReadinessSummary summary={readinessProjection} />}
               {selectedCaseId && <h2 id="case-heading" tabIndex={-1}>Case {selectedCaseId}</h2>}
             </>
           )}
           {loadingCase && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
-          {failedRegionEntries.map((region) => (
-            <WorkspaceRegion
-              key={region}
-              status={projectionRegions[region].status}
-              error={projectionRegions[region].error}
-              currentPath={currentCasePath}
-              onRetry={() => { void reloadRegion(region); }}
-            />
-          ))}
+          {projectionRegionsOrder.map((region) => {
+            const state = projectionRegions[region];
+            if (state.status === 'ready' || state.data === null && state.error === null && state.status !== 'loading') return null;
+            return (
+              <WorkspaceRegion
+                key={region}
+                status={state.status}
+                error={state.error}
+                currentPath={currentCasePath}
+                onRetry={() => { void reloadRegion(region); }}
+              />
+            );
+          })}
           {caseError && !activeFailedRegion && <WorkspaceRegion
             status={resolveRegionStatus(caseError)}
             error={resolveRegionError(caseError)}
             currentPath={currentCasePath}
             onRetry={() => { void reloadFailedRegion(); }}
           />}
-          {hasLoadedCaseData && data && (
+          {hasLoadedCaseData && caseProjection && (
             <>
-              <p>Revision: {data.caseState?.revision}</p>
-              <p>Evidence basis: {data.caseState?.basis?.length ?? 0}</p>
+              <p>Revision: {caseProjection.revision}</p>
+              <p>Evidence basis: {caseProjection.basis?.length ?? 0}</p>
               <p>Technical-review decision: {currentDecision ?? 'No current decision'}</p>
               <button type="button" onClick={() => { void enterHangar(); }}>Enter Hangar</button>
               {hangarView === 'regular' && (
@@ -993,7 +1058,7 @@ export default function App({
                 </section>
               )}
               <CapabilityDashboard
-                data={data?.dashboard ?? { allowedDecisions: [], capabilities: [], queue: [], activity: [] }}
+                data={dashboardProjection ?? { allowedDecisions: [], capabilities: [], queue: [], activity: [] }}
                 decisionReason={reason}
                 onDecisionReasonChange={setReason}
                 onTraceSelect={(url) => { void showTrace(url); }}
