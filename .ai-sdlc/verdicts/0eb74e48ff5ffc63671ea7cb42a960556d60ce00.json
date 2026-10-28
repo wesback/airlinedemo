@@ -1,0 +1,278 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 650,
+  "branch": "ai-sdlc/issue-650",
+  "commitSha": "0eb74e48ff5ffc63671ea7cb42a960556d60ce00",
+  "round": 1,
+  "pipelineVersion": "e544081",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The full-path returnTo change addresses the prior URL-state issue. The retry still reloads the combined projection bundle, and the required App-level retry test remains absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 597,
+          "message": "Retry still restarts the full projection load instead of repeating only the failed region's request.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Retry increments caseRefreshNonce, which is a dependency of the effect that sequentially fetches the case, dashboard, technical reviews, and readiness.",
+            "failureScenario": "If the dashboard request returns 503, clicking Retry reruns the effect and refetches the case and the other projections too, so other regions' requests are not unchanged."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/WorkspaceRegion.test.tsx",
+          "line": 20,
+          "message": "The required App-level retry test still does not verify request counts, successful recovery, and unchanged other regions.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The retry test renders WorkspaceRegion with a mocked onRetry callback and manually rerenders success content; the incremental diff adds no App-level retry test.",
+            "failureScenario": "If an App Retry click sends zero or multiple requests, or a successful response fails to replace only the failed region's error, the component test still passes; the required App.test.tsx / retry_reloads_region_once_per_click test is missing."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest fix preserves the current URL for 401 navigation, but retry still reruns the projection sequence. The required App-level test for retry request counts and recovery is still missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 596,
+          "message": "Retry still reruns the full projection load, so a failure in a later projection causes earlier successful requests to be repeated.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "Retry increments caseRefreshNonce, which reruns the effect at line 423. That effect requests the case, dashboard, technical reviews, and readiness in sequence.",
+            "failureScenario": "If the dashboard request returns 503 after the case request succeeds, clicking Retry requests the case again before retrying the dashboard. The retry therefore repeats requests for other regions instead of only the failed region."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/WorkspaceRegion.test.tsx",
+          "line": 26,
+          "message": "The retry criterion remains unverified through the required App request path; the existing component test does not assert request counts or request-backed recovery.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The named test renders WorkspaceRegion with a mocked callback, counts callback invocations, then manually rerenders hardcoded success content. It does not render App or exercise fetch.",
+            "failureScenario": "If Retry sends zero or multiple requests, fails to recover from a successful response, or changes another region, this test still passes. The required App.test.tsx / retry_reloads_region_once_per_click test is absent."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The 401 return path now preserves the current URL, including query and hash. Retry still reruns the full projection load, and the required App-level retry test remains absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 596,
+          "message": "The prior retry-isolation finding remains: Retry still reruns the full projection load instead of retrying only the failed region.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "Retry increments caseRefreshNonce, which reruns the effect that fetches the case, dashboard, technical reviews, and readiness in sequence.",
+            "failureScenario": "If only the case request failed with 503, clicking Retry repeats the case request and then reloads every other projection, contrary to the criterion that retry repeats only the failed region's request and leaves other regions unchanged."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/WorkspaceRegion.test.tsx",
+          "line": 20,
+          "message": "The prior retry-test finding remains: the request count and region recovery behavior are not tested through App.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The named retry test counts calls to a mocked onRetry callback and manually rerenders success content; it does not exercise App's fetch path.",
+            "failureScenario": "If a Retry click sends zero or multiple requests, or a successful response fails to replace only the failed region's error, the test still passes. The required App.test.tsx / retry_reloads_region_once_per_click test remains absent."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AccessibleReviewNavigation.test.tsx",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/WorkspaceRegion.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 26,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
