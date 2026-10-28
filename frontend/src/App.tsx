@@ -13,7 +13,7 @@ import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type Se
 import HangarSemanticControls from './hangar/semanticControls';
 import HangarSelectionEvidence from './hangar/selectionPanel';
 import HangarGuidedJourney from './hangar/guidedJourney';
-import HangarCaseReset from './hangar/caseReset';
+import HangarCaseReset, { getHangarCaseResetPermission } from './hangar/caseReset';
 import HangarErrorBoundary, { HangarFallbackPanel } from './hangar/errorBoundary';
 import hangarManifest from './hangar/sceneManifest.json';
 import { HANGAR_SOURCE_IDS, type HangarSourceSummaryEntry } from './hangar/sourceSummary';
@@ -29,6 +29,8 @@ import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWor
 import LegalWorkspace from './workspaces/LegalWorkspace';
 import FindingWorkspace from './workspaces/FindingWorkspace';
 import ObligationWorkspace, { type ObligationRecord } from './workspaces/ObligationWorkspace';
+import PresenterDemoControl from './workspaces/PresenterDemoControl';
+import { submitHangarCaseReset } from './hangar/caseReset';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 const LEGAL_DECISIONS = [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }];
@@ -701,6 +703,34 @@ export default function App({
   const { value: readiness } = regions.readiness;
   const financeHomeRoute = session?.role === 'finance-reviewer' && routePath === '/work';
   const financeReserveRoute = session?.role === 'finance-reviewer' && /^\/cases\/[^/]+\/reserve(?:$|\?)/.test(normalizeRoutePath(routePath));
+  const presenterHomeRoute = session?.role === 'presenter' && routePath === '/demo';
+  const presenterCaseIds = session?.role === 'presenter' ? session.caseScopes : [];
+  const presenterCaseEntries = presenterCaseIds.map((caseId) => {
+    const envelope = hangarSceneEnvelopes[caseId];
+    const permission = envelope ? getHangarCaseResetPermission(envelope) : { allowed: false, revision: null };
+    return {
+      id: caseId,
+      name: hangarEntries.find((entry) => entry.caseId === caseId)?.name ?? caseId,
+      canReset: permission.allowed && permission.revision !== null,
+    };
+  });
+
+  async function handlePresenterReset(caseId: string) {
+    if (!session || session.role !== 'presenter' || !session.caseScopes.includes(caseId)) return;
+    const envelope = hangarSceneEnvelopes[caseId];
+    if (!envelope) return;
+    const permission = getHangarCaseResetPermission(envelope);
+    if (!permission.allowed || permission.revision === null) return;
+    const result = await submitHangarCaseReset({
+      envelope,
+      csrfToken: session.csrfToken,
+      transport: (url, init) => fetch(url, init),
+      refetch: () => refreshHangarSnapshot(),
+    });
+    if (!result.accepted && !result.uncertain) {
+      setCaseError(`Reset rejected (${result.status}).`);
+    }
+  }
 
   async function submitFinanceDecision(decision: string) {
     // The expected revision is the case revision the server holds, not the reserve draft's own version.
@@ -1097,6 +1127,16 @@ export default function App({
               </section>
             ))}
             {caseError && <p role="alert">{caseError}</p>}
+            {session?.role === 'presenter' && presenterHomeRoute && (
+              <PresenterDemoControl
+                cases={presenterCaseEntries}
+                caseId={selectedCaseId ?? undefined}
+                onResetCase={handlePresenterReset}
+                onViewAs={(userId) => {
+                  void handleRoleSwitch(userId);
+                }}
+              />
+            )}
             {session?.role === 'finance-reviewer' && selectedCaseId && financeHomeRoute && (
               <FinanceWorkspace items={financeWorklist} onOpenCase={(caseId) => {
                 handleCaseNavigate(`/cases/${encodeURIComponent(caseId)}/reserve`);
