@@ -1,0 +1,245 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 654,
+  "branch": "ai-sdlc/issue-654",
+  "commitSha": "ce4757e39a86653c3007a33393548560b08531bc",
+  "round": 0,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The presenter case route does not render its read-only summary, and an out-of-order portfolio response can expose a prior executive's rows after a session switch. The required acceptance-criteria tests are also absent from the diff.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 653,
+          "message": "Guard the portfolio response against session changes and clear the prior session's rows when starting a new request; otherwise a late response can display another executive's scoped case data.",
+          "confidence": 0.92,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "The portfolio fetch callback writes its response to portfolioRows without checking whether the session that started the request is still current.",
+            "failureScenario": "Executive A starts a portfolio request, then the app switches to executive B. If A's response arrives after B's, its rows replace B's portfolio and are rendered at /portfolio, exposing A's case data to B (OWASP A01:2025 Broken Access Control)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 1258,
+          "message": "Presenter portfolio rows navigate to a case route that never renders ExecutiveCaseSummary. Render the scoped read-only summary for presenters too, or prevent presenters from opening rows.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "ExecutivePortfolio is rendered for both executive and presenter roles, and its row callback navigates to the case overview. ExecutiveCaseSummary is rendered only when session.role is executive.",
+            "failureScenario": "A presenter opens a portfolio row. The app navigates to the case overview, but the executive case summary is not rendered, so the row does not open the required read-only case summary."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 1247,
+          "message": "Acceptance criteria AC_016_portfolio_kpis_contract, executive_portfolio_table_contract, AC_017_executive_read_only_contract, portfolio_server_text_remains_inert, and the specified role route navigation coverage have no tests in this change. The named test cases are missing.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The diff adds the portfolio, case summary, security, and route behavior, but includes none of the acceptance criteria's named test files or test cases.",
+            "failureScenario": "A regression that removes the KPI calculation, renders decision controls, or turns server text into active markup can pass because the named tests are absent from this change."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff adds the executive views but omits the named behavior tests. It also allows an older portfolio request to overwrite the current session's scoped rows.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 653,
+          "message": "AC-016 names `frontend/tests/ExecutivePortfolio.test.tsx / AC_016_portfolio_kpis_contract`, AC for the portfolio table names `executive_portfolio_table_contract`, the read-only criterion names `frontend/tests/ExecutiveCaseSummary.test.tsx / AC_017_executive_read_only_contract`, and the inert-text criterion names `portfolio_server_text_remains_inert`. None of those tests is included in the diff, so these behavior criteria lack the required test coverage.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The portfolio fetch and role-specific rendering are added in App.tsx, but the supplied diff contains no test changes for the named portfolio, case-summary, or App tests.",
+            "failureScenario": "If the KPI calculations, row navigation, executive read-only behavior, or inert rendering is broken, the named tests are absent from this change and cannot catch the regression."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 653,
+          "message": "A stale portfolio request can overwrite the current user's portfolio after a session change. Clear rows when the scope changes and ignore responses that no longer belong to the current session. OWASP A01:2025 (Broken Access Control).",
+          "confidence": 0.86,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The executive/presenter branch starts a portfolio request without clearing portfolioRows or associating the response with the current session. The response handler later writes its cases directly to state.",
+            "failureScenario": "If executive A's request is still pending when the mounted app switches to executive B, A's response can resolve after B's and replace B's portfolio rows. B then sees A's scoped case data."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 1247,
+          "message": "The final acceptance criterion requires `frontend/tests/App.test.tsx / Hangar case-work composition remains in the App host` to be updated for executive navigation. That test update is not present in the diff.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The diff changes executive portfolio navigation and adds the executive case summary, but does not update `frontend/tests/App.test.tsx`.",
+            "failureScenario": "If executive role navigation can no longer enter Hangar without decision controls, or executive `/work` exposes worklist data, the required updated App test is absent from this change and cannot catch the regression."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "Portfolio and case-summary values come from React text nodes, so the changed rendering does not expose an apparent HTML injection path. The portfolio state can retain data across session changes while the replacement request is pending.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 650,
+          "message": "Clear portfolioRows before fetching for a new executive or presenter session so data from the previous session cannot remain visible during the request. OWASP A01:2025 Broken Access Control.",
+          "confidence": 0.76,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "When an executive or presenter session changes, this branch starts a portfolio request without clearing the previously stored portfolioRows. The portfolio and case summary render from that state.",
+            "failureScenario": "An executive with access to case A switches to an executive account scoped to case B. Before the new request resolves, the page can still render case A's portfolio data and summary to the second account."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "tdd-green",
+      "tdd-red",
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 0,
+      "tdd-red": 0,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": false,
+    "red": false,
+    "reason": "no test files added or changed in this branch"
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

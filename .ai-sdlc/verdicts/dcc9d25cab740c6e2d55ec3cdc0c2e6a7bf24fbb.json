@@ -1,0 +1,319 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 654,
+  "branch": "ai-sdlc/issue-654",
+  "commitSha": "dcc9d25cab740c6e2d55ec3cdc0c2e6a7bf24fbb",
+  "round": 0,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The implementation adds the portfolio and read-only summary views, but several acceptance criteria lack tests that exercise the App host or their specified negative cases. The current tests would not catch incorrect row navigation, role-mismatched decision panels, executive worklist exposure, or sensitive extra projection fields appearing in the table.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 384,
+          "message": "The acceptance criterion for `executive_portfolio_row_opens_matching_read_only_summary` has no App-host test in this change.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The portfolio table test in ExecutivePortfolio.test.tsx checks a component callback, but no App test selects a row and verifies the resulting route and summary.",
+            "failureScenario": "If App routes case-002 to case-001 or fails to render its summary, the component callback test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 384,
+          "message": "The App-host role-matched decision-panel behavior required by the read-only acceptance criterion is not tested.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "`AC_017_executive_read_only_contract` tests ExecutiveCaseSummary in isolation. The App test added here checks portfolio navigation, but does not cover `executive_case_read_only_and_role_matched_decision_panels`.",
+            "failureScenario": "If App renders a finance or technical decision panel for an executive or the wrong role, the standalone summary test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 384,
+          "message": "The `role route navigation` test does not cover the executive `/work` behavior required by the acceptance criterion.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "`role route navigation` signs in as an executive and checks `/portfolio`; it does not navigate to `/work` or assert the denial message and absence of worklist data.",
+            "failureScenario": "If executive `/work` displays worklist data or omits `This page is not part of your workspace`, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 36,
+          "message": "The table contract test does not verify that sensitive values in extra projection properties are omitted.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "`executive_portfolio_table_contract` supplies only the listed display fields and asserts expected row text. It does not supply or check extra projection properties containing the forbidden sensitive values.",
+            "failureScenario": "If the table starts rendering `SECRET-ITEM-1`, `SECRET-EVIDENCE`, `SECRET-DRAFT`, or `SECRET-DECISION` from extra projection properties, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The diff adds portfolio and read-only component tests plus executive Hangar assertions. Several required App-host behaviors and specified negative cases remain untested.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 6,
+          "message": "The AC_016 test does not verify the criterion that `/portfolio` loads `GET /api/v1/workspace/portfolio` through the App host.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`AC_016_portfolio_kpis_contract` renders `ExecutivePortfolio` directly with supplied rows; it does not render the App or observe a request to `/api/v1/workspace/portfolio`.",
+            "failureScenario": "If `/portfolio` stops requesting the portfolio endpoint, the KPI component test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutivePortfolio.test.tsx",
+          "line": 37,
+          "message": "The table contract test does not cover the criterion’s negative case for sensitive values in extra projection properties.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`executive_portfolio_table_contract` checks displayed text and row callback behavior using rows without extra projection properties. It does not supply the specified secret values or assert their absence.",
+            "failureScenario": "If the table starts rendering `SECRET-ITEM-1`, `SECRET-EVIDENCE`, `SECRET-DRAFT`, or `SECRET-DECISION` from extra properties, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The required `executive_portfolio_row_opens_matching_read_only_summary` App-host test is missing.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed App tests cover executive portfolio sign-in and Hangar entry, but no test selects `case-002` through the App and asserts the matching read-only summary.",
+            "failureScenario": "If selecting `case-002` opens `case-001` or renders no summary, the component-only callback test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 387,
+          "message": "The `role route navigation` test does not cover the executive `/work` behavior required by the criterion.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`role route navigation` asserts the executive `/portfolio` route. It does not navigate to `/work` or check the denial text, worklist absence, or decision-control absence there.",
+            "failureScenario": "If executive `/work` renders worklist data or omits `This page is not part of your workspace`, the test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ExecutiveCaseSummary.test.tsx",
+          "line": 5,
+          "message": "The read-only test does not cover the criterion’s App-level role-matched decision-panel behavior or the absence of all mutating actions.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "`AC_017_executive_read_only_contract` renders the summary component alone. It does not exercise the App host or verify decision panels appear only for their matching technical and finance roles.",
+            "failureScenario": "If App renders a technical or finance decision panel for the wrong role, this component test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": true,
+      "findings": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "No concrete security vulnerability is reachable in the changed code. Portfolio responses are invalidated on session changes and rows are gated by the current session key; server supplied text is rendered as inert React text.",
+      "findingList": []
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 2,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/ExecutiveCaseSummary.test.tsx",
+      "frontend/tests/ExecutivePortfolio.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

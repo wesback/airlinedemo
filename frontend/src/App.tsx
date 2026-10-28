@@ -28,6 +28,8 @@ import ReserveWorksheet, { type ReserveWorksheetDraft } from './workspaces/Reser
 import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
 import LegalWorkspace from './workspaces/LegalWorkspace';
 import FindingWorkspace from './workspaces/FindingWorkspace';
+import ExecutivePortfolio, { type ExecutivePortfolioRow } from './workspaces/ExecutivePortfolio';
+import ExecutiveCaseSummary from './workspaces/ExecutiveCaseSummary';
 import ObligationWorkspace, { type ObligationRecord } from './workspaces/ObligationWorkspace';
 import PresenterDemoControl from './workspaces/PresenterDemoControl';
 import { submitHangarCaseReset } from './hangar/caseReset';
@@ -158,8 +160,11 @@ export default function App({
   const [worklistError, setWorklistError] = useState<number | null>(null);
   const [worklistLoaded, setWorklistLoaded] = useState(false);
   const [worklistSelection, setWorklistSelection] = useState<{ caseId: string; itemId: string } | null>(null);
+  const [portfolioRows, setPortfolioRows] = useState<ExecutivePortfolioRow[]>([]);
   const worklistRequestId = useRef(0);
   const worklistOwner = useRef('');
+  const portfolioRequestId = useRef(0);
+  const portfolioOwner = useRef('');
   const [conflictNotice, setConflictNotice] = useState('');
   const [obligationRecord, setObligationRecord] = useState<ObligationRecord | null>(null);
   const [obligationReason, setObligationReason] = useState('');
@@ -546,6 +551,12 @@ export default function App({
         return;
       }
       const nextSession: SignedInSession = await response.json();
+      const nextOwner = `${nextSession.id}:${nextSession.csrfToken}`;
+      worklistOwner.current = nextOwner;
+      worklistRequestId.current += 1;
+      portfolioOwner.current = nextOwner;
+      portfolioRequestId.current += 1;
+      setPortfolioRows([]);
       requestContext.current = '';
       resetHangarState();
       setSession(nextSession);
@@ -563,6 +574,10 @@ export default function App({
   }
 
   function handleSessionChange(nextSession: SignedInSession | null) {
+    const nextOwner = nextSession ? `${nextSession.id}:${nextSession.csrfToken}` : '';
+    portfolioRequestId.current += 1;
+    portfolioOwner.current = nextOwner;
+    setPortfolioRows([]);
     requestContext.current = '';
     resetHangarState();
     setSession(nextSession);
@@ -577,16 +592,17 @@ export default function App({
     if (nextSession) {
       const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
       const requestedFromSearch = validateReturnTo(new URLSearchParams(currentSearch).get('returnTo'));
-      const currentRoute = routePath && routeMatchesRole(routePath, nextSession.role) ? routePath : null;
-      const requestedPath = requestedFromSearch ?? currentRoute ?? returnTo ?? null;
+      const validRequestedFromSearch = requestedFromSearch && routeMatchesRole(requestedFromSearch, nextSession.role) ? requestedFromSearch : null;
+      const currentRoleRoute = routeMatchesRole(routePath, nextSession.role) ? normalizeRoutePath(routePath) : null;
+      const requestedPath = validRequestedFromSearch ?? (returnTo && routeMatchesRole(returnTo, nextSession.role) ? returnTo : null) ?? currentRoleRoute;
       const roleHome = ROLE_HOME_PATHS[nextSession.role] ?? '/work';
-      const resolvedPath = resolveReturnTo(requestedPath, roleHome);
-      const nextRoute = nextSession.role === 'presenter'
-        ? '/demo'
-        : (routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome);
+      const currentNormalizedRoute = normalizeRoutePath(routePath);
+      const executiveDenialRoute = nextSession.role === 'executive' && [currentNormalizedRoute, requestedFromSearch, returnTo].includes('/work');
+      const resolvedPath = executiveDenialRoute ? '/work' : resolveReturnTo(requestedPath, roleHome);
+      const nextRoute = executiveDenialRoute || routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome;
       if (typeof window !== 'undefined') {
         applyRoutePath(nextRoute);
-        setReturnTo(nextSession.role === 'presenter' ? null : (routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : null));
+        setReturnTo(executiveDenialRoute || routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : null);
       }
     }
   }
@@ -629,13 +645,10 @@ export default function App({
   }
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const nextPath = window.location.pathname + window.location.search;
-      const preferredRoute = session
-        ? (session.role === 'presenter' ? '/demo' : (routeMatchesRole(routePath, session.role) ? routePath : nextPath))
-        : nextPath;
-      setRoutePath(preferredRoute);
-      if (!session) {
+    if (!session) {
+      if (typeof window !== 'undefined') {
+        const nextPath = window.location.pathname + window.location.search;
+        setRoutePath(nextPath);
         const returnParam = new URLSearchParams(window.location.search).get('returnTo');
         if (returnParam && validateReturnTo(returnParam)) {
           setReturnTo(validateReturnTo(returnParam));
@@ -643,8 +656,6 @@ export default function App({
           setReturnTo(null);
         }
       }
-    }
-    if (!session) {
       requestContext.current = '';
       traceRequestId.current += 1;
       setRegions(loadingRegions());
@@ -660,6 +671,28 @@ export default function App({
       setConflictNotice('');
       return;
     }
+
+    const roleHome = ROLE_HOME_PATHS[session.role] ?? '/work';
+    const normalizedRoute = normalizeRoutePath(routePath);
+    const executiveDenialRoute = session.role === 'executive' && normalizedRoute === '/work';
+    if (executiveDenialRoute) {
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(true);
+      setPortfolioRows([]);
+      setReturnTo(null);
+      return;
+    }
+    const desiredRoute = routeMatchesRole(normalizedRoute, session.role) ? normalizedRoute : roleHome;
+    if (desiredRoute !== normalizedRoute) {
+      applyRoutePath(desiredRoute);
+      return;
+    }
+    if (session.role === 'executive' && normalizedRoute !== '/portfolio' && normalizedRoute !== '/work' && !normalizedRoute.match(/^\/cases\/[^/]+(?:\/|$)/)) {
+      applyRoutePath('/portfolio');
+      return;
+    }
+
     // A different user must never see the previous session's worklist: drop it before anything is fetched.
     const owner = `${session.id}:${session.csrfToken}`;
     if (worklistOwner.current !== owner) {
@@ -670,6 +703,11 @@ export default function App({
       setWorklistLoaded(false);
       setWorklistSelection(null);
       setConflictNotice('');
+    }
+    if (portfolioOwner.current !== owner) {
+      portfolioOwner.current = owner;
+      portfolioRequestId.current += 1;
+      setPortfolioRows([]);
     }
     if (session.role === 'technical-reviewer' || session.role === 'legal-reviewer') {
       const requestId = ++worklistRequestId.current;
@@ -694,11 +732,33 @@ export default function App({
           setWorklistError(0);
           setWorklistLoaded(true);
         });
+    } else if (session.role === 'executive' || session.role === 'presenter') {
+      worklistRequestId.current += 1;
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(true);
+      const requestId = ++portfolioRequestId.current;
+      fetch('/api/v1/workspace/portfolio')
+        .then(async (response) => {
+          if (!response.ok) {
+            if (requestId !== portfolioRequestId.current) return;
+            setPortfolioRows([]);
+            return;
+          }
+          const payload = await response.json() as { cases?: ExecutivePortfolioRow[] };
+          if (requestId !== portfolioRequestId.current) return;
+          setPortfolioRows(Array.isArray(payload.cases) ? payload.cases : []);
+        })
+        .catch(() => {
+          if (requestId !== portfolioRequestId.current) return;
+          setPortfolioRows([]);
+        });
     } else {
       worklistRequestId.current += 1;
       setWorklist([]);
       setWorklistError(null);
       setWorklistLoaded(true);
+      setPortfolioRows([]);
     }
     const sessionCaseId = resolveSessionCaseId(session, selectedCaseId);
     if (!sessionCaseId) {
@@ -716,7 +776,7 @@ export default function App({
     setCaseError('');
     for (const key of REGION_KEYS) loadRegion(key, sessionCaseId, context);
     return () => { if (requestContext.current === context) requestContext.current = ''; };
-  }, [session, selectedCaseId, refresh]);
+  }, [session, selectedCaseId, refresh, routePath]);
 
   async function showTrace(url: string) {
     const requestId = ++traceRequestId.current;
@@ -736,6 +796,7 @@ export default function App({
   const { value: dashboard } = regions.dashboard;
   const { value: review } = regions.review;
   const { value: readiness } = regions.readiness;
+  const executiveReadOnlyRole = !!session && (session.role === 'executive' || session.role === 'presenter');
   const financeHomeRoute = session?.role === 'finance-reviewer' && routePath === '/work';
   const financeReserveRoute = session?.role === 'finance-reviewer' && /^\/cases\/[^/]+\/reserve(?:$|\?)/.test(normalizeRoutePath(routePath));
   const presenterHomeRoute = session?.role === 'presenter' && routePath === '/demo';
@@ -767,6 +828,16 @@ export default function App({
       setCaseError(`Reset rejected (${result.status}).`);
     }
   }
+  const roleHomePath = session ? (ROLE_HOME_PATHS[session.role] ?? '/work') : '/work';
+  const roleHomeLabel = roleHomePath === '/portfolio' ? 'Portfolio' : roleHomePath === '/demo' ? 'Demo control' : 'My work';
+  const normalizedRoute = normalizeRoutePath(routePath);
+  const routeIsInRole = !session || routeMatchesRole(routePath, session.role);
+  const executiveRouteDenial = !!session && session.role === 'executive' && normalizedRoute === '/work';
+  const routeIsExecutivePortfolio = !!session && executiveReadOnlyRole && normalizedRoute === '/portfolio';
+  const routeIsExecutiveCase = !!session && executiveReadOnlyRole && /^\/cases\/[^/]+(?:\/|$)/.test(normalizedRoute);
+  const technicalDecisionPanelEnabled = session?.role === 'technical-reviewer';
+  const portfolioSessionKey = session ? `${session.id}:${session.csrfToken}` : '';
+  const visiblePortfolioRows = portfolioOwner.current === portfolioSessionKey ? portfolioRows : [];
 
   async function submitFinanceDecision(decision: string) {
     // The expected revision is the case revision the server holds, not the reserve draft's own version.
@@ -1129,6 +1200,12 @@ export default function App({
           primaryNavigation={<RoleNavigation role={session.role} />}
         >
           <section aria-labelledby="case-heading">
+            {session && (!routeIsInRole || executiveRouteDenial) && (
+              <section aria-live="polite">
+                <p>This page is not part of your workspace</p>
+                <a href={roleHomePath}>{roleHomeLabel}</a>
+              </section>
+            )}
             {!session.caseScopes?.length ? (
               <p>No cases are assigned to your account.</p>
             ) : (
@@ -1371,6 +1448,23 @@ export default function App({
                 onSelect={(caseId, itemId) => openTechnicalFinding(caseId, itemId)}
               />
             )}
+            {(session.role === 'executive' || session.role === 'presenter') && routePath === '/portfolio' && (
+              <ExecutivePortfolio
+                rows={visiblePortfolioRows}
+                onOpenCase={(caseId) => {
+                  handleCaseNavigate(`/cases/${encodeURIComponent(caseId)}/overview`);
+                }}
+              />
+            )}
+            {((session.role === 'executive' || session.role === 'presenter') && normalizeRoutePath(routePath).match(/^\/cases\/[^/]+(?:\/|$)/) && selectedCaseId && (
+              <ExecutiveCaseSummary
+                caseId={selectedCaseId}
+                summary="Executive read-only view"
+                rows={visiblePortfolioRows.find((row) => row.caseId === selectedCaseId)?.openItemsByRole ? Object.entries(visiblePortfolioRows.find((row) => row.caseId === selectedCaseId)!.openItemsByRole).map(([role, count]) => ({ role, count })) : []}
+                latestActivity={visiblePortfolioRows.find((row) => row.caseId === selectedCaseId)?.latestActivity ?? null}
+                showDecisionControls={false}
+              />
+            ))}
             {session.role === 'legal-reviewer' && worklistLoaded && legalObligationRoute && legalObligationRoute.caseId === selectedCaseId && obligationRecord && (
               <ObligationWorkspace
                 worklist={worklist}
@@ -1428,7 +1522,7 @@ export default function App({
               />
             )}
             {dashboard && <CapabilityDashboard
-              data={dashboard}
+              data={technicalDecisionPanelEnabled ? dashboard : { ...dashboard, allowedDecisions: [] }}
               decisionReason={reason}
               onDecisionReasonChange={setReason}
               onTraceSelect={(url) => { void showTrace(url); }}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PresenterDemoControl from '../src/workspaces/PresenterDemoControl';
 
@@ -39,6 +39,14 @@ describe('PresenterDemoControl', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /View as Finance reviewer/i })[0]);
     expect(onViewAs).toHaveBeenCalledWith('fin-1');
     expect(onViewAs.mock.calls).toEqual([['presenter'], ['fin-1']]);
+    const switches = within(screen.getByLabelText('Presenter persona switches'));
+    expect(switches.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'View as Demo presenter', 'View as Technical reviewer', 'View as Finance reviewer', 'View as Legal reviewer', 'View as Executive observer',
+    ]);
+    fireEvent.click(switches.getByRole('button', { name: 'View as Technical reviewer' }));
+    fireEvent.click(switches.getByRole('button', { name: 'View as Legal reviewer' }));
+    fireEvent.click(switches.getByRole('button', { name: 'View as Executive observer' }));
+    expect(onViewAs.mock.calls).toEqual([['presenter'], ['fin-1'], ['reviewer'], ['legal-1'], ['exec-1']]);
   });
 
   it('presenter_guided_path_contract', () => {

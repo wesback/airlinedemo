@@ -82,6 +82,12 @@ function setupApi(options: {
       return json(session);
     }
     if (url === '/api/auth/sign-out' && method === 'POST') return new Response(null, { status: 204 });
+    if (url === '/api/v1/workspace/portfolio' && method === 'GET') return json({ contractVersion: 1, cases: [], unavailableCaseIds: [] });
+    if (url === '/api/v1/workspace/worklist' && method === 'GET') return json({ contractVersion: 1, items: [], unavailableCaseIds: [], truncated: false });
+    if (url === '/api/cases/case-001/reserve' && method === 'GET') return json({
+      version: 1, status: 'Ready', lines: [],
+      allowedDecisions: [{ id: 'approve', label: 'Approve reserve' }, { id: 'return', label: 'Return reserve' }],
+    });
     if (url === '/api/cases/case-001' && method === 'GET') return json({ revision: 7, basis: [{ version: 4 }] });
     if (options.pendingCaseId && url === `/api/cases/${encodeURIComponent(options.pendingCaseId)}` && method === 'GET') return pendingCaseProjection!;
     if (url === '/api/cases/case-001/readiness' && method === 'GET') return json({
@@ -147,6 +153,14 @@ async function signIn() {
     || screen.queryAllByRole('alert')[0]
     || screen.queryByText('No cases are assigned to your account.')
   ).toBeTruthy());
+}
+
+async function signInPersona(displayName: string, role: string) {
+  fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  fireEvent.click(await screen.findByRole('radio', { name: `${displayName} (${role})` }));
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await screen.findByText(`Signed in as ${displayName}.`);
 }
 
 afterEach(() => {
@@ -240,7 +254,7 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
   });
 
-  it('presenter_scoped_reset_app_request_contract', async () => {
+  it('presenter_case_scope_and_reset_eligibility_contract', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -275,8 +289,9 @@ describe('reviewer workspace', () => {
       });
       if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && method === 'POST') {
         const body = JSON.parse(String(init?.body ?? '{}'));
-        expect(body).toMatchObject({ contractVersion: 1, expectedRevision: 7, variant: 'blocked' });
+        expect(body).toEqual({ contractVersion: 1, commandId: expect.stringMatching(/^cp-reset-7-\d+$/), expectedRevision: 7, variant: 'blocked' });
         expect(body.commandId).toMatch(/^cp-reset-7-\d+$/);
+        expect(calls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(1);
         expect((init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
         return json({ accepted: true }, 200);
       }
@@ -337,8 +352,46 @@ describe('reviewer workspace', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /Demo presenter/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await screen.findByText('Signed in as Demo presenter.');
+    await screen.findByLabelText('cp-case-a reset not eligible');
+    const presenterList = within(screen.getByRole('region', { name: 'Demo control' }));
+    expect(presenterList.getAllByRole('row')).toHaveLength(2);
+    expect(presenterList.getByRole('cell', { name: 'Case A' })).toBeTruthy();
+    expect(presenterList.queryByRole('cell', { name: /Case C|cp-case-c/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
     expect(noActionCalls.filter(({ url, init }) => url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && init?.method === 'POST')).toHaveLength(0);
+
+    cleanup();
+    window.history.replaceState({}, '', '/demo');
+    const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-c'], csrfToken: 'csrf-session-token' });
+      if (String(input) === '/api/v1/cases/cp-case-c/scene') return json({
+        contractVersion: 1, current: true, canResetBlockedVariant: false, allowedActions: ['reset'],
+        case: { caseId: 'cp-case-c', caseRevision: 7, permission: true }, objects: [],
+      });
+      return baseFetch(input, init);
+    });
+    render(<App />);
+    await signInPersona('Demo presenter', 'presenter');
+    await screen.findByLabelText('cp-case-c reset not eligible');
+    const ineligibleList = within(screen.getByRole('region', { name: 'Demo control' }));
+    expect(ineligibleList.getByRole('cell', { name: 'Case C' })).toBeTruthy();
+    expect(ineligibleList.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(noActionCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
+
+    cleanup();
+    window.history.replaceState({}, '', '/demo');
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: [], csrfToken: 'csrf-session-token' });
+      return baseFetch(input, init);
+    });
+    render(<App />);
+    await signInPersona('Demo presenter', 'presenter');
+    const emptyList = within(await screen.findByRole('region', { name: 'Demo control' }));
+    expect(emptyList.getAllByRole('row')).toHaveLength(1);
+    expect(emptyList.queryAllByRole('cell')).toHaveLength(0);
+    expect(emptyList.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(noActionCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
   });
 
   it('AC_004_demo_view_as_contract', async () => {
@@ -352,6 +405,8 @@ describe('reviewer workspace', () => {
 
     for (const persona of personaChecks) {
       const calls: Array<{ url: string; init?: RequestInit }> = [];
+      let resolveSwitch!: (response: Response) => void;
+      const pendingSwitch = new Promise<Response>((resolve) => { resolveSwitch = resolve; });
       const assignSpy = vi.fn();
       Object.defineProperty(window, 'location', {
         configurable: true,
@@ -369,7 +424,7 @@ describe('reviewer workspace', () => {
           const body = JSON.parse(String(init?.body ?? '{}'));
           expect(body).toEqual({ userId: persona.id });
           expect((init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
-          return json({ id: persona.id, displayName: persona.label, role: persona.id === 'presenter' ? 'presenter' : persona.id === 'reviewer' ? 'technical-reviewer' : persona.id === 'fin-1' ? 'finance-reviewer' : persona.id === 'legal-1' ? 'legal-reviewer' : 'executive', caseScopes: ['cp-case-c'], csrfToken: 'csrf-next-token' }, 200);
+          return pendingSwitch;
         }
         if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 }] });
         if (url === '/api/v1/cases/cp-case-c/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: true, allowedActions: ['reset'], case: { caseId: 'cp-case-c', caseRevision: 7, name: 'Case C', aircraftName: 'Case C', aircraftCategory: 'wide-body', capabilityLabel: 'Rules-based', permission: true, allowedActions: ['reset'] }, objects: [] });
@@ -393,7 +448,15 @@ describe('reviewer workspace', () => {
       expect(switchCall).toBeTruthy();
       expect(JSON.parse(String(switchCall?.init?.body ?? '{}'))).toEqual({ userId: persona.id });
       expect((switchCall?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
-      expect(assignSpy).toHaveBeenCalledWith(persona.home);
+      expect(calls.filter(({ url }) => url === '/api/auth/switch-user')).toHaveLength(1);
+      expect(assignSpy).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Demo presenter' })).toBeTruthy();
+      expect(screen.getByRole('navigation', { name: 'Primary' }).getAttribute('data-role')).toBe('presenter');
+      resolveSwitch(json({ id: persona.id, displayName: persona.label, role: persona.id === 'presenter' ? 'presenter' : persona.id === 'reviewer' ? 'technical-reviewer' : persona.id === 'fin-1' ? 'finance-reviewer' : persona.id === 'legal-1' ? 'legal-reviewer' : 'executive', caseScopes: ['cp-case-c'], csrfToken: 'csrf-next-token' }));
+      await waitFor(() => expect(assignSpy).toHaveBeenCalledWith(persona.home));
+      expect(assignSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: persona.label })).toBeTruthy();
+      expect(screen.getByRole('navigation', { name: 'Primary' }).getAttribute('data-role')).toBe(persona.id === 'presenter' ? 'presenter' : persona.id === 'reviewer' ? 'technical-reviewer' : persona.id === 'fin-1' ? 'finance-reviewer' : persona.id === 'legal-1' ? 'legal-reviewer' : 'executive');
       cleanup();
     }
 
@@ -580,6 +643,137 @@ describe('reviewer workspace', () => {
     expect(invalidWorkspaceMain).not.toBeNull();
     expect(invalidWorkspaceMain?.contains(screen.getByRole('heading', { name: 'Case case-001' }))).toBe(true);
     expect(invalidCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+  });
+
+  it('role route navigation', async () => {
+    const executiveSession = { ...signedIn, role: 'executive', displayName: 'Executive observer', caseScopes: ['case-001'] };
+    setupApi({ session: executiveSession, users: [{ id: 'exec-1', displayName: 'Executive observer', role: 'executive' }] });
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Executive observer.');
+    expect(window.location.pathname).toBe('/portfolio');
+    expect(screen.getByRole('heading', { name: 'Portfolio' })).toBeTruthy();
+    expect(screen.queryByText('This page is not part of your workspace')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Technical My work' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Accept finding|Reject finding/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /My work/i })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Case case-001' })).toBeTruthy();
+
+    cleanup();
+    window.history.replaceState({}, '', '/work');
+    const calls = setupApi({ session: executiveSession, users: [{ id: 'exec-1', displayName: 'Executive observer', role: 'executive' }] });
+    render(<App />);
+    await signInPersona('Executive observer', 'executive');
+    expect(window.location.pathname).toBe('/work');
+    expect(screen.getAllByText('This page is not part of your workspace').map((element) => element.textContent))
+      .toEqual(['This page is not part of your workspace']);
+    expect(within(screen.getByRole('navigation', { name: 'Primary' })).queryByRole('link', { name: 'My work' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /My work/ })).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('group', { name: /decisions/i })).toBeNull();
+    expect(screen.queryByLabelText('Reason for decision')).toBeNull();
+    expect(calls.filter(({ url }) => url === '/api/v1/workspace/worklist')).toEqual([]);
+  });
+
+  it.each([
+    { role: 'technical-reviewer', path: '/cases/case-001/overview', technical: true, finance: false },
+    { role: 'finance-reviewer', path: '/cases/case-001/reserve', technical: false, finance: true },
+    { role: 'executive', path: '/cases/case-001/overview', technical: false, finance: false },
+    { role: 'executive', path: '/cases/case-001/history', technical: false, finance: false },
+  ])('executive_case_read_only_and_role_matched_decision_panels ($role)', async ({ role, path, technical, finance }) => {
+    const session = { ...signedIn, role };
+    const calls = setupApi({ canReset: true, session, users: [{ id: session.id, displayName: session.displayName, role }] });
+    window.history.replaceState({}, '', path);
+    render(<App />);
+    await signInPersona(session.displayName, role);
+    await screen.findByRole('heading', { name: 'Capabilities' });
+    if (finance) await screen.findByRole('group', { name: 'Reserve decisions' });
+
+    expect(window.location.pathname).toBe(path);
+    expect(screen.queryByRole('group', { name: 'Technical review decisions' }) !== null).toBe(technical);
+    expect(screen.queryByRole('group', { name: 'Reserve decisions' }) !== null).toBe(finance);
+    expect(screen.queryByRole('button', { name: 'Accept finding' }) !== null).toBe(technical);
+    expect(screen.queryByRole('button', { name: 'Reject finding' }) !== null).toBe(technical);
+    expect(screen.queryByRole('button', { name: 'Approve reserve' }) !== null).toBe(finance);
+    expect(screen.queryByRole('button', { name: 'Return reserve' }) !== null).toBe(finance);
+    if (role === 'executive') {
+      expect(screen.getByTestId('executive-case-summary')).toBeTruthy();
+      expect(screen.queryByLabelText('Reason for decision')).toBeNull();
+      expect(screen.queryAllByRole('form').map((form) => form.getAttribute('aria-label'))).toEqual(['Case search form']);
+      expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    }
+    expect(calls.filter(({ url, init }) => url.startsWith('/api/cases/') && init?.method === 'POST')).toEqual([]);
+  });
+
+  it('executive_portfolio_row_opens_matching_read_only_summary', async () => {
+    const executiveSession = { ...signedIn, role: 'executive', displayName: 'Executive observer', caseScopes: ['case-001', 'case-002'] };
+    setupApi({ session: executiveSession, users: [{ id: 'exec-1', displayName: 'Executive observer', role: 'executive' }] });
+    const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/v1/workspace/portfolio') {
+        return json({
+          cases: [
+            {
+              caseId: 'case-001',
+              openItemsByRole: { 'technical-reviewer': 2, 'finance-reviewer': 1 },
+              nextDecisionOwner: 'exec-1',
+              oldestOpenAgeSeconds: 90000,
+              latestActivity: { sequence: 1, actor: 'Ada Reviewer', label: 'Human decision', outcome: 'technical-review.decided' },
+            },
+            {
+              caseId: 'case-002',
+              openItemsByRole: { 'technical-reviewer': 1 },
+              nextDecisionOwner: 'exec-2',
+              oldestOpenAgeSeconds: 3600,
+              latestActivity: { sequence: 2, actor: 'Sam Analyst', label: 'Review queued', outcome: 'awaiting-finance-review' },
+            },
+          ],
+        });
+      }
+      return baseFetch(input, init);
+    });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Executive observer.');
+    await screen.findByRole('heading', { name: 'Portfolio' });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('row').find((row) => row.textContent?.includes('case-002'))).toBeTruthy();
+    });
+    const case002Row = screen.getAllByRole('row').find((row) => row.textContent?.includes('case-002'))!;
+    fireEvent.click(case002Row);
+
+    const caseSummary002 = await screen.findByTestId('executive-case-summary');
+    expect(within(caseSummary002).getByRole('heading', { name: 'Case case-002' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-002/overview');
+    expect(within(caseSummary002).queryByText('Case case-001')).toBeNull();
+
+    cleanup();
+    window.history.replaceState({}, '', '/portfolio');
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('heading', { name: 'Portfolio' });
+
+    const case001Row = (await screen.findAllByRole('row')).find((row) => row.textContent?.includes('case-001'));
+    expect(case001Row).toBeTruthy();
+    fireEvent.click(case001Row!);
+
+    const caseSummary001 = await screen.findByTestId('executive-case-summary');
+    expect(within(caseSummary001).getByRole('heading', { name: 'Case case-001' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-001/overview');
+    expect(within(caseSummary001).queryByText('Case case-002')).toBeNull();
   });
 
   it('AC_001_App_root_shell_and_Hangar_composition', async () => {
@@ -1014,6 +1208,21 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('button', { name: 'Move avatar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Reset blocked variant' })).toBeTruthy();
+
+    cleanup();
+    window.history.replaceState({}, '', '/portfolio');
+    const executiveSession = { ...signedIn, role: 'executive', displayName: 'Executive observer', caseScopes: ['case-001'] };
+    setupApi({ session: executiveSession, users: [{ id: 'exec-1', displayName: 'Executive observer', role: 'executive' }] });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Executive observer.');
+    fireEvent.click(await screen.findByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Accept finding|Reject finding/i })).toBeNull();
   });
 
   it('reports an unavailable API without claiming it is connected', async () => {

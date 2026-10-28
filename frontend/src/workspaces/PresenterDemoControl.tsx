@@ -56,10 +56,7 @@ export default function PresenterDemoControl({
   onResetCase,
   onViewAs,
 }: PresenterDemoControlProps) {
-  const resolvedCases = cases.length
-    ? cases
-    : [{ id: caseId ?? 'demo-case', name: caseId ?? 'Selected case', canReset: false }];
-  const effectiveCaseId = caseId ?? resolvedCases[0]?.id;
+  const effectiveCaseId = caseId ?? cases[0]?.id;
 
   return (
     <section aria-labelledby="presenter-demo-control-heading">
@@ -75,6 +72,7 @@ export default function PresenterDemoControl({
         </div>
       </div>
 
+      {cases.length === 0 && <p>No cases in your scope.</p>}
       <table>
         <thead>
           <tr>
@@ -84,7 +82,7 @@ export default function PresenterDemoControl({
           </tr>
         </thead>
         <tbody>
-          {resolvedCases.map((entry) => (
+          {cases.map((entry) => (
             <tr key={entry.id}>
               <td>{entry.name ?? entry.id}</td>
               <td>

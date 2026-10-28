@@ -178,7 +178,7 @@ public static partial class TelemetryRedaction
         ["severity.number"] = v => v is "9" or "13" or "17",
         ["source.id"] = v => AllowedSourceIds.Contains(v),
         ["case.id"] = v => CaseIdRule.IsMatch(v),
-        ["event.outcome"] = v => AllowedSourceOutcomes.Contains(v) || v is "success" or "unauthorized" or "anti_forgery_failed" or "unknown_user",
+        ["event.outcome"] = v => AllowedSourceOutcomes.Contains(v) || v is "success" or "unauthorized" or "anti_forgery_failed" or "unknown_user" or "replayed" or "validation_failed" or "conflict" or "invalid" or "rate_limited",
         ["duration"] = v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var duration) && duration >= 0,
         ["action"] = v => v is "role-switch" or "case-reset",
         ["fixture.role"] = v => v == "unknown" || DemoFixtureRole(v),
@@ -314,7 +314,7 @@ public static partial class TelemetryRedaction
         string serviceVersion,
         string environment)
     {
-        if (outcome is not ("success" or "replayed" or "denied" or "validation_failed" or "conflict" or "invalid" or "rate_limited" or "failed"))
+        if (outcome is not ("success" or "replayed" or "denied" or "validation_failed" or "conflict" or "invalid" or "rate_limited" or "failed" or "unauthorized" or "anti_forgery_failed"))
         {
             throw new ArgumentException("Unknown case-reset outcome.", nameof(outcome));
         }

@@ -1,10 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Collections.Concurrent;
+using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Runs;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -36,6 +41,86 @@ public sealed class DemoRunResetTests : IDisposable
     {
         var scope = store.AuthorizeCase(runId, Owner);
         store.Commit(scope, store.Read(scope).Revision, new CaseCommit(null, receipt, actor, action, action + " " + runId));
+    }
+
+    [Theory]
+    [InlineData("success", 200, "success")]
+    [InlineData("stale", 409, "conflict")]
+    [InlineData("outside-scope", 404, "denied")]
+    [InlineData("anonymous", 401, "unauthorized")]
+    [InlineData("wrong-role", 403, "denied")]
+    [InlineData("csrf", 400, "anti_forgery_failed")]
+    [InlineData("invalid-body", 400, "validation_failed")]
+    public async Task Demo_reset_and_role_switch_events(string scenario, int status, string outcome)
+    {
+        var logs = new ResetEventLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Demo:Passcode"] = "reset-test-passcode",
+                ["CaseState:Path"] = PathFor(),
+            }));
+            builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(logs));
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        var store = factory.Services.GetRequiredService<ICaseStateStore>();
+        var scope = store.CreateCase("cp-case-c", Owner);
+        for (var revision = 0; revision < 7; revision++)
+            store.Commit(scope, revision, new CaseCommit(null, null, Owner, "seed", "seed"));
+        var before = JsonSerializer.Serialize(store.Read(scope));
+        var role = scenario == "wrong-role" ? "technical-reviewer" : "presenter";
+        var session = factory.Services.GetRequiredService<DemoSessionStore>().Create(
+            new DemoUser("reset-test-presenter", "Presenter", role, scenario == "outside-scope" ? ["cp-case-a"] : ["cp-case-c"]));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-c/reset-blocked-variant")
+        {
+            Content = scenario == "invalid-body"
+                ? JsonContent.Create(new { itemBody = "CANARY-ITEM-655", noticeDraft = "CANARY-DRAFT-655" })
+                : JsonContent.Create(new { contractVersion = 1, commandId = "reset-event-1", expectedRevision = scenario == "stale" ? 6 : 7, variant = "blocked" }),
+        };
+        if (scenario != "anonymous")
+        {
+            request.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+            request.Headers.Add("X-CSRF-Token", scenario == "csrf" ? "CANARY-CSRF-655" : session.CsrfToken);
+        }
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.Equal(status, (int)response.StatusCode);
+        if (scenario == "outside-scope")
+            Assert.Equal("{\"contractVersion\":1,\"error\":{\"code\":\"not_found\",\"message\":\"Not found.\"}}", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        if (scenario == "stale")
+            Assert.Equal("stale_revision", (await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).GetProperty("error").GetProperty("code").GetString());
+        if (scenario == "csrf")
+            Assert.Equal("anti_forgery_failed", (await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).GetProperty("error").GetProperty("code").GetString());
+        if (scenario == "success")
+        {
+            Assert.Equal(8, store.Read(scope).Revision);
+            Assert.Single(store.Read(scope).BlockedVariantResetReceipts!);
+        }
+        else Assert.Equal(before, JsonSerializer.Serialize(store.Read(scope)));
+
+        var properties = Assert.Single(logs.Events.Where(p => p.GetValueOrDefault("event.name") == "security.case_reset"));
+        Assert.Equal(TelemetryRedaction.SecurityEvents.CaseReset, properties["event.name"]);
+        Assert.Equal("case-reset", properties["action"]);
+        Assert.Equal(outcome, properties["event.outcome"]);
+        Assert.Equal(scenario == "anonymous" ? "unknown" : role, properties["fixture.role"]);
+        Assert.Matches("^trace-[0-9a-f]{16}$", properties["trace.id"]!);
+        Assert.Matches("^actor-[0-9a-f]{16}$", properties["enduser.pseudo.id"]!);
+        foreach (var canary in new[] { session.Id, session.CsrfToken, "reset-test-passcode", "CANARY-CSRF-655", "CANARY-ITEM-655", "CANARY-DRAFT-655" })
+            Assert.DoesNotContain(canary, string.Join("|", properties.Select(p => $"{p.Key}={p.Value}")));
+    }
+
+    private sealed class ResetEventLogger : ILoggerProvider, ILogger
+    {
+        public ConcurrentQueue<Dictionary<string, string?>> Events { get; } = new();
+        public ILogger CreateLogger(string categoryName) => this;
+        public void Dispose() { }
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (state is IEnumerable<KeyValuePair<string, object?>> properties)
+                Events.Enqueue(properties.GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Last().Value?.ToString()));
+        }
     }
 
     [Fact]
