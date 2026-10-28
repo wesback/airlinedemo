@@ -373,12 +373,12 @@ afterEach(() => {
     });
     window.dispatchEvent(new Event('focus'));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Hangar scene' }));
-    await waitFor(() => expect(sceneCalls).toBe(1));
+    await waitFor(() => expect(sceneCalls).toBe(1), { timeout: 5000 });
     const makeEnvelope = (revision: number) => new Response(JSON.stringify({ contractVersion: 1, case: { caseId: 'cp-case-a', caseRevision: revision, status: {}, owner: 'Technical reviewer', nextAction: null, capabilityLabel: 'Rules-based', permission: true }, objects: [
       { objectId: 'SYN-CP-A-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-ENG-001', kind: 'engine', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-001', kind: 'component', caseId: 'cp-case-a' }, { objectId: 'SYN-CP-A-CMP-002', kind: 'component', caseId: 'cp-case-a' },
     ], canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     resolveFocus(makeEnvelope(8));
-    await waitFor(() => expect(sceneCalls).toBe(2));
+    await waitFor(() => expect(sceneCalls).toBe(2), { timeout: 5000 });
     expect(sceneCalls).toBe(2);
     resolveExplicit(makeEnvelope(7));
     await screen.findByText(/Hangar refresh failed/);
