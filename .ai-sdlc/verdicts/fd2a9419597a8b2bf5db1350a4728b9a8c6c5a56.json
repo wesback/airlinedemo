@@ -1,0 +1,259 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 655,
+  "branch": "ai-sdlc/issue-655",
+  "commitSha": "fd2a9419597a8b2bf5db1350a4728b9a8c6c5a56",
+  "round": 1,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previously reported App-level test and guided-path gaps are addressed. The new App tests cover successful flows but omit the acceptance criteria’s required negative cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 243,
+          "message": "The reset test does not cover AC1’s negative cases: an out-of-scope case or an ineligible scene must show no reset action and send no request.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_app_request_contract exercises only an eligible, in-scope reset. It does not assert the acceptance criterion’s negative UI cases.",
+            "failureScenario": "If the App lists an out-of-scope case or sends a reset request when scene eligibility is false, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 301,
+          "message": "The View as test does not cover AC2’s negative case: a 403 or unknown persona must leave the session and role unchanged and must not navigate.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_004_demo_view_as_contract exercises successful switches for the five known personas but does not test a 403 response or an unknown persona.",
+            "failureScenario": "If a failed switch changes the current session or navigates, or an unknown ID is accepted, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The checklist now includes the required role-specific destinations, and the reset test exercises the App request. The View as test covers the request and CSRF header, but does not verify success-gating or rejection behavior from AC_004.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 300,
+          "message": "The production View as test still misses success-gated navigation and the required rejection cases. Assert that navigation and session changes wait for success, and that a 403 or unknown persona leaves the session unchanged and does not navigate.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_004_demo_view_as_contract stubs each switch-user request with an immediately successful response and checks that navigation occurs. It does not hold the response pending or test a 403 or unknown persona.",
+            "failureScenario": "If the App navigates before the server responds, or changes the session and navigates after a 403 or unknown persona, this test still passes; the acceptance criterion’s success-gating and rejection behavior are unverified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The checklist now includes the required role-specific destinations. The updated App tests cover successful reset and persona-switch requests, but leave the specified scope, eligibility, and rejection cases unverified.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 243,
+          "message": "The reset test still does not verify the App-level scope and eligibility safeguards required by the acceptance criterion.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_app_request_contract exercises only an eligible in-scope reset. It does not test an out-of-scope case or a scene whose reset eligibility is false.",
+            "failureScenario": "If the App stops checking presenter case scope or reset eligibility, the test still passes. The acceptance criterion requires no reset action and no reset request for those states."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 302,
+          "message": "The View as test still omits the rejection cases required by AC_004.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC_004_demo_view_as_contract tests successful switch-user responses for the five personas, but does not test a 403 response or an unknown persona.",
+            "failureScenario": "If a rejected switch changes the session or navigates, or an unknown persona reaches the switch-user request, this test still passes. The acceptance criterion requires the role and session to remain unchanged and navigation not to occur on rejection."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/PresenterDemoControl.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
