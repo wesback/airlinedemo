@@ -24,7 +24,7 @@ export default function CaseSearch({ caseScopes = [], onNavigate }: CaseSearchPr
     const path = `/cases/${firstMatch}/overview`;
     onNavigate?.(path);
     if (typeof window !== 'undefined') {
-      window.history.pushState({}, '', path);
+      window.history.replaceState({}, '', path);
     }
   }
 

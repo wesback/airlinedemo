@@ -274,11 +274,14 @@ describe('reviewer workspace', () => {
   });
 
   it('AC_006_returnTo_and_role_route_integration', async () => {
-    const calls = setupApi({
-      session: { ...signedIn, role: 'finance-reviewer', displayName: 'Finance reviewer', caseScopes: ['case-001'] },
-      users: [{ id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }],
+    const financeSession = { ...signedIn, role: 'finance-reviewer', displayName: 'Finance reviewer', caseScopes: ['case-001'] };
+    const financeUsers = [{ id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }];
+
+    const validCalls = setupApi({
+      session: financeSession,
+      users: financeUsers,
     });
-    window.history.replaceState({}, '', '/work?returnTo=%2Fcases%2Fcase-001%2Ffindings');
+    window.history.replaceState({}, '', '/cases/case-001/reserve?returnTo=%2Fcases%2Fcase-001%2Freserve');
     render(<App />);
 
     expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
@@ -290,8 +293,25 @@ describe('reviewer workspace', () => {
     await screen.findByText('Signed in as Finance reviewer.');
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Finance reviewer' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-001/reserve');
+    expect(validCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+
+    cleanup();
+    const invalidCalls = setupApi({
+      session: financeSession,
+      users: financeUsers,
+    });
+    window.history.replaceState({}, '', '/work?returnTo=%2Fcases%2Fcase-001%2Ffindings');
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Finance reviewer (finance-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('Signed in as Finance reviewer.');
     expect(window.location.pathname).toBe('/work');
-    expect(calls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+    expect(invalidCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
   });
 
   it('AC_001_App_root_shell_and_Hangar_composition', async () => {
