@@ -23,6 +23,8 @@ import HangarNon3dDataRoom from './hangar/non3dDataRoom';
 import WorkspaceShell from './components/WorkspaceShell';
 import RoleNavigation from './components/RoleNavigation';
 import CaseSearch from './components/CaseSearch';
+import FinanceWorkspace, { type FinanceWorklistItem } from './workspaces/FinanceWorkspace';
+import ReserveWorksheet, { type ReserveWorksheetDraft } from './workspaces/ReserveWorksheet';
 import TechnicalWorkspace, { type WorklistItem } from './workspaces/TechnicalWorkspace';
 import FindingWorkspace from './workspaces/FindingWorkspace';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
@@ -134,6 +136,9 @@ export default function App({
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
   const [session, setSession] = useState<SignedInSession | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [financeWorklist, setFinanceWorklist] = useState<FinanceWorklistItem[]>([]);
+  const [financeReserve, setFinanceReserve] = useState<ReserveWorksheetDraft | null>(null);
+  const [financeDecisionToast, setFinanceDecisionToast] = useState('');
   const [regions, setRegions] = useState<Regions>(loadingRegions);
   // Identifies the signed-in session and selected case a request was made for; a response for any other is dropped.
   const requestContext = useRef('');
@@ -679,6 +684,121 @@ export default function App({
   const { value: dashboard } = regions.dashboard;
   const { value: review } = regions.review;
   const { value: readiness } = regions.readiness;
+  const financeHomeRoute = session?.role === 'finance-reviewer' && routePath === '/work';
+  const financeReserveRoute = session?.role === 'finance-reviewer' && /^\/cases\/[^/]+\/reserve(?:$|\?)/.test(normalizeRoutePath(routePath));
+
+  async function submitFinanceDecision(decision: string) {
+    // The expected revision is the case revision the server holds, not the reserve draft's own version.
+    if (!session || session.role !== 'finance-reviewer' || !selectedCaseId || !financeReserve || !caseState || !Number.isInteger(caseState.revision) || !reason.trim()) return;
+    setDecisionBusy(true);
+    setCaseError('');
+    setConflictNotice('');
+    setFinanceDecisionToast('');
+    try {
+      const response = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/reserve/decisions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
+        body: JSON.stringify({
+          expectedRevision: caseState.revision,
+          decision,
+          reason: reason.trim(),
+        }),
+      });
+      if (response.status === 403) {
+        setCaseError('You are not permitted to record this decision.');
+        return;
+      }
+      if (response.status === 409) {
+        // Nothing is applied locally; the reload replaces the case, reserve and worklist with what the server holds.
+        setConflictNotice('The case changed. Refresh the case before deciding.');
+        setRefresh((value) => value + 1);
+        return;
+      }
+      if (!response.ok) throw new RequestError(response.status);
+      setFinanceDecisionToast('Decision recorded');
+      setReason('');
+      setRefresh((value) => value + 1);
+    } catch {
+      setCaseError('Unable to record the decision. Try again later.');
+    } finally {
+      setDecisionBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!session || session.role !== 'finance-reviewer') {
+      setFinanceWorklist([]);
+      setFinanceDecisionToast('');
+      return;
+    }
+    let active = true;
+    fetch('/api/v1/workspace/worklist')
+      .then(async (response) => {
+        if (!response.ok) {
+          if (active) setFinanceWorklist([]);
+          return;
+        }
+        const payload = await response.json() as { items?: Array<{ caseId: string; itemId: string; capabilityId: string; state: string; owner: string; ageSeconds: number; label: string }> };
+        if (active) setFinanceWorklist((payload.items ?? []).map((item) => ({
+          caseId: item.caseId,
+          itemId: item.itemId,
+          capabilityId: item.capabilityId,
+          state: item.state,
+          owner: item.owner,
+          ageSeconds: item.ageSeconds,
+          label: item.label,
+        })));
+      })
+      .catch(() => {
+        if (active) setFinanceWorklist([]);
+      });
+    return () => { active = false; };
+  }, [session, refresh]);
+
+  useEffect(() => {
+    if (!session || session.role !== 'finance-reviewer' || !selectedCaseId || !(financeHomeRoute || financeReserveRoute)) {
+      setFinanceReserve(null);
+      return;
+    }
+    let active = true;
+    fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/reserve`)
+      .then(async (response) => {
+        if (!response.ok) {
+          if (active) setFinanceReserve(null);
+          return;
+        }
+        const payload = await response.json() as {
+          draftId?: string;
+          version?: number;
+          revision?: number;
+          period?: string;
+          status?: string;
+          payableTotal?: number | null;
+          calculationBasis?: string;
+          blockers?: Array<{ code?: string; detail?: string }>;
+          discrepancies?: string[];
+          lines?: Array<{ input?: string; value?: string | number | null; source?: string; freshness?: string; status?: string; label?: string; contractLine?: string; ContractLine?: string }>;
+          allowedDecisions?: Array<{ id: string; label: string }>;
+        };
+        if (active) setFinanceReserve({
+          draftId: payload.draftId,
+          version: payload.version,
+          revision: payload.revision ?? payload.version,
+          period: payload.period,
+          status: payload.status,
+          payableTotal: payload.payableTotal,
+          calculationBasis: payload.calculationBasis,
+          blockers: payload.blockers ?? [],
+          discrepancies: payload.discrepancies ?? [],
+          lines: payload.lines ?? [],
+          allowedDecisions: payload.allowedDecisions ?? [{ id: 'approve', label: 'Approve reserve' }, { id: 'return', label: 'Return reserve' }],
+        });
+      })
+      .catch(() => {
+        if (active) setFinanceReserve(null);
+      });
+    return () => { active = false; };
+  }, [session, selectedCaseId, financeHomeRoute, financeReserveRoute, refresh]);
 
   async function submitDecision(capabilityId: string, decision: string, overrideReason?: string): Promise<boolean> {
     const nextReason = (overrideReason ?? reason).trim();
@@ -727,7 +847,7 @@ export default function App({
     }
   }
 
-  const currentDecision = review?.decisions.filter((item) => item.current).at(-1)?.decision;
+  const currentDecision = (review?.decisions ?? []).filter((item) => item.current).at(-1)?.decision;
   const healthMessage = {
     checking: 'Checking service connection…',
     ready: 'Service connected',
@@ -899,8 +1019,24 @@ export default function App({
               </section>
             ))}
             {caseError && <p role="alert">{caseError}</p>}
+            {session?.role === 'finance-reviewer' && selectedCaseId && financeHomeRoute && (
+              <FinanceWorkspace items={financeWorklist} onOpenCase={(caseId) => {
+                handleCaseNavigate(`/cases/${encodeURIComponent(caseId)}/reserve`);
+              }} />
+            )}
+            {session?.role === 'finance-reviewer' && selectedCaseId && (financeHomeRoute || financeReserveRoute) && (
+              <>
+                {financeDecisionToast && <p role="status">{financeDecisionToast}</p>}
+                <ReserveWorksheet
+                  draft={financeReserve}
+                  decisionReason={reason}
+                  onDecisionReasonChange={setReason}
+                  onDecision={(decision) => { if (!decisionBusy) void submitFinanceDecision(decision); }}
+                />
+              </>
+            )}
             {conflictNotice && <p role="alert">{conflictNotice}</p>}
-            {caseState && (
+            {caseState && session?.role !== 'finance-reviewer' && (
               <>
                 <p>Revision: {caseState.revision}</p>
                 <p>Evidence basis: {caseState.basis.length}</p>

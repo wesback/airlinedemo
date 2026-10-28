@@ -60,10 +60,10 @@ type Props = {
 export default function CapabilityDashboard({
   data, decisionReason, onDecisionReasonChange, onDecision, onTraceSelect,
 }: Props) {
-  const allowedDecisions = data.allowedDecisions.filter(
+  const allowedDecisions = (data?.allowedDecisions ?? []).filter(
     (action) => (action.id === 'accept' || action.id === 'reject') && typeof action.label === 'string',
   );
-  const hasTechnicalReview = data.capabilities.some((capability) => capability.id === 'technical-review');
+  const hasTechnicalReview = (data?.capabilities ?? []).some((capability) => capability.id === 'technical-review');
   const decisionControls = (capabilityId: string) => capabilityId === 'technical-review' && allowedDecisions.length > 0 && (
     <>
       {typeof decisionReason === 'string' && onDecisionReasonChange && (
@@ -90,7 +90,7 @@ export default function CapabilityDashboard({
     <div>
       <section aria-labelledby="capabilities-heading">
         <h2 id="capabilities-heading">Capabilities</h2>
-        {data.capabilities.map((capability) => {
+        {(data?.capabilities ?? []).map((capability) => {
           const label = safeLabel(capability.label);
           const traces = capability.id === 'records-investigation'
             ? capability.evidence.flatMap((link) => {
@@ -148,7 +148,7 @@ export default function CapabilityDashboard({
         <h2 id="queue-heading">Queue</h2>
         <div role="status" aria-label="Queue updates">
           <ul>
-            {data.queue.map((item) => (
+            {(data?.queue ?? []).map((item) => (
               <li key={item.itemId}>
                 <span>{safeLabel(item.label)}</span> {item.itemId}
               </li>
@@ -161,7 +161,7 @@ export default function CapabilityDashboard({
         <h2 id="activity-heading">Activity</h2>
         <div role="status" aria-label="Activity updates">
           <ol>
-            {[...data.activity]
+            {[...(data?.activity ?? [])]
               .sort((a, b) => a.sequence - b.sequence)
               .map((event) => (
                 <li key={event.sequence}>
