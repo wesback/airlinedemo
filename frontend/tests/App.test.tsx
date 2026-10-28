@@ -182,6 +182,11 @@ describe('reviewer workspace', () => {
 
   it('AC_004_switch_role_failure', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, init });
@@ -209,6 +214,8 @@ describe('reviewer workspace', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('You do not have permission for this action.');
+    expect(calls.filter(({ url }) => url === '/api/auth/switch-user')).toHaveLength(1);
+    expect(assignSpy).not.toHaveBeenCalled();
     expect(screen.getByText('Technical reviewer')).toBeTruthy();
     expect(screen.getByText('Case case-001')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
