@@ -1,0 +1,289 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 652,
+  "branch": "ai-sdlc/issue-652",
+  "commitSha": "9bc8ecaa345be4fd57e13073b541862cb7ec6c0c",
+  "round": 0,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new components have basic rendering and interaction tests, but the named criterion tests are absent and key acceptance behaviors are not asserted. In particular, the reserve decision test does not exercise the App's API submission and response flow.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/FinanceWorkspace.test.tsx",
+          "line": 6,
+          "message": "The required `AC_010_finance_worklist_contract` test is absent, and this test is not tied to that criterion by name or comment. Add criterion coverage that asserts server order as well as filtering and opening.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The only worklist test checks filtering and opening a row; it does not assert the rendered row order.",
+            "failureScenario": "If the workspace sorts server-provided items instead of preserving server order, this test still passes, contrary to the worklist criterion."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 5,
+          "message": "The required `AC_010_reserve_worksheet_contract` test is absent, and the existing render test is not tied to that criterion. Add assertions for every specified server-projected column and the exact blocked, stale, and banner text.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The worksheet test checks some rendered statuses and the banner, but does not assert the input, value, source, and freshness columns against the server payload.",
+            "failureScenario": "If a row renders the wrong source or freshness value, the current assertions still pass."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 5,
+          "message": "The required `finance_reserve_decision_contract` test is absent. The callback test does not cover the POST contract, forbidden and stale responses, success timing, or projection refresh.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The component test verifies only that clicking a button calls a callback; it does not exercise App's decision submission or fetch response handling.",
+            "failureScenario": "If App omits the CSRF header or expected revision, submits a decision when none are allowed, shows success before a successful response, or fails to refresh projections, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 5,
+          "message": "The required `reserve_text_and_status_remain_inert` test is absent, and the current test does not cover all the criterion's prohibited output paths. Add criterion-tied assertions for URL, action, and HTML-attribute behavior.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The inert-text check verifies that `<b>x</b>` does not create a `b` element and that no style attribute appears, but it does not exercise the other prohibited URL, action, or HTML-attribute paths.",
+            "failureScenario": "If a server value is rendered into a URL or another HTML attribute, the current assertions can still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The worksheet infers Ready when a server status is absent, contrary to the server-authoritative requirement. The changed tests also do not cover the App decision submission path, and the worklist and worksheet tests are not mapped to the exact acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/ReserveWorksheet.tsx",
+          "line": 39,
+          "message": "Do not infer Ready for a missing server status; it presents an unprovided status as authoritative.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "normalizeRow supplies a status when the server omits it; normalizeStatus also converts a blank status to Ready.",
+            "failureScenario": "When the server projection has an input with no status, the worksheet displays Ready even though the server supplied no such status, contradicting the requirement to render server values only."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 5,
+          "message": "The reserve decision criterion has no test for the App submission flow. Add the named finance_reserve_decision_contract test covering the request, forbidden and stale responses, success timing, and projection refresh.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The test renders ReserveWorksheet and checks that clicking a button calls a callback. It does not render App or exercise submitFinanceDecision, which performs the POST and handles its response.",
+            "failureScenario": "If the App sends the wrong URL, omits X-CSRF-Token or expectedRevision, shows the success toast before a successful response, or fails to refresh projections after success, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/FinanceWorkspace.test.tsx",
+          "line": 7,
+          "message": "The finance worklist criterion lacks its named AC_010_finance_worklist_contract test, including coverage of loading and server-order preservation.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed test exercises filtering and row clicks in FinanceWorkspace, but it is named differently from AC_010_finance_worklist_contract and does not identify that criterion.",
+            "failureScenario": "Under the required criterion-to-test mapping, the acceptance criterion has no tied test; a change that breaks loading or server-order preservation in App can pass this component-only test."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/ReserveWorksheet.test.tsx",
+          "line": 5,
+          "message": "The worksheet and inert-text criteria lack their named tests and criterion references; the current assertions do not cover the stated URL and HTML-attribute cases.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The worksheet test checks several rendered values and that a text string does not create a b element, but it is not named AC_010_reserve_worksheet_contract or reserve_text_and_status_remain_inert and has no criterion reference.",
+            "failureScenario": "The required criteria are not tied to a test; for example, a server string used as a URL or an HTML attribute could be introduced without the current test detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The changed components render server strings as React text, and the visible decision actions come from the server payload. The reserve decision request and its success and refresh behavior lack an effective test.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 627,
+          "message": "Add an App-level test for finance_reserve_decision_contract that exercises the decision request, response handling, and projection refresh.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The finance decision handler sends the request, shows the success toast, and triggers projection refreshes. The named ReserveWorksheet test only checks that clicking a button calls the component callback; it does not exercise this handler or its network request.",
+            "failureScenario": "If the handler omits X-CSRF-Token, sends the wrong expected revision, or shows success without refreshing projections, the current test still passes. Acceptance criterion finance_reserve_decision_contract is therefore not covered by a test that can fail on those regressions."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/FinanceWorkspace.test.tsx",
+      "frontend/tests/ReserveWorksheet.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
