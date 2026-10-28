@@ -382,6 +382,35 @@ export default function App({
     setTraceView(null);
   }
 
+  async function reloadCaseProjection() {
+    if (!session || !selectedCaseId) return;
+    setLoadingCase(true);
+    setCaseError('');
+    const encodedCaseId = encodeURIComponent(selectedCaseId);
+    const caseBase = `/api/cases/${encodedCaseId}`;
+    try {
+      const caseProjection = await getProjection<CaseProjection>(caseBase);
+      setData((current) => current ? { ...current, caseState: caseProjection } : {
+        caseState: caseProjection,
+        dashboard: { allowedDecisions: [], capabilities: [], queue: [], activity: [] },
+        review: { basisVersion: 0, decisions: [] },
+        readiness: {
+          monthsUntilReturn: 0,
+          gapsFound: 0,
+          requestsSent: 0,
+          heldForReview: 0,
+          notProcessed: 0,
+          sentence: '',
+        },
+      });
+      setCaseError('');
+    } catch (error) {
+      setCaseError(loadError(error));
+    } finally {
+      setLoadingCase(false);
+    }
+  }
+
   useEffect(() => {
     if (!session) {
       traceRequestId.current += 1;
@@ -413,7 +442,6 @@ export default function App({
         setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection, readiness });
       } catch (error) {
         if (!active) return;
-        setData(null);
         setCaseError(loadError(error));
       } finally {
         if (active) setLoadingCase(false);
@@ -593,7 +621,7 @@ export default function App({
             status={resolveRegionStatus(caseError)}
             error={resolveRegionError(caseError)}
             currentPath={currentCasePath}
-            onRetry={() => setCaseRefreshNonce((value) => value + 1)}
+            onRetry={() => { void reloadCaseProjection(); }}
           />}
           {data && (
             <>

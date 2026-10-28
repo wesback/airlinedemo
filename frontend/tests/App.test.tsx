@@ -430,6 +430,49 @@ describe('reviewer workspace', () => {
     }
   });
 
+  it('retry_reloads_region_once_per_click', async () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        pathname: '/cases/case-001',
+        search: '',
+        hash: '',
+        assign: vi.fn(),
+      },
+    });
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/health') return json({ status: 'ok' });
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json(users);
+      if (url === '/api/auth/sign-in') return json(signedIn);
+      if (url === '/api/cases/case-001' && (init?.method ?? 'GET') === 'GET') {
+        const count = fetchSpy.mock.calls.filter(([candidate]) => String(candidate) === url).length;
+        return count === 1 ? json({ error: 'request failed' }, 503) : json({ revision: 7, basis: [{ version: 4 }] });
+      }
+      return json({});
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    render(<App />);
+    await signIn();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Service temporarily unavailable Retry');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(fetchSpy.mock.calls.filter(([candidate]) => String(candidate) === '/api/cases/case-001')).toHaveLength(2);
+      expect(screen.getByText('Revision: 7')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    });
+
+    vi.unstubAllGlobals();
+    Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+  });
+
   it('reports an unavailable API without claiming it is connected', async () => {
     setupApi({ healthStatus: 503 });
     render(<App />);
