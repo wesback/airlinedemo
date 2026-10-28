@@ -577,16 +577,41 @@ export default function App({
     if (nextSession) {
       const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
       const requestedFromSearch = validateReturnTo(new URLSearchParams(currentSearch).get('returnTo'));
-      const requestedPath = requestedFromSearch ?? returnTo ?? null;
+      const currentRoute = routePath && routeMatchesRole(routePath, nextSession.role) ? routePath : null;
+      const requestedPath = requestedFromSearch ?? currentRoute ?? returnTo ?? null;
       const roleHome = ROLE_HOME_PATHS[nextSession.role] ?? '/work';
       const resolvedPath = resolveReturnTo(requestedPath, roleHome);
-      const nextRoute = routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome;
+      const nextRoute = nextSession.role === 'presenter'
+        ? '/demo'
+        : (routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : roleHome);
       if (typeof window !== 'undefined') {
         applyRoutePath(nextRoute);
-        setReturnTo(routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : null);
+        setReturnTo(nextSession.role === 'presenter' ? null : (routeMatchesRole(resolvedPath, nextSession.role) ? resolvedPath : null));
       }
     }
   }
+
+  useEffect(() => {
+    if (!session || session.role !== 'presenter' || !session.caseScopes.length) return;
+    const pending = session.caseScopes.filter((caseId) => !(caseId in hangarSceneEnvelopes));
+    if (!pending.length) return;
+    let active = true;
+    void Promise.all(pending.map(async (caseId) => {
+      try {
+        const response = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}/scene`);
+        if (!response.ok) return [caseId, null] as const;
+        return [caseId, await response.json()] as const;
+      } catch {
+        return [caseId, null] as const;
+      }
+    })).then((results) => {
+      if (!active) return;
+      const nextScenes = Object.fromEntries(results.filter((entry): entry is [string, unknown] => entry[1] !== null));
+      if (!Object.keys(nextScenes).length) return;
+      setHangarSceneEnvelopes((current) => ({ ...current, ...nextScenes }));
+    });
+    return () => { active = false; };
+  }, [session, hangarSceneEnvelopes]);
 
   // Requests one region. The response is applied only while the session and case it was requested for are still active.
   function loadRegion(key: RegionKey, caseId: string, context: string) {
@@ -606,7 +631,10 @@ export default function App({
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const nextPath = window.location.pathname + window.location.search;
-      setRoutePath(nextPath);
+      const preferredRoute = session
+        ? (session.role === 'presenter' ? '/demo' : (routeMatchesRole(routePath, session.role) ? routePath : nextPath))
+        : nextPath;
+      setRoutePath(preferredRoute);
       if (!session) {
         const returnParam = new URLSearchParams(window.location.search).get('returnTo');
         if (returnParam && validateReturnTo(returnParam)) {
@@ -719,6 +747,7 @@ export default function App({
       id: caseId,
       name: hangarEntries.find((entry) => entry.caseId === caseId)?.name ?? caseId,
       canReset: permission.allowed && permission.revision !== null,
+      resetLabel: 'Reset blocked variant',
     };
   });
 

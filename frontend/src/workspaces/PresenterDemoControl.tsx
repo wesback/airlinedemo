@@ -31,10 +31,15 @@ export function getPresenterGuidedChecklist(caseId?: string): Array<{ label: str
   const selectedCaseRoute = caseId ? `/cases/${encodeURIComponent(caseId)}/overview` : '/cases';
   return [
     { label: 'My work', route: '/work', description: 'Review the technical findings queue.' },
-    { label: 'Portfolio', route: PRESENTER_GUIDED_MAIN_VIEWS.executive, description: 'Review the executive portfolio overview.' },
+    { label: 'Portfolio', route: '/portfolio', description: 'Review the executive portfolio overview.' },
     { label: 'Demo control', route: PRESENTER_GUIDED_MAIN_VIEWS.presenter, description: 'Stay on the presenter control centre.' },
     { label: 'Case', route: selectedCaseRoute, description: 'Open the selected case overview.' },
     { label: 'Hangar', route: '/hangar', description: 'Review the aircraft view.' },
+    { label: 'Technical findings', route: caseId ? `/cases/${encodeURIComponent(caseId)}/findings` : PRESENTER_GUIDED_MAIN_VIEWS.technical, description: 'Open the technical findings workspace.' },
+    { label: 'Finance reserve', route: caseId ? `/cases/${encodeURIComponent(caseId)}/reserve` : PRESENTER_GUIDED_MAIN_VIEWS.finance, description: 'Review the finance reserve assignment.' },
+    { label: 'Legal obligations', route: caseId ? `/cases/${encodeURIComponent(caseId)}/obligations` : PRESENTER_GUIDED_MAIN_VIEWS.legal, description: 'Review the legal obligation record.' },
+    { label: 'Executive portfolio', route: PRESENTER_GUIDED_MAIN_VIEWS.executive, description: 'Review the executive portfolio overview.' },
+    { label: 'Presenter demo', route: PRESENTER_GUIDED_MAIN_VIEWS.presenter, description: 'Return to the presenter control centre.' },
   ];
 }
 

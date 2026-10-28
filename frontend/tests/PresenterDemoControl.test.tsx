@@ -44,13 +44,24 @@ describe('PresenterDemoControl', () => {
   it('presenter_guided_path_contract', () => {
     render(<PresenterDemoControl caseId="cp-case-c" />);
 
+    const expected = [
+      { label: 'My work', href: '/work' },
+      { label: 'Portfolio', href: '/portfolio' },
+      { label: 'Demo control', href: '/demo' },
+      { label: 'Case', href: '/cases/cp-case-c/overview' },
+      { label: 'Hangar', href: '/hangar' },
+      { label: 'Technical findings', href: '/cases/cp-case-c/findings' },
+      { label: 'Finance reserve', href: '/cases/cp-case-c/reserve' },
+      { label: 'Legal obligations', href: '/cases/cp-case-c/obligations' },
+      { label: 'Executive portfolio', href: '/portfolio' },
+      { label: 'Presenter demo', href: '/demo' },
+    ];
+
     const links = screen.getAllByRole('link');
-    expect(links).toHaveLength(5);
-    expect(links.map((link) => link.textContent)).toEqual(['My work', 'Portfolio', 'Demo control', 'Case', 'Hangar']);
-    expect(screen.getByRole('link', { name: 'My work' }).getAttribute('href')).toBe('/work');
-    expect(screen.getByRole('link', { name: 'Portfolio' }).getAttribute('href')).toBe('/portfolio');
-    expect(screen.getByRole('link', { name: 'Demo control' }).getAttribute('href')).toBe('/demo');
-    expect(screen.getByRole('link', { name: 'Case' }).getAttribute('href')).toBe('/cases/cp-case-c/overview');
-    expect(screen.getByRole('link', { name: 'Hangar' }).getAttribute('href')).toBe('/hangar');
+    expect(links).toHaveLength(expected.length);
+    expect(links.map((link) => link.textContent)).toEqual(expected.map(({ label }) => label));
+    for (const { label, href } of expected) {
+      expect(screen.getByRole('link', { name: label }).getAttribute('href')).toBe(href);
+    }
   });
 });
