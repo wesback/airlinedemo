@@ -78,6 +78,12 @@ function normalizeRoutePath(value: string | null | undefined): string {
   }
 }
 
+export function resolveSessionCaseId(session: SignedInSession | null, currentCaseId: string | null): string | null {
+  if (!session) return null;
+  if (currentCaseId && session.caseScopes.includes(currentCaseId)) return currentCaseId;
+  return session.caseScopes[0] ?? null;
+}
+
 function routeMatchesRole(pathname: string, role: string): boolean {
   const normalized = normalizeRoutePath(pathname).split('?')[0];
   const allowed = ROLE_ALLOWED_PATHS[role] ?? [];
@@ -500,7 +506,7 @@ export default function App({
       requestContext.current = '';
       resetHangarState();
       setSession(nextSession);
-      setSelectedCaseId(nextSession.caseScopes?.[0] ?? null);
+      setSelectedCaseId((currentCaseId) => resolveSessionCaseId(nextSession, currentCaseId));
       traceRequestId.current += 1;
       setRegions(loadingRegions());
       setReason('');
@@ -517,7 +523,9 @@ export default function App({
     requestContext.current = '';
     resetHangarState();
     setSession(nextSession);
-    setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
+    if (nextSession) {
+      setSelectedCaseId((currentCaseId) => resolveSessionCaseId(nextSession, currentCaseId));
+    }
     traceRequestId.current += 1;
     setRegions(loadingRegions());
     setReason('');
@@ -574,18 +582,53 @@ export default function App({
       setTraceView(null);
       return;
     }
+<<<<<<< HEAD
     if (!selectedCaseId) {
       requestContext.current = '';
       setRegions(loadingRegions());
+=======
+    const sessionCaseId = resolveSessionCaseId(session, selectedCaseId);
+    if (!sessionCaseId) {
+      setData(null);
+>>>>>>> origin/main
       setCaseError('');
       return;
     }
+<<<<<<< HEAD
     // A fresh id per load, so a response from an earlier visit to the same session and case cannot become valid again.
     const context = String(++contextCounter.current);
     requestContext.current = context;
     setCaseError('');
     for (const key of REGION_KEYS) loadRegion(key, selectedCaseId, context);
     return () => { if (requestContext.current === context) requestContext.current = ''; };
+=======
+    if (selectedCaseId !== sessionCaseId) {
+      setSelectedCaseId(sessionCaseId);
+      return;
+    }
+    let active = true;
+    setLoadingCase(true);
+    setCaseError('');
+    const encodedCaseId = encodeURIComponent(sessionCaseId);
+    const caseBase = `/api/cases/${encodedCaseId}`;
+    (async () => {
+      try {
+        const caseProjection = await getProjection<CaseProjection>(caseBase);
+        const dashboardProjection = await getProjection<DashboardData>(`${caseBase}/dashboard`);
+        const reviewProjection = await getProjection<TechnicalReviewProjection>(`${caseBase}/technical-reviews`);
+        const readiness = await getProjection<ReadinessSummaryData>(`${caseBase}/readiness`);
+        if (!active) return;
+        setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection, readiness });
+      } catch (error) {
+        if (!active) return;
+        setData(null);
+        setCaseError(loadError(error));
+      } finally {
+        if (active) setLoadingCase(false);
+      }
+    })();
+    return () => { active = false; };
+>>>>>>> origin/main
   }, [session, selectedCaseId, refresh]);
 
   async function showTrace(url: string) {
