@@ -527,6 +527,11 @@ export default function App({
         return;
       }
       const nextSession: SignedInSession = await response.json();
+      const nextOwner = `${nextSession.id}:${nextSession.csrfToken}`;
+      worklistOwner.current = nextOwner;
+      worklistRequestId.current += 1;
+      portfolioOwner.current = nextOwner;
+      portfolioRequestId.current += 1;
       requestContext.current = '';
       resetHangarState();
       setSession(nextSession);
