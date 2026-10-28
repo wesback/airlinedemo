@@ -657,7 +657,7 @@ export default function App({
   const { value: review } = regions.review;
   const { value: readiness } = regions.readiness;
 
-  async function submitDecision(capabilityId: string, decision: string, overrideReason?: string) {
+  async function submitDecision(capabilityId: string, decision: string, overrideReason?: string): Promise<boolean> {
     const nextReason = (overrideReason ?? reason).trim();
     if (
       capabilityId !== 'technical-review'
@@ -666,7 +666,7 @@ export default function App({
       || !session || !selectedCaseId || !caseState || !review
       || !Number.isInteger(caseState.revision) || !Number.isInteger(review.basisVersion)
       || !nextReason
-    ) return;
+    ) return false;
 
     setDecisionBusy(true);
     setCaseError('');
@@ -683,17 +683,19 @@ export default function App({
       });
       if (response.status === 403) {
         setCaseError('You are not permitted to record this decision.');
-        return;
+        return false;
       }
       if (response.status === 409) {
         setCaseError('The case changed. Refresh the case before deciding.');
-        return;
+        return false;
       }
       if (!response.ok) throw new RequestError(response.status);
       setReason(nextReason);
       setRefresh((value) => value + 1);
+      return true;
     } catch {
       setCaseError('Unable to record the decision. Try again later.');
+      return false;
     } finally {
       setDecisionBusy(false);
     }
@@ -705,6 +707,33 @@ export default function App({
     ready: 'Service connected',
     unavailable: 'Service unavailable. Try again later.',
   }[apiState];
+
+  function openTechnicalFinding(caseId: string, itemId: string) {
+    setWorklistSelection({ caseId, itemId });
+    setSelectedCaseId(caseId);
+    const nextPath = `/cases/${encodeURIComponent(caseId)}/findings`;
+    setRoutePath(nextPath);
+    if (typeof window !== 'undefined') {
+      const currentPath = `${window.location.pathname}${window.location.search}`;
+      if (currentPath !== nextPath) {
+        window.history.pushState({}, '', nextPath);
+      }
+    }
+  }
+
+  function navigateTechnicalFinding(direction: 'previous' | 'next') {
+    if (!worklist.length) return;
+    const currentIndex = worklistSelection
+      ? worklist.findIndex((item) => item.caseId === worklistSelection.caseId && item.itemId === worklistSelection.itemId)
+      : selectedCaseId
+        ? worklist.findIndex((item) => item.caseId === selectedCaseId)
+        : -1;
+    const nextIndex = currentIndex >= 0 ? currentIndex + (direction === 'previous' ? -1 : 1) : 0;
+    if (nextIndex < 0 || nextIndex >= worklist.length) return;
+    const nextItem = worklist[nextIndex];
+    if (!nextItem) return;
+    openTechnicalFinding(nextItem.caseId, nextItem.itemId);
+  }
 
   function handleCaseNavigate(nextPath: string) {
     const match = nextPath.match(/^\/cases\/([^/]+)(?:\/.*)?$/);
@@ -995,6 +1024,41 @@ export default function App({
                   </section>
                 )}
               </>
+            )}
+            {session.role === 'technical-reviewer' && worklistLoaded && routePath.match(/^\/cases\/[^/]+\/findings(?:\/)?$/) && (
+              <FindingWorkspace
+                worklist={worklist}
+                caseId={technicalFindingRoute?.caseId ?? selectedCaseId}
+                itemId={technicalFindingRoute?.itemId ?? worklistSelection?.itemId ?? null}
+                findings={{
+                  title: 'Finding review',
+                  summary: 'Technical review evidence and decision',
+                  status: selectedCaseId ? 'Awaiting review' : 'Awaiting review',
+                  evidence: [
+                    { id: 'request-status', label: 'Request status', text: 'Awaiting review', status: 'open' },
+                    { id: 'evidence-1', label: 'Trace', text: 'No trace recorded', status: 'ready' },
+                  ],
+                }}
+                allowedDecisions={dashboard?.allowedDecisions ?? []}
+                decisionReason={reason}
+                onDecisionReasonChange={setReason}
+                onNavigate={(direction) => navigateTechnicalFinding(direction)}
+                onDecisionSubmit={async (decisionId, decisionReasonValue) => {
+                  const saved = await submitDecision('technical-review', decisionId, decisionReasonValue);
+                  if (saved) {
+                    setWorklistSelection((current) => current ? { ...current, itemId: current.itemId } : current);
+                    return true;
+                  }
+                  return false;
+                }}
+              />
+            )}
+            {session.role === 'technical-reviewer' && worklistLoaded && !routePath.match(/^\/cases\/[^/]+\/findings(?:\/)?$/) && (
+              <TechnicalWorkspace
+                items={worklist}
+                title="Technical My work"
+                onSelect={(caseId, itemId) => openTechnicalFinding(caseId, itemId)}
+              />
             )}
             {dashboard && <CapabilityDashboard
               data={dashboard}

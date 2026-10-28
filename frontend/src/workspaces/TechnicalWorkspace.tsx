@@ -39,8 +39,6 @@ export default function TechnicalWorkspace({
   const [capabilityFilter, setCapabilityFilter] = useState('all');
   const [ageSort, setAgeSort] = useState<'server' | 'asc' | 'desc'>('server');
 
-  const ageSortLabel = ageSort === 'server' ? 'Server order' : ageSort === 'asc' ? 'Oldest first' : 'Newest first';
-
   const caseOptions = useMemo(() => Array.from(new Set(items.map((item) => item.caseId))), [items]);
   const capabilityOptions = useMemo(() => Array.from(new Set(items.map((item) => item.capabilityId))), [items]);
 
@@ -64,7 +62,7 @@ export default function TechnicalWorkspace({
       <div aria-label="Worklist filters" style={{ display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'center', marginBottom: tokens.spacingHorizontalM }}>
         <label>
           Case
-          <select value={caseFilter} onChange={(event) => setCaseFilter(event.target.value)}>
+          <select aria-label="Worklist case" value={caseFilter} onChange={(event) => setCaseFilter(event.target.value)}>
             <option value="all">All cases</option>
             {caseOptions.map((caseId) => (
               <option key={caseId} value={caseId}>{caseId}</option>
@@ -73,7 +71,7 @@ export default function TechnicalWorkspace({
         </label>
         <label>
           Capability
-          <select value={capabilityFilter} onChange={(event) => setCapabilityFilter(event.target.value)}>
+          <select aria-label="Worklist capability" value={capabilityFilter} onChange={(event) => setCapabilityFilter(event.target.value)}>
             <option value="all">All capabilities</option>
             {capabilityOptions.map((capabilityId) => (
               <option key={capabilityId} value={capabilityId}>{capabilityId}</option>

@@ -105,7 +105,7 @@ describe('accessible review navigation', () => {
     await screen.findByLabelText('Reason for decision');
 
     const focusOrder: string[] = [];
-    for (let step = 0; step < 9; step += 1) {
+    for (let step = 0; step < 11; step += 1) {
       await user.tab();
       const active = document.activeElement as HTMLElement;
       focusOrder.push(active.id === 'decision-reason'
@@ -115,13 +115,13 @@ describe('accessible review navigation', () => {
     expect(focusOrder).toEqual([
       'Sign out', 'Case search', 'Ada Reviewer', 'Collapse navigation', 'Enter Hangar',
       'Case A, narrow-body', 'Case B, regional', 'Case C, wide-body',
-      'Investigation trace',
+      'Worklist case', 'Worklist capability', 'Age',
     ]);
     const lastDecision = screen.getByRole('button', { name: 'Reject finding' });
     await user.tab();
     expect(document.activeElement).not.toBe(lastDecision);
     await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Accept finding' }));
+    expect(document.activeElement).toBe(screen.getByLabelText('Reason for decision'));
   });
 
   it('AccessibleReviewNavigationTest.ControlsAndStatusUpdatesExposeAccessibleText', async () => {

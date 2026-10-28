@@ -90,12 +90,16 @@ export default function FindingWorkspace({
       </div>
       <div>
         <div style={{ display: 'flex', gap: tokens.spacingHorizontalS, alignItems: 'center' }}>
-          <button type="button" disabled={!canGoPrevious} onClick={() => { if (canGoPrevious && onNavigate) onNavigate('previous'); }}>
-            Previous
-          </button>
-          <button type="button" disabled={!canGoNext} onClick={() => { if (canGoNext && onNavigate) onNavigate('next'); }}>
-            Next
-          </button>
+          {canGoPrevious && (
+            <button type="button" onClick={() => onNavigate?.('previous')}>
+              Previous
+            </button>
+          )}
+          {canGoNext && (
+            <button type="button" onClick={() => onNavigate?.('next')}>
+              Next
+            </button>
+          )}
         </div>
         <h3>{findings?.title ?? selectedItem?.itemId ?? 'Finding'}</h3>
         <p>{findings?.summary ?? `Case ${selectedItem?.caseId ?? caseId ?? 'unknown'}: ${selectedItem?.itemId ?? 'Finding'}`}</p>
