@@ -51,7 +51,7 @@ describe('ExecutivePortfolio', () => {
     expect(rows[1].textContent).toContain('1d 1h');
     expect(rows[1].textContent).toContain('Ada Reviewer: Human decision — technical-review.decided');
 
-    fireEvent.click(screen.getAllByRole('cell')[0]);
+    fireEvent.click(rows[1]);
     expect(onOpenCase).toHaveBeenCalledWith('case-001');
   });
 

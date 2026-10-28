@@ -532,6 +532,7 @@ export default function App({
       worklistRequestId.current += 1;
       portfolioOwner.current = nextOwner;
       portfolioRequestId.current += 1;
+      setPortfolioRows([]);
       requestContext.current = '';
       resetHangarState();
       setSession(nextSession);
@@ -550,6 +551,7 @@ export default function App({
 
   function handleSessionChange(nextSession: SignedInSession | null) {
     const nextOwner = nextSession ? `${nextSession.id}:${nextSession.csrfToken}` : '';
+    portfolioRequestId.current += 1;
     portfolioOwner.current = nextOwner;
     setPortfolioRows([]);
     requestContext.current = '';

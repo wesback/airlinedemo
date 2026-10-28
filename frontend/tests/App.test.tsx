@@ -395,9 +395,10 @@ describe('reviewer workspace', () => {
     await screen.findByText('Signed in as Executive observer.');
     expect(window.location.pathname).toBe('/portfolio');
     expect(screen.getByRole('heading', { name: 'Portfolio' })).toBeTruthy();
+    expect(screen.queryByText('This page is not part of your workspace')).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Technical My work' })).toBeNull();
-    expect(screen.queryAllByRole('button', { name: /Accept finding|Reject finding/i })).toHaveLength(0);
-    expect(screen.queryByRole('heading', { name: 'Case case-001' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /Accept finding|Reject finding/i })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Case case-001' })).toBeTruthy();
   });
 
   it('AC_001_App_root_shell_and_Hangar_composition', async () => {
@@ -793,6 +794,20 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('button', { name: 'Move avatar' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Aircraft' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Reset blocked variant' })).toBeTruthy();
+
+    cleanup();
+    const executiveSession = { ...signedIn, role: 'executive', displayName: 'Executive observer', caseScopes: ['case-001'] };
+    setupApi({ session: executiveSession, users: [{ id: 'exec-1', displayName: 'Executive observer', role: 'executive' }] });
+    render(<App hangarBrowserSupported={true} hangarWebGl2Probe={{ webgl2: true }} hangarLazyLoader={() => { function Scene() { return <canvas aria-label="3D hangar scene" />; } return Scene; }} />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Executive observer (executive)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Executive observer.');
+    fireEvent.click(await screen.findByRole('button', { name: 'Enter Hangar' }));
+    await screen.findByRole('button', { name: 'Refresh Hangar scene' });
+    expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Accept finding|Reject finding/i })).toBeNull();
   });
 
   it('reports an unavailable API without claiming it is connected', async () => {
