@@ -133,6 +133,9 @@ export default function App({
   const updateActiveCaseContext = (nextSessionId: string | null, nextCaseId: string | null) => {
     activeCaseContext.current = { sessionId: nextSessionId, caseId: nextCaseId };
   };
+  const invalidateActiveCaseContext = () => {
+    updateActiveCaseContext(null, null);
+  };
   useEffect(() => {
     updateActiveCaseContext(session?.id ?? null, selectedCaseId ?? null);
   }, [session, selectedCaseId]);
@@ -461,7 +464,9 @@ export default function App({
 
   function handleSessionChange(nextSession: SignedInSession | null) {
     const nextCaseId = nextSession?.caseScopes?.[0] ?? null;
-    updateActiveCaseContext(nextSession?.id ?? null, nextCaseId);
+    const nextSessionId = nextSession?.id ?? null;
+    invalidateActiveCaseContext();
+    updateActiveCaseContext(nextSessionId, nextCaseId);
     setSession(nextSession);
     setSelectedCaseId(nextCaseId);
     traceRequestId.current += 1;
@@ -797,6 +802,7 @@ export default function App({
                 <label>
                   Case
                   <select value={selectedCaseId ?? ''} onChange={(event) => {
+                    invalidateActiveCaseContext();
                     setData(null);
                     setReason('');
                     setDecisionBusy(false);
