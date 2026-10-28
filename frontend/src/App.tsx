@@ -31,6 +31,7 @@ type ProjectionRegionState = {
   error: { status: number; message: string } | null;
   url: string;
 };
+const projectionRegionsOrder: ProjectionRegion[] = ['case', 'dashboard', 'review', 'readiness'];
 
 class RequestError extends Error { constructor(readonly status: number) { super(`Request failed with status ${status}`); } }
 
@@ -123,9 +124,15 @@ export default function App({
     review: { status: 'loading', data: null, error: null, url: selectedCaseId ? `/api/cases/${encodeURIComponent(selectedCaseId)}/technical-reviews` : '' },
     readiness: { status: 'loading', data: null, error: null, url: selectedCaseId ? `/api/cases/${encodeURIComponent(selectedCaseId)}/readiness` : '' },
   });
+  const failedRegions = projectionRegionsOrder.filter((region) => projectionRegions[region].error !== null);
   const [loadingCase, setLoadingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
   const [failedRegion, setFailedRegion] = useState<ProjectionRegion | null>(null);
+  const activeFailedRegion = failedRegion ?? (failedRegions[0] ?? null);
+  const activeCaseContext = useRef<{ sessionId: string | null; caseId: string | null }>({ sessionId: session?.id ?? null, caseId: selectedCaseId ?? null });
+  useEffect(() => {
+    activeCaseContext.current = { sessionId: session?.id ?? null, caseId: selectedCaseId ?? null };
+  }, [session, selectedCaseId]);
   const [reason, setReason] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -469,14 +476,18 @@ export default function App({
   async function reloadRegion(region: ProjectionRegion) {
     if (!session || !selectedCaseId) return;
     const regionUrl = getProjectionUrl(selectedCaseId, region);
+    const currentCaseId = activeCaseContext.current.caseId;
+    const currentSessionId = activeCaseContext.current.sessionId;
     setProjectionRegions((current) => ({
       ...current,
       [region]: { ...current[region], status: 'loading', error: null, url: regionUrl },
     }));
-    setFailedRegion(region);
-    setCaseError('');
+    setCaseError((current) => region === 'case' ? '' : current);
     try {
       const nextValue = await getProjection<unknown>(regionUrl);
+      if (activeCaseContext.current.caseId !== currentCaseId || activeCaseContext.current.sessionId !== currentSessionId) {
+        return;
+      }
       const nextState: ProjectionRegionState = {
         status: hasEmptyProjection(region, nextValue) ? 'empty' : 'ready',
         data: nextValue,
@@ -493,18 +504,25 @@ export default function App({
         if (region === 'review') return mergeProjectionData(current, { review: nextValue as TechnicalReviewProjection });
         return mergeProjectionData(current, { readiness: nextValue as ReadinessSummaryData });
       });
-      setFailedRegion((current) => current === region ? null : current);
+      setFailedRegion((current) => {
+        if (current !== region) return current;
+        return null;
+      });
       setCaseError('');
     } catch (error) {
+      if (activeCaseContext.current.caseId !== currentCaseId || activeCaseContext.current.sessionId !== currentSessionId) {
+        return;
+      }
       const normalized = normalizeRegionError(error);
+      const nextState = {
+        status: getRegionStatusFromCode(normalized.status),
+        data: null,
+        error: normalized,
+        url: regionUrl,
+      };
       setProjectionRegions((current) => ({
         ...current,
-        [region]: {
-          status: getRegionStatusFromCode(normalized.status),
-          data: null,
-          error: normalized,
-          url: regionUrl,
-        },
+        [region]: nextState,
       }));
       setFailedRegion(region);
       setCaseError(region === 'case' ? normalized.message : '');
@@ -512,11 +530,8 @@ export default function App({
   }
 
   async function reloadFailedRegion() {
-    if (failedRegion) {
-      await reloadRegion(failedRegion);
-      return;
-    }
-    await reloadRegion('case');
+    const regionToRetry = failedRegion ?? activeFailedRegion ?? 'case';
+    await reloadRegion(regionToRetry);
   }
 
   useEffect(() => {
@@ -794,13 +809,15 @@ export default function App({
             </>
           )}
           {loadingCase && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
-          {failedRegion && projectionRegions[failedRegion].error && <WorkspaceRegion
-            status={projectionRegions[failedRegion].status}
-            error={projectionRegions[failedRegion].error}
-            currentPath={currentCasePath}
-            onRetry={() => { void reloadFailedRegion(); }}
-          />}
-          {caseError && !failedRegion && <WorkspaceRegion
+          {(activeFailedRegion && projectionRegions[activeFailedRegion].error) && (
+            <WorkspaceRegion
+              status={projectionRegions[activeFailedRegion].status}
+              error={projectionRegions[activeFailedRegion].error}
+              currentPath={currentCasePath}
+              onRetry={() => { void reloadRegion(activeFailedRegion); }}
+            />
+          )}
+          {caseError && !activeFailedRegion && <WorkspaceRegion
             status={resolveRegionStatus(caseError)}
             error={resolveRegionError(caseError)}
             currentPath={currentCasePath}
