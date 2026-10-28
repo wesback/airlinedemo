@@ -39,6 +39,8 @@ export default function TechnicalWorkspace({
   const [capabilityFilter, setCapabilityFilter] = useState('all');
   const [ageSort, setAgeSort] = useState<'server' | 'asc' | 'desc'>('server');
 
+  const ageSortLabel = ageSort === 'server' ? 'Server order' : ageSort === 'asc' ? 'Oldest first' : 'Newest first';
+
   const caseOptions = useMemo(() => Array.from(new Set(items.map((item) => item.caseId))), [items]);
   const capabilityOptions = useMemo(() => Array.from(new Set(items.map((item) => item.capabilityId))), [items]);
 

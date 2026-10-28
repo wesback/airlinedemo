@@ -25,18 +25,18 @@ export type FindingWorkspaceProps = {
   decisionReason?: string;
   onDecisionReasonChange?: (reason: string) => void;
   onNavigate?: (direction: 'previous' | 'next') => void;
-  onDecisionSubmit?: (decisionId: string, reason: string) => void | Promise<void>;
+  onDecisionSubmit?: (decisionId: string, reason: string) => boolean | void | Promise<boolean | void>;
 };
 
 function findSelectedIndex(worklist: WorklistItem[], caseId?: string | null, itemId?: string | null): number {
   if (!worklist.length) return -1;
   if (caseId && itemId) {
     const index = worklist.findIndex((item) => item.caseId === caseId && item.itemId === itemId);
-    if (index >= 0) return index;
+    return index >= 0 ? index : -1;
   }
   if (caseId) {
     const index = worklist.findIndex((item) => item.caseId === caseId);
-    if (index >= 0) return index;
+    return index >= 0 ? index : -1;
   }
   return 0;
 }
@@ -59,10 +59,10 @@ export default function FindingWorkspace({
   const canGoPrevious = selectedIndex > 0;
   const canGoNext = selectedIndex >= 0 && selectedIndex < worklist.length - 1;
 
-  async function handleDecision(decisionId: string) {
+  async function handleDecision(decisionId: string): Promise<void> {
     if (!onDecisionSubmit) return;
-    await onDecisionSubmit(decisionId, decisionReason ?? '');
-    setToast('Decision recorded');
+    const submission = await onDecisionSubmit(decisionId, decisionReason ?? '');
+    if (submission === true) setToast('Decision recorded');
   }
 
   const evidence = findings?.evidence ?? [

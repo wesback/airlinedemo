@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import CapabilityDashboard, { type DashboardData } from './CapabilityDashboard';
 import WorkspaceRegion from './components/WorkspaceRegion';
 import SignIn, { type SignedInSession } from './components/SignIn';
@@ -143,6 +143,11 @@ export default function App({
   const [worklistError, setWorklistError] = useState<number | null>(null);
   const [worklistLoaded, setWorklistLoaded] = useState(false);
   const [worklistSelection, setWorklistSelection] = useState<{ caseId: string; itemId: string } | null>(null);
+  const technicalFindingRoute = useMemo(() => {
+    if (!session || session.role !== 'technical-reviewer') return null;
+    const match = routePath.match(/^\/cases\/([^/]+)\/findings(?:\/)?$/);
+    return match ? { caseId: decodeURIComponent(match[1]), itemId: worklistSelection?.itemId ?? null } : null;
+  }, [routePath, session, worklistSelection]);
   const [returnTo, setReturnTo] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const value = new URLSearchParams(window.location.search).get('returnTo');
