@@ -626,6 +626,23 @@ describe('reviewer workspace', () => {
     expect(screen.queryByText('Technical-review decision: reject')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
 
+    // Case A -> case B -> case A again: the response of the first visit stays ignored.
+    cleanup();
+    setupApi({ session: { ...signedIn, caseScopes: ['case-001', 'cp-case-b'] }, statuses: { [REVIEWS]: [503] } });
+    render(<App />);
+    await signIn();
+    const resolveFirstVisit = holdRetry();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'cp-case-b' } });
+    await screen.findByRole('heading', { name: 'Case cp-case-b' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Case' }), { target: { value: 'case-001' } });
+    await screen.findByRole('heading', { name: 'Case case-001' });
+    expect(await within(regionOf('Technical review')).findByRole('alert')).toBeTruthy();
+    resolveFirstVisit();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('Technical-review decision: reject')).toBeNull();
+    expect(within(regionOf('Technical review')).getByRole('alert').textContent).toBe(`${UNAVAILABLE} Retry`);
+
     // Session A -> session B while the session A retry is pending.
     cleanup();
     setupApi({ signInSessions: [{ ...signedIn, id: 'session-a' }, { ...signedIn, id: 'session-b' }], statuses: { [REVIEWS]: [503, 200] } });

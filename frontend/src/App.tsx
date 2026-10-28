@@ -129,6 +129,7 @@ export default function App({
   const [regions, setRegions] = useState<Regions>(loadingRegions);
   // Identifies the signed-in session and selected case a request was made for; a response for any other is dropped.
   const requestContext = useRef('');
+  const contextCounter = useRef(0);
   const [routePath, setRoutePath] = useState<string>(() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
   const [returnTo, setReturnTo] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -579,7 +580,8 @@ export default function App({
       setCaseError('');
       return;
     }
-    const context = `${session.id}|${selectedCaseId}|${refresh}`;
+    // A fresh id per load, so a response from an earlier visit to the same session and case cannot become valid again.
+    const context = String(++contextCounter.current);
     requestContext.current = context;
     setCaseError('');
     for (const key of REGION_KEYS) loadRegion(key, selectedCaseId, context);
