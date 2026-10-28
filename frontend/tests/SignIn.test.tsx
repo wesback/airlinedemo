@@ -34,6 +34,7 @@ async function enterPasscodeAndPick(passcode: string, userName: string) {
 }
 
 afterEach(() => {
+  localStorage.clear();
   cleanup();
   vi.unstubAllGlobals();
 });

@@ -139,6 +139,11 @@ afterEach(() => {
 describe('reviewer workspace', () => {
   it('AC_004_switch_role_behavior', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: assignSpy },
+    });
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, init });
@@ -171,6 +176,7 @@ describe('reviewer workspace', () => {
     const switchCall = calls.find(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST');
     expect(JSON.parse(String(switchCall?.init?.body))).toEqual({ userId: 'fin-1' });
     expect((switchCall?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+    expect(assignSpy).toHaveBeenCalledWith('/work');
     expect(screen.getByText('Finance reviewer')).toBeTruthy();
   });
 
