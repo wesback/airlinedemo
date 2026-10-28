@@ -130,8 +130,11 @@ export default function App({
   const [failedRegion, setFailedRegion] = useState<ProjectionRegion | null>(null);
   const activeFailedRegion = failedRegion ?? (failedRegions[0] ?? null);
   const activeCaseContext = useRef<{ sessionId: string | null; caseId: string | null }>({ sessionId: session?.id ?? null, caseId: selectedCaseId ?? null });
+  const updateActiveCaseContext = (nextSessionId: string | null, nextCaseId: string | null) => {
+    activeCaseContext.current = { sessionId: nextSessionId, caseId: nextCaseId };
+  };
   useEffect(() => {
-    activeCaseContext.current = { sessionId: session?.id ?? null, caseId: selectedCaseId ?? null };
+    updateActiveCaseContext(session?.id ?? null, selectedCaseId ?? null);
   }, [session, selectedCaseId]);
   const [reason, setReason] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
@@ -457,15 +460,17 @@ export default function App({
   }
 
   function handleSessionChange(nextSession: SignedInSession | null) {
+    const nextCaseId = nextSession?.caseScopes?.[0] ?? null;
+    updateActiveCaseContext(nextSession?.id ?? null, nextCaseId);
     setSession(nextSession);
-    setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
+    setSelectedCaseId(nextCaseId);
     traceRequestId.current += 1;
     setData(null);
     setProjectionRegions({
-      case: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'case') : '' },
-      dashboard: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'dashboard') : '' },
-      review: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'review') : '' },
-      readiness: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'readiness') : '' },
+      case: { status: 'loading', data: null, error: null, url: nextCaseId ? getProjectionUrl(nextCaseId, 'case') : '' },
+      dashboard: { status: 'loading', data: null, error: null, url: nextCaseId ? getProjectionUrl(nextCaseId, 'dashboard') : '' },
+      review: { status: 'loading', data: null, error: null, url: nextCaseId ? getProjectionUrl(nextCaseId, 'review') : '' },
+      readiness: { status: 'loading', data: null, error: null, url: nextCaseId ? getProjectionUrl(nextCaseId, 'readiness') : '' },
     });
     setFailedRegion(null);
     setReason('');
@@ -476,8 +481,8 @@ export default function App({
   async function reloadRegion(region: ProjectionRegion) {
     if (!session || !selectedCaseId) return;
     const regionUrl = getProjectionUrl(selectedCaseId, region);
-    const currentCaseId = activeCaseContext.current.caseId;
-    const currentSessionId = activeCaseContext.current.sessionId;
+    const requestScope = { sessionId: session.id, caseId: selectedCaseId };
+    updateActiveCaseContext(requestScope.sessionId, requestScope.caseId);
     setProjectionRegions((current) => ({
       ...current,
       [region]: { ...current[region], status: 'loading', error: null, url: regionUrl },
@@ -485,7 +490,7 @@ export default function App({
     setCaseError((current) => region === 'case' ? '' : current);
     try {
       const nextValue = await getProjection<unknown>(regionUrl);
-      if (activeCaseContext.current.caseId !== currentCaseId || activeCaseContext.current.sessionId !== currentSessionId) {
+      if (activeCaseContext.current.caseId !== requestScope.caseId || activeCaseContext.current.sessionId !== requestScope.sessionId) {
         return;
       }
       const nextState: ProjectionRegionState = {
@@ -510,7 +515,7 @@ export default function App({
       });
       setCaseError('');
     } catch (error) {
-      if (activeCaseContext.current.caseId !== currentCaseId || activeCaseContext.current.sessionId !== currentSessionId) {
+      if (activeCaseContext.current.caseId !== requestScope.caseId || activeCaseContext.current.sessionId !== requestScope.sessionId) {
         return;
       }
       const normalized = normalizeRegionError(error);
@@ -530,7 +535,7 @@ export default function App({
   }
 
   async function reloadFailedRegion() {
-    const regionToRetry = failedRegion ?? activeFailedRegion ?? 'case';
+    const regionToRetry = failedRegion ?? (projectionRegionsOrder.find((region) => projectionRegions[region].error !== null) ?? 'case');
     await reloadRegion(regionToRetry);
   }
 
