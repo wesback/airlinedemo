@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react';
 import { tokens } from '@fluentui/react-components';
 import type { WorklistItem } from './TechnicalWorkspace';
 
+// Permanent text of this screen; the server cannot change it.
+const SIMULATION_BANNER = 'Simulated — no notice is sent.';
+
 export type DecisionAction = { id: string; label: string };
 
 export type ObligationRow = { label: string; value: string };
@@ -13,11 +16,9 @@ export type ObligationRecord = {
   summary?: string;
   status?: string;
   basisVersion?: number | null;
-  expectedRevision?: number | null;
   rows?: ObligationRow[];
   clauseReferences?: ClauseReference[];
   noticeDraft?: string;
-  banner?: string;
   allowedDecisions?: DecisionAction[];
 };
 
@@ -59,7 +60,6 @@ export default function ObligationWorkspace({
   const canGoNext = selectedIndex >= 0 && selectedIndex < worklist.length - 1;
   const rows = obligation?.rows ?? [];
   const clauseReferences = obligation?.clauseReferences ?? [];
-  const banner = obligation?.banner ?? 'Simulated — no notice is sent.';
   const allowedDecisions = obligation?.allowedDecisions ?? [];
   const title = obligation?.title ?? selectedItem?.itemId ?? 'Obligation';
 
@@ -114,7 +114,7 @@ export default function ObligationWorkspace({
           )}
         </div>
         <p>{obligation?.status ?? selectedItem?.state ?? 'Awaiting legal review'}</p>
-        <div role="status" aria-live="polite">{banner}</div>
+        <p>{SIMULATION_BANNER}</p>
         <div>
           <h3>Notice draft</h3>
           <p>{obligation?.noticeDraft ?? 'No notice draft recorded.'}</p>

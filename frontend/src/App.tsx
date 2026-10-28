@@ -31,6 +31,10 @@ import FindingWorkspace from './workspaces/FindingWorkspace';
 import ObligationWorkspace, { type ObligationRecord } from './workspaces/ObligationWorkspace';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
+const LEGAL_DECISIONS = [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }];
+// The server serialises the draft status as its enum number (Current = 0).
+const isCurrentDraft = (status: string | number | undefined) => status === 0 || String(status).toLowerCase() === 'current';
+
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
 type RegionKey = 'case' | 'dashboard' | 'review' | 'readiness';
@@ -899,42 +903,31 @@ export default function App({
         setObligationRecord(null);
         return;
       }
-      const payload = await response.json() as {
-        state?: string;
-        reasons?: string[];
-        drafts?: Array<{ id: string; body: string; status?: string; evidenceRequirementIds?: string[]; citation?: { sourceId?: string; recordId?: string; recordVersion?: number } }>;
-        newDraft?: { id?: string; body?: string; status?: string; evidenceRequirementIds?: string[]; citation?: { sourceId?: string; recordId?: string; recordVersion?: number } };
-        citation?: { sourceId?: string; recordId?: string; recordVersion?: number };
-        rows?: Array<{ label: string; value: string }>;
-        clauseReferences?: Array<{ id: string; text: string }>;
-        noticeDraft?: string;
-        banner?: string;
-        allowedDecisions?: Array<{ id: string; label: string }>;
-        basisVersion?: number | null;
-        expectedRevision?: number | null;
-      };
+      type Citation = { sourceId?: string; recordId?: string; recordVersion?: number };
+      type Draft = { id: string; obligationId?: string; basisVersion?: number; body?: string; status?: string | number; citation?: Citation };
+      const payload = await response.json() as { state?: string | number; drafts?: Draft[]; newDraft?: Draft; citation?: Citation };
       if (requestId !== obligationRequestId.current || activeObligationSelection.current !== selection) return;
-      const record = payload.drafts?.find((draft) => draft.id === itemId || draft.id?.endsWith(`-${itemId}`)) ?? payload.newDraft;
-      const clauseText = payload.clauseReferences?.[0]?.text ?? (record?.citation ? `Clause: ${record.citation.sourceId ?? 'contracts'}/${record.citation.recordId ?? 'unknown'} § ${record.citation.recordVersion ?? 1}` : 'Clause: contracts/con-clause-return-notice-001 § 1');
-      const rows = Array.isArray(payload.rows) && payload.rows.length > 0 ? payload.rows : [
-        { label: 'Obligation', value: itemId },
-        { label: 'Case', value: caseId },
-        { label: 'Basis version', value: String(payload.basisVersion ?? caseState?.basis?.length ?? 0) },
-      ];
+      // Only the server's own draft for this obligation is shown. Nothing is filled in when the server sent none.
+      const draft = [...(payload.drafts ?? []), ...(payload.newDraft ? [payload.newDraft] : [])]
+        .find((candidate) => candidate.obligationId === itemId && isCurrentDraft(candidate.status));
+      const citation = draft?.citation ?? payload.citation;
       const nextRecord: ObligationRecord = {
         id: itemId,
         title: `Obligation ${itemId}`,
         summary: `Case ${caseId}: ${itemId}`,
-        status: payload.state ?? 'Awaiting legal review',
-        basisVersion: payload.basisVersion ?? caseState?.basis?.length ?? null,
-        expectedRevision: payload.expectedRevision ?? caseState?.revision ?? 0,
-        rows,
-        clauseReferences: payload.clauseReferences && payload.clauseReferences.length > 0 ? payload.clauseReferences : [{ id: 'clause-1', text: clauseText }],
-        noticeDraft: payload.noticeDraft ?? record?.body ?? 'No notice draft recorded.',
-        banner: payload.banner ?? 'Simulated — no notice is sent.',
-        allowedDecisions: Array.isArray(payload.allowedDecisions) && payload.allowedDecisions.length > 0
-          ? payload.allowedDecisions
+        status: payload.state === undefined ? 'Unknown' : String(payload.state),
+        basisVersion: draft?.basisVersion ?? null,
+        rows: [
+          { label: 'Obligation', value: itemId },
+          { label: 'Case', value: caseId },
+          ...(draft?.basisVersion === undefined ? [] : [{ label: 'Basis version', value: String(draft.basisVersion) }]),
+        ],
+        clauseReferences: citation?.sourceId && citation.recordId
+          ? [{ id: `${citation.sourceId}/${citation.recordId}`, text: `Clause: ${citation.sourceId}/${citation.recordId} § ${citation.recordVersion ?? 1}` }]
           : [],
+        noticeDraft: draft?.body,
+        // The existing command accepts exactly these two decisions, and only for the current draft.
+        allowedDecisions: draft ? LEGAL_DECISIONS : [],
       };
       setObligationRecord(nextRecord);
       setObligationReason('');
@@ -1325,8 +1318,9 @@ export default function App({
                 }}
                 onDecisionSubmit={(decisionId, reason) => {
                   if (!session || !selectedCaseId || !obligationRecord || !obligationRecord.id) return false;
+                  if (!caseState || !Number.isInteger(caseState.revision)) return false;
                   const payload = {
-                    expectedRevision: obligationRecord.expectedRevision ?? caseState?.revision ?? 0,
+                    expectedRevision: caseState.revision,
                     decision: decisionId,
                     reason,
                   };
@@ -1338,6 +1332,7 @@ export default function App({
                     if (response.status === 403) return false;
                     if (response.status === 409) {
                       setConflictNotice('The case changed. Refresh the case before deciding.');
+                      setRefresh((value) => value + 1);
                       return false;
                     }
                     if (!response.ok) return false;
