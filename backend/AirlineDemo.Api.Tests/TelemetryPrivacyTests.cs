@@ -466,6 +466,8 @@ public sealed class TelemetryPrivacyTests
     [InlineData(TelemetryRedaction.SecurityEvents.AuthScopeFailure)]
     [InlineData(TelemetryRedaction.SecurityEvents.IntegritySignatureFailure)]
     [InlineData(TelemetryRedaction.SecurityEvents.BudgetExhausted)]
+    [InlineData(TelemetryRedaction.SecurityEvents.RoleSwitch)]
+    [InlineData(TelemetryRedaction.SecurityEvents.CaseReset)]
     public void Security_events_are_emitted_under_their_alert_event_name(string eventName)
     {
         var logger = new CapturingLogger();

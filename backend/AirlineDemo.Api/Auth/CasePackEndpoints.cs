@@ -92,6 +92,7 @@ public static class CasePackEndpoints
         int version,
         string caseId,
         HttpContext http,
+        IConfiguration config,
         DemoSessionStore sessions,
         CasePackRequestLimiter limiter,
         ICaseStateStore caseStates,
@@ -198,12 +199,14 @@ public static class CasePackEndpoints
             var result = reset.Reset(scope, session.User.Id, body.CommandId!,
                 body.ExpectedRevision.Value, body.Variant!);
             CasePackDiagnostics.Reset(logger, result.Replayed ? "replayed" : "success", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId);
+            TelemetryRedaction.EmitCaseResetEvent(logger, result.Replayed ? "replayed" : "success", session.User.Role, session.Id, TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
             return Results.Ok(result.Receipt);
         }
         catch (CasePackBlockedVariantResetException exception)
         {
             var outcome = exception.Code switch { "validation_error" => "validation_failed", "command_id_conflict" or "stale_revision" => "conflict", "unsupported_target" => "invalid", _ => "failed" };
             CasePackDiagnostics.Reset(logger, outcome, CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId);
+            TelemetryRedaction.EmitCaseResetEvent(logger, outcome, session.User.Role, session.Id, TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
             return Error(exception.StatusCode, exception.Code, exception.Message);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

@@ -302,6 +302,43 @@ describe('reviewer workspace', () => {
     const body = JSON.parse(String(resetCall?.init?.body ?? '{}'));
     expect(body).toMatchObject({ contractVersion: 1, expectedRevision: 7, variant: 'blocked' });
     expect(body.commandId).toMatch(/^cp-reset-7-\d+$/);
+
+    cleanup();
+
+    const noActionCalls: Array<{ url: string; init?: RequestInit }> = [];
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: vi.fn(), pathname: '/demo' },
+    });
+    window.history.replaceState({}, '', '/demo');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      noActionCalls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'presenter', displayName: 'Demo presenter', role: 'presenter' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-a'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-a', name: 'Case A', aircraftCategory: 'narrow-body', caseRevision: 7 }, { caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+      if (url === '/api/v1/cases/cp-case-a/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: false, allowedActions: [], case: { caseId: 'cp-case-a', caseRevision: 7, name: 'Case A', aircraftName: 'Case A', aircraftCategory: 'narrow-body', capabilityLabel: 'Rules-based', permission: false, allowedActions: [] }, objects: [] });
+      if (url === '/api/v1/cases/cp-case-c/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: true, allowedActions: ['reset'], case: { caseId: 'cp-case-c', caseRevision: 7, name: 'Case C', aircraftName: 'Case C', aircraftCategory: 'wide-body', capabilityLabel: 'Rules-based', permission: true, allowedActions: ['reset'] }, objects: [] });
+      if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && method === 'POST') return json({ accepted: true }, 200);
+      if (url === '/api/cases/cp-case-a') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/cp-case-c') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/cp-case-c/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/cp-case-c/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/cp-case-c/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Demo presenter/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Demo presenter.');
+    expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(noActionCalls.filter(({ url, init }) => url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && init?.method === 'POST')).toHaveLength(0);
   });
 
   it('AC_004_demo_view_as_contract', async () => {
@@ -359,6 +396,46 @@ describe('reviewer workspace', () => {
       expect(assignSpy).toHaveBeenCalledWith(persona.home);
       cleanup();
     }
+
+    const rejectionCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const rejectionAssignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: rejectionAssignSpy },
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      rejectionCalls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'presenter', displayName: 'Demo presenter', role: 'presenter' }, { id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-c'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/auth/switch-user') return json({ error: 'You do not have permission for this action.' }, 403);
+      if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+      if (url === '/api/v1/cases/cp-case-c/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: true, allowedActions: ['reset'], case: { caseId: 'cp-case-c', caseRevision: 7, name: 'Case C', aircraftName: 'Case C', aircraftCategory: 'wide-body', capabilityLabel: 'Rules-based', permission: true, allowedActions: ['reset'] }, objects: [] });
+      if (url === '/api/cases/cp-case-c') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/cp-case-c/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/cp-case-c/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/cp-case-c/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Demo presenter/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Demo presenter.');
+    const switchButton = screen.getAllByRole('button', { name: /View as Technical reviewer/i })[0];
+    fireEvent.click(switchButton);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('You do not have permission for this action.');
+    expect(rejectionCalls.filter(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST')).toHaveLength(1);
+    expect(rejectionAssignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Demo presenter')).toBeTruthy();
+    expect(screen.getByText('Case cp-case-c')).toBeTruthy();
   });
 
   it('keeps the active case when it stays in scope and falls back otherwise', () => {
