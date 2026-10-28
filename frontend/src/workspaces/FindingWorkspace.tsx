@@ -29,16 +29,12 @@ export type FindingWorkspaceProps = {
 };
 
 function findSelectedIndex(worklist: WorklistItem[], caseId?: string | null, itemId?: string | null): number {
-  if (!worklist.length) return -1;
-  if (caseId && itemId) {
+  if (!worklist.length || !caseId) return -1;
+  if (itemId) {
     const index = worklist.findIndex((item) => item.caseId === caseId && item.itemId === itemId);
     return index >= 0 ? index : -1;
   }
-  if (caseId) {
-    const index = worklist.findIndex((item) => item.caseId === caseId);
-    return index >= 0 ? index : -1;
-  }
-  return 0;
+  return worklist.findIndex((item) => item.caseId === caseId);
 }
 
 export default function FindingWorkspace({
@@ -65,9 +61,7 @@ export default function FindingWorkspace({
     if (submission === true) setToast('Decision recorded');
   }
 
-  const evidence = findings?.evidence ?? [
-    { id: 'evidence-1', label: 'Request status', text: findings?.status ?? selectedItem?.state ?? 'Open', status: 'open' },
-  ];
+  const evidence = findings?.evidence ?? [];
 
   return (
     <section aria-labelledby="finding-workspace-heading" style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(260px, 1.3fr)', gap: tokens.spacingHorizontalM }}>
@@ -75,6 +69,7 @@ export default function FindingWorkspace({
       <div>
         <h3>Evidence</h3>
         <ul>
+          {evidence.length === 0 && <li>No evidence recorded</li>}
           {evidence.map((entry, index) => (
             <li key={`${entry.id ?? 'evidence'}-${index}`}>
               <strong>{entry.label ?? `Evidence ${index + 1}`}</strong>
@@ -85,7 +80,7 @@ export default function FindingWorkspace({
         </ul>
         <div>
           <h3>Request status</h3>
-          <p>{findings?.status ?? selectedItem?.state ?? 'Awaiting review'}</p>
+          <p>{findings?.status ?? selectedItem?.state ?? 'Unknown'}</p>
         </div>
       </div>
       <div>

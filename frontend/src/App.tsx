@@ -144,6 +144,8 @@ export default function App({
   const [worklistLoaded, setWorklistLoaded] = useState(false);
   const [worklistSelection, setWorklistSelection] = useState<{ caseId: string; itemId: string } | null>(null);
   const worklistRequestId = useRef(0);
+  const worklistOwner = useRef('');
+  const [conflictNotice, setConflictNotice] = useState('');
   const technicalFindingRoute = useMemo(() => {
     if (!session || session.role !== 'technical-reviewer') return null;
     const match = routePath.match(/^\/cases\/([^/]+)\/findings(?:\/)?$/);
@@ -592,10 +594,25 @@ export default function App({
       setCaseError('');
       setReason('');
       setTraceView(null);
+      worklistRequestId.current += 1;
+      worklistOwner.current = '';
       setWorklist([]);
       setWorklistError(null);
       setWorklistLoaded(false);
+      setWorklistSelection(null);
+      setConflictNotice('');
       return;
+    }
+    // A different user must never see the previous session's worklist: drop it before anything is fetched.
+    const owner = `${session.id}:${session.csrfToken}`;
+    if (worklistOwner.current !== owner) {
+      worklistOwner.current = owner;
+      worklistRequestId.current += 1;
+      setWorklist([]);
+      setWorklistError(null);
+      setWorklistLoaded(false);
+      setWorklistSelection(null);
+      setConflictNotice('');
     }
     if (session.role === 'technical-reviewer') {
       const requestId = ++worklistRequestId.current;
@@ -621,6 +638,7 @@ export default function App({
           setWorklistLoaded(true);
         });
     } else {
+      worklistRequestId.current += 1;
       setWorklist([]);
       setWorklistError(null);
       setWorklistLoaded(true);
@@ -691,11 +709,14 @@ export default function App({
         return false;
       }
       if (response.status === 409) {
-        setCaseError('The case changed. Refresh the case before deciding.');
+        // Nothing is changed locally; the reload below replaces every projection with what the server holds.
+        setConflictNotice('The case changed. Refresh the case before deciding.');
+        setRefresh((value) => value + 1);
         return false;
       }
       if (!response.ok) throw new RequestError(response.status);
       setReason(nextReason);
+      setConflictNotice('');
       setRefresh((value) => value + 1);
       return true;
     } catch {
@@ -878,6 +899,7 @@ export default function App({
               </section>
             ))}
             {caseError && <p role="alert">{caseError}</p>}
+            {conflictNotice && <p role="alert">{conflictNotice}</p>}
             {caseState && (
               <>
                 <p>Revision: {caseState.revision}</p>
@@ -1030,46 +1052,26 @@ export default function App({
                 )}
               </>
             )}
-            {session.role === 'technical-reviewer' && worklistLoaded && routePath.match(/^\/cases\/[^/]+\/findings(?:\/)?$/) && (
+            {session.role === 'technical-reviewer' && worklistLoaded && technicalFindingRoute && technicalFindingRoute.caseId === selectedCaseId && dashboard && review && (
               <FindingWorkspace
                 worklist={worklist}
-                caseId={technicalFindingRoute?.caseId ?? selectedCaseId}
-                itemId={technicalFindingRoute?.itemId ?? worklistSelection?.itemId ?? null}
-                findings={
-                  dashboard && typeof dashboard === 'object' && 'capabilities' in dashboard
-                    ? {
-                        title: selectedCaseId ? `Finding for ${selectedCaseId}` : 'Finding review',
-                        summary: worklistSelection ? `Case ${worklistSelection.caseId}: ${worklistSelection.itemId}` : 'Technical review evidence and decision',
-                        status: review?.decisions.some((item) => item.current) ? 'Decision recorded' : 'Awaiting review',
-                        evidence: [
-                          { id: 'request-status', label: 'Request status', text: review?.decisions.some((item) => item.current) ? 'Decision recorded' : 'Awaiting review', status: review?.decisions.some((item) => item.current) ? 'resolved' : 'open' },
-                          ...((dashboard.capabilities.find((capability) => capability.id === 'records-investigation')?.evidence ?? []).map((link, index) => ({
-                            id: `evidence-${index + 1}`,
-                            label: link.label || 'Evidence',
-                            text: link.label || 'Trace',
-                            status: 'ready',
-                          }))),
-                        ],
-                      }
-                    : {
-                        title: 'Finding review',
-                        summary: 'Technical review evidence and decision',
-                        status: 'Awaiting review',
-                        evidence: [{ id: 'request-status', label: 'Request status', text: 'Awaiting review', status: 'open' }],
-                      }
-                }
-                allowedDecisions={dashboard?.allowedDecisions ?? []}
+                caseId={technicalFindingRoute.caseId}
+                itemId={technicalFindingRoute.itemId}
+                findings={{
+                  title: `Finding for ${technicalFindingRoute.caseId}`,
+                  summary: technicalFindingRoute.itemId ? `Case ${technicalFindingRoute.caseId}: ${technicalFindingRoute.itemId}` : `Case ${technicalFindingRoute.caseId}`,
+                  status: review.decisions.some((item) => item.current) ? 'Decision recorded' : 'Awaiting review',
+                  evidence: dashboard.capabilities.flatMap((capability) => capability.evidence.map((link) => ({
+                    id: `${capability.id}:${link.url}`,
+                    label: capability.name,
+                    text: link.label,
+                  }))),
+                }}
+                allowedDecisions={dashboard.allowedDecisions}
                 decisionReason={reason}
                 onDecisionReasonChange={setReason}
                 onNavigate={(direction) => navigateTechnicalFinding(direction)}
-                onDecisionSubmit={async (decisionId, decisionReasonValue) => {
-                  const saved = await submitDecision('technical-review', decisionId, decisionReasonValue);
-                  if (saved) {
-                    setWorklistSelection((current) => current ? { ...current, itemId: current.itemId } : current);
-                    return true;
-                  }
-                  return false;
-                }}
+                onDecisionSubmit={(decisionId, decisionReasonValue) => submitDecision('technical-review', decisionId, decisionReasonValue)}
               />
             )}
             {session.role === 'technical-reviewer' && worklistLoaded && !routePath.match(/^\/cases\/[^/]+\/findings(?:\/)?$/) && (

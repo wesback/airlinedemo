@@ -879,10 +879,18 @@ describe('reviewer workspace', () => {
 
       const alert = await screen.findByRole('alert');
       expect(alert.textContent).toBe(status === 403 ? 'You are not permitted to record this decision.' : 'The case changed. Refresh the case before deciding.');
-      expect(screen.getByText('Revision: 7')).toBeTruthy();
-      expect(screen.getByText('Technical-review decision: No current decision')).toBeTruthy();
-      expect(screen.queryByText('finding-2')).toBeNull();
-      expect(calls.filter(({ url }) => url.endsWith('/dashboard'))).toHaveLength(1);
+      expect(calls.filter(({ url, init }) => url.endsWith('/technical-reviews') && init?.method === 'POST')).toHaveLength(1);
+      expect(screen.queryByText('Decision recorded')).toBeNull();
+      if (status === 403) {
+        expect(screen.getByText('Revision: 7')).toBeTruthy();
+        expect(screen.getByText('Technical-review decision: No current decision')).toBeTruthy();
+        expect(screen.queryByText('finding-2')).toBeNull();
+        expect(calls.filter(({ url }) => url.endsWith('/dashboard'))).toHaveLength(1);
+      } else {
+        // A stale revision is not applied locally; the server projections are read again.
+        await waitFor(() => expect(calls.filter(({ url }) => url.endsWith('/dashboard'))).toHaveLength(2));
+        expect(screen.getByRole('alert').textContent).toBe('The case changed. Refresh the case before deciding.');
+      }
     }
   });
 });

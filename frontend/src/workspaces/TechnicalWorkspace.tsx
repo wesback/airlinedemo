@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { tokens } from '@fluentui/react-components';
+import { safeLabel } from '../CapabilityDashboard';
 
 export type WorklistItem = {
   caseId: string;
@@ -16,10 +17,6 @@ export type TechnicalWorkspaceProps = {
   title?: string;
   onSelect?: (caseId: string, itemId: string) => void;
 };
-
-function normalizeStatus(label: unknown): string {
-  return typeof label === 'string' && label.trim().length > 0 ? label.trim() : 'Unknown';
-}
 
 function formatAge(ageSeconds: number): string {
   if (!Number.isFinite(ageSeconds)) return 'Unknown';
@@ -101,7 +98,7 @@ export default function TechnicalWorkspace({
               <td>{item.capabilityId}</td>
               <td>{formatAge(item.ageSeconds)}</td>
               <td>
-                <span>{normalizeStatus(item.label)}</span>
+                <span>{safeLabel(item.label)}</span>
               </td>
             </tr>
           ))}
