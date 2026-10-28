@@ -25,10 +25,50 @@ type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
 type Projections = { caseState: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection; readiness: ReadinessSummaryData };
 type ProjectionRegion = 'case' | 'dashboard' | 'review' | 'readiness';
+type ProjectionRegionState = {
+  status: 'loading' | 'ready' | 'empty' | 'error' | 'permission' | 'missing' | 'unavailable';
+  data: unknown | null;
+  error: { status: number; message: string } | null;
+  url: string;
+};
 
 class RequestError extends Error { constructor(readonly status: number) { super(`Request failed with status ${status}`); } }
 
 async function getProjection<T>(url: string): Promise<T> { const response = await fetch(url); if (!response.ok) throw new RequestError(response.status); return response.json(); }
+
+function normalizeRegionError(error: unknown): { status: number; message: string } {
+  if (error instanceof RequestError) {
+    return { status: error.status, message: loadError(error) };
+  }
+  const status = typeof error === 'object' && error !== null && 'status' in error && typeof (error as { status?: unknown }).status === 'number'
+    ? Number((error as { status: number }).status)
+    : 500;
+  return { status, message: loadError(new RequestError(status)) };
+}
+
+function getRegionStatusFromCode(status: number | undefined): ProjectionRegionState['status'] {
+  if (status === 401 || status === 403) return 'permission';
+  if (status === 404) return 'missing';
+  if (status === 503) return 'unavailable';
+  return 'error';
+}
+
+function hasEmptyProjection(region: ProjectionRegion, value: unknown): boolean {
+  if (value == null) return true;
+  if (region === 'dashboard') {
+    const dashboard = value as Partial<DashboardData> | undefined;
+    return Array.isArray(dashboard?.capabilities) && dashboard.capabilities.length === 0 && Array.isArray(dashboard?.queue) && dashboard.queue.length === 0 && Array.isArray(dashboard?.activity) && dashboard.activity.length === 0;
+  }
+  if (region === 'review') {
+    const review = value as Partial<TechnicalReviewProjection> | undefined;
+    return Array.isArray(review?.decisions) && review.decisions.length === 0;
+  }
+  if (region === 'readiness') {
+    const readiness = value as Partial<ReadinessSummaryData> | undefined;
+    return typeof readiness?.sentence === 'string' && readiness.sentence.trim().length === 0;
+  }
+  return false;
+}
 
 function loadError(error: unknown): string {
   return error instanceof RequestError && error.status === 401 ? 'Sign in again to continue.'
@@ -77,9 +117,15 @@ export default function App({
   const [session, setSession] = useState<SignedInSession | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [data, setData] = useState<Projections | null>(null);
+  const [projectionRegions, setProjectionRegions] = useState<Record<ProjectionRegion, ProjectionRegionState>>({
+    case: { status: 'loading', data: null, error: null, url: selectedCaseId ? `/api/cases/${encodeURIComponent(selectedCaseId)}` : '' },
+    dashboard: { status: 'loading', data: null, error: null, url: selectedCaseId ? `/api/cases/${encodeURIComponent(selectedCaseId)}/dashboard` : '' },
+    review: { status: 'loading', data: null, error: null, url: selectedCaseId ? `/api/cases/${encodeURIComponent(selectedCaseId)}/technical-reviews` : '' },
+    readiness: { status: 'loading', data: null, error: null, url: selectedCaseId ? `/api/cases/${encodeURIComponent(selectedCaseId)}/readiness` : '' },
+  });
   const [loadingCase, setLoadingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
-  const [failedRegion, setFailedRegion] = useState<'case' | 'dashboard' | 'review' | 'readiness' | null>(null);
+  const [failedRegion, setFailedRegion] = useState<ProjectionRegion | null>(null);
   const [reason, setReason] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -374,56 +420,103 @@ export default function App({
     return () => { active = false; };
   }, []);
 
+  function makeDefaultData(): Projections {
+    return {
+      caseState: { revision: 0, basis: [] },
+      dashboard: { allowedDecisions: [], capabilities: [], queue: [], activity: [] },
+      review: { basisVersion: 0, decisions: [] },
+      readiness: { monthsUntilReturn: 0, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: '' },
+    };
+  }
+
+  function mergeProjectionData(current: Projections | null | undefined, patch: Partial<Projections>): Projections {
+    const defaults = makeDefaultData();
+    const merged = { ...defaults, ...(current ?? {}) };
+    if (patch.caseState !== undefined) merged.caseState = { ...defaults.caseState, ...(patch.caseState ?? {}) };
+    if (patch.dashboard !== undefined) merged.dashboard = { ...defaults.dashboard, ...(patch.dashboard ?? {}) };
+    if (patch.review !== undefined) merged.review = { ...defaults.review, ...(patch.review ?? {}) };
+    if (patch.readiness !== undefined) merged.readiness = { ...defaults.readiness, ...(patch.readiness ?? {}) };
+    return merged;
+  }
+
+  function getProjectionUrl(caseId: string, region: ProjectionRegion): string {
+    const base = `/api/cases/${encodeURIComponent(caseId)}`;
+    return {
+      case: base,
+      dashboard: `${base}/dashboard`,
+      review: `${base}/technical-reviews`,
+      readiness: `${base}/readiness`,
+    }[region];
+  }
+
   function handleSessionChange(nextSession: SignedInSession | null) {
     setSession(nextSession);
     setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
     traceRequestId.current += 1;
     setData(null);
+    setProjectionRegions({
+      case: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'case') : '' },
+      dashboard: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'dashboard') : '' },
+      review: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'review') : '' },
+      readiness: { status: 'loading', data: null, error: null, url: nextSession?.caseScopes?.[0] ? getProjectionUrl(nextSession.caseScopes[0], 'readiness') : '' },
+    });
     setFailedRegion(null);
     setReason('');
     setDecisionBusy(false);
     setTraceView(null);
   }
 
-  async function reloadCaseProjection() {
+  async function reloadRegion(region: ProjectionRegion) {
     if (!session || !selectedCaseId) return;
-    setLoadingCase(true);
+    const regionUrl = getProjectionUrl(selectedCaseId, region);
+    setProjectionRegions((current) => ({
+      ...current,
+      [region]: { ...current[region], status: 'loading', error: null, url: regionUrl },
+    }));
+    setFailedRegion(region);
     setCaseError('');
-    setFailedRegion('case');
-    const encodedCaseId = encodeURIComponent(selectedCaseId);
-    const caseBase = `/api/cases/${encodedCaseId}`;
     try {
-      const caseProjection = await getProjection<CaseProjection>(caseBase);
-      setData((current) => current ? { ...current, caseState: caseProjection } : {
-        caseState: caseProjection,
-        dashboard: { allowedDecisions: [], capabilities: [], queue: [], activity: [] },
-        review: { basisVersion: 0, decisions: [] },
-        readiness: {
-          monthsUntilReturn: 0,
-          gapsFound: 0,
-          requestsSent: 0,
-          heldForReview: 0,
-          notProcessed: 0,
-          sentence: '',
-        },
+      const nextValue = await getProjection<unknown>(regionUrl);
+      const nextState: ProjectionRegionState = {
+        status: hasEmptyProjection(region, nextValue) ? 'empty' : 'ready',
+        data: nextValue,
+        error: null,
+        url: regionUrl,
+      };
+      setProjectionRegions((current) => ({
+        ...current,
+        [region]: nextState,
+      }));
+      setData((current) => {
+        if (region === 'case') return mergeProjectionData(current, { caseState: nextValue as CaseProjection });
+        if (region === 'dashboard') return mergeProjectionData(current, { dashboard: nextValue as DashboardData });
+        if (region === 'review') return mergeProjectionData(current, { review: nextValue as TechnicalReviewProjection });
+        return mergeProjectionData(current, { readiness: nextValue as ReadinessSummaryData });
       });
+      setFailedRegion((current) => current === region ? null : current);
       setCaseError('');
-      setFailedRegion(null);
     } catch (error) {
-      setCaseError(loadError(error));
-    } finally {
-      setLoadingCase(false);
+      const normalized = normalizeRegionError(error);
+      setProjectionRegions((current) => ({
+        ...current,
+        [region]: {
+          status: getRegionStatusFromCode(normalized.status),
+          data: null,
+          error: normalized,
+          url: regionUrl,
+        },
+      }));
+      setFailedRegion(region);
+      setCaseError(region === 'case' ? normalized.message : '');
     }
   }
 
   async function reloadFailedRegion() {
-    if (failedRegion === 'case') {
-      await reloadCaseProjection();
+    if (failedRegion) {
+      await reloadRegion(failedRegion);
       return;
     }
-    if (failedRegion === null) {
-      await reloadCaseProjection();
-    }
+    await reloadRegion('case');
   }
 
   useEffect(() => {
@@ -444,29 +537,92 @@ export default function App({
       setLoadingCase(false);
       return;
     }
+
     let active = true;
+    const caseBase = getProjectionUrl(selectedCaseId, 'case');
+    const nextRegions: Record<ProjectionRegion, ProjectionRegionState> = {
+      case: { status: 'loading', data: null, error: null, url: caseBase },
+      dashboard: { status: 'loading', data: null, error: null, url: getProjectionUrl(selectedCaseId, 'dashboard') },
+      review: { status: 'loading', data: null, error: null, url: getProjectionUrl(selectedCaseId, 'review') },
+      readiness: { status: 'loading', data: null, error: null, url: getProjectionUrl(selectedCaseId, 'readiness') },
+    };
     setLoadingCase(true);
     setCaseError('');
     setFailedRegion(null);
-    const encodedCaseId = encodeURIComponent(selectedCaseId);
-    const caseBase = `/api/cases/${encodedCaseId}`;
-    (async () => {
-      try {
-        const caseProjection = await getProjection<CaseProjection>(caseBase);
-        const dashboardProjection = await getProjection<DashboardData>(`${caseBase}/dashboard`);
-        const reviewProjection = await getProjection<TechnicalReviewProjection>(`${caseBase}/technical-reviews`);
-        const readiness = await getProjection<ReadinessSummaryData>(`${caseBase}/readiness`);
-        if (!active) return;
-        setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection, readiness });
-        setFailedRegion(null);
-      } catch (error) {
-        if (!active) return;
-        setFailedRegion('case');
-        setCaseError(loadError(error));
-      } finally {
-        if (active) setLoadingCase(false);
-      }
-    })();
+    setProjectionRegions(nextRegions);
+
+    void Promise.allSettled([
+      (async () => {
+        try {
+          const value = await getProjection<CaseProjection>(caseBase);
+          if (!active) return;
+          nextRegions.case = { status: hasEmptyProjection('case', value) ? 'empty' : 'ready', data: value, error: null, url: caseBase };
+          setProjectionRegions({ ...nextRegions });
+          setData((current) => mergeProjectionData(current, { caseState: value }));
+        } catch (error) {
+          if (!active) return;
+          const normalized = normalizeRegionError(error);
+          nextRegions.case = { status: getRegionStatusFromCode(normalized.status), data: null, error: normalized, url: caseBase };
+          setProjectionRegions({ ...nextRegions });
+        }
+      })(),
+      (async () => {
+        const url = getProjectionUrl(selectedCaseId, 'dashboard');
+        try {
+          const value = await getProjection<DashboardData>(url);
+          if (!active) return;
+          nextRegions.dashboard = { status: hasEmptyProjection('dashboard', value) ? 'empty' : 'ready', data: value, error: null, url };
+          setProjectionRegions({ ...nextRegions });
+          setData((current) => mergeProjectionData(current, { dashboard: value }));
+        } catch (error) {
+          if (!active) return;
+          const normalized = normalizeRegionError(error);
+          nextRegions.dashboard = { status: getRegionStatusFromCode(normalized.status), data: null, error: normalized, url };
+          setProjectionRegions({ ...nextRegions });
+        }
+      })(),
+      (async () => {
+        const url = getProjectionUrl(selectedCaseId, 'review');
+        try {
+          const value = await getProjection<TechnicalReviewProjection>(url);
+          if (!active) return;
+          nextRegions.review = { status: hasEmptyProjection('review', value) ? 'empty' : 'ready', data: value, error: null, url };
+          setProjectionRegions({ ...nextRegions });
+          setData((current) => mergeProjectionData(current, { review: value }));
+        } catch (error) {
+          if (!active) return;
+          const normalized = normalizeRegionError(error);
+          nextRegions.review = { status: getRegionStatusFromCode(normalized.status), data: null, error: normalized, url };
+          setProjectionRegions({ ...nextRegions });
+        }
+      })(),
+      (async () => {
+        const url = getProjectionUrl(selectedCaseId, 'readiness');
+        try {
+          const value = await getProjection<ReadinessSummaryData>(url);
+          if (!active) return;
+          nextRegions.readiness = { status: hasEmptyProjection('readiness', value) ? 'empty' : 'ready', data: value, error: null, url };
+          setProjectionRegions({ ...nextRegions });
+          setData((current) => mergeProjectionData(current, { readiness: value }));
+        } catch (error) {
+          if (!active) return;
+          const normalized = normalizeRegionError(error);
+          nextRegions.readiness = { status: getRegionStatusFromCode(normalized.status), data: null, error: normalized, url };
+          setProjectionRegions({ ...nextRegions });
+        }
+      })(),
+    ]).then(() => {
+      if (!active) return;
+      const failed = (Object.entries(nextRegions) as Array<[ProjectionRegion, ProjectionRegionState]>).find(([, regionState]) => regionState.error !== null)?.[0] ?? null;
+      setFailedRegion(failed);
+      setCaseError(failed === 'case' && nextRegions.case.error ? nextRegions.case.error.message : '');
+      setLoadingCase(false);
+      setProjectionRegions({ ...nextRegions });
+    }).catch(() => {
+      if (!active) return;
+      setLoadingCase(false);
+    });
+
     return () => { active = false; };
   }, [session, selectedCaseId, refresh, caseRefreshNonce]);
 
@@ -527,7 +683,7 @@ export default function App({
   const currentCasePath = typeof window !== 'undefined'
     ? `${window.location.pathname}${window.location.search}${window.location.hash}`
     : selectedCaseId ? `/cases/${encodeURIComponent(selectedCaseId)}` : undefined;
-  const currentDecision = data?.review.decisions.filter((item) => item.current).at(-1)?.decision;
+  const currentDecision = data?.review?.decisions?.filter((item) => item.current).at(-1)?.decision;
   const healthMessage = {
     checking: 'Checking service connection…',
     ready: 'Service connected',
@@ -626,6 +782,7 @@ export default function App({
                     setDecisionBusy(false);
                     setTraceView(null);
                     setCaseError('');
+                    setFailedRegion(null);
                     setSelectedCaseId(event.target.value);
                   }}>
                     {session.caseScopes.map((caseId) => <option key={caseId} value={caseId}>{caseId}</option>)}
@@ -637,7 +794,13 @@ export default function App({
             </>
           )}
           {loadingCase && <WorkspaceRegion status="loading" loadingMessage="Loading case data…" />}
-          {caseError && <WorkspaceRegion
+          {failedRegion && projectionRegions[failedRegion].error && <WorkspaceRegion
+            status={projectionRegions[failedRegion].status}
+            error={projectionRegions[failedRegion].error}
+            currentPath={currentCasePath}
+            onRetry={() => { void reloadFailedRegion(); }}
+          />}
+          {caseError && !failedRegion && <WorkspaceRegion
             status={resolveRegionStatus(caseError)}
             error={resolveRegionError(caseError)}
             currentPath={currentCasePath}
@@ -792,7 +955,7 @@ export default function App({
                 </section>
               )}
               <CapabilityDashboard
-                data={data.dashboard}
+                data={data?.dashboard ?? { allowedDecisions: [], capabilities: [], queue: [], activity: [] }}
                 decisionReason={reason}
                 onDecisionReasonChange={setReason}
                 onTraceSelect={(url) => { void showTrace(url); }}

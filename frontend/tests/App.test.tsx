@@ -177,7 +177,7 @@ describe('reviewer workspace', () => {
       .toEqual(['Citation check — Outcome: verified', 'Tool call — search-manual — Outcome: requested']);
   });
 
-  it('Dashboard_waits_for_authorized_server_state', async () => {
+  it('Dashboard_preserves_case_data_when_another_region_fails', async () => {
     const calls = setupApi();
     render(<App />);
 
@@ -199,7 +199,8 @@ describe('reviewer workspace', () => {
       render(<App />);
       await signIn();
       expect(await screen.findByRole('alert')).toBeTruthy();
-      expect(screen.queryByText('Revision: 7')).toBeNull();
+      expect(screen.getByText('Revision: 7')).toBeTruthy();
+      expect(screen.getByRole('heading', { name: 'Case case-001' })).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Records investigation' })).toBeNull();
     }
   });
