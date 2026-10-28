@@ -81,6 +81,7 @@ export default function App({
   const [reason, setReason] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [caseRefreshNonce, setCaseRefreshNonce] = useState(0);
   const [traceView, setTraceView] = useState<InvestigationTraceView | null>(null);
   const traceRequestId = useRef(0);
   const [hangarView, setHangarView] = useState<'regular' | 'loading' | '3d' | 'fallback' | 'contract-error'>('regular');
@@ -419,7 +420,7 @@ export default function App({
       }
     })();
     return () => { active = false; };
-  }, [session, selectedCaseId, refresh]);
+  }, [session, selectedCaseId, refresh, caseRefreshNonce]);
 
   async function showTrace(url: string) {
     const requestId = ++traceRequestId.current;
@@ -475,6 +476,9 @@ export default function App({
     }
   }
 
+  const currentCasePath = typeof window !== 'undefined'
+    ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+    : selectedCaseId ? `/cases/${encodeURIComponent(selectedCaseId)}` : undefined;
   const currentDecision = data?.review.decisions.filter((item) => item.current).at(-1)?.decision;
   const healthMessage = {
     checking: 'Checking service connection…',
@@ -588,8 +592,8 @@ export default function App({
           {caseError && <WorkspaceRegion
             status={resolveRegionStatus(caseError)}
             error={resolveRegionError(caseError)}
-            currentPath={selectedCaseId ? `/cases/${encodeURIComponent(selectedCaseId)}` : undefined}
-            onRetry={() => setRefresh((value) => value + 1)}
+            currentPath={currentCasePath}
+            onRetry={() => setCaseRefreshNonce((value) => value + 1)}
           />}
           {data && (
             <>
