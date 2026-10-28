@@ -143,6 +143,7 @@ export default function App({
   const [worklistError, setWorklistError] = useState<number | null>(null);
   const [worklistLoaded, setWorklistLoaded] = useState(false);
   const [worklistSelection, setWorklistSelection] = useState<{ caseId: string; itemId: string } | null>(null);
+  const worklistRequestId = useRef(0);
   const technicalFindingRoute = useMemo(() => {
     if (!session || session.role !== 'technical-reviewer') return null;
     const match = routePath.match(/^\/cases\/([^/]+)\/findings(?:\/)?$/);
@@ -597,20 +598,24 @@ export default function App({
       return;
     }
     if (session.role === 'technical-reviewer') {
+      const requestId = ++worklistRequestId.current;
       fetch('/api/v1/workspace/worklist')
         .then(async (response) => {
           if (!response.ok) {
+            if (requestId !== worklistRequestId.current) return;
             setWorklistError(response.status);
             setWorklist([]);
             setWorklistLoaded(true);
             return;
           }
           const payload = await response.json() as { items?: WorklistItem[] };
+          if (requestId !== worklistRequestId.current) return;
           setWorklist(Array.isArray(payload.items) ? payload.items : []);
           setWorklistError(null);
           setWorklistLoaded(true);
         })
         .catch(() => {
+          if (requestId !== worklistRequestId.current) return;
           setWorklist([]);
           setWorklistError(0);
           setWorklistLoaded(true);
@@ -1030,15 +1035,29 @@ export default function App({
                 worklist={worklist}
                 caseId={technicalFindingRoute?.caseId ?? selectedCaseId}
                 itemId={technicalFindingRoute?.itemId ?? worklistSelection?.itemId ?? null}
-                findings={{
-                  title: 'Finding review',
-                  summary: 'Technical review evidence and decision',
-                  status: selectedCaseId ? 'Awaiting review' : 'Awaiting review',
-                  evidence: [
-                    { id: 'request-status', label: 'Request status', text: 'Awaiting review', status: 'open' },
-                    { id: 'evidence-1', label: 'Trace', text: 'No trace recorded', status: 'ready' },
-                  ],
-                }}
+                findings={
+                  dashboard && typeof dashboard === 'object' && 'capabilities' in dashboard
+                    ? {
+                        title: selectedCaseId ? `Finding for ${selectedCaseId}` : 'Finding review',
+                        summary: worklistSelection ? `Case ${worklistSelection.caseId}: ${worklistSelection.itemId}` : 'Technical review evidence and decision',
+                        status: review?.decisions.some((item) => item.current) ? 'Decision recorded' : 'Awaiting review',
+                        evidence: [
+                          { id: 'request-status', label: 'Request status', text: review?.decisions.some((item) => item.current) ? 'Decision recorded' : 'Awaiting review', status: review?.decisions.some((item) => item.current) ? 'resolved' : 'open' },
+                          ...((dashboard.capabilities.find((capability) => capability.id === 'records-investigation')?.evidence ?? []).map((link, index) => ({
+                            id: `evidence-${index + 1}`,
+                            label: link.label || 'Evidence',
+                            text: link.label || 'Trace',
+                            status: 'ready',
+                          }))),
+                        ],
+                      }
+                    : {
+                        title: 'Finding review',
+                        summary: 'Technical review evidence and decision',
+                        status: 'Awaiting review',
+                        evidence: [{ id: 'request-status', label: 'Request status', text: 'Awaiting review', status: 'open' }],
+                      }
+                }
                 allowedDecisions={dashboard?.allowedDecisions ?? []}
                 decisionReason={reason}
                 onDecisionReasonChange={setReason}
