@@ -485,9 +485,10 @@ export default function App({
         return;
       }
       const nextSession: SignedInSession = await response.json();
+      const nextSelectedCaseId = resolveSessionCaseId(nextSession, selectedCaseId);
       resetHangarState();
       setSession(nextSession);
-      setSelectedCaseId(resolveSessionCaseId(nextSession, selectedCaseId));
+      setSelectedCaseId(nextSelectedCaseId);
       traceRequestId.current += 1;
       setData(null);
       setReason('');
@@ -501,9 +502,10 @@ export default function App({
   }
 
   function handleSessionChange(nextSession: SignedInSession | null) {
+    const nextSelectedCaseId = resolveSessionCaseId(nextSession, selectedCaseId);
     resetHangarState();
     setSession(nextSession);
-    setSelectedCaseId(resolveSessionCaseId(nextSession, selectedCaseId));
+    setSelectedCaseId(nextSelectedCaseId);
     traceRequestId.current += 1;
     setData(null);
     setReason('');
