@@ -19,10 +19,27 @@ import { HANGAR_SOURCE_IDS, type HangarSourceSummaryEntry } from './hangar/sourc
 import { createHangarWalkController } from './hangar/walkController';
 import { createHangarFollowCamera, type HangarFollowCamera } from './hangar/followCamera';
 import HangarNon3dDataRoom from './hangar/non3dDataRoom';
+import WorkspaceShell from './components/WorkspaceShell';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
 type Projections = { caseState: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection; readiness: ReadinessSummaryData };
+
+const PERSONA_OPTIONS = [
+  { id: 'presenter', label: 'Demo presenter', role: 'presenter' },
+  { id: 'reviewer', label: 'Technical reviewer', role: 'technical-reviewer' },
+  { id: 'fin-1', label: 'Finance reviewer', role: 'finance-reviewer' },
+  { id: 'legal-1', label: 'Legal reviewer', role: 'legal-reviewer' },
+  { id: 'exec-1', label: 'Executive observer', role: 'executive' },
+] as const;
+
+const ROLE_HOME_PATHS: Record<string, string> = {
+  'technical-reviewer': '/work',
+  'finance-reviewer': '/work',
+  'legal-reviewer': '/work',
+  executive: '/portfolio',
+  presenter: '/demo',
+};
 
 class RequestError extends Error { constructor(readonly status: number) { super(`Request failed with status ${status}`); } }
 
@@ -352,6 +369,36 @@ export default function App({
     return () => { active = false; };
   }, []);
 
+  async function handleRoleSwitch(userId: string) {
+    if (!session) return;
+    try {
+      const response = await fetch('/api/auth/switch-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': session.csrfToken,
+        },
+        body: JSON.stringify({ userId }),
+      });
+      if (!response.ok) {
+        setCaseError('You do not have permission for this action.');
+        return;
+      }
+      const nextSession: SignedInSession = await response.json();
+      setSession(nextSession);
+      setSelectedCaseId(nextSession.caseScopes?.[0] ?? null);
+      traceRequestId.current += 1;
+      setData(null);
+      setReason('');
+      setDecisionBusy(false);
+      setTraceView(null);
+      const path = ROLE_HOME_PATHS[nextSession.role] ?? '/work';
+      if (typeof window !== 'undefined') window.location.assign(path);
+    } catch {
+      setCaseError('Unable to switch roles. Try again later.');
+    }
+  }
+
   function handleSessionChange(nextSession: SignedInSession | null) {
     setSession(nextSession);
     setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
@@ -540,6 +587,16 @@ export default function App({
       <p>Reviewer workspace</p>
       <p role="status" aria-live="polite">{healthMessage}</p>
       <SignIn onSessionChange={handleSessionChange} />
+      {session && (
+        <WorkspaceShell
+          userLabel={session.displayName}
+          role={session.role}
+          roleOptions={PERSONA_OPTIONS.map((option) => ({ id: option.id, label: option.label, role: option.role }))}
+          onRoleSelect={handleRoleSwitch}
+        >
+          <></>
+        </WorkspaceShell>
+      )}
       {session && (
         <section aria-labelledby="case-heading">
           {!session.caseScopes?.length ? (

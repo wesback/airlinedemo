@@ -1,13 +1,23 @@
+import { tokens } from '@fluentui/react-components';
 import { useEffect, useState, type ReactNode } from 'react';
 
 export const NAV_EXPANDED_WIDTH = 240;
 export const NAV_COLLAPSED_WIDTH = 48;
+
+export type WorkspaceShellRoleOption = {
+  id: string;
+  label: string;
+  role: string;
+};
 
 export type WorkspaceShellProps = {
   children?: ReactNode;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   userLabel?: string;
+  role?: string;
+  roleOptions?: WorkspaceShellRoleOption[];
+  onRoleSelect?: (userId: string) => void;
 };
 
 function readNavCollapsed(): boolean {
@@ -21,8 +31,12 @@ export default function WorkspaceShell({
   searchValue = '',
   onSearchChange,
   userLabel = 'User',
+  role,
+  roleOptions = [],
+  onRoleSelect,
 }: WorkspaceShellProps) {
   const [, setNavRenderTick] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -43,6 +57,8 @@ export default function WorkspaceShell({
     setNavRenderTick((value) => value + 1);
   };
 
+  const menuOptions = roleOptions.filter((option) => option.role !== role || option.label !== userLabel);
+
   return (
     <div>
       <header>
@@ -60,8 +76,48 @@ export default function WorkspaceShell({
             onChange={(event) => onSearchChange?.(event.target.value)}
           />
         </div>
-        <div aria-label="User menu">
-          <button type="button">{userLabel}</button>
+        <div aria-label="User menu" style={{ position: 'relative' }}>
+          <button type="button" onClick={() => setMenuOpen((value) => !value)}>{userLabel}</button>
+          {menuOpen && menuOptions.length > 0 && (
+            <div
+              role="menu"
+              aria-label="Switch role"
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: `calc(100% + ${tokens.spacingHorizontalXS})`,
+                background: tokens.colorNeutralBackground1,
+                border: `1px solid ${tokens.colorNeutralStroke1}`,
+                borderRadius: tokens.borderRadiusMedium,
+                padding: tokens.spacingHorizontalS,
+                minWidth: '220px',
+                zIndex: 1,
+              }}
+            >
+              {menuOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRoleSelect?.(option.id);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: `${tokens.spacingHorizontalXS} ${tokens.spacingHorizontalS}`,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Switch role: {option.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </header>
 

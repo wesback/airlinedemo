@@ -1,12 +1,28 @@
+import { tokens } from '@fluentui/react-components';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
-type SeededUser = { id: string; displayName: string; role: string };
+type SeededUser = { id: string; displayName: string; role: string; description?: string };
 export type SignedInSession = { id: string; displayName: string; role: string; caseScopes: string[]; csrfToken: string };
 
 const GENERIC_FAILURE = 'Sign-in failed. Check your details and try again.';
 const THROTTLED = 'Too many attempts. Wait a few minutes before you try again.';
 const SIGN_OUT_FIRST = 'Sign out before switching users.';
 const UNAVAILABLE = 'Service unavailable. Try again later.';
+const LAST_USER_ID_KEY = 'altivane.lastUserId';
+
+const PERSONAS: Record<string, { displayName: string; role: string; description: string }> = {
+  presenter: { displayName: 'Demo presenter', role: 'presenter', description: 'Guides the aircraft story and demo flow.' },
+  'technical-reviewer': { displayName: 'Technical reviewer', role: 'technical-reviewer', description: 'Reviews findings and decides case actions.' },
+  'finance-reviewer': { displayName: 'Finance reviewer', role: 'finance-reviewer', description: 'Checks reserve inputs and approvals.' },
+  'legal-reviewer': { displayName: 'Legal reviewer', role: 'legal-reviewer', description: 'Reviews obligations and drafting notices.' },
+  executive: { displayName: 'Executive observer', role: 'executive', description: 'Tracks portfolio health and decisions.' },
+};
+
+function readLastUserId(): string | null {
+  if (typeof window === 'undefined') return null;
+  const stored = window.localStorage.getItem(LAST_USER_ID_KEY);
+  return stored && stored.length > 0 ? stored : null;
+}
 
 export default function SignIn({ onSessionChange }: { onSessionChange?: (session: SignedInSession | null) => void }) {
   const [step, setStep] = useState<'passcode' | 'picker'>('passcode');
@@ -21,6 +37,16 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
   useEffect(() => {
     if (message) alertRef.current?.focus();
   }, [message]);
+
+  useEffect(() => {
+    if (!users.length) return;
+    const preferredId = readLastUserId();
+    if (preferredId && users.some((user) => user.id === preferredId)) {
+      setSelectedId(preferredId);
+      return;
+    }
+    setSelectedId(users[0]?.id ?? '');
+  }, [users]);
 
   async function continueWithPasscode(event: FormEvent) {
     event.preventDefault();
@@ -45,7 +71,11 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
       }
       const response = await fetch('/api/auth/users');
       if (!response.ok) throw new Error('user list failed');
-      setUsers(await response.json());
+      const nextUsers = (await response.json()) as SeededUser[];
+      setUsers(nextUsers.map((user) => ({
+        ...user,
+        description: PERSONAS[user.role]?.description ?? `${user.displayName} works in this demo workflow.`,
+      })));
       setStep('picker');
       setMessage('');
     } catch {
@@ -72,6 +102,9 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
         const body: SignedInSession = await response.json();
         setSession(body);
         onSessionChange?.(body);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(LAST_USER_ID_KEY, selectedId);
+        }
         setPasscode('');
         setMessage('');
         return;
@@ -130,42 +163,67 @@ export default function SignIn({ onSessionChange }: { onSessionChange?: (session
   }
 
   return (
-    <section aria-labelledby="signin-heading">
-      <h2 id="signin-heading">Sign in</h2>
-      {step === 'passcode' ? (
-        <form onSubmit={continueWithPasscode}>
-          <label htmlFor="demo-passcode">Demo passcode</label>
-          <input
-            id="demo-passcode"
-            type="password"
-            autoComplete="off"
-            value={passcode}
-            onChange={(event) => setPasscode(event.target.value)}
-          />
-          <button type="submit" disabled={busy}>Continue</button>
-        </form>
-      ) : (
-        <form onSubmit={signIn}>
-          <fieldset>
-            <legend>Choose a user</legend>
-            {users.map((user) => (
-              <div key={user.id}>
-                <input
-                  id={`user-${user.id}`}
-                  type="radio"
-                  name="seeded-user"
-                  value={user.id}
-                  checked={selectedId === user.id}
-                  onChange={() => setSelectedId(user.id)}
-                />
-                <label htmlFor={`user-${user.id}`}>{user.displayName} ({user.role})</label>
+    <section aria-labelledby="signin-heading" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.1fr) minmax(320px, 1.7fr)', gap: tokens.spacingHorizontalL, background: tokens.colorNeutralBackground2, border: `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusLarge, padding: tokens.spacingHorizontalL, maxWidth: '980px', margin: '0 auto' }}>
+      <aside aria-label="Altivane brand" style={{ background: `linear-gradient(180deg, ${tokens.colorBrandBackground} 0%, ${tokens.colorBrandBackgroundHover} 100%)`, color: tokens.colorNeutralForegroundInverted, borderRadius: tokens.borderRadiusMedium, padding: tokens.spacingHorizontalL, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: tokens.fontSizeBase200, letterSpacing: '0.2rem', fontWeight: 700 }}>ALTIVANE</div>
+          <h2 id="signin-heading" style={{ margin: '0.5rem 0 1rem', fontSize: tokens.fontSizeHero700 }}>Asset Transitions</h2>
+          <p style={{ margin: 0, lineHeight: 1.5, opacity: 0.88 }}>Review aircraft readiness through the role-based workspace your stakeholders use every day.</p>
+        </div>
+        <div style={{ marginTop: tokens.spacingVerticalL, display: 'grid', gap: tokens.spacingVerticalS }}>
+          {Object.values(PERSONAS).map((persona) => (
+            <div key={persona.role} style={{ background: tokens.colorBrandBackgroundInverted, padding: '0.75rem 0.9rem', borderRadius: tokens.borderRadiusMedium }}>
+              <div style={{ fontWeight: 700 }}>{persona.displayName}</div>
+              <div style={{ opacity: 0.85, fontSize: tokens.fontSizeBase200 }}>{persona.role}</div>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <div>
+        {step === 'passcode' ? (
+          <form onSubmit={continueWithPasscode}>
+            <h2 style={{ marginTop: 0 }}>Welcome back</h2>
+            <label htmlFor="demo-passcode">Demo passcode</label>
+            <input
+              id="demo-passcode"
+              type="password"
+              autoComplete="off"
+              value={passcode}
+              onChange={(event) => setPasscode(event.target.value)}
+              style={{ display: 'block', width: '100%', marginTop: '0.5rem', marginBottom: '1rem', padding: tokens.spacingHorizontalS }}
+            />
+            <button type="submit" disabled={busy}>Continue</button>
+          </form>
+        ) : (
+          <form onSubmit={signIn}>
+            <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
+              <legend style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem' }}>Choose a user</legend>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: tokens.spacingHorizontalM }}>
+                {users.map((user) => (
+                  <div key={user.id} style={{ border: selectedId === user.id ? `2px solid ${tokens.colorBrandStroke1}` : `1px solid ${tokens.colorNeutralStroke1}`, borderRadius: tokens.borderRadiusMedium, padding: tokens.spacingHorizontalM, background: selectedId === user.id ? tokens.colorBrandBackground2 : tokens.colorNeutralBackground1 }}>
+                    <input
+                      id={`user-${user.id}`}
+                      type="radio"
+                      name="seeded-user"
+                      value={user.id}
+                      checked={selectedId === user.id}
+                      onChange={() => setSelectedId(user.id)}
+                    />
+                    <label htmlFor={`user-${user.id}`} style={{ display: 'block', marginTop: '0.75rem', cursor: 'pointer' }}>
+                      <div style={{ fontWeight: 700 }}>{user.displayName}</div>
+                      <div style={{ color: tokens.colorNeutralForeground2, marginTop: '0.15rem' }}>({user.role})</div>
+                      <div aria-hidden="true" style={{ marginTop: '0.5rem', color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200, lineHeight: 1.4 }}>{user.description}</div>
+                    </label>
+                  </div>
+                ))}
               </div>
-            ))}
-          </fieldset>
-          <button type="submit" disabled={busy}>Sign in</button>
-        </form>
-      )}
-      {alert}
+            </fieldset>
+            <button type="submit" disabled={busy || !selectedId} style={{ marginTop: '1rem' }}>Sign in</button>
+          </form>
+        )}
+        {alert}
+      </div>
     </section>
   );
 }

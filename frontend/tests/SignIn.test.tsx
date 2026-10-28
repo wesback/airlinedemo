@@ -34,6 +34,7 @@ async function enterPasscodeAndPick(passcode: string, userName: string) {
 }
 
 afterEach(() => {
+  localStorage.clear();
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -175,6 +176,53 @@ describe('sign-in page', () => {
     expect(screen.queryByLabelText('Demo passcode')).toBeNull();
   });
 
+  it('AC_005_branded_signin_persona_contract', async () => {
+    const fixtureUsers = [
+      { id: 'presenter', displayName: 'Demo presenter', role: 'presenter' },
+      { id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer' },
+      { id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' },
+      { id: 'legal-1', displayName: 'Legal reviewer', role: 'legal-reviewer' },
+      { id: 'exec-1', displayName: 'Executive observer', role: 'executive' },
+    ];
+    localStorage.setItem('altivane.lastUserId', 'legal-1');
+    stubApi({
+      'GET /api/auth/users': () => json(fixtureUsers),
+    });
+    render(<SignIn />);
+
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(await screen.findByRole('heading', { name: 'Asset Transitions' })).toBeTruthy();
+    for (const user of fixtureUsers) {
+      expect(screen.getByRole('radio', { name: `${user.displayName} (${user.role})` })).toBeTruthy();
+    }
+    await waitFor(() => {
+      expect((screen.getByRole('radio', { name: 'Legal reviewer (legal-reviewer)' }) as HTMLInputElement).checked).toBe(true);
+    });
+    expect(screen.getByText('Review aircraft readiness through the role-based workspace your stakeholders use every day.')).toBeTruthy();
+    expect(screen.getByText('Guides the aircraft story and demo flow.')).toBeTruthy();
+    expect(screen.getByText('Reviews findings and decides case actions.')).toBeTruthy();
+  });
+
+  it('local_storage_and_sign_in_secrets', async () => {
+    const fetchMock = stubApi({
+      'GET /api/auth/users': () => json(users),
+      'POST /api/auth/sign-in': () => json({ id: 'agent-1', displayName: 'Ada Reviewer', role: 'Reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-123' }),
+    });
+    render(<SignIn />);
+    await enterPasscodeAndPick('demo-pass', 'Ada');
+
+    expect(await screen.findByText('Signed in as Ada Reviewer.')).toBeTruthy();
+    expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))).toEqual(['altivane.lastUserId']);
+    expect(localStorage.getItem('altivane.lastUserId')).toBe('agent-1');
+    const scan = Array.from({ length: localStorage.length }, (_, index) => localStorage.getItem(localStorage.key(index) ?? '') ?? '').join('\n');
+    expect(scan).not.toContain('demo-pass');
+    expect(scan).not.toContain('csrf-123');
+    expect(scan).not.toContain('session');
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/sign-in')).toBe(true);
+  });
+
   it('shows the sign-out-first message when the server refuses a switch', async () => {
     stubApi({
       'GET /api/auth/users': () => json(users),
@@ -184,6 +232,9 @@ describe('sign-in page', () => {
     await enterPasscodeAndPick('demo-pass', 'Ben');
 
     expect((await screen.findByRole('alert')).textContent).toBe('Sign out before switching users.');
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeTruthy();
+    expect(screen.getByLabelText('Demo passcode')).toBeTruthy();
+    expect(screen.queryByRole('radio')).toBeNull();
   });
 
   it('moves focus to the error message when it appears', async () => {
