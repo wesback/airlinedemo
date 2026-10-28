@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import FinanceWorkspace from '../src/workspaces/FinanceWorkspace';
 
@@ -15,13 +15,18 @@ describe('FinanceWorkspace', () => {
     render(<FinanceWorkspace items={items} onOpenCase={onOpenCase} />);
 
     expect(screen.getByRole('heading', { name: 'My work' })).toBeTruthy();
-    expect(screen.getByText('Reserve case 001')).toBeTruthy();
-    expect(screen.getByText('Reserve case 002')).toBeTruthy();
+    // Server order is kept (case-002 before case-001, not sorted), and only the finance reserve items are listed.
+    const dataRows = () => screen.getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent));
+    expect(dataRows()).toEqual([
+      ['Reserve case 002', 'case-002', 'reserve', '120s', 'Blocked'],
+      ['Reserve case 001', 'case-001', 'reserve', '3600s', 'Stale'],
+    ]);
     expect(screen.queryByText('Legal case 001')).toBeNull();
     expect(screen.queryByText('Other reviewer case')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('Case'), { target: { value: 'case-001' } });
     expect(screen.queryByText('Reserve case 002')).toBeNull();
+    expect(dataRows().map((row) => row[0])).toEqual(['Reserve case 001']);
 
     fireEvent.change(screen.getByLabelText('Capability'), { target: { value: 'reserve' } });
     expect(screen.getByText('Reserve case 001')).toBeTruthy();

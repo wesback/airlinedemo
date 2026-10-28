@@ -104,7 +104,6 @@ export default function ReserveWorksheet({ draft, decisionReason = '', onDecisio
             aria-label="Reason for decision"
             value={decisionReason ?? ''}
             onChange={(event) => onDecisionReasonChange?.(event.currentTarget.value)}
-            onInput={(event) => onDecisionReasonChange?.((event.target as HTMLTextAreaElement).value)}
           />
           <div role="group" aria-label="Reserve decisions">
             {allowedDecisions.map((action) => (

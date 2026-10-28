@@ -688,15 +688,18 @@ export default function App({
   const financeReserveRoute = session?.role === 'finance-reviewer' && /^\/cases\/[^/]+\/reserve(?:$|\?)/.test(normalizeRoutePath(routePath));
 
   async function submitFinanceDecision(decision: string) {
-    if (!session || session.role !== 'finance-reviewer' || !selectedCaseId || !financeReserve || !financeReserve.revision || !reason.trim()) return;
+    // The expected revision is the case revision the server holds, not the reserve draft's own version.
+    if (!session || session.role !== 'finance-reviewer' || !selectedCaseId || !financeReserve || !caseState || !Number.isInteger(caseState.revision) || !reason.trim()) return;
     setDecisionBusy(true);
     setCaseError('');
+    setConflictNotice('');
+    setFinanceDecisionToast('');
     try {
       const response = await fetch(`/api/cases/${encodeURIComponent(selectedCaseId)}/reserve/decisions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken },
         body: JSON.stringify({
-          expectedRevision: financeReserve.revision,
+          expectedRevision: caseState.revision,
           decision,
           reason: reason.trim(),
         }),
@@ -706,7 +709,9 @@ export default function App({
         return;
       }
       if (response.status === 409) {
-        setCaseError('The case changed. Refresh the case before deciding.');
+        // Nothing is applied locally; the reload replaces the case, reserve and worklist with what the server holds.
+        setConflictNotice('The case changed. Refresh the case before deciding.');
+        setRefresh((value) => value + 1);
         return;
       }
       if (!response.ok) throw new RequestError(response.status);
@@ -723,6 +728,7 @@ export default function App({
   useEffect(() => {
     if (!session || session.role !== 'finance-reviewer') {
       setFinanceWorklist([]);
+      setFinanceDecisionToast('');
       return;
     }
     let active = true;
