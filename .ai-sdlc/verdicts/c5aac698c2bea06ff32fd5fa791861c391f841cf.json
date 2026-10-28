@@ -1,0 +1,288 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 651,
+  "branch": "ai-sdlc/issue-651",
+  "commitSha": "c5aac698c2bea06ff32fd5fa791861c391f841cf",
+  "round": 2,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The workspaces are now rendered by App and boundary navigation controls disappear as required. The stale-conflict path still leaves projections stale, and the required criterion-linked tests remain missing.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 688,
+          "message": "Stale revision handling still does not re-read server state after a conflict, as required by the acceptance criterion.",
+          "confidence": 0.98,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When the decision POST returns 409, submitDecision sets a conflict message and returns false without triggering the refresh that reloads server projections.",
+            "failureScenario": "After a stale revision is rejected, the user is told to refresh, but the worklist and case projections remain stale."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/FindingWorkspace.test.tsx",
+          "line": 1,
+          "message": "The previously reported missing criterion-linked tests remain absent: `AC_008_technical_worklist_contract`, `technical_finding_split_and_worklist_navigation`, `AC_009_technical_decision_contract`, `technical_stale_revision_refresh_contract`, and `AI_trace_and_finding_text_remains_inert`.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The changes since the previous review modify App and AccessibleReviewNavigation tests but still add none of the acceptance-criteria tests named in the issue.",
+            "failureScenario": "The worklist contract, finding navigation, decision submission, stale revision refresh, and inert text behavior lack the required criterion-linked tests and can regress without those tests detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The fix connects the workspaces and hides navigation controls at their boundaries, resolving those prior findings. Hardcoded finding evidence, missing stale-conflict refresh, and absent criterion-linked behavior tests remain.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 1036,
+          "message": "The finding workspace displays hardcoded placeholder status and evidence rather than server projections, contrary to the criterion requiring server-owned evidence.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "When a technical reviewer opens a finding, App passes hardcoded status and evidence text to FindingWorkspace instead of server-owned finding and evidence projections.",
+            "failureScenario": "If the selected finding has different server status or evidence, the page still displays “Awaiting review” and “No trace recorded,” so the reviewer sees incorrect decision context."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 688,
+          "message": "The stale-revision path still does not refresh server projections after the conflict.",
+          "confidence": 0.99,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "On a 409 response, submitDecision sets a conflict message and returns false; the refresh state is incremented only after a successful response.",
+            "failureScenario": "When the server rejects a stale revision, the UI tells the reviewer to refresh but does not re-read server state, leaving stale projections displayed."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/AccessibleReviewNavigation.test.tsx",
+          "line": 108,
+          "message": "The required criterion-linked tests remain missing: `AC_008_technical_worklist_contract`, `technical_finding_split_and_worklist_navigation`, `AC_009_technical_decision_contract`, `technical_stale_revision_refresh_contract`, and `AI_trace_and_finding_text_remains_inert`.",
+          "confidence": 0.99,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The changed test checks keyboard focus order for the worklist controls, but the change adds none of the acceptance-criteria-named worklist, finding, decision, stale-revision, or inert-text behavior tests.",
+            "failureScenario": "Worklist filtering, finding navigation, decision submission, stale-revision refresh, or inert text rendering can regress without the required criterion-linked tests detecting it."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The round fixes workspace rendering and hides navigation controls at the boundaries. A session race can expose a previous reviewer’s worklist, and stale conflicts still leave projections unchanged; the required criterion-linked tests are also absent.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 600,
+          "message": "A worklist response can update shared UI state after its session ends, exposing one technical reviewer’s scoped items to the next reviewer. This is OWASP A01:2025 Broken Access Control.",
+          "confidence": 0.91,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The worklist fetch has no cancellation or session identity check before its response updates shared worklist state. Logging out clears the state, but an earlier request can still call setWorklist after that; a later technical-reviewer session renders the shared state.",
+            "failureScenario": "Reviewer A starts a worklist request and signs out before it resolves. Reviewer B signs in as a technical reviewer, then A's response resolves and populates the worklist shown to B, exposing A's scoped queue."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/src/App.tsx",
+          "line": 688,
+          "message": "The stale-revision path still does not re-read server state after the conflict, as required by the acceptance criterion.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The 409 branch sets the refresh instruction and returns false without changing refresh or re-reading the worklist or case projections.",
+            "failureScenario": "A decision with a stale revision receives 409; the UI tells the reviewer to refresh but continues displaying the stale projections."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/FindingWorkspace.test.tsx",
+          "line": 1,
+          "message": "The required criterion-linked tests remain missing: `AC_008_technical_worklist_contract`, `technical_finding_split_and_worklist_navigation`, `AC_009_technical_decision_contract`, `technical_stale_revision_refresh_contract`, and `AI_trace_and_finding_text_remains_inert`.",
+          "confidence": 0.99,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The round-3 delta adds no FindingWorkspace or TechnicalWorkspace criterion tests; the issue-named tests remain absent from the change.",
+            "failureScenario": "Worklist behavior, finding navigation, decisions, stale-revision handling, and inert text rendering can regress without the named acceptance-criteria tests detecting it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "assertion",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/AccessibleReviewNavigation.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
