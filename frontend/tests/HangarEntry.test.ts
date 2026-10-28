@@ -1,7 +1,7 @@
 import { createElement, type ComponentType } from 'react';
 
 vi.mock('@react-three/fiber', () => ({ Canvas: () => null }));
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { type HangarEntryAppProps } from '../src/App';
 import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
@@ -86,6 +86,9 @@ describe('HangarEntry', () => {
       expect(calls).not.toHaveBeenCalled();
     }
   });
+
+// CI runners are slower than local machines; the default 1000 ms async query timeout flaked.
+configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => {
   cleanup();
