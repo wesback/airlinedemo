@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import FinanceWorkspace from '../src/workspaces/FinanceWorkspace';
 
 describe('FinanceWorkspace', () => {
-  it('filters by case and capability and opens the reserve route for a selected row', () => {
+  it('AC_010_finance_worklist_contract', () => {
     const onOpenCase = vi.fn();
     const items = [
       { caseId: 'case-002', itemId: 'reserve-2', capabilityId: 'reserve', state: 'Blocked', owner: 'finance-reviewer', ageSeconds: 120, label: 'Reserve case 002' },
@@ -13,8 +13,10 @@ describe('FinanceWorkspace', () => {
 
     render(<FinanceWorkspace items={items} onOpenCase={onOpenCase} />);
 
+    expect(screen.getByRole('heading', { name: 'My work' })).toBeTruthy();
     expect(screen.getByText('Reserve case 001')).toBeTruthy();
     expect(screen.getByText('Reserve case 002')).toBeTruthy();
+    expect(screen.getByText('Legal case 001')).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Case'), { target: { value: 'case-001' } });
     expect(screen.queryByText('Reserve case 002')).toBeNull();
@@ -25,6 +27,7 @@ describe('FinanceWorkspace', () => {
 
     fireEvent.click(screen.getByText('Reserve case 001'));
     expect(onOpenCase).toHaveBeenCalledWith('case-001');
+    expect(screen.getAllByText('Reserve case 001')).toHaveLength(1);
   });
 
   it('shows a no-items state for a filtered list with no matching reserve items', () => {

@@ -1,14 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ReserveWorksheet from '../src/workspaces/ReserveWorksheet';
 
 describe('ReserveWorksheet', () => {
-  it('renders draft text, statuses, and decision actions from the server payload', () => {
+  afterEach(() => cleanup());
+
+  it('AC_010_reserve_worksheet_contract', () => {
     const onDecision = vi.fn();
     const { rerender } = render(
       <ReserveWorksheet
         draft={{
-          status: 'Ready',
+          status: 'Blocked',
           revision: 11,
           payableTotal: 125.5,
           blockers: [{ code: 'missing-document', detail: 'Missing rate support' }],
@@ -27,8 +29,14 @@ describe('ReserveWorksheet', () => {
     );
 
     expect(screen.getByText('Draft only — no invoice is issued.')).toBeTruthy();
-    expect(screen.getByText('Blocked')).toBeTruthy();
-    expect(screen.getByText('Stale')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('Blocked');
+    expect(screen.getByText('Input')).toBeTruthy();
+    expect(screen.getByText('Value')).toBeTruthy();
+    expect(screen.getByText('Source')).toBeTruthy();
+    expect(screen.getByText('Freshness')).toBeTruthy();
+    expect(screen.getByText('Status')).toBeTruthy();
+    expect(screen.getAllByText('Blocked')).toHaveLength(2);
+    expect(screen.getAllByText('Stale')).toHaveLength(1);
     expect(screen.getByText('Not available')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Approve reserve' })).toBeTruthy();
 
@@ -51,6 +59,68 @@ describe('ReserveWorksheet', () => {
 
     expect(screen.getByText('<b>x</b>')).toBeTruthy();
     expect(document.querySelector('b')).toBeNull();
+    expect(document.querySelector('[style]')).toBeNull();
+  });
+
+  it('finance_reserve_decision_contract', async () => {
+    const onDecisionReasonChange = vi.fn();
+    const onDecision = vi.fn();
+    const { rerender } = render(
+      <ReserveWorksheet
+        draft={{
+          status: 'Ready',
+          revision: 11,
+          allowedDecisions: [{ id: 'approve', label: 'Approve reserve' }, { id: 'return', label: 'Return reserve' }],
+        }}
+        decisionReason=""
+        onDecisionReasonChange={onDecisionReasonChange}
+        onDecision={onDecision}
+      />,
+    );
+
+    const textarea = screen.getByLabelText('Reason for decision', { selector: 'textarea' });
+    fireEvent.change(textarea, { target: { value: 'Ready to review' } });
+    expect(onDecisionReasonChange).toHaveBeenCalledWith('Ready to review');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return reserve' }));
+    expect(onDecision).toHaveBeenCalledWith('return');
+
+    rerender(
+      <ReserveWorksheet
+        draft={{
+          status: 'Ready',
+          revision: 11,
+          allowedDecisions: [{ id: 'approve', label: 'Approve reserve' }],
+        }}
+        decisionReason=""
+        onDecisionReasonChange={vi.fn()}
+        onDecision={onDecision}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Approve reserve' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Return reserve' })).toBeNull();
+  });
+
+  it('reserve_text_and_status_remain_inert', () => {
+    const { rerender } = render(
+      <ReserveWorksheet
+        draft={{
+          status: 'Blocked',
+          lines: [
+            { input: '<b>x</b>', value: '<script>evil()</script>', source: 'https://example.test/ok', freshness: 'fresh', status: 'stale' },
+          ],
+          allowedDecisions: [{ id: 'approve', label: 'Approve reserve' }],
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText('<b>x</b>').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Stale').length).toBeGreaterThan(0);
+    expect(document.querySelector('script')).toBeNull();
+    expect(document.querySelector('b')).toBeNull();
+    expect(document.querySelector('[href]')).toBeNull();
+    expect(document.querySelector('[action]')).toBeNull();
     expect(document.querySelector('[style]')).toBeNull();
   });
 });

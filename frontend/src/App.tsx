@@ -690,7 +690,7 @@ export default function App({
   }, [session, refresh]);
 
   useEffect(() => {
-    if (!session || session.role !== 'finance-reviewer' || !selectedCaseId || !financeReserveRoute) {
+    if (!session || session.role !== 'finance-reviewer' || !selectedCaseId || !(financeHomeRoute || financeReserveRoute)) {
       setFinanceReserve(null);
       return;
     }
@@ -732,7 +732,7 @@ export default function App({
         if (active) setFinanceReserve(null);
       });
     return () => { active = false; };
-  }, [session, selectedCaseId, financeReserveRoute, refresh]);
+  }, [session, selectedCaseId, financeHomeRoute, financeReserveRoute, refresh]);
 
   async function submitDecision(capabilityId: string, decision: string) {
     if (
@@ -774,7 +774,7 @@ export default function App({
     }
   }
 
-  const currentDecision = review?.decisions.filter((item) => item.current).at(-1)?.decision;
+  const currentDecision = (review?.decisions ?? []).filter((item) => item.current).at(-1)?.decision;
   const healthMessage = {
     checking: 'Checking service connection…',
     ready: 'Service connected',
@@ -919,12 +919,12 @@ export default function App({
               </section>
             ))}
             {caseError && <p role="alert">{caseError}</p>}
-            {session?.role === 'finance-reviewer' && financeHomeRoute && (
+            {session?.role === 'finance-reviewer' && selectedCaseId && financeHomeRoute && (
               <FinanceWorkspace items={financeWorklist} onOpenCase={(caseId) => {
                 handleCaseNavigate(`/cases/${encodeURIComponent(caseId)}/reserve`);
               }} />
             )}
-            {session?.role === 'finance-reviewer' && financeReserveRoute && (
+            {session?.role === 'finance-reviewer' && selectedCaseId && (financeHomeRoute || financeReserveRoute) && (
               <>
                 {financeDecisionToast && <p role="status">{financeDecisionToast}</p>}
                 <ReserveWorksheet

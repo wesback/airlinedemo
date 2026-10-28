@@ -240,6 +240,43 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
   });
 
+  it('finance_reserve_decision_contract', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const financeSession = { id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-finance' };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'fin-1', displayName: 'Finance reviewer', role: 'finance-reviewer' }]);
+      if (url === '/api/auth/sign-in') return json(financeSession);
+      if (url === '/api/v1/workspace/worklist' && method === 'GET') return json({ items: [{ caseId: 'case-001', itemId: 'reserve-1', capabilityId: 'reserve', state: 'Blocked', owner: 'finance-reviewer', ageSeconds: 300, label: 'Reserve case 001' }] });
+      if (url === '/api/cases/case-001/reserve' && method === 'GET') return json({ revision: 11, status: 'Ready', lines: [{ input: 'Pax frequency', value: null, source: 'usage', freshness: 'fresh', status: 'blocked' }], allowedDecisions: [{ id: 'approve', label: 'Approve reserve' }] });
+      if (url === '/api/cases/case-001/reserve/decisions' && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        expect(body).toEqual({ expectedRevision: 11, decision: 'approve', reason: 'Ready to review' });
+        expect((init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-finance');
+        return json({ decision: 'approve', revision: 12, simulated: true, invoiceIssued: false });
+      }
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Finance reviewer (finance-reviewer)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Finance reviewer.');
+    await waitFor(() => expect(screen.getByText('Reserve worksheet')).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('Reason for decision'), { target: { value: 'Ready to review' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve reserve' }));
+    await waitFor(() => expect(screen.getByText('Decision recorded')).toBeTruthy());
+    expect(calls.filter(({ url }) => url === '/api/cases/case-001/reserve/decisions')).toHaveLength(1);
+    const reserveRequests = calls.filter(({ url }) => url === '/api/cases/case-001/reserve');
+    expect(reserveRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('keeps the active case when it stays in scope and falls back otherwise', () => {
     const session = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] };
     expect(resolveSessionCaseId(session, 'cp-case-b')).toBe('cp-case-b');

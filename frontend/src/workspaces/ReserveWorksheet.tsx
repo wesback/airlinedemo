@@ -35,13 +35,13 @@ function normalizeRow(row: ReserveWorksheetRow): ReserveWorksheetRow {
   const value = row.value ?? null;
   const source = row.source ?? 'Unknown source';
   const freshness = row.freshness ?? 'Unknown';
-  const status = row.status ?? 'Ready';
+  const status = row.status ?? 'Not available';
   return { ...row, input, value, source, freshness, status };
 }
 
 function normalizeStatus(status: string | undefined | null): string {
-  const normalized = (status ?? 'Ready').trim();
-  if (!normalized) return 'Ready';
+  const normalized = (status ?? '').trim();
+  if (!normalized) return 'Not available';
   const lower = normalized.toLowerCase();
   if (lower.includes('blocked')) return 'Blocked';
   if (lower.includes('stale')) return 'Stale';
@@ -56,7 +56,7 @@ export default function ReserveWorksheet({ draft, decisionReason = '', onDecisio
     <section aria-labelledby="reserve-heading">
       <h2 id="reserve-heading">Reserve worksheet</h2>
       <p>Draft only — no invoice is issued.</p>
-      <div role="status" aria-live="polite">{draft?.status ?? 'Ready'}</div>
+      <div role="status" aria-live="polite">{draft?.status ?? 'Not available'}</div>
       <table>
         <thead>
           <tr>
@@ -99,7 +99,13 @@ export default function ReserveWorksheet({ draft, decisionReason = '', onDecisio
       {allowedDecisions.length > 0 && (
         <section aria-label="Reserve decision panel">
           <label htmlFor="reserve-decision-reason">Reason for decision</label>
-          <textarea id="reserve-decision-reason" value={decisionReason} onChange={(event) => onDecisionReasonChange?.(event.target.value)} />
+          <textarea
+            id="reserve-decision-reason"
+            aria-label="Reason for decision"
+            value={decisionReason ?? ''}
+            onChange={(event) => onDecisionReasonChange?.(event.currentTarget.value)}
+            onInput={(event) => onDecisionReasonChange?.((event.target as HTMLTextAreaElement).value)}
+          />
           <div role="group" aria-label="Reserve decisions">
             {allowedDecisions.map((action) => (
               <button key={action.id} type="button" onClick={() => onDecision?.(action.id)}>{action.label}</button>
