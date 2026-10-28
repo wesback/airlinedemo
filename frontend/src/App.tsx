@@ -24,6 +24,7 @@ import HangarNon3dDataRoom from './hangar/non3dDataRoom';
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
 type Projections = { caseState: CaseProjection; dashboard: DashboardData; review: TechnicalReviewProjection; readiness: ReadinessSummaryData };
+type ProjectionRegion = 'case' | 'dashboard' | 'review' | 'readiness';
 
 class RequestError extends Error { constructor(readonly status: number) { super(`Request failed with status ${status}`); } }
 
@@ -78,6 +79,7 @@ export default function App({
   const [data, setData] = useState<Projections | null>(null);
   const [loadingCase, setLoadingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
+  const [failedRegion, setFailedRegion] = useState<'case' | 'dashboard' | 'review' | 'readiness' | null>(null);
   const [reason, setReason] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -377,6 +379,7 @@ export default function App({
     setSelectedCaseId(nextSession?.caseScopes?.[0] ?? null);
     traceRequestId.current += 1;
     setData(null);
+    setFailedRegion(null);
     setReason('');
     setDecisionBusy(false);
     setTraceView(null);
@@ -386,6 +389,7 @@ export default function App({
     if (!session || !selectedCaseId) return;
     setLoadingCase(true);
     setCaseError('');
+    setFailedRegion('case');
     const encodedCaseId = encodeURIComponent(selectedCaseId);
     const caseBase = `/api/cases/${encodedCaseId}`;
     try {
@@ -404,10 +408,21 @@ export default function App({
         },
       });
       setCaseError('');
+      setFailedRegion(null);
     } catch (error) {
       setCaseError(loadError(error));
     } finally {
       setLoadingCase(false);
+    }
+  }
+
+  async function reloadFailedRegion() {
+    if (failedRegion === 'case') {
+      await reloadCaseProjection();
+      return;
+    }
+    if (failedRegion === null) {
+      await reloadCaseProjection();
     }
   }
 
@@ -416,6 +431,7 @@ export default function App({
       traceRequestId.current += 1;
       setData(null);
       setCaseError('');
+      setFailedRegion(null);
       setLoadingCase(false);
       setReason('');
       setTraceView(null);
@@ -424,12 +440,14 @@ export default function App({
     if (!selectedCaseId) {
       setData(null);
       setCaseError('');
+      setFailedRegion(null);
       setLoadingCase(false);
       return;
     }
     let active = true;
     setLoadingCase(true);
     setCaseError('');
+    setFailedRegion(null);
     const encodedCaseId = encodeURIComponent(selectedCaseId);
     const caseBase = `/api/cases/${encodedCaseId}`;
     (async () => {
@@ -440,8 +458,10 @@ export default function App({
         const readiness = await getProjection<ReadinessSummaryData>(`${caseBase}/readiness`);
         if (!active) return;
         setData({ caseState: caseProjection, dashboard: dashboardProjection, review: reviewProjection, readiness });
+        setFailedRegion(null);
       } catch (error) {
         if (!active) return;
+        setFailedRegion('case');
         setCaseError(loadError(error));
       } finally {
         if (active) setLoadingCase(false);
@@ -621,7 +641,7 @@ export default function App({
             status={resolveRegionStatus(caseError)}
             error={resolveRegionError(caseError)}
             currentPath={currentCasePath}
-            onRetry={() => { void reloadCaseProjection(); }}
+            onRetry={() => { void reloadFailedRegion(); }}
           />}
           {data && (
             <>
