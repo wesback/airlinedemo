@@ -20,6 +20,9 @@ import { createHangarWalkController } from './hangar/walkController';
 import { createHangarFollowCamera, type HangarFollowCamera } from './hangar/followCamera';
 import HangarNon3dDataRoom from './hangar/non3dDataRoom';
 import WorkspaceShell from './components/WorkspaceShell';
+import RoleNavigation from './components/RoleNavigation';
+import CaseSearch from './components/CaseSearch';
+import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 type CaseProjection = { revision: number; basis: unknown[] };
 type TechnicalReviewProjection = { basisVersion: number; decisions: { decision: string; current: boolean }[] };
@@ -40,6 +43,40 @@ const ROLE_HOME_PATHS: Record<string, string> = {
   executive: '/portfolio',
   presenter: '/demo',
 };
+
+const ROLE_ALLOWED_PATHS: Record<string, string[]> = {
+  'technical-reviewer': ['/work', '/cases', '/cases/:caseId/overview', '/cases/:caseId/findings', '/cases/:caseId/history', '/hangar'],
+  'finance-reviewer': ['/work', '/cases', '/cases/:caseId/overview', '/cases/:caseId/reserve', '/cases/:caseId/history', '/hangar'],
+  'legal-reviewer': ['/work', '/cases', '/cases/:caseId/overview', '/cases/:caseId/obligations', '/cases/:caseId/history', '/hangar'],
+  executive: ['/portfolio', '/cases', '/cases/:caseId/overview', '/cases/:caseId/history', '/hangar'],
+  presenter: ['/work', '/portfolio', '/demo', '/cases', '/cases/:caseId/overview', '/cases/:caseId/findings', '/cases/:caseId/reserve', '/cases/:caseId/obligations', '/cases/:caseId/history', '/hangar'],
+};
+
+function normalizeRoutePath(value: string | null | undefined): string {
+  if (typeof value !== 'string' || !value.trim()) return '/';
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) return '/';
+  try {
+    const parsed = new URL(trimmed, 'http://localhost');
+    return parsed.pathname + parsed.search;
+  } catch {
+    return '/';
+  }
+}
+
+function routeMatchesRole(pathname: string, role: string): boolean {
+  const normalized = normalizeRoutePath(pathname).split('?')[0];
+  const allowed = ROLE_ALLOWED_PATHS[role] ?? [];
+  if (!allowed.length) return false;
+  return allowed.some((pattern) => {
+    const patternPath = pattern.split('?')[0];
+    if (patternPath.includes(':caseId')) {
+      const regex = new RegExp(`^${patternPath.replace(/:caseId/g, '[^/]+')}$`);
+      return regex.test(normalized);
+    }
+    return normalized === patternPath;
+  });
+}
 
 class RequestError extends Error { constructor(readonly status: number) { super(`Request failed with status ${status}`); } }
 
@@ -74,6 +111,12 @@ export default function App({
   const [session, setSession] = useState<SignedInSession | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [data, setData] = useState<Projections | null>(null);
+  const [routePath, setRoutePath] = useState<string>(() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
+  const [returnTo, setReturnTo] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const value = new URLSearchParams(window.location.search).get('returnTo');
+    return validateReturnTo(value);
+  });
   const [loadingCase, setLoadingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
   const [reason, setReason] = useState('');
@@ -82,6 +125,7 @@ export default function App({
   const [traceView, setTraceView] = useState<InvestigationTraceView | null>(null);
   const traceRequestId = useRef(0);
   const [hangarView, setHangarView] = useState<'regular' | 'loading' | '3d' | 'fallback' | 'contract-error'>('regular');
+  const [routeError, setRouteError] = useState<string | null>(null);
   const [hangarFallback, setHangarFallback] = useState<string | null>(null);
   const [hangarContractVersion] = useState<unknown>(contractVersionProp === undefined ? 1 : contractVersionProp);
   const [hangarSceneLoaded, setHangarSceneLoaded] = useState(false);
@@ -293,6 +337,10 @@ export default function App({
         };
       }).filter((entry) => entry.caseId && entry.name && entry.category);
       setHangarEntries(entries);
+      const firstEntryId = entries[0]?.caseId ?? 'cp-case-a';
+      const firstObjectId = `SYN-CP-${firstEntryId.slice(-1).toUpperCase()}-AIR-001`;
+      setHangarSelectedCaseId(firstEntryId);
+      setHangarSelectedObjectId(firstObjectId);
       const initialCaseSnapshots: Record<string, ServerSceneSnapshot> = {};
       let latestSnapshot: ServerSceneSnapshot | null = hangarSnapshot;
       for (let index = 0; index < envelopes.length; index += 1) {
@@ -357,7 +405,33 @@ export default function App({
     }
   }
 
+  function applyRoutePath(nextRoute: string) {
+    if (typeof window === 'undefined') return;
+    const normalized = nextRoute.startsWith('/') ? nextRoute : `/${nextRoute}`;
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    if (currentPath !== normalized) {
+      window.history.replaceState({}, '', normalized);
+    }
+    setRoutePath(normalized);
+  }
+
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      const search = window.location.search;
+      if (!session && pathname !== '/' && pathname !== '/sign-in') {
+        const params = new URLSearchParams(search);
+        const explicitReturnTo = validateReturnTo(params.get('returnTo'));
+        const redirectTarget = explicitReturnTo ?? (validateReturnTo(pathname + search) ? pathname + search : null);
+        if (redirectTarget) {
+          const target = `/sign-in?returnTo=${encodeURIComponent(redirectTarget)}`;
+          if (window.location.pathname !== '/sign-in' || window.location.search !== `?returnTo=${encodeURIComponent(redirectTarget)}`) {
+            window.history.replaceState({}, '', target);
+            setRoutePath(target);
+          }
+        }
+      }
+    }
     let active = true;
     fetch('/api/health')
       .then((response) => {
@@ -407,9 +481,32 @@ export default function App({
     setReason('');
     setDecisionBusy(false);
     setTraceView(null);
+    if (nextSession) {
+      const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+      const requestedFromSearch = validateReturnTo(new URLSearchParams(currentSearch).get('returnTo'));
+      const requestedPath = requestedFromSearch ?? returnTo ?? null;
+      const path = resolveReturnTo(requestedPath, ROLE_HOME_PATHS[nextSession.role] ?? '/work');
+      const nextRoute = routeMatchesRole(path, nextSession.role) ? path : ROLE_HOME_PATHS[nextSession.role] ?? '/work';
+      if (typeof window !== 'undefined') {
+        applyRoutePath(nextRoute);
+        setReturnTo(requestedPath);
+      }
+    }
   }
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const nextPath = window.location.pathname + window.location.search;
+      setRoutePath(nextPath);
+      if (!session) {
+        const returnParam = new URLSearchParams(window.location.search).get('returnTo');
+        if (returnParam && validateReturnTo(returnParam)) {
+          setReturnTo(validateReturnTo(returnParam));
+        } else {
+          setReturnTo(null);
+        }
+      }
+    }
     if (!session) {
       traceRequestId.current += 1;
       setData(null);
@@ -510,6 +607,18 @@ export default function App({
     unavailable: 'Service unavailable. Try again later.',
   }[apiState];
 
+  function handleCaseNavigate(nextPath: string) {
+    const match = nextPath.match(/^\/cases\/([^/]+)(?:\/.*)?$/);
+    if (match) {
+      const nextCaseId = decodeURIComponent(match[1]);
+      setSelectedCaseId(nextCaseId);
+      setRoutePath(nextPath);
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', nextPath);
+      }
+    }
+  }
+
   const LoadedHangarScene = HangarSceneRef.current;
   const hangarActiveEnvelope = hangarSceneEnvelopes[hangarSelectedCaseId] ?? hangarSnapshot?.completeContent;
   const hangarComposedScene = typeof hangarActiveEnvelope === 'object' && hangarActiveEnvelope !== null
@@ -593,6 +702,8 @@ export default function App({
           role={session.role}
           roleOptions={PERSONA_OPTIONS.map((option) => ({ id: option.id, label: option.label, role: option.role }))}
           onRoleSelect={handleRoleSwitch}
+          searchInput={<CaseSearch caseScopes={session.caseScopes} onNavigate={handleCaseNavigate} />}
+          primaryNavigation={<RoleNavigation role={session.role} />}
         >
           <></>
         </WorkspaceShell>

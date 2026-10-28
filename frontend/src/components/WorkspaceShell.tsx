@@ -14,6 +14,8 @@ export type WorkspaceShellProps = {
   children?: ReactNode;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
+  searchInput?: ReactNode;
+  primaryNavigation?: ReactNode;
   userLabel?: string;
   role?: string;
   roleOptions?: WorkspaceShellRoleOption[];
@@ -30,6 +32,8 @@ export default function WorkspaceShell({
   children,
   searchValue = '',
   onSearchChange,
+  searchInput,
+  primaryNavigation,
   userLabel = 'User',
   role,
   roleOptions = [],
@@ -67,14 +71,18 @@ export default function WorkspaceShell({
           <span>Asset Transitions</span>
         </div>
         <div>
-          <label htmlFor="workspace-search">Case search</label>
-          <input
-            id="workspace-search"
-            aria-label="Case search"
-            type="search"
-            value={searchValue}
-            onChange={(event) => onSearchChange?.(event.target.value)}
-          />
+          {searchInput ?? (
+            <>
+              <label htmlFor="workspace-search">Case search</label>
+              <input
+                id="workspace-search"
+                aria-label="Case search"
+                type="search"
+                value={searchValue}
+                onChange={(event) => onSearchChange?.(event.target.value)}
+              />
+            </>
+          )}
         </div>
         <div aria-label="User menu" style={{ position: 'relative' }}>
           <button type="button" onClick={() => setMenuOpen((value) => !value)}>{userLabel}</button>
@@ -135,7 +143,7 @@ export default function WorkspaceShell({
           >
             {navCollapsed ? '›' : '‹'}
           </button>
-          <nav aria-label="Primary" />
+          {primaryNavigation ?? <nav aria-label="Primary" />}
         </aside>
 
         <main>{children}</main>
