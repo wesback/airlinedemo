@@ -92,6 +92,7 @@ public static class CasePackEndpoints
         int version,
         string caseId,
         HttpContext http,
+        IConfiguration config,
         DemoSessionStore sessions,
         CasePackRequestLimiter limiter,
         ICaseStateStore caseStates,
@@ -102,38 +103,63 @@ public static class CasePackEndpoints
         var logger = loggers.CreateLogger("AirlineDemo.Api.CasePackDiagnostics");
         var started = Stopwatch.GetTimestamp();
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        IResult Audited(IResult response, string outcome)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+                TelemetryRedaction.EmitCaseResetEvent(logger, outcome, session?.User.Role ?? "unknown", session?.Id,
+                    TelemetryRedaction.ServiceVersion, config["Telemetry:Environment"] ?? "demo");
+            return response;
+        }
         if (session is null)
-            { CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in."); }
+            { CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(Error(StatusCodes.Status401Unauthorized, "unauthenticated", "Not signed in."), "unauthorized"); }
 
         try
         {
             if (!await limiter.TryRecordAttemptAsync(session.User.Id,
                     CasePackRequestLimiter.ResetEndpoint, cancellationToken))
-                { CasePackDiagnostics.Reset(logger, "rate_limited", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded"); }
+                { CasePackDiagnostics.Reset(logger, "rate_limited", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(Error(StatusCodes.Status429TooManyRequests, "rate_limit_exceeded", "rate_limit_exceeded"), "rate_limited"); }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
-            return Error(StatusCodes.Status503ServiceUnavailable, "rate_limit_unavailable", "rate_limit_unavailable");
+            return Audited(Error(StatusCodes.Status503ServiceUnavailable, "rate_limit_unavailable", "rate_limit_unavailable"), "failed");
         }
 
         if (version != ContractVersion)
-            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"); }
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"), "invalid"); }
         if (!string.Equals(session.User.Role, "presenter", StringComparison.Ordinal))
-            { CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden"); }
+            { CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden"), "denied"); }
 
-        if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal)
-            || caseStates.OwnerOf(caseId) is not { } owner)
-            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return SceneNotFound(); }
+        if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(SceneNotFound(), "denied"); }
+
+        string? owner;
+        try { owner = caseStates.OwnerOf(caseId); }
+        catch (CaseAccessDeniedException) { return Audited(SceneNotFound(), "denied"); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
+            return Audited(Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed."), "failed");
+        }
+
+        if (owner is null)
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(SceneNotFound(), "denied"); }
 
         CaseScope scope;
         try { scope = caseStates.AuthorizeCase(caseId, owner); }
-        catch (CaseAccessDeniedException) { return SceneNotFound(); }
+        catch (CaseAccessDeniedException) { return Audited(SceneNotFound(), "denied"); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
+            return Audited(Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed."), "failed");
+        }
 
         if (!DemoAuthEndpoints.HasValidAntiForgery(http, session))
         {
             CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
-            return Error(StatusCodes.Status400BadRequest, "anti_forgery_failed", "Anti-forgery validation failed.");
+            return Audited(Error(StatusCodes.Status400BadRequest, "anti_forgery_failed", "Anti-forgery validation failed."), "anti_forgery_failed");
         }
 
         CasePackResetBlockedVariantRequest? body;
@@ -172,7 +198,7 @@ public static class CasePackEndpoints
                 || !variantFound || variant.ValueKind != JsonValueKind.String)
                 return ValidationError();
             if (versionValue != ContractVersion)
-                return Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version");
+                return Audited(Error(StatusCodes.Status400BadRequest, "unsupported_contract_version", "unsupported_contract_version"), "invalid");
 
             body = new CasePackResetBlockedVariantRequest(
                 versionValue, commandId.GetString(), revisionValue, variant.GetString());
@@ -182,7 +208,7 @@ public static class CasePackEndpoints
             return ValidationError();
         }
 
-        IResult ValidationError(string? commandId = null) { CasePackDiagnostics.Reset(logger, "validation_failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, commandId); return Error(StatusCodes.Status400BadRequest, "validation_error", "Reset command fields are invalid."); }
+        IResult ValidationError(string? commandId = null) { CasePackDiagnostics.Reset(logger, "validation_failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, commandId); return Audited(Error(StatusCodes.Status400BadRequest, "validation_error", "Reset command fields are invalid."), "validation_failed"); }
 
         if (!Regex.IsMatch(body.CommandId!, "^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)
             || body.ExpectedRevision < 0)
@@ -190,7 +216,7 @@ public static class CasePackEndpoints
 
         if (!string.Equals(caseId, "cp-case-c", StringComparison.Ordinal)
             || !string.Equals(body.Variant, "blocked", StringComparison.Ordinal))
-            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId); return Error(StatusCodes.Status422UnprocessableEntity, "unsupported_target", "Only the Case C blocked variant can be reset."); }
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId); return Audited(Error(StatusCodes.Status422UnprocessableEntity, "unsupported_target", "Only the Case C blocked variant can be reset."), "invalid"); }
 
         try
         {
@@ -198,19 +224,19 @@ public static class CasePackEndpoints
             var result = reset.Reset(scope, session.User.Id, body.CommandId!,
                 body.ExpectedRevision.Value, body.Variant!);
             CasePackDiagnostics.Reset(logger, result.Replayed ? "replayed" : "success", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId);
-            return Results.Ok(result.Receipt);
+            return Audited(Results.Ok(result.Receipt), result.Replayed ? "replayed" : "success");
         }
         catch (CasePackBlockedVariantResetException exception)
         {
             var outcome = exception.Code switch { "validation_error" => "validation_failed", "command_id_conflict" or "stale_revision" => "conflict", "unsupported_target" => "invalid", _ => "failed" };
             CasePackDiagnostics.Reset(logger, outcome, CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body.CommandId);
-            return Error(exception.StatusCode, exception.Code, exception.Message);
+            return Audited(Error(exception.StatusCode, exception.Code, exception.Message), outcome);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId, body?.CommandId);
-            return Error(StatusCodes.Status500InternalServerError,
-                "internal_error", "The request could not be completed.");
+            return Audited(Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed."), "failed");
         }
     }
 

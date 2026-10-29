@@ -19,6 +19,15 @@ namespace AirlineDemo.Api.Tests;
 
 public sealed class TelemetryPrivacyTests
 {
+    [Theory]
+    [InlineData("unknown-outcome", "presenter")]
+    [InlineData("success", "unknown-role")]
+    public void Case_reset_event_rejects_unknown_outcome_and_role(string outcome, string role)
+    {
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        Assert.Throws<ArgumentException>(() => TelemetryRedaction.EmitCaseResetEvent(logger, outcome, role, "session", "1.0", "test"));
+    }
+
     [Fact]
     public void Bearer_jwt_and_cookie_name_shapes_are_redacted()
     {
@@ -337,7 +346,7 @@ public sealed class TelemetryPrivacyTests
     }
 
     [Fact]
-    public async Task Role_switch_success_event_is_redacted()
+    public async Task Demo_reset_and_role_switch_events()
     {
         var logger = new CapturingLogger();
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -379,7 +388,7 @@ public sealed class TelemetryPrivacyTests
     }
 
     [Fact]
-    public async Task Role_switch_rejection_events_carry_the_exact_outcome()
+    public async Task Security_events_are_redacted()
     {
         var logger = new CapturingLogger();
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -400,12 +409,12 @@ public sealed class TelemetryPrivacyTests
 
         foreach (var scenario in new[] { "no-token", "wrong-token", "unknown-user", "empty-user", "malformed-json" })
         {
-            object body = scenario == "unknown-user" ? new { userId = "nobody" }
+            object body = scenario == "unknown-user" ? new { userId = "unknown-1", itemBody = "CANARY-ITEM-655", noticeDraft = "CANARY-DRAFT-655" }
                 : scenario == "empty-user" ? new { userId = "" } : new { userId = "exec-1" };
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/switch-user")
             { Content = scenario == "malformed-json" ? new StringContent("{ not-json", Encoding.UTF8, "application/json") : JsonContent.Create(body) };
             request.Headers.Add("Cookie", cookie);
-            if (scenario != "no-token") request.Headers.Add("X-CSRF-Token", scenario == "wrong-token" ? "wrong-token" : csrf);
+            if (scenario != "no-token") request.Headers.Add("X-CSRF-Token", scenario == "wrong-token" ? "CANARY-CSRF-655" : csrf);
             using var response = await client.SendAsync(request, ct);
             var expectedStatus = scenario.Contains("token") ? HttpStatusCode.Forbidden : HttpStatusCode.BadRequest;
             Assert.Equal(expectedStatus, response.StatusCode);
@@ -419,6 +428,15 @@ public sealed class TelemetryPrivacyTests
         Assert.Equal(new[] { "unauthorized", "anti_forgery_failed", "anti_forgery_failed", "unknown_user", "unknown_user", "unknown_user" }, events.Select(p => p["event.outcome"]!).ToArray());
         Assert.Equal("unknown", events[0]["fixture.role"]);
         Assert.All(events.Skip(1), p => Assert.Equal("presenter", p["fixture.role"]));
+        Assert.All(events, properties =>
+        {
+            Assert.Equal("security.role_switch", properties["event.name"]);
+            Assert.Equal("role-switch", properties["action"]);
+            Assert.Matches("^trace-[0-9a-f]{16}$", properties["trace.id"]!);
+            Assert.Matches("^actor-[0-9a-f]{16}$", properties["enduser.pseudo.id"]!);
+            foreach (var canary in new[] { AppPasscode, cookie, csrf, "CANARY-CSRF-655", "CANARY-ITEM-655", "CANARY-DRAFT-655" })
+                Assert.DoesNotContain(canary, string.Join("|", properties.Select(p => $"{p.Key}={p.Value}")));
+        });
     }
 
     [Fact]
@@ -466,6 +484,8 @@ public sealed class TelemetryPrivacyTests
     [InlineData(TelemetryRedaction.SecurityEvents.AuthScopeFailure)]
     [InlineData(TelemetryRedaction.SecurityEvents.IntegritySignatureFailure)]
     [InlineData(TelemetryRedaction.SecurityEvents.BudgetExhausted)]
+    [InlineData(TelemetryRedaction.SecurityEvents.RoleSwitch)]
+    [InlineData(TelemetryRedaction.SecurityEvents.CaseReset)]
     public void Security_events_are_emitted_under_their_alert_event_name(string eventName)
     {
         var logger = new CapturingLogger();

@@ -1,0 +1,282 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 655,
+  "branch": "ai-sdlc/issue-655",
+  "commitSha": "469e2c37d5e9c575f4080b6a80d986cb058bc9fd",
+  "round": 1,
+  "pipelineVersion": "55b2313",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous round’s guided-path and App-wiring findings remain unresolved. The added persona check does not address the missing role-specific checklist links or the tests’ lack of App-level coverage.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/PresenterDemoControl.tsx",
+          "line": 36,
+          "message": "The guided checklist still omits the required role-specific working views; its Case link targets the generic overview.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "getPresenterGuidedChecklist uses the generic /work and /cases/{caseId}/overview routes. The technical, finance, and legal main-view paths declared above are not used by the checklist.",
+            "failureScenario": "After switching to finance or legal and following the Case link, the presenter reaches the generic overview instead of the required reserve or obligations view."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 10,
+          "message": "The named reset test still does not verify the App-level scope check or the existing reset command’s CSRF and revision safeguards.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_actions renders PresenterDemoControl with a mock callback and asserts only that clicking the button passes a case ID. It does not exercise App.tsx or submitHangarCaseReset.",
+            "failureScenario": "If the App reset wiring stops enforcing presenter scope or stops sending CSRF and revision safeguards, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 30,
+          "message": "The named View as test still does not verify the production switch-user request, CSRF, or success-gated navigation.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC_004_presenter_view_as_contract supplies a mock onViewAs callback and checks only the persona IDs passed to it; it does not exercise App.tsx's role-switch request or navigation.",
+            "failureScenario": "If App omits CSRF, navigates before the switch-user request succeeds, or fails to navigate after success, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The guided checklist still lacks the required role-specific destinations, and the named reset and View as tests still cover only component callbacks rather than the App integrations required by the acceptance criteria.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/src/workspaces/PresenterDemoControl.tsx",
+          "line": 36,
+          "message": "The guided checklist still omits the role-specific main working views required by the acceptance criterion.",
+          "confidence": 0.96,
+          "category": "logic-error",
+          "evidence": {
+            "codePathTraced": "getPresenterGuidedChecklist still returns the same fixed routes for every persona; its Case link points to /overview, and the role-specific main-view constants are not used in the checklist.",
+            "failureScenario": "After switching to finance or legal, the presenter follows the Case link and reaches the generic overview rather than the required reserve or obligations view."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 12,
+          "message": "The named reset test still does not verify the App-level scoped reset request and its CSRF and revision safeguards.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_actions renders PresenterDemoControl with a mock callback and checks that it receives a case ID; it does not exercise App.tsx or the reset command.",
+            "failureScenario": "If the App reset path omits presenter scope checks, CSRF, or the revision safeguard, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 30,
+          "message": "The named View as test still does not verify the production switch-user request, CSRF, success-gated navigation, or rejection behavior.",
+          "confidence": 0.97,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_004_presenter_view_as_contract supplies a mock onViewAs callback and checks persona IDs; it does not exercise App.tsx's role-switch request or navigation.",
+            "failureScenario": "If App omits CSRF, navigates before server success, or fails to preserve the session after rejection, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The App.tsx fix adds an allowlist check for persona IDs, but both previously reported safeguard test gaps remain. The reset and role-switch paths are not verified by the named tests.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 12,
+          "message": "The previously reported reset safeguard coverage gap remains: the named test does not exercise the App reset path or verify the scoped request's CSRF and revision safeguards.",
+          "confidence": 0.95,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_actions renders the component directly and checks its callback; it does not exercise App.tsx or the existing reset command.",
+            "failureScenario": "If the App reset path stops enforcing presenter case scope or stops sending CSRF and revision safeguards, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/PresenterDemoControl.test.tsx",
+          "line": 30,
+          "message": "The previously reported View as safeguard coverage gap remains: the named test does not exercise the production role-switch path or verify CSRF and success-gated navigation.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "AC_004_presenter_view_as_contract supplies a mock callback and asserts the persona ID; it does not exercise App.tsx's switch-user request or navigation.",
+            "failureScenario": "If the App path omits CSRF, navigates before the server succeeds, or accepts an unknown persona, this test still passes."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 1,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/PresenterDemoControl.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

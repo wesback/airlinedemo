@@ -254,6 +254,259 @@ describe('reviewer workspace', () => {
     expect(screen.queryByRole('button', { name: 'Switch role: Finance reviewer' })).toBeNull();
   });
 
+  it('presenter_case_scope_and_reset_eligibility_contract', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: vi.fn(), pathname: '/demo' },
+    });
+    window.history.replaceState({}, '', '/demo');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'presenter', displayName: 'Demo presenter', role: 'presenter' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-c'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+      if (url === '/api/v1/cases/cp-case-c/scene') return json({
+        contractVersion: 1,
+        current: true,
+        canResetBlockedVariant: true,
+        allowedActions: ['reset'],
+        case: {
+          caseId: 'cp-case-c',
+          caseRevision: 7,
+          name: 'Case C',
+          aircraftName: 'Case C',
+          aircraftCategory: 'wide-body',
+          capabilityLabel: 'Rules-based',
+          permission: true,
+          allowedActions: ['reset'],
+        },
+        objects: [],
+      });
+      if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        expect(body).toEqual({ contractVersion: 1, commandId: expect.stringMatching(/^cp-reset-7-\d+$/), expectedRevision: 7, variant: 'blocked' });
+        expect(body.commandId).toMatch(/^cp-reset-7-\d+$/);
+        expect(calls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(1);
+        expect((init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+        return json({ accepted: true }, 200);
+      }
+      if (url === '/api/cases/cp-case-c') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/cp-case-c/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/cp-case-c/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/cp-case-c/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Demo presenter/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Demo presenter.');
+    fireEvent.click(await screen.findByRole('button', { name: 'Reset blocked variant' }));
+
+    await waitFor(() => expect(calls.some(({ url, init }) => url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && init?.method === 'POST')).toBe(true));
+    const resetCall = calls.find(({ url, init }) => url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && init?.method === 'POST');
+    expect(resetCall).toBeTruthy();
+    expect((resetCall?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+    const body = JSON.parse(String(resetCall?.init?.body ?? '{}'));
+    expect(body).toMatchObject({ contractVersion: 1, expectedRevision: 7, variant: 'blocked' });
+    expect(body.commandId).toMatch(/^cp-reset-7-\d+$/);
+
+    cleanup();
+
+    const noActionCalls: Array<{ url: string; init?: RequestInit }> = [];
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: vi.fn(), pathname: '/demo' },
+    });
+    window.history.replaceState({}, '', '/demo');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      noActionCalls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'presenter', displayName: 'Demo presenter', role: 'presenter' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-a'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-a', name: 'Case A', aircraftCategory: 'narrow-body', caseRevision: 7 }, { caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+      if (url === '/api/v1/cases/cp-case-a/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: false, allowedActions: [], case: { caseId: 'cp-case-a', caseRevision: 7, name: 'Case A', aircraftName: 'Case A', aircraftCategory: 'narrow-body', capabilityLabel: 'Rules-based', permission: false, allowedActions: [] }, objects: [] });
+      if (url === '/api/v1/cases/cp-case-c/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: true, allowedActions: ['reset'], case: { caseId: 'cp-case-c', caseRevision: 7, name: 'Case C', aircraftName: 'Case C', aircraftCategory: 'wide-body', capabilityLabel: 'Rules-based', permission: true, allowedActions: ['reset'] }, objects: [] });
+      if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && method === 'POST') return json({ accepted: true }, 200);
+      if (url === '/api/cases/cp-case-a') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/cp-case-c') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/cp-case-c/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/cp-case-c/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/cp-case-c/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Demo presenter/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Demo presenter.');
+    await screen.findByLabelText('cp-case-a reset not eligible');
+    const presenterList = within(screen.getByRole('region', { name: 'Demo control' }));
+    expect(presenterList.getAllByRole('row')).toHaveLength(2);
+    expect(presenterList.getByRole('cell', { name: 'Case A' })).toBeTruthy();
+    expect(presenterList.queryByRole('cell', { name: /Case C|cp-case-c/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(noActionCalls.filter(({ url, init }) => url === '/api/v1/cases/cp-case-c/reset-blocked-variant' && init?.method === 'POST')).toHaveLength(0);
+
+    cleanup();
+    window.history.replaceState({}, '', '/demo');
+    const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    const ineligibleCalls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      ineligibleCalls.push({ url: String(input), init });
+      if (String(input) === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-c'], csrfToken: 'csrf-session-token' });
+      if (String(input) === '/api/v1/cases/cp-case-c/scene') return json({
+        contractVersion: 1, current: true, canResetBlockedVariant: false, allowedActions: ['reset'],
+        case: { caseId: 'cp-case-c', caseRevision: 7, permission: true }, objects: [],
+      });
+      return baseFetch(input, init);
+    });
+    render(<App />);
+    await signInPersona('Demo presenter', 'presenter');
+    await screen.findByLabelText('cp-case-c reset not eligible');
+    const ineligibleList = within(screen.getByRole('region', { name: 'Demo control' }));
+    expect(ineligibleList.getByRole('cell', { name: 'Case C' })).toBeTruthy();
+    expect(ineligibleList.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(ineligibleCalls.some(({ url }) => url === '/api/v1/cases/cp-case-c/scene')).toBe(true);
+    expect(ineligibleCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
+
+    cleanup();
+    window.history.replaceState({}, '', '/demo');
+    const emptyCalls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      emptyCalls.push({ url: String(input), init });
+      if (String(input) === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: [], csrfToken: 'csrf-session-token' });
+      return baseFetch(input, init);
+    });
+    render(<App />);
+    await signInPersona('Demo presenter', 'presenter');
+    const emptyList = within(await screen.findByRole('region', { name: 'Demo control' }));
+    expect(emptyList.getAllByRole('row')).toHaveLength(1);
+    expect(emptyList.queryAllByRole('cell')).toHaveLength(0);
+    expect(emptyList.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
+    expect(emptyCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+    expect(emptyCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('AC_004_demo_view_as_contract', async () => {
+    const personaChecks = [
+      { id: 'presenter', label: 'Demo presenter', home: '/demo' },
+      { id: 'reviewer', label: 'Technical reviewer', home: '/work' },
+      { id: 'fin-1', label: 'Finance reviewer', home: '/work' },
+      { id: 'legal-1', label: 'Legal reviewer', home: '/work' },
+      { id: 'exec-1', label: 'Executive observer', home: '/portfolio' },
+    ] as const;
+
+    for (const persona of personaChecks) {
+      const calls: Array<{ url: string; init?: RequestInit }> = [];
+      let resolveSwitch!: (response: Response) => void;
+      const pendingSwitch = new Promise<Response>((resolve) => { resolveSwitch = resolve; });
+      const assignSpy = vi.fn();
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...window.location, assign: assignSpy },
+      });
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        calls.push({ url, init });
+        if (url === '/api/health') return json({ status: 'ok' }, 200);
+        if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+        if (url === '/api/auth/users') return json(personaChecks.map((entry) => ({ id: entry.id, displayName: entry.label, role: entry.id === 'presenter' ? 'presenter' : entry.id === 'reviewer' ? 'technical-reviewer' : entry.id === 'fin-1' ? 'finance-reviewer' : entry.id === 'legal-1' ? 'legal-reviewer' : 'executive' })));
+        if (url === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-c'], csrfToken: 'csrf-session-token' });
+        if (url === '/api/auth/switch-user') {
+          const body = JSON.parse(String(init?.body ?? '{}'));
+          expect(body).toEqual({ userId: persona.id });
+          expect((init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+          return pendingSwitch;
+        }
+        if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+        if (url === '/api/v1/cases/cp-case-c/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: true, allowedActions: ['reset'], case: { caseId: 'cp-case-c', caseRevision: 7, name: 'Case C', aircraftName: 'Case C', aircraftCategory: 'wide-body', capabilityLabel: 'Rules-based', permission: true, allowedActions: ['reset'] }, objects: [] });
+        if (url === '/api/cases/cp-case-c') return json({ revision: 7, basis: [{ version: 4 }] });
+        if (url === '/api/cases/cp-case-c/dashboard') return json(dashboard([], [], decisions));
+        if (url === '/api/cases/cp-case-c/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+        if (url === '/api/cases/cp-case-c/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+        return json({});
+      }));
+
+      render(<App />);
+      fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+      fireEvent.click(await screen.findByRole('radio', { name: /Demo presenter/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+      await screen.findByText('Signed in as Demo presenter.');
+      fireEvent.click(screen.getAllByRole('button', { name: new RegExp(`View as ${persona.label}`, 'i') })[0]);
+
+      await waitFor(() => expect(calls.some(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST')).toBe(true));
+      const switchCall = calls.find(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST');
+      expect(switchCall).toBeTruthy();
+      expect(JSON.parse(String(switchCall?.init?.body ?? '{}'))).toEqual({ userId: persona.id });
+      expect((switchCall?.init?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-session-token');
+      expect(calls.filter(({ url }) => url === '/api/auth/switch-user')).toHaveLength(1);
+      expect(assignSpy).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Demo presenter' })).toBeTruthy();
+      expect(screen.getByRole('navigation', { name: 'Primary' }).getAttribute('data-role')).toBe('presenter');
+      resolveSwitch(json({ id: persona.id, displayName: persona.label, role: persona.id === 'presenter' ? 'presenter' : persona.id === 'reviewer' ? 'technical-reviewer' : persona.id === 'fin-1' ? 'finance-reviewer' : persona.id === 'legal-1' ? 'legal-reviewer' : 'executive', caseScopes: ['cp-case-c'], csrfToken: 'csrf-next-token' }));
+      await waitFor(() => expect(assignSpy).toHaveBeenCalledWith(persona.home));
+      expect(assignSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: persona.label })).toBeTruthy();
+      expect(screen.getByRole('navigation', { name: 'Primary' }).getAttribute('data-role')).toBe(persona.id === 'presenter' ? 'presenter' : persona.id === 'reviewer' ? 'technical-reviewer' : persona.id === 'fin-1' ? 'finance-reviewer' : persona.id === 'legal-1' ? 'legal-reviewer' : 'executive');
+      cleanup();
+    }
+
+    const rejectionCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const rejectionAssignSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, assign: rejectionAssignSpy },
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      rejectionCalls.push({ url, init });
+      if (url === '/api/health') return json({ status: 'ok' }, 200);
+      if (url === '/api/auth/passcode') return new Response(null, { status: 204 });
+      if (url === '/api/auth/users') return json([{ id: 'presenter', displayName: 'Demo presenter', role: 'presenter' }, { id: 'reviewer', displayName: 'Technical reviewer', role: 'technical-reviewer' }]);
+      if (url === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-c'], csrfToken: 'csrf-session-token' });
+      if (url === '/api/auth/switch-user') return json({ error: 'You do not have permission for this action.' }, 403);
+      if (url === '/api/v1/cases') return json({ contractVersion: 1, cases: [{ caseId: 'cp-case-c', name: 'Case C', aircraftCategory: 'wide-body', caseRevision: 7 }] });
+      if (url === '/api/v1/cases/cp-case-c/scene') return json({ contractVersion: 1, current: true, canResetBlockedVariant: true, allowedActions: ['reset'], case: { caseId: 'cp-case-c', caseRevision: 7, name: 'Case C', aircraftName: 'Case C', aircraftCategory: 'wide-body', capabilityLabel: 'Rules-based', permission: true, allowedActions: ['reset'] }, objects: [] });
+      if (url === '/api/cases/cp-case-c') return json({ revision: 7, basis: [{ version: 4 }] });
+      if (url === '/api/cases/cp-case-c/dashboard') return json(dashboard([], [], decisions));
+      if (url === '/api/cases/cp-case-c/technical-reviews') return json({ basisVersion: 4, decisions: [] });
+      if (url === '/api/cases/cp-case-c/readiness') return json({ monthsUntilReturn: 9, gapsFound: 0, requestsSent: 0, heldForReview: 0, notProcessed: 0, sentence: 'Return in 9 months.' });
+      return json({});
+    }));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Demo presenter/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as Demo presenter.');
+    const switchButton = screen.getAllByRole('button', { name: /View as Technical reviewer/i })[0];
+    fireEvent.click(switchButton);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('You do not have permission for this action.');
+    expect(rejectionCalls.filter(({ url, init }) => url === '/api/auth/switch-user' && init?.method === 'POST')).toHaveLength(1);
+    expect(rejectionAssignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Demo presenter')).toBeTruthy();
+    expect(screen.getByText('Case cp-case-c')).toBeTruthy();
+  });
+
   it('keeps the active case when it stays in scope and falls back otherwise', () => {
     const session = { ...signedIn, caseScopes: ['cp-case-a', 'cp-case-b'] };
     expect(resolveSessionCaseId(session, 'cp-case-b')).toBe('cp-case-b');

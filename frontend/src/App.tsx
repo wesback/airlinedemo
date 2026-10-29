@@ -13,7 +13,7 @@ import { canAdmitHangarCommands, refreshHangarScene, snapshotFromServer, type Se
 import HangarSemanticControls from './hangar/semanticControls';
 import HangarSelectionEvidence from './hangar/selectionPanel';
 import HangarGuidedJourney from './hangar/guidedJourney';
-import HangarCaseReset from './hangar/caseReset';
+import HangarCaseReset, { getHangarCaseResetPermission } from './hangar/caseReset';
 import HangarErrorBoundary, { HangarFallbackPanel } from './hangar/errorBoundary';
 import hangarManifest from './hangar/sceneManifest.json';
 import { HANGAR_SOURCE_IDS, type HangarSourceSummaryEntry } from './hangar/sourceSummary';
@@ -31,6 +31,8 @@ import FindingWorkspace from './workspaces/FindingWorkspace';
 import ExecutivePortfolio, { type ExecutivePortfolioRow } from './workspaces/ExecutivePortfolio';
 import ExecutiveCaseSummary from './workspaces/ExecutiveCaseSummary';
 import ObligationWorkspace, { type ObligationRecord } from './workspaces/ObligationWorkspace';
+import PresenterDemoControl from './workspaces/PresenterDemoControl';
+import { submitHangarCaseReset } from './hangar/caseReset';
 import { resolveReturnTo, validateReturnTo } from './routing/returnTo';
 
 const LEGAL_DECISIONS = [{ id: 'signed-off', label: 'Signed off' }, { id: 'rejected', label: 'Rejected' }];
@@ -61,6 +63,8 @@ const PERSONA_OPTIONS = [
   { id: 'legal-1', label: 'Legal reviewer', role: 'legal-reviewer' },
   { id: 'exec-1', label: 'Executive observer', role: 'executive' },
 ] as const;
+
+const PERSONA_BY_ID = new Map<string, (typeof PERSONA_OPTIONS)[number]>(PERSONA_OPTIONS.map((persona) => [persona.id, persona]));
 
 const ROLE_HOME_PATHS: Record<string, string> = {
   'technical-reviewer': '/work',
@@ -528,6 +532,11 @@ export default function App({
 
   async function handleRoleSwitch(userId: string) {
     if (!session) return;
+    const persona = PERSONA_BY_ID.get(userId);
+    if (!persona) {
+      setCaseError('You do not have permission for this action.');
+      return;
+    }
     try {
       const response = await fetch('/api/auth/switch-user', {
         method: 'POST',
@@ -598,6 +607,28 @@ export default function App({
     }
   }
 
+  useEffect(() => {
+    if (!session || session.role !== 'presenter' || !session.caseScopes.length) return;
+    const pending = session.caseScopes.filter((caseId) => !(caseId in hangarSceneEnvelopes));
+    if (!pending.length) return;
+    let active = true;
+    void Promise.all(pending.map(async (caseId) => {
+      try {
+        const response = await fetch(`/api/v1/cases/${encodeURIComponent(caseId)}/scene`);
+        if (!response.ok) return [caseId, null] as const;
+        return [caseId, await response.json()] as const;
+      } catch {
+        return [caseId, null] as const;
+      }
+    })).then((results) => {
+      if (!active) return;
+      const nextScenes = Object.fromEntries(results.filter((entry): entry is [string, unknown] => entry[1] !== null));
+      if (!Object.keys(nextScenes).length) return;
+      setHangarSceneEnvelopes((current) => ({ ...current, ...nextScenes }));
+    });
+    return () => { active = false; };
+  }, [session, hangarSceneEnvelopes]);
+
   // Requests one region. The response is applied only while the session and case it was requested for are still active.
   function loadRegion(key: RegionKey, caseId: string, context: string) {
     const apply = (state: Regions[RegionKey]) => { if (requestContext.current === context) setRegions((current) => ({ ...current, [key]: state }) as Regions); };
@@ -657,7 +688,7 @@ export default function App({
       applyRoutePath(desiredRoute);
       return;
     }
-    if ((session.role === 'executive' || session.role === 'presenter') && normalizedRoute !== '/portfolio' && normalizedRoute !== '/work' && !normalizedRoute.match(/^\/cases\/[^/]+(?:\/|$)/)) {
+    if (session.role === 'executive' && normalizedRoute !== '/portfolio' && normalizedRoute !== '/work' && !normalizedRoute.match(/^\/cases\/[^/]+(?:\/|$)/)) {
       applyRoutePath('/portfolio');
       return;
     }
@@ -768,6 +799,35 @@ export default function App({
   const executiveReadOnlyRole = !!session && (session.role === 'executive' || session.role === 'presenter');
   const financeHomeRoute = session?.role === 'finance-reviewer' && routePath === '/work';
   const financeReserveRoute = session?.role === 'finance-reviewer' && /^\/cases\/[^/]+\/reserve(?:$|\?)/.test(normalizeRoutePath(routePath));
+  const presenterHomeRoute = session?.role === 'presenter' && routePath === '/demo';
+  const presenterCaseIds = session?.role === 'presenter' ? session.caseScopes : [];
+  const presenterCaseEntries = presenterCaseIds.map((caseId) => {
+    const envelope = hangarSceneEnvelopes[caseId];
+    const permission = envelope ? getHangarCaseResetPermission(envelope) : { allowed: false, revision: null };
+    return {
+      id: caseId,
+      name: hangarEntries.find((entry) => entry.caseId === caseId)?.name ?? caseId,
+      canReset: permission.allowed && permission.revision !== null,
+      resetLabel: 'Reset blocked variant',
+    };
+  });
+
+  async function handlePresenterReset(caseId: string) {
+    if (!session || session.role !== 'presenter' || !session.caseScopes.includes(caseId)) return;
+    const envelope = hangarSceneEnvelopes[caseId];
+    if (!envelope) return;
+    const permission = getHangarCaseResetPermission(envelope);
+    if (!permission.allowed || permission.revision === null) return;
+    const result = await submitHangarCaseReset({
+      envelope,
+      csrfToken: session.csrfToken,
+      transport: (url, init) => fetch(url, init),
+      refetch: () => refreshHangarSnapshot(),
+    });
+    if (!result.accepted && !result.uncertain) {
+      setCaseError(`Reset rejected (${result.status}).`);
+    }
+  }
   const roleHomePath = session ? (ROLE_HOME_PATHS[session.role] ?? '/work') : '/work';
   const roleHomeLabel = roleHomePath === '/portfolio' ? 'Portfolio' : roleHomePath === '/demo' ? 'Demo control' : 'My work';
   const normalizedRoute = normalizeRoutePath(routePath);
@@ -1180,6 +1240,16 @@ export default function App({
               </section>
             ))}
             {caseError && <p role="alert">{caseError}</p>}
+            {session?.role === 'presenter' && presenterHomeRoute && (
+              <PresenterDemoControl
+                cases={presenterCaseEntries}
+                caseId={selectedCaseId ?? undefined}
+                onResetCase={handlePresenterReset}
+                onViewAs={(userId) => {
+                  void handleRoleSwitch(userId);
+                }}
+              />
+            )}
             {session?.role === 'finance-reviewer' && selectedCaseId && financeHomeRoute && (
               <FinanceWorkspace items={financeWorklist} onOpenCase={(caseId) => {
                 handleCaseNavigate(`/cases/${encodeURIComponent(caseId)}/reserve`);

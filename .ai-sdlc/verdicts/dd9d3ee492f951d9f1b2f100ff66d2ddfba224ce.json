@@ -1,0 +1,326 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 655,
+  "branch": "ai-sdlc/issue-655",
+  "commitSha": "dd9d3ee492f951d9f1b2f100ff66d2ddfba224ce",
+  "round": 3,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 4,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previous reset and View as test gaps are only partly addressed: the tests still miss scoped-list and View as edge cases. Reset telemetry is now emitted on successful command paths, but rejected attempts can still return without the required security event, and the added telemetry test does not exercise the new emitter.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 306,
+          "message": "The named reset test does not verify that the presenter case list excludes out-of-scope cases.",
+          "confidence": 0.96,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The negative reset test checks that no reset button is shown and no reset request is sent, but it never asserts which cases are listed.",
+            "failureScenario": "If App displays out-of-scope case cp-case-c without a reset button, the test still passes, although the criterion requires listing only scoped cases."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 396,
+          "message": "The View as test still omits the unknown-persona and pending-response cases required to prove AC2.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The rejection flow tests a 403 response, while the success flows return immediately; no test supplies an unknown persona ID or holds the switch response pending.",
+            "failureScenario": "If App accepts an unknown persona or navigates before a pending switch request succeeds, the named test still passes, despite AC2 requiring unknown IDs to be rejected and navigation to wait for success."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 202,
+          "message": "Reset attempts rejected by early endpoint checks do not emit the required security event (OWASP A09:2025, Security Logging and Alerting Failures).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "ResetBlockedVariant emits the new security event on success and caught reset-command exceptions, but earlier validation, unsupported-target, authorization, and rate-limit returns exit without calling EmitCaseResetEvent.",
+            "failureScenario": "A signed-in presenter with valid scope and CSRF submits a reset for an unsupported variant; the endpoint returns 422 without a redacted reset security event, leaving the attempted action unaudited."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+          "line": 470,
+          "message": "The required reset telemetry test is missing: the changed test does not exercise Demo_reset_and_role_switch_events or assert redaction for EmitCaseResetEvent.",
+          "confidence": 0.97,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The added CaseReset inline case invokes EmitSecurityEvent, not EmitCaseResetEvent or the reset endpoint; the existing redaction test exercises only the role-switch emitter.",
+            "failureScenario": "If EmitCaseResetEvent omits required fields or includes a passcode, cookie, CSRF token, item body, or notice draft, the changed tests still pass."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The added tests cover an ineligible scene and a 403 switch rejection, but they still miss the out-of-scope listing assertion and success timing/unknown-persona cases. The reset event is emitted for success and typed command failures, but not for unexpected failures.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 340,
+          "message": "AC1's out-of-scope case test still does not verify that the case is absent from the presenter list. Assert that Case C is not rendered when the session is scoped only to cp-case-a.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "The added negative setup signs in with scope cp-case-a, but the test never asserts that the displayed case list excludes cp-case-c. It only checks for no reset button and no reset POST.",
+            "failureScenario": "If the App lists out-of-scope cp-case-c but leaves its reset action disabled because no scene was loaded, these assertions still pass, despite AC1 requiring only scoped cases to be listed."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 391,
+          "message": "AC2's success-gating and unknown-persona cases remain unverified. Add coverage that holds the switch response pending and submits an unknown persona ID, asserting no navigation or session change before success or after rejection.",
+          "confidence": 0.96,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_004_demo_view_as_contract uses a switch-user stub that resolves immediately on success. It does not hold the response pending to check navigation timing, and its rejection case exercises only a known persona, not an unknown ID.",
+            "failureScenario": "If the App navigates before a successful response, the immediate-success test still passes. If an unknown persona ID is accepted by the handler, neither test exercises that path."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 209,
+          "message": "The case-reset audit event is missing for unexpected reset failures (OWASP A09:2025, Security Logging and Alerting Failures). Emit the redacted failed event on the general exception path as well.",
+          "confidence": 0.93,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The new reset event is emitted on success and for CasePackBlockedVariantResetException. Other non-cancellation exceptions reach the general catch, which records diagnostics and returns HTTP 500 without emitting the security event.",
+            "failureScenario": "If the reset store throws an unexpected exception after a valid request, the endpoint returns HTTP 500 and no redacted case-reset event records the failed outcome."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The new wiring records successful resets and command-level failures, but misses reset requests rejected before the command runs, including out-of-scope attempts.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 202,
+          "message": "Reset audit events cover successful commands and reset-command exceptions, but not earlier denials such as an out-of-scope request. This leaves attempted unauthorized resets unaudited (OWASP A09:2025, Security Logging and Alerting Failures).",
+          "confidence": 0.93,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The new case-reset event is emitted after a successful reset or a caught reset-command exception. Earlier rejection paths return without calling EmitCaseResetEvent, including the out-of-scope check at lines 126–128.",
+            "failureScenario": "A signed-in user submits a reset for a case outside their scope. The endpoint returns not_found without emitting the required redacted security event, leaving that attempted unauthorized reset absent from the security event stream."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/PresenterDemoControl.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 28,
+      "total": 32,
+      "percent": 87.5,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 2,
+          "total": 2,
+          "missed": []
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 26,
+          "total": 30,
+          "missed": [
+            318,
+            319,
+            322,
+            323
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}

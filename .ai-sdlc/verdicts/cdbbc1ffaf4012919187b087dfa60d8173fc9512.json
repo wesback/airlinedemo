@@ -1,0 +1,265 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 655,
+  "branch": "ai-sdlc/issue-655",
+  "commitSha": "cdbbc1ffaf4012919187b087dfa60d8173fc9512",
+  "round": 2,
+  "pipelineVersion": "6c8e964",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The previously reported reset and View as test gaps remain. The named App tests cover successful flows but do not assert the acceptance criteria's required negative behavior.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 243,
+          "message": "AC1's required negative cases remain untested: an out-of-scope case or ineligible scene must show no reset action and send no request.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_app_request_contract tests only an eligible, in-scope reset; it does not exercise the out-of-scope or ineligible states required by AC1.",
+            "failureScenario": "If App exposes or submits a reset for an out-of-scope case or a scene with reset eligibility false, this test still passes."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 301,
+          "message": "AC2's required success-gating and rejection cases remain untested: a 403 or unknown persona must leave the role and session unchanged and must not navigate.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_004_demo_view_as_contract covers successful switches only; it does not hold the response pending or test a 403 or unknown persona.",
+            "failureScenario": "If navigation or session changes happen before success, or after a 403 or unknown persona, this test still passes."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The named App tests cover successful reset and persona-switch flows. They still omit the acceptance criteria’s required reset scope and eligibility negatives, and View as pending-response and rejection cases.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 243,
+          "message": "AC1’s required scope and eligibility negative cases remain untested by the named App test.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "presenter_scoped_reset_app_request_contract exercises an eligible, in-scope reset and asserts its request, but does not test an out-of-scope case or an ineligible scene.",
+            "failureScenario": "If the App shows a reset action or sends a reset request for an out-of-scope case or a scene with reset eligibility false, this test still passes, despite AC1 requiring no action and no request."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 301,
+          "message": "AC2’s success-gating and rejection cases remain untested by the named App test.",
+          "confidence": 0.98,
+          "category": "testing",
+          "evidence": {
+            "codePathTraced": "AC_004_demo_view_as_contract stubs successful switch-user responses and checks the request, CSRF header, and navigation, but does not hold the response pending or test a 403 or unknown persona.",
+            "failureScenario": "If the App navigates before the server responds, or changes the session or navigates after a 403 or unknown persona, this test still passes, despite AC2 requiring success-gated navigation and unchanged session and role on rejection."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The latest diff adds case-reset event constants but does not wire them into the telemetry allowlists or the reset path. A successful reset therefore has no required security event.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 37,
+          "message": "The required case-reset security event is not emitted or allowlisted. This leaves successful resets without the audit signal required by the issue (OWASP A09:2025, Security Logging and Alerting Failures).",
+          "confidence": 0.94,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The change adds the case-reset event name, but does not add it to SecurityEventNames or AllowedEventNames, and the reset endpoint does not emit a reset event.",
+            "failureScenario": "A presenter submits an eligible reset and the server changes the case state without recording the required redacted security event. If the event is passed to EmitSecurityEvent, its allowlist check rejects it."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 2,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/PresenterDemoControl.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": false,
+      "covered": 0,
+      "total": 0,
+      "percent": null,
+      "files": [],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
