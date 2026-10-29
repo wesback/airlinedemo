@@ -1,0 +1,293 @@
+{
+  "schema": "ep-pipeline/verdicts/v1",
+  "repo": "wesback/airlinedemo",
+  "issue": 655,
+  "branch": "ai-sdlc/issue-655",
+  "commitSha": "5975ea467375c3c194127d76fca3ae4d92f33780",
+  "round": 0,
+  "pipelineVersion": "6c8e964-dirty",
+  "tokenKind": "app",
+  "writers": [
+    {
+      "step": "implement",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-1",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-2",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    },
+    {
+      "step": "fix-3",
+      "harness": "copilot",
+      "version": "1.0.95",
+      "model": "mai-code-1.1-flash"
+    }
+  ],
+  "reviewers": [
+    {
+      "agentId": "code-reviewer-codex",
+      "reviewType": "critic",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset endpoint can miss audit events when ownership lookup throws, and the App test's no-request assertions for two scenarios inspect a stale request recorder.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 133,
+          "message": "A case-store failure during ownership lookup bypasses the required reset audit event for every non-cancelled request.",
+          "confidence": 0.84,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The reset handler calls caseStates.OwnerOf(caseId) before the reset command's audited exception handlers. The ownership lookup is not caught here, so an exception exits before Audited emits the event.",
+            "failureScenario": "A non-cancelled reset request arrives while the case store throws during OwnerOf. The request fails without emitting the required security.case_reset event (OWASP A09:2025, Security Logging and Alerting Failures)."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "frontend/tests/App.test.tsx",
+          "line": 399,
+          "message": "The named App test does not actually detect reset requests in its ineligible-scene and empty-scope scenarios.",
+          "confidence": 0.98,
+          "category": "other",
+          "evidence": {
+            "codePathTraced": "The ineligible-scene and empty-scope cases replace fetch but do not record requests in noActionCalls. Their final no-request assertions therefore inspect only calls from the earlier scenario.",
+            "failureScenario": "If either later scenario sends a reset POST, the test does not record it and still passes the zero-request assertion, so the named criterion's no-request behavior is not verified."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "test-reviewer-codex",
+      "reviewType": "testing",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 1,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The presenter UI and named tests cover the listed flows. The reset endpoint still has a reachable ownership-lookup failure path that returns without the required audit event.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 133,
+          "message": "A case-store failure during the ownership lookup bypasses the required reset audit event (OWASP A09:2025, Security Logging and Alerting Failures).",
+          "confidence": 0.88,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The reset handler calls caseStates.OwnerOf(caseId) before the reset command's exception handlers and before any Audited call. An exception from the case store exits without emitting the reset event.",
+            "failureScenario": "A signed-in presenter submits a non-cancelled reset request while OwnerOf throws; the request fails without the required security.case_reset event, despite the criterion requiring an event for every non-cancelled request (OWASP A09:2025)."
+          }
+        }
+      ]
+    },
+    {
+      "agentId": "security-reviewer",
+      "reviewType": "security",
+      "harness": "codex",
+      "harnessVersion": "0.162.0",
+      "model": "gpt-6-luna",
+      "approved": false,
+      "findings": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0,
+        "suggestion": 0
+      },
+      "summary": "The reset audit path can omit events when case-store checks throw, and its redaction allowlist does not retain the `failed` outcome used for unexpected reset errors. Both gaps are reachable through the changed endpoint.",
+      "findingList": [
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "line": 128,
+          "message": "Case-store failures during ownership lookup or authorization bypass the required reset audit event (OWASP A09:2025, Security Logging and Alerting Failures).",
+          "confidence": 0.84,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "The reset handler calls caseStates.OwnerOf(caseId) before the try/catch that emits the reset event. The AuthorizeCase call also catches only CaseAccessDeniedException.",
+            "failureScenario": "A signed-in presenter submits a reset while the case store throws during ownership lookup or authorization. The exception escapes before Audited is called, so the request has no security.case_reset event."
+          }
+        },
+        {
+          "severity": "major",
+          "file": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "line": 181,
+          "message": "The redaction allowlist drops the `failed` outcome accepted by the reset emitter, leaving unexpected reset failures without the required audit outcome (OWASP A09:2025, Security Logging and Alerting Failures).",
+          "confidence": 0.82,
+          "category": "security",
+          "evidence": {
+            "codePathTraced": "EmitCaseResetEvent accepts outcome \"failed\" and the reset endpoint passes it for unexpected exceptions, but the event.outcome redaction rule omits \"failed\". The event is passed through Redact before emission.",
+            "failureScenario": "A reset request reaches the unexpected-exception handler. The endpoint emits security.case_reset with outcome \"failed\", but redaction rejects that outcome value, so the recorded event lacks the outcome needed to identify the failure."
+          }
+        }
+      ]
+    }
+  ],
+  "independence": {
+    "ok": true,
+    "violations": [],
+    "implementerHarnesses": [
+      "copilot"
+    ]
+  },
+  "gate": {
+    "name": "ep-merge-gate",
+    "allowed": false,
+    "failed": [
+      "reviewers-pass"
+    ],
+    "results": [
+      {
+        "gate": "semgrep-changed-files",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-green",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "tdd-red",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "diff-coverage",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "reviewers-pass",
+        "enforcement": "hard-mandatory",
+        "verdict": "fail"
+      },
+      {
+        "gate": "three-reviewers",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "harness-independence",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      },
+      {
+        "gate": "approval-tier-auto",
+        "enforcement": "hard-mandatory",
+        "verdict": "pass"
+      }
+    ],
+    "metrics": {
+      "tdd-green": 1,
+      "tdd-red": 1,
+      "diff-coverage": 1,
+      "reviewer-failures": 3,
+      "independence-violations": 0,
+      "human-approval-required": 0
+    },
+    "reviewerCount": 3
+  },
+  "approvalTier": {
+    "tier": "auto",
+    "complexityScore": 3,
+    "needsHuman": false,
+    "securitySensitive": false,
+    "securityPaths": [],
+    "isInfraChange": false,
+    "infraPaths": []
+  },
+  "tdd": {
+    "green": true,
+    "red": true,
+    "redWaived": "",
+    "redKind": "build",
+    "greenKind": "",
+    "greenExit": 0,
+    "redExit": 1,
+    "testFiles": [
+      "backend/AirlineDemo.Api.Tests/DemoRunResetTests.cs",
+      "backend/AirlineDemo.Api.Tests/TelemetryPrivacyTests.cs",
+      "frontend/tests/App.test.tsx",
+      "frontend/tests/PresenterDemoControl.test.tsx"
+    ],
+    "testUser": "tester",
+    "reason": "",
+    "coverage": {
+      "min": 80,
+      "ok": true,
+      "measured": true,
+      "covered": 47,
+      "total": 52,
+      "percent": 90.4,
+      "files": [
+        {
+          "path": "backend/AirlineDemo.Api/Auth/CasePackEndpoints.cs",
+          "covered": 20,
+          "total": 21,
+          "missed": [
+            139
+          ]
+        },
+        {
+          "path": "backend/AirlineDemo.Api/Diagnostics/TelemetryRedaction.cs",
+          "covered": 27,
+          "total": 31,
+          "missed": [
+            318,
+            319,
+            322,
+            323
+          ]
+        }
+      ],
+      "reportFiles": [
+        "TestResults/backend.cobertura.xml"
+      ]
+    }
+  },
+  "semgrep": {
+    "blocking": [],
+    "elsewhere": 0,
+    "total": 27,
+    "ran": true,
+    "version": "1.178.0",
+    "config": "p-default-2026-10-11.yml",
+    "configSha256": "974409ed18b020a7e2a06400828a0003f584320c2cbb09d0e776bc04cf8de9db"
+  }
+}
