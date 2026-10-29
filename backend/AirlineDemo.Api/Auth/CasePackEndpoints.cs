@@ -130,13 +130,31 @@ public static class CasePackEndpoints
         if (!string.Equals(session.User.Role, "presenter", StringComparison.Ordinal))
             { CasePackDiagnostics.Reset(logger, "denied", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(Error(StatusCodes.Status403Forbidden, "forbidden", "forbidden"), "denied"); }
 
-        if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal)
-            || caseStates.OwnerOf(caseId) is not { } owner)
+        if (!session.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
+            { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(SceneNotFound(), "denied"); }
+
+        string? owner;
+        try { owner = caseStates.OwnerOf(caseId); }
+        catch (CaseAccessDeniedException) { return Audited(SceneNotFound(), "denied"); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
+            return Audited(Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed."), "failed");
+        }
+
+        if (owner is null)
             { CasePackDiagnostics.Reset(logger, "invalid", CasePackDiagnostics.ElapsedMilliseconds(started), caseId); return Audited(SceneNotFound(), "denied"); }
 
         CaseScope scope;
         try { scope = caseStates.AuthorizeCase(caseId, owner); }
         catch (CaseAccessDeniedException) { return Audited(SceneNotFound(), "denied"); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            CasePackDiagnostics.Reset(logger, "failed", CasePackDiagnostics.ElapsedMilliseconds(started), caseId);
+            return Audited(Error(StatusCodes.Status500InternalServerError,
+                "internal_error", "The request could not be completed."), "failed");
+        }
 
         if (!DemoAuthEndpoints.HasValidAntiForgery(http, session))
         {
