@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Persistence;
@@ -107,6 +109,76 @@ public sealed class DemoRunResetTests : IDisposable
         Assert.Matches("^actor-[0-9a-f]{16}$", properties["enduser.pseudo.id"]!);
         foreach (var canary in new[] { session.Id, session.CsrfToken, "reset-test-passcode", "CANARY-CSRF-655", "CANARY-ITEM-655", "CANARY-DRAFT-655" })
             Assert.DoesNotContain(canary, string.Join("|", properties.Select(p => $"{p.Key}={p.Value}")));
+    }
+
+    [Theory]
+    [InlineData("owner-denied", 404, "denied")]
+    [InlineData("owner-failed", 500, "failed")]
+    [InlineData("owner-missing", 404, "denied")]
+    [InlineData("authorize-denied", 404, "denied")]
+    [InlineData("authorize-failed", 500, "failed")]
+    public async Task Demo_reset_store_lookup_failures_emit_one_event(string scenario, int status, string outcome)
+    {
+        var logs = new ResetEventLogger();
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Demo:Passcode"] = "reset-test-passcode",
+                ["CaseState:Path"] = PathFor(),
+            }));
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton<ILoggerProvider>(logs);
+                var seeded = new CaseStateStore(PathFor());
+                seeded.CreateCase("cp-case-lookup", Owner);
+                var proxy = DispatchProxy.Create<ICaseStateStore, FaultingStore>();
+                ((FaultingStore)(object)proxy).Configure(seeded, scenario);
+                services.AddSingleton(proxy);
+            });
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        var session = factory.Services.GetRequiredService<DemoSessionStore>().Create(
+            new DemoUser("reset-test-presenter", "Presenter", "presenter", ["cp-case-lookup"]));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/cases/cp-case-lookup/reset-blocked-variant")
+        {
+            Content = JsonContent.Create(new { contractVersion = 1, commandId = "reset-lookup-1", expectedRevision = 1, variant = "blocked" }),
+        };
+        request.Headers.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+        request.Headers.Add("X-CSRF-Token", session.CsrfToken);
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(status, (int)response.StatusCode);
+        var properties = Assert.Single(logs.Events.Where(p => p.GetValueOrDefault("event.name") == "security.case_reset"));
+        Assert.Equal("case-reset", properties["action"]);
+        Assert.Equal(outcome, properties["event.outcome"]);
+        Assert.Equal("presenter", properties["fixture.role"]);
+    }
+
+    public class FaultingStore : DispatchProxy
+    {
+        private ICaseStateStore _inner = null!;
+        private string _scenario = "";
+
+        public void Configure(ICaseStateStore inner, string scenario) { _inner = inner; _scenario = scenario; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            switch (_scenario, targetMethod!.Name)
+            {
+                case ("owner-denied", nameof(ICaseStateStore.OwnerOf)):
+                case ("authorize-denied", nameof(ICaseStateStore.AuthorizeCase)):
+                    throw new CaseAccessDeniedException();
+                case ("owner-failed", nameof(ICaseStateStore.OwnerOf)):
+                case ("authorize-failed", nameof(ICaseStateStore.AuthorizeCase)):
+                    throw new InvalidOperationException("store unavailable");
+                case ("owner-missing", nameof(ICaseStateStore.OwnerOf)):
+                    return null;
+            }
+            try { return targetMethod.Invoke(_inner, args); }
+            catch (TargetInvocationException exception) { ExceptionDispatchInfo.Capture(exception.InnerException!).Throw(); throw; }
+        }
     }
 
     private sealed class ResetEventLogger : ILoggerProvider, ILogger

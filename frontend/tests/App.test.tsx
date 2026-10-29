@@ -363,7 +363,9 @@ describe('reviewer workspace', () => {
     cleanup();
     window.history.replaceState({}, '', '/demo');
     const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    const ineligibleCalls: Array<{ url: string; init?: RequestInit }> = [];
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      ineligibleCalls.push({ url: String(input), init });
       if (String(input) === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: ['cp-case-c'], csrfToken: 'csrf-session-token' });
       if (String(input) === '/api/v1/cases/cp-case-c/scene') return json({
         contractVersion: 1, current: true, canResetBlockedVariant: false, allowedActions: ['reset'],
@@ -377,11 +379,14 @@ describe('reviewer workspace', () => {
     const ineligibleList = within(screen.getByRole('region', { name: 'Demo control' }));
     expect(ineligibleList.getByRole('cell', { name: 'Case C' })).toBeTruthy();
     expect(ineligibleList.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
-    expect(noActionCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
+    expect(ineligibleCalls.some(({ url }) => url === '/api/v1/cases/cp-case-c/scene')).toBe(true);
+    expect(ineligibleCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
 
     cleanup();
     window.history.replaceState({}, '', '/demo');
+    const emptyCalls: Array<{ url: string; init?: RequestInit }> = [];
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      emptyCalls.push({ url: String(input), init });
       if (String(input) === '/api/auth/sign-in') return json({ id: 'presenter', displayName: 'Demo presenter', role: 'presenter', caseScopes: [], csrfToken: 'csrf-session-token' });
       return baseFetch(input, init);
     });
@@ -391,7 +396,8 @@ describe('reviewer workspace', () => {
     expect(emptyList.getAllByRole('row')).toHaveLength(1);
     expect(emptyList.queryAllByRole('cell')).toHaveLength(0);
     expect(emptyList.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
-    expect(noActionCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
+    expect(emptyCalls.some(({ url }) => url === '/api/auth/sign-in')).toBe(true);
+    expect(emptyCalls.filter(({ url, init }) => url.endsWith('/reset-blocked-variant') && init?.method === 'POST')).toHaveLength(0);
   });
 
   it('AC_004_demo_view_as_contract', async () => {

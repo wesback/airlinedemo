@@ -19,6 +19,15 @@ namespace AirlineDemo.Api.Tests;
 
 public sealed class TelemetryPrivacyTests
 {
+    [Theory]
+    [InlineData("unknown-outcome", "presenter")]
+    [InlineData("success", "unknown-role")]
+    public void Case_reset_event_rejects_unknown_outcome_and_role(string outcome, string role)
+    {
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        Assert.Throws<ArgumentException>(() => TelemetryRedaction.EmitCaseResetEvent(logger, outcome, role, "session", "1.0", "test"));
+    }
+
     [Fact]
     public void Bearer_jwt_and_cookie_name_shapes_are_redacted()
     {
