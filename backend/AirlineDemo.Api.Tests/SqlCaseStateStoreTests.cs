@@ -234,7 +234,7 @@ public sealed class SqlCaseStateStoreTests
     [InlineData("User")]
     public void Runtime_registration_accepts_user_assigned_managed_identity_client_id(string key)
     {
-        const string clientId = "18cb6492-bde1-400e-8d46-60a58e9927de";
+        const string clientId = "11111111-2222-4333-8444-555555555555";
         var connectionString = $"Server=tcp:case-state.database.windows.net,1433;Database=casestate;Encrypt=True;Authentication=Active Directory Managed Identity;{key}={clientId};";
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
