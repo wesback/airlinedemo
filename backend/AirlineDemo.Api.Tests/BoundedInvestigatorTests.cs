@@ -133,6 +133,38 @@ public class BoundedInvestigatorTests
             new(retriesUsed == 0);
     }
 
+    private sealed class StatusPipelineResponse(int status) : System.ClientModel.Primitives.PipelineResponse
+    {
+        protected override System.ClientModel.Primitives.PipelineResponseHeaders HeadersCore => new EmptyPipelineResponseHeaders();
+        protected override bool IsErrorCore => status >= 400;
+        public override int Status => status;
+        public override string ReasonPhrase => "model service response";
+        public override Stream ContentStream { get; set; } = Stream.Null;
+        public override BinaryData Content => BinaryData.Empty;
+        public override BinaryData BufferContent(CancellationToken cancellationToken = default) => BinaryData.Empty;
+        public override ValueTask<BinaryData> BufferContentAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(BinaryData.Empty);
+        public override void Dispose() { }
+    }
+
+    private sealed class EmptyPipelineResponseHeaders : System.ClientModel.Primitives.PipelineResponseHeaders
+    {
+        public override bool TryGetValue(string name, out string value)
+        {
+            value = string.Empty;
+            return false;
+        }
+
+        public override bool TryGetValues(string name, out IEnumerable<string> values)
+        {
+            values = [];
+            return false;
+        }
+
+        public override IEnumerator<KeyValuePair<string, string>> GetEnumerator() =>
+            Enumerable.Empty<KeyValuePair<string, string>>().GetEnumerator();
+    }
+
     private sealed class CountingLimits : IInvestigationLimits
     {
         public int Models { get; private set; }
@@ -480,6 +512,41 @@ public class BoundedInvestigatorTests
             Investigator(refused, caseId: "user@example.test").InvestigateAsync(Docs));
         Assert.Equal("correlation fields refused: Case", exception.Message);
         Assert.Empty(refused.Requests);
+    }
+
+    [Theory]
+    [InlineData(408, 2)]
+    [InlineData(429, 2)]
+    [InlineData(500, 2)]
+    [InlineData(503, 2)]
+    [InlineData(400, 1)]
+    [InlineData(401, 1)]
+    public async Task Model_http_failures_retry_only_for_transient_statuses(int status, int expectedCalls)
+    {
+        var calls = 0;
+        var model = new ScriptedChatClient((_, _) =>
+        {
+            if (++calls == 1)
+            {
+                throw new System.ClientModel.ClientResultException($"HTTP {status} (model service response)",
+                    new StatusPipelineResponse(status), null);
+            }
+
+            return Reply(ClaimsJson);
+        });
+
+        if (expectedCalls == 1)
+        {
+            await Assert.ThrowsAsync<System.ClientModel.ClientResultException>(() =>
+                Investigator(model, limits: new RetryOnceLimits()).InvestigateAsync(Docs));
+        }
+        else
+        {
+            var result = await Investigator(model, limits: new RetryOnceLimits()).InvestigateAsync(Docs);
+            Assert.Single(result.Claims);
+        }
+
+        Assert.Equal(expectedCalls, model.Requests.Count);
     }
 
     [Fact]
