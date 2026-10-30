@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { activityFrom, actorKind, deriveProgress, waitingOn } from '../src/journey/model';
-import type { AuditEvent, CaseRecord } from '../src/journey/api';
+import type { AuditEvent, CaseHistory, CaseRecord } from '../src/journey/api';
+import { aiBriefFor, aiChipFor } from '../src/journey/aiBriefs';
 
 const at = '2026-10-30T10:00:00Z';
 const event = (sequence: number, actor: string, action: string, detail = ''): AuditEvent => ({ sequence, revision: sequence, actor, action, detail, at });
@@ -83,5 +84,29 @@ describe('activity', () => {
     expect(items).toHaveLength(4);
     expect(items[0]).toMatchObject({ actor: 'human', who: 'Technical reviewer', what: 'Technical review accepted the findings', reason: 'Verified.' });
     expect(items[3]).toMatchObject({ actor: 'rules', who: 'Intake service' });
+  });
+});
+
+describe('AI briefing', () => {
+  const aiHistory = (summary: string): CaseHistory => ({ events: [{ eventId: 'e1', sequence: 1, eventType: 'findings-raised', actorRole: 'records-agent', summary, capabilityLabel: 'AI agent',
+    witnesses: [{ witnessId: 'w1', documentId: 'x/a.txt', documentVersion: 1, page: 1 }, { witnessId: 'w2', documentId: 'x/b.txt', documentVersion: 1, page: 1 }] }] });
+
+  it('stays hidden until the records agent has reported', () => {
+    expect(aiBriefFor('cp-case-a', null)).toBeNull();
+    expect(aiBriefFor('cp-case-a', { events: [{ ...aiHistory('x').events[0], capabilityLabel: 'Rules-based' }] })).toBeNull();
+  });
+
+  it('uses the case-pack briefing for known aircraft and summarises its findings for the board', () => {
+    expect(aiBriefFor('cp-case-b', aiHistory('raised'))?.findings.map((finding) => finding.severity)).toEqual(['blocker', 'attention']);
+    expect(aiChipFor('cp-case-b')).toEqual({ label: 'AI: 2 findings, 1 blocking', severity: 'blocker' });
+    expect(aiChipFor('cp-case-c')).toEqual({ label: 'AI: 1 finding', severity: 'attention' });
+    expect(aiChipFor('case-001')).toBeNull();
+  });
+
+  it('falls back to the recorded agent summary for other cases', () => {
+    const brief = aiBriefFor('case-001', aiHistory('Agent found a gap.'))!;
+    expect(brief.headline).toBe('Agent found a gap.');
+    expect(brief.documentsRead).toBe(2);
+    expect(brief.findings).toEqual([]);
   });
 });

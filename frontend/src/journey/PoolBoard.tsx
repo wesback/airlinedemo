@@ -1,4 +1,5 @@
 import type { Session } from './api';
+import { aiChipFor } from './aiBriefs';
 import { aircraftFor, formatWhen, STEPS, waitingOn, type Actor } from './model';
 import { ActorGlyph, ActorTag, AircraftArt, CheckIcon } from './Art';
 import type { FleetEntry } from './useFleet';
@@ -93,6 +94,7 @@ export default function PoolBoard({ session, entries, state, onOpen, onOpenHanga
                     {here.length === 0 && <span className="av-lane-empty">Clear</span>}
                     {here.map(({ entry, wait }) => {
                       const aircraft = aircraftFor(entry.record.caseId);
+                      const ai = entry.progress.states.investigation === 'done' ? aiChipFor(entry.record.caseId) : null;
                       return (
                         <button key={entry.record.caseId} type="button" className={`av-plane-card${entry.progress.blocked ? ' is-blocked' : ''}${entry.progress.released ? ' is-released' : ''}`}
                           onClick={() => onOpen(entry.record.caseId)} aria-label={`${aircraft.manufacturer} ${aircraft.model} ${aircraft.registration}: ${wait.label}`}>
@@ -101,6 +103,7 @@ export default function PoolBoard({ session, entries, state, onOpen, onOpenHanga
                           <span className="av-plane-card-model">{aircraft.manufacturer} {aircraft.model}</span>
                           <span className="av-plane-card-route">{aircraft.outgoingLessee}<span aria-hidden="true"> › </span>{aircraft.nextLessee}</span>
                           <span className={`av-wait av-wait-${entry.progress.released ? 'released' : wait.actor}`}>{entry.progress.released ? <CheckIcon /> : <ActorGlyph actor={wait.actor} size={12} />}{wait.label}</span>
+                          {ai && <span className={`av-ai-chip av-ai-chip-${ai.severity}`}><ActorGlyph actor="ai" size={11} />{ai.label}</span>}
                           <span className="av-plane-card-when">{entry.progress.lastActivity ? `Updated ${formatWhen(entry.progress.lastActivity)}` : 'Just arrived'}</span>
                         </button>
                       );

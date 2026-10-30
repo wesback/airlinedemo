@@ -90,6 +90,24 @@ describe('journey app', () => {
     expect(await screen.findByText('Accepted the AI findings')).toBeTruthy();
   });
 
+  it('explains why the technical review needs a person and links to the full AI briefing', async () => {
+    stubApi();
+    window.history.replaceState({}, '', '/cases/cp-case-c');
+    render(<App />);
+    await signInAs('Riley Reviewer');
+
+    const why = await screen.findByRole('region', { name: 'Why you are reviewing' });
+    expect(within(why).getByText('Landing-gear inspection report not processed')).toBeTruthy();
+    expect(within(why).getByText('If you reject')).toBeTruthy();
+
+    fireEvent.click(within(screen.getByRole('region', { name: 'AI insight' })).getByRole('button', { name: 'See what the AI found' }));
+    expect(await screen.findByRole('heading', { name: 'AI records investigation', level: 2 })).toBeTruthy();
+    expect(screen.getByText('Main landing-gear inspection report')).toBeTruthy();
+    expect(screen.getByText('Could not read')).toBeTruthy();
+    expect(screen.getByText('Did not infer the content of the unread report from the work card.')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'AI insight' })).toBeNull();
+  });
+
   it('hands a human gate to its owner instead of showing the form to another persona', async () => {
     stubApi({
       'POST /api/auth/sign-in': () => json(finance),
