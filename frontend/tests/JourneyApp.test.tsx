@@ -157,6 +157,42 @@ describe('journey app', () => {
     expect(screen.queryByRole('button', { name: 'Release to Polaris International' })).toBeNull();
   });
 
+  it('lets the presenter send the demo records package from the intake step', async () => {
+    const presenter = { id: 'presenter', displayName: 'Pat Presenter', role: 'presenter', caseScopes: ['case-001'], csrfToken: 'csrf-4' };
+    let uploaded = false;
+    const pdf = () => new Response('%PDF-1.4', { status: 200, headers: { 'Content-Type': 'application/pdf' } });
+    stubApi({
+      'GET /api/auth/users': () => json([{ id: 'presenter', displayName: 'Pat Presenter', role: 'presenter' }]),
+      'POST /api/auth/sign-in': () => json(presenter),
+      'GET /demo-records/case-001/engine-identity-record.pdf': pdf,
+      'GET /demo-records/case-001/llp-status-sheet.pdf': pdf,
+      'GET /demo-records/case-001/maintenance-log-extract.pdf': pdf,
+      'POST /api/cases/case-001/packages': () => { uploaded = true; return json({ packageId: 'pkg-1', caseId: 'case-001', state: 'complete', documents: [] }, 201); },
+      'GET /api/cases/case-001': () => json(uploaded
+        ? { caseId: 'case-001', revision: 3, basis: [{ version: 1 }], audit: [
+          { sequence: 1, revision: 1, actor: 'intake', action: 'journey', detail: 'Records package received.', at },
+          { sequence: 2, revision: 2, actor: 'records-agent', action: 'journey', detail: 'Records agent read 3 documents.', at }] }
+        : { caseId: 'case-001', revision: 0, basis: [], audit: [] }),
+      'GET /api/cases/case-001/history': () => json({ events: [] }),
+      'GET /api/cases/case-001/technical-reviews': () => json({ basisVersion: 1, decisions: [] }),
+      'GET /api/cases/case-001/reserve': () => new Response(null, { status: 403 }),
+      'GET /api/cases/case-001/obligations': () => new Response(null, { status: 403 }),
+      'GET /api/cases/case-001/readiness': () => json({ sentence: 'Return in 9 months.' }),
+    });
+    window.history.replaceState({}, '', '/cases/case-001');
+    render(<App />);
+    await signInAs('Pat Presenter');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Send demo records package' }));
+    await waitFor(() => expect(uploaded).toBe(true));
+    const post = fetchMock.mock.calls.find(([url, init]) => url === '/api/cases/case-001/packages' && init?.method === 'POST')!;
+    const init = post[1] as RequestInit;
+    expect(init.headers).toEqual({ 'X-CSRF-Token': 'csrf-4' });
+    expect((init.body as FormData).getAll('files').map((file) => (file as File).name))
+      .toEqual(['engine-identity-record.pdf', 'llp-status-sheet.pdf', 'maintenance-log-extract.pdf']);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Send demo records package' })).toBeNull());
+  });
+
   it('switches to the 3D hangar mode from the top bar', async () => {
     stubApi();
     render(<App />);

@@ -32,6 +32,27 @@ export async function postJson<T>(url: string, csrfToken: string, body: unknown)
   return response.json() as Promise<T>;
 }
 
+export type PackageDocument = { fileName: string; status: string; reason: string; version: number | null };
+export type PackageReceipt = { packageId: string; caseId: string; state: string; documents: PackageDocument[] };
+
+/** Submits PDF files as one records package; the server parses them and runs the records agent before it answers. */
+export async function postPackage(caseId: string, csrfToken: string, files: File[]): Promise<PackageReceipt> {
+  const form = new FormData();
+  for (const file of files) form.append('files', file, file.name);
+  const response = await fetch(caseUrl(caseId, '/packages'), { method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body: form });
+  if (!response.ok) {
+    let message = '';
+    try {
+      const payload = await response.json() as { error?: unknown };
+      if (typeof payload?.error === 'string') message = payload.error;
+    } catch {
+      // The body is optional on failures.
+    }
+    throw new ApiError(response.status, message || `Upload failed (${response.status})`);
+  }
+  return response.json() as Promise<PackageReceipt>;
+}
+
 export type BasisVersion = { version: number; createdAt?: string };
 export type AuditEvent = { sequence: number; revision: number; actor: string; action: string; detail: string; at: string };
 export type CaseRecord = {

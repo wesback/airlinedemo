@@ -144,12 +144,15 @@ public static class EvidenceEndpoints
         var packageId = PackageIdFor(caseId, documents);
         var (record, created) = packages.Submit(packageId, caseId,
             () => EvidenceIntake.ProcessPackage(caseId, documents, basis, parserOptions));
+        // The accepted documents become the case's evidence basis, so the journey moves past intake.
+        IntakeJourneyHandover.RecordIntake(caseStore, scope, record);
         // Runs on every submission until the trace exists, so a retry after a failed append re-runs only the investigation.
-        await RunInvestigationAsync(record, caseId, scope, session.User.Id, session.User.Role, caseSources, basis, services, investigations, ct);
+        var handover = await RunInvestigationAsync(record, caseId, scope, session.User.Id, session.User.Role, caseSources, basis, services, investigations, ct);
+        if (handover is not null) IntakeJourneyHandover.RecordInvestigation(caseStore, scope, record, handover);
         return created ? Results.Created($"/api/cases/{caseId}/packages/{packageId}", record) : Results.Ok(record);
     }
 
-    private static async Task RunInvestigationAsync(
+    private static async Task<InvestigationHandover?> RunInvestigationAsync(
         EvidencePackageRecord record,
         string caseId,
         CaseScope scope,
@@ -162,7 +165,7 @@ public static class EvidenceEndpoints
         CancellationToken ct)
     {
         var accepted = record.Documents.Where(d => d.Status == "accepted").Select(d => d.FileName).Distinct(StringComparer.Ordinal).ToList();
-        if (accepted.Count == 0) return;
+        if (accepted.Count == 0) return null;
 
         // Accepted evidence must not succeed without its investigation trace, so a missing model is a failure, not a skip.
         var chat = services.GetService<IChatClient>()
@@ -174,7 +177,7 @@ public static class EvidenceEndpoints
 
         var runId = record.PackageId;
         var investigationId = "inv-" + runId;
-        if (caseStore.FindTrace(scope, caseId, runId, investigationId) is not null) return;
+        if (caseStore.FindTrace(scope, caseId, runId, investigationId) is not null) return null;
 
         // Pin each document to the version this package accepted, so a retry investigates the same evidence.
         // Duplicate accepted filenames pin to the newest accepted version of that name, so the lookup cannot throw.
@@ -207,17 +210,38 @@ public static class EvidenceEndpoints
                 services.GetRequiredService<ISourceSystem<RecordsPayload>>(),
                 services.GetRequiredService<ISourceSystem<ContractsPayload>>()));
 
-        // A gate refusal (evidence not in the synthetic registry) or model output that breaks the claim contract is a recorded
-        // outcome (escalated, rejected): the trace is already appended with it. Any append failure is a different exception
-        // and still reaches the caller.
+        // A gate refusal (evidence not in the synthetic registry), model output that breaks the claim contract, or a failed
+        // model call is a recorded outcome (escalated, rejected): the trace is already appended with it. Any append failure
+        // is a different exception and still reaches the caller.
         try
         {
-            await investigations.ExecuteAsync(scope, context, investigator, evidenceTexts, ClaimKind.Baseline, documents, string.Empty, ct);
+            var result = await investigations.ExecuteAsync(scope, context, investigator, evidenceTexts, ClaimKind.Baseline, documents, string.Empty, ct);
+            return new InvestigationHandover("approved", string.Empty, result.Claims);
         }
-        catch (Exception ex) when (ex is ModelGateException or InvestigationOutputException)
+        catch (ModelGateException)
         {
+            return new InvestigationHandover("escalated",
+                "The model gate kept these documents from the AI agent: only registered synthetic demo records may be sent to the model. The package goes to a technical reviewer without AI findings.",
+                []);
+        }
+        catch (InvestigationOutputException ex)
+        {
+            Log(services, "Records investigation output rejected for {CaseId}: {Reason}", caseId, ex.Message);
+            return new InvestigationHandover("escalated",
+                "The AI agent's answer failed the citation check (every finding must quote its source page verbatim), so it was discarded. The package goes to a technical reviewer without AI findings.",
+                []);
+        }
+        catch (Exception ex) when (ModelFailureDetail.IsModelServiceFailure(ex, ct))
+        {
+            Log(services, "Records investigation model call failed for {CaseId}: {Reason}", caseId, ModelFailureDetail.Describe(ex));
+            return new InvestigationHandover("escalated",
+                "The AI agent could not reach the model service, so no findings were produced. The package goes to a technical reviewer, who checks the records manually.",
+                []);
         }
     }
+
+    private static void Log(IServiceProvider services, string message, string caseId, string reason) =>
+        services.GetService<ILoggerFactory>()?.CreateLogger("AirlineDemo.Api.Evidence.Investigation").LogWarning(message, caseId, reason);
 
     /// <summary>The validation basis keeps one entry per page, so a claim citing page 2 is checked against page 2.</summary>
     internal static BasisDocument BasisDocumentFor(string name, string text) =>

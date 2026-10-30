@@ -1,0 +1,1 @@
+SYNTHETIC EVIDENCE: Life-limited parts status sheet for aircraft N-DEMO1. ESN-DEMO1-114 HPT stage 1 disk: 14,220 cycles used of 20,000, back-to-birth trace on file. ESN-DEMO1-212 HPT stage 1 disk: 11,940 cycles used of 20,000, back-to-birth trace on file. No installation record for ESN-DEMO1-212 is included in this records package.

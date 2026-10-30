@@ -1,4 +1,4 @@
-import type { CaseHistory } from './api';
+import type { CaseHistory, JourneyEvent } from './api';
 
 export type FindingSeverity = 'blocker' | 'attention';
 export type CheckResult = 'pass' | 'flag' | 'unread';
@@ -116,12 +116,41 @@ export function aiBriefFor(caseId: string, history: CaseHistory | null): AiBrief
   if (events.length === 0) return null;
   const known = BRIEFS[caseId];
   if (known) return known;
+  return liveBrief(events);
+}
+
+/** A briefing built from a live records-agent run: one finding per cited claim, or the reason the run escalated. */
+function liveBrief(events: JourneyEvent[]): AiBrief {
   const documents = new Set(events.flatMap((event) => event.witnesses.map((witness) => witness.documentId)));
+  const escalated = events.find((event) => event.eventType === 'investigation-escalated');
+  const findings: AiFinding[] = events
+    .filter((event) => event.eventType === 'finding-raised')
+    .map((event) => ({
+      id: event.eventId,
+      severity: 'attention',
+      title: event.summary,
+      detail: 'Quoted word for word from the cited page. The citation check found the quote on that page before the finding was kept.',
+      sources: event.witnesses.map((witness) => ({ document: witness.documentId, note: `page ${witness.page}` })),
+    }));
+  if (escalated) {
+    return {
+      headline: escalated.summary,
+      documentsRead: documents.size,
+      checks: [{ label: 'Records agent run', result: 'unread', detail: escalated.summary }],
+      findings: [],
+      guardrails: ALWAYS,
+      whyHuman: 'The agent produced no usable findings, so a technical reviewer checks the records package directly before the case can move on.',
+      acceptMeans: 'The reviewer checked the records and found them complete for this return.',
+      rejectMeans: 'The records are incomplete. The case goes back for investigation.',
+    };
+  }
   return {
-    headline: events[events.length - 1].summary,
+    headline: findings.length
+      ? `The agent raised ${findings.length} finding${findings.length === 1 ? '' : 's'} from ${documents.size} document${documents.size === 1 ? '' : 's'}, each quoted from its source page.`
+      : events[events.length - 1].summary,
     documentsRead: documents.size,
-    checks: [],
-    findings: [],
+    checks: [{ label: 'Citation check', result: 'pass', detail: 'Every finding quotes its source page word for word; findings that did not were discarded.' }],
+    findings,
     guardrails: ALWAYS,
     whyHuman: 'The agent raises findings but cannot accept them. A reviewer confirms them against the cited records before the case can move on.',
     acceptMeans: 'The findings are correct and become part of the case record.',
