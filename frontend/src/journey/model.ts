@@ -75,7 +75,7 @@ export const STEPS: StepDefinition[] = [
   { id: 'investigation', title: 'AI records investigation', short: 'AI investigation', actor: 'ai', actorLabel: 'AI agent', owner: 'Records agent',
     description: 'The records agent cross-checks engine identity, life-limited parts and maintenance history, cites each source page, and raises findings for a human.' },
   { id: 'technical', title: 'Technical review', short: 'Technical review', actor: 'human', actorLabel: 'Human decision', owner: 'Technical reviewer', ownerRole: 'technical-reviewer',
-    description: 'A technical reviewer checks the AI findings against the cited records and accepts or rejects them. Nothing moves on without this decision.' },
+    description: 'The AI can find problems in the records but may not judge airworthiness or waive a return condition. A technical reviewer verifies each finding against the cited records and accepts or rejects it. Nothing moves on without this decision.' },
   { id: 'finance', title: 'Maintenance reserve', short: 'Finance reserve', actor: 'human', actorLabel: 'Rules + human approval', owner: 'Finance reviewer', ownerRole: 'finance-reviewer',
     description: 'The reserve is calculated by contract rules from utilisation and rate reports. A finance reviewer approves it or returns it.' },
   { id: 'legal', title: 'Return obligations sign-off', short: 'Legal sign-off', actor: 'human', actorLabel: 'Rules + human sign-off', owner: 'Legal reviewer', ownerRole: 'legal-reviewer',

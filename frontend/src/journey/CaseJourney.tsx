@@ -3,6 +3,8 @@ import { caseUrl, getJson, type CaseHistory, type CaseRecord, type ObligationRec
 import { activityFrom, aircraftFor, deriveProgress, formatWhen, STEPS, waitingOn, type StepId } from './model';
 import { ActorGlyph, ActorTag, AircraftArt, CheckIcon } from './Art';
 import { StepPanel, type JourneyData } from './StepPanels';
+import { aiBriefFor } from './aiBriefs';
+import { AiInsightCard } from './AiInsight';
 
 type Props = {
   session: Session;
@@ -129,6 +131,13 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
             </footer>
           </section>
 
+          <div className="av-journey-side">
+          {(() => {
+            const brief = aiBriefFor(data.record.caseId, data.history);
+            return brief && activeId !== 'investigation'
+              ? <AiInsightCard brief={brief} onOpen={() => setSelected('investigation')} />
+              : null;
+          })()}
           <aside className="av-activity" aria-labelledby="activity-heading">
             <h2 id="activity-heading">Activity</h2>
             {activityFrom(data.record.audit).length === 0 ? <p className="av-muted">No activity yet. The aircraft has just arrived.</p> : (
@@ -146,6 +155,7 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
               </ol>
             )}
           </aside>
+          </div>
         </div>
       )}
     </main>

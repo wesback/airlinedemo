@@ -2,6 +2,8 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError, caseUrl, postJson, type CaseHistory, type CaseRecord, type ObligationRecord, type Readiness, type ReserveDraft, type Session, type TechnicalReviews } from './api';
 import { actorName, aircraftFor, formatWhen, PERSONAS, STEPS, type CaseProgress, type StepDefinition } from './model';
 import { ActorGlyph, CheckIcon, DocumentIcon } from './Art';
+import { aiBriefFor } from './aiBriefs';
+import { AiBriefView, WhyReview } from './AiInsight';
 
 export type JourneyData = {
   record: CaseRecord;
@@ -105,24 +107,11 @@ function InvestigationPanel({ data }: PanelProps) {
       </Empty>
     );
   }
+  const brief = aiBriefFor(data.record.caseId, data.history);
   return (
     <>
       <Outcome tone="ai">The records agent finished and handed its findings to a technical reviewer.</Outcome>
-      <ol className="av-ai-trace">
-        {events.map((event) => (
-          <li key={event.eventId}>
-            <span className="av-ai-trace-marker"><ActorGlyph actor="ai" size={14} /></span>
-            <div>
-              <p>{event.summary}</p>
-              <div className="av-citations" aria-label="Sources">
-                {event.witnesses.map((witness) => (
-                  <span key={witness.witnessId} className="av-citation"><DocumentIcon />{documentTitle(witness.documentId)}, p. {witness.page}</span>
-                ))}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ol>
+      {brief && <AiBriefView brief={brief} trace={events} />}
       <p className="av-footnote">Recorded agent run. A live run needs an approved model manifest in this environment.</p>
     </>
   );
@@ -133,8 +122,10 @@ function TechnicalPanel(props: PanelProps) {
   const current = data.reviews?.decisions.find((decision) => decision.current);
   const state = data.progress.states.technical;
   const ready = data.progress.states.investigation === 'done';
+  const brief = aiBriefFor(data.record.caseId, data.history);
   return (
     <>
+      {ready && brief && <WhyReview brief={brief} />}
       {current ? (
         <Decision accepted={current.decision === 'accept'} who={actorName(current.actor ?? 'reviewer')} at={current.at}
           verb={current.decision === 'accept' ? 'Accepted the AI findings' : 'Rejected the AI findings'} reason={current.reason} />
