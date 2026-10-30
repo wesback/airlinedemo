@@ -566,10 +566,13 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
           <set-body>gateway correlation rejected</set-body>
         </return-response>
       </when>
-      <when condition='@(context.Request.Body.As<Newtonsoft.Json.Linq.JObject>(preserveContent: true)?["model"]?.ToString() != "${local.gateway_model_deployment}")'>
+      <when condition='@{
+        var model = context.Request.Body.As<Newtonsoft.Json.Linq.JObject>(preserveContent: true)?["model"]?.ToString();
+        return ${join(" && ", [for allowed in local.gateway_allowed_models : "model != \"${allowed}\""])};
+      }'>
         <return-response>
           <set-status code="400" reason="Unsupported model" />
-          <set-body>{"error":{"code":"unsupported_model","message":"Only the configured model deployment is allowed."}}</set-body>
+          <set-body>{"error":{"code":"unsupported_model","message":"Only the configured model deployments are allowed."}}</set-body>
         </return-response>
       </when>
     </choose>
@@ -591,7 +594,38 @@ resource "azurerm_cognitive_deployment" "model" {
   }
 
   sku {
-    name = "GlobalStandard"
+    name     = "GlobalStandard"
+    capacity = var.model_capacity
+  }
+}
+
+# The gateway admits the app's deployment and, when configured, the evaluation arm C deployment.
+locals {
+  gateway_allowed_models = compact([local.gateway_model_deployment, var.evaluation_model_name])
+}
+
+# Evaluation arm C: a larger model compared against the app's model on the frozen suite (DD-044).
+resource "azurerm_cognitive_deployment" "evaluation" {
+  count                = var.evaluation_model_name == null ? 0 : 1
+  name                 = var.evaluation_model_name
+  cognitive_account_id = azurerm_cognitive_account.model.id
+
+  model {
+    format  = "OpenAI"
+    name    = var.evaluation_model_name
+    version = var.evaluation_model_version
+  }
+
+  sku {
+    name     = "GlobalStandard"
+    capacity = var.evaluation_model_capacity
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.evaluation_model_version != null
+      error_message = "evaluation_model_version is required when evaluation_model_name is set."
+    }
   }
 }
 

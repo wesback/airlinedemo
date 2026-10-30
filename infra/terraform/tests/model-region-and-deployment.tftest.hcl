@@ -185,3 +185,51 @@ run "model_endpoint_dns_zone_group_targets_model_zone" {
     error_message = "Each private endpoint's DNS zone group must resolve its own zone key (each.value.zone) to the matching private DNS zone."
   }
 }
+
+run "evaluation_model_deployment_is_optional_and_global_standard" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_cognitive_deployment.evaluation) == 0 && azurerm_cognitive_deployment.model.sku[0].capacity == 100
+    error_message = "Without evaluation_model_name no evaluation deployment exists, and the model deployment defaults to 100K tokens per minute."
+  }
+}
+
+run "evaluation_model_deployment_uses_its_inputs" {
+  command = plan
+
+  variables {
+    evaluation_model_name     = "gpt-eval-test"
+    evaluation_model_version  = "1111-11-11"
+    evaluation_model_capacity = 40
+  }
+
+  assert {
+    condition = (azurerm_cognitive_deployment.evaluation[0].name == "gpt-eval-test" &&
+      azurerm_cognitive_deployment.evaluation[0].model[0].name == "gpt-eval-test" &&
+      azurerm_cognitive_deployment.evaluation[0].model[0].version == "1111-11-11" &&
+      azurerm_cognitive_deployment.evaluation[0].sku[0].name == "GlobalStandard" &&
+    azurerm_cognitive_deployment.evaluation[0].sku[0].capacity == 40)
+    error_message = "The evaluation deployment must use the evaluation model inputs on GlobalStandard."
+  }
+}
+
+run "evaluation_model_requires_a_version" {
+  command = plan
+
+  variables {
+    evaluation_model_name = "gpt-eval-test"
+  }
+
+  expect_failures = [azurerm_cognitive_deployment.evaluation]
+}
+
+run "rejects_fractional_model_capacity" {
+  command = plan
+
+  variables {
+    model_capacity = 1.5
+  }
+
+  expect_failures = [var.model_capacity]
+}

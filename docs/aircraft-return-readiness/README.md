@@ -105,6 +105,18 @@ Use the run-specific reset action to start a fresh demo run. Confirm that it cha
 
 The [scored-evaluation format](../../backend/AirlineDemo.Api.Tests/Fixtures/Evaluation/README.md) describes the frozen synthetic suite and scoring inputs. After the model manifest and annotations are approved, run all four arms against the same frozen suite and retain the exact manifests, hashes, run IDs, traces, eligible counts, failures, and output. Report per-arm precision and recall, citation validity, forbidden actions, p50/p95 latency, and cost per page and case. Label each figure by its evidence kind; an unmeasured value is “not measured.” No result is reported here: a scored result does not exist until model approval and an actual run.
 
+Arms: A is the rules baseline, B the bounded gpt-6-luna agent, C the bounded agent on the larger evaluation model (`evaluation_model_name`, for example gpt-6-sol), and D a single gpt-6-luna call without tools. Every model arm receives the case inputs and the claims to verify without their labels, and must answer with the JSON contract in `FourArmEvaluationRunner.AnswerContract`. Costs use the list prices in the job's `Evaluation__Rates__*` settings and ignore cached input, so they are upper bounds.
+
+With `evaluation_model_name` and `evaluation_model_version` set, Terraform deploys the evaluation model and the manual job `caj-<prefix>-eval`. To run it on a released image and read the report:
+
+```sh
+az containerapp job start -g <resource-group> -n caj-<prefix>-eval --image <registry>/airline-api@<digest> --container-name evaluation
+az containerapp job logs show -g <resource-group> -n caj-<prefix>-eval --container evaluation --follow > eval.log
+sed -n '/EVALUATION_REPORT_BEGIN/,/EVALUATION_REPORT_END/p' eval.log | sed '1d;$d' | tr -d '\n' | base64 -d | gunzip > evaluation-report.json
+```
+
+The report contains the suite hash, effective manifests, rates, token use, per-arm metrics against the bars, the recommended arm, and per-dispatch outcomes, latencies, tokens and tool order. It contains no prompts or answers.
+
 ## Cost disclosure
 
 No numeric estimate or spending cap is approved. The Terraform budget notification is an alert, not a spending cap. Every unapproved price remains `STUB`; replace a value only after approval and evidence.

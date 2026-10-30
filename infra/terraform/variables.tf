@@ -424,3 +424,45 @@ variable "adopt_key_vault" {
     error_message = "adopt_key_vault object versions must be 32 lowercase hex characters."
   }
 }
+
+variable "model_capacity" {
+  description = "GlobalStandard capacity of the model deployment, in thousands of tokens per minute."
+  type        = number
+  default     = 100
+  nullable    = false
+  validation {
+    condition     = var.model_capacity >= 1 && floor(var.model_capacity) == var.model_capacity
+    error_message = "model_capacity must be a whole number of at least 1."
+  }
+}
+
+variable "evaluation_model_name" {
+  description = "Optional larger model for evaluation arm C (for example gpt-6-sol). Null creates no second deployment and no evaluation job."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.evaluation_model_name == null ? true : can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", var.evaluation_model_name))
+    error_message = "evaluation_model_name must be null or a deployment-safe model name."
+  }
+}
+
+variable "evaluation_model_version" {
+  description = "Model version of evaluation_model_name. Required when evaluation_model_name is set."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.evaluation_model_version == null ? true : length(trimspace(var.evaluation_model_version)) > 0
+    error_message = "evaluation_model_version must not be empty or whitespace."
+  }
+}
+
+variable "evaluation_model_capacity" {
+  description = "GlobalStandard capacity of the evaluation model deployment, in thousands of tokens per minute."
+  type        = number
+  default     = 100
+  nullable    = false
+  validation {
+    condition     = var.evaluation_model_capacity >= 1 && floor(var.evaluation_model_capacity) == var.evaluation_model_capacity
+    error_message = "evaluation_model_capacity must be a whole number of at least 1."
+  }
+}

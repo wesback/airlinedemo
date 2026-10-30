@@ -165,7 +165,7 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
     [Fact]
     public async Task Production_executor_enforces_quota_boundary_and_denies_over_limit_result()
     {
-        // Arm B allows 10000 input tokens and 2000 output tokens per call; input is estimated as the UTF-8 byte count of the joined messages.
+        // Arm B allows 16000 input tokens (DD-019) and 2000 output tokens per call; input is estimated as the UTF-8 byte count of the joined messages.
         var probe = new GatewayChatClient();
         using var probeHost = Host(Private, probe);
         await Executor(probeHost).ExecuteAsync(Request(), TestContext.Current.CancellationToken);
@@ -173,14 +173,14 @@ public sealed class ModelGatewayTokenomicsTests : IDisposable
 
         var atLimit = new GatewayChatClient { OutputTokenCount = 2000, TotalTokenCount = null };
         using var atLimitHost = Host(Private, atLimit);
-        var accepted = await Executor(atLimitHost).ExecuteAsync(Request(padding: new string('x', 10_000 - baseBytes)), TestContext.Current.CancellationToken);
+        var accepted = await Executor(atLimitHost).ExecuteAsync(Request(padding: new string('x', 16_000 - baseBytes)), TestContext.Current.CancellationToken);
         Assert.Equal((1, 2042L), (atLimit.Calls, accepted.TokenUsage));
 
         var overInput = new GatewayChatClient();
         using var overInputHost = Host(Private, overInput);
         var overInputExecutor = Executor(overInputHost);
         var inputDenied = await Assert.ThrowsAsync<InvalidOperationException>(() => overInputExecutor
-            .ExecuteAsync(Request(padding: new string('x', 10_001 - baseBytes)), TestContext.Current.CancellationToken));
+            .ExecuteAsync(Request(padding: new string('x', 16_001 - baseBytes)), TestContext.Current.CancellationToken));
         Assert.Equal("gateway quota exceeded by one unit: input-tokens", inputDenied.Message);
         Assert.Equal(0, overInput.Calls);
         Assert.Null(overInputExecutor.LastGatewayMetrics!.InputTokens);
