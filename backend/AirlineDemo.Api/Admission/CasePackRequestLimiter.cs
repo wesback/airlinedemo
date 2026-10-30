@@ -95,9 +95,6 @@ public sealed class SqlCasePackRequestWindowStore(DbContextOptions<CaseStateDbCo
                     cancellationToken);
             }
 
-            await db.CasePackRequestWindows
-                .Where(row => row.AttemptId != Guid.Empty && row.RequestedAtTicks <= cutoff)
-                .ExecuteDeleteAsync(cancellationToken);
             var attempts = db.CasePackRequestWindows.Where(row =>
                 row.UserHash == userHash && row.Endpoint == endpoint && row.RequestedAtTicks > cutoff);
             var maximum = CasePackRequestLimiter.MaximumFor(endpoint);
@@ -107,13 +104,28 @@ public sealed class SqlCasePackRequestWindowStore(DbContextOptions<CaseStateDbCo
                 return false;
             }
 
-            db.CasePackRequestWindows.Add(new CasePackRequestWindowRow
+            // The app identity holds SELECT, INSERT and UPDATE on this table but no DELETE, so an expired attempt row
+            // is reused for the new attempt; the table stays bounded by the peak number of attempts in one window.
+            var expired = await db.CasePackRequestWindows
+                .Where(row => row.AttemptId != Guid.Empty && row.RequestedAtTicks <= cutoff)
+                .OrderBy(row => row.RequestedAtTicks)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (expired is not null)
             {
-                AttemptId = Guid.NewGuid(),
-                UserHash = userHash,
-                Endpoint = endpoint,
-                RequestedAtTicks = now,
-            });
+                expired.UserHash = userHash;
+                expired.Endpoint = endpoint;
+                expired.RequestedAtTicks = now;
+            }
+            else
+            {
+                db.CasePackRequestWindows.Add(new CasePackRequestWindowRow
+                {
+                    AttemptId = Guid.NewGuid(),
+                    UserHash = userHash,
+                    Endpoint = endpoint,
+                    RequestedAtTicks = now,
+                });
+            }
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return true;

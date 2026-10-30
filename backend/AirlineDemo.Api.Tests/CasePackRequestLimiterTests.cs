@@ -572,6 +572,41 @@ public sealed class CasePackRequestLimiterTests
     }
 
     [Fact]
+    public async Task SqlStoreReusesExpiredAttemptsWithoutDeletingRows()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlite(connection).Options;
+        await using (var db = new CaseStateDbContext(options))
+        {
+            await db.Database.MigrateAsync();
+            // The deployed app identity has no DELETE grant on this table.
+            await db.Database.ExecuteSqlRawAsync(
+                "CREATE TRIGGER deny_request_window_delete BEFORE DELETE ON case_pack_request_windows BEGIN SELECT RAISE(ABORT, 'DELETE permission denied'); END;");
+        }
+
+        var store = new SqlCasePackRequestWindowStore(options);
+        for (var attempt = 0; attempt < CasePackRequestLimiter.MaxRequests; attempt++)
+            Assert.True(await store.TryRecordAttemptAsync(
+                "user-a", CasePackRequestLimiter.SceneEndpoint, Now, CancellationToken.None));
+        Assert.False(await store.TryRecordAttemptAsync(
+            "user-a", CasePackRequestLimiter.SceneEndpoint, Now, CancellationToken.None));
+
+        var later = Now + CasePackRequestLimiter.RollingWindow;
+        Assert.True(await store.TryRecordAttemptAsync(
+            "user-b", CasePackRequestLimiter.CaseListEndpoint, later, CancellationToken.None));
+
+        await using (var db = new CaseStateDbContext(options))
+        {
+            Assert.Equal(CasePackRequestLimiter.MaxRequests + 1, await db.CasePackRequestWindows.CountAsync());
+            var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("user-b"));
+            Assert.Equal(1, await db.CasePackRequestWindows.CountAsync(row =>
+                row.UserHash == hash && row.Endpoint == CasePackRequestLimiter.CaseListEndpoint
+                && row.RequestedAtTicks == later.UtcDateTime.Ticks));
+        }
+    }
+
+    [Fact]
     public async Task SqliteMigrationCanDropTheRequestWindowTable()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
