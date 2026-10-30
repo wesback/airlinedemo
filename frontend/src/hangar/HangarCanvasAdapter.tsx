@@ -203,11 +203,11 @@ export function HangarLabelOverlay({sceneGroup,camera,sceneData,selection,childr
     for(const el of Array.from(hostNode.querySelectorAll('[data-hangar-label]')) as HTMLElement[]){const id=el.getAttribute('data-hangar-label');const entry=data.entries.find(v=>v.id===id);if(!entry||!entry.anchor){el.style.display='none';continue;}
       const bounds:any=new THREE.Box3().setFromObject(entry.anchor);const center=bounds.getCenter(new THREE.Vector3());const anchor=entry.kind==='aircraft'?new THREE.Vector3(center.x,bounds.max.y+1.5,center.z):center;
       const projected=projectHangarLabelAnchor(camera,anchor);if(!projected?.visible){el.style.display='none';continue;}const width=hostNode.clientWidth||1,height=hostNode.clientHeight||1;const x=(projected.x*.5+.5)*width,y=(-projected.y*.5+.5)*height;
-      el.style.display='block';el.style.left='0';el.style.top='0';el.style.transform=`translate(${x}px,${y}px)`;
+      el.style.display='block';el.style.left='0';el.style.top='0';el.style.transform=entry.kind==='aircraft'?`translate(${x}px,${y}px) translate(-50%,-100%)`:`translate(${x}px,${y}px) translate(-50%,-50%)`;
     }};update();if(typeof setInterval==='function'){const interval=setInterval(update,16);return ()=>{active=false;clearInterval(interval);}}return ()=>{active=false};},[data,camera]);
   const mappingError=data.mappingFailed||data.entries.length===0&&sceneGroup?HANGAR_LABEL_MAPPING_ERROR:null;
-  return createElement('div',{ref:host,'data-hangar-label-host':'true',style:{position:'relative'}},children as any,
+  return createElement('div',{ref:host,className:'hangar-label-host','data-hangar-label-host':'true',style:{position:'relative'}},children as any,
     mappingError?createElement('p',{role:'alert'},mappingError):null,
-    data.entries.map(entry=>createElement('div',{key:entry.id,'data-hangar-label':entry.id,'aria-hidden':'true',style:{position:'absolute',zIndex:1,pointerEvents:'none',whiteSpace:'pre-line',background:HANGAR_SCENE_THEME.labelBackground,color:HANGAR_SCENE_THEME.labelText,border:`1px solid ${HANGAR_SCENE_THEME.labelMuted}`,display:'none'}},entry.text)));
+    data.entries.map(entry=>createElement('div',{key:entry.id,className:`hangar-scene-label hangar-scene-label--${entry.kind}`,'data-hangar-label':entry.id,'aria-hidden':'true',style:{position:'absolute',zIndex:1,pointerEvents:'none',whiteSpace:'pre-line',background:HANGAR_SCENE_THEME.labelBackground,color:HANGAR_SCENE_THEME.labelText,border:`1px solid ${HANGAR_SCENE_THEME.labelMuted}`,display:'none'}},entry.text)));
 }
 export default HangarCanvasAdapter;

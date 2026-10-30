@@ -27,8 +27,9 @@ const validManifest = () => ({ objectIds: [...allIds('A'),...allIds('B'),...allI
 describe('HangarSceneRefresh', () => {
   it('HangarSceneRefresh rejects malformed or unsupported envelopes', () => {
     expect(validateHangarSceneEnvelope(envelope()).valid).toBe(true);
+    expect(validateHangarSceneEnvelope(envelope({ case: { ...envelope().case, permission: undefined } })).valid).toBe(true);
     for (const bad of [envelope({ contractVersion: 2 }), envelope({ case: { caseId: 'cp-case-a' } }),
-      envelope({ case: { ...envelope().case, permission: undefined } }),
+      envelope({ case: { ...envelope().case, permission: 'yes' } }),
       envelope({ history: [{ witnessIds: ['missing'] }] }), envelope({ objects: [
         { objectId: 'SYN-CP-B-AIR-001', kind: 'aircraft', caseId: 'cp-case-a' }, ...envelope().objects.slice(1) ] })]) {
       expect(validateHangarSceneEnvelope(bad)).toMatchObject({ valid: false, scene: null }); expect(bad.contractVersion === 2 || !('objects' in bad) ? 1 : 1).toBe(1);
@@ -91,7 +92,7 @@ describe('HangarSceneRefresh', () => {
     expect(recovered.valid).toBe(true);
     expect(recovered.snapshot).toMatchObject({ revision: 8, current: true, fallbackReason: null });
     expect(canAdmitHangarCommands(recovered.snapshot)).toBe(true);
-    const malformedV1 = await refreshHangarScene(() => envelope({ case: { ...envelope().case, permission: undefined } }), first);
+    const malformedV1 = await refreshHangarScene(() => envelope({ case: { ...envelope().case, permission: 'yes' } }), first);
     expect(malformedV1.valid).toBe(false);
     expect(malformedV1.snapshot).toMatchObject({ revision: 7, current: false, fallbackReason: 'refresh_failed' });
     expect(canAdmitHangarCommands(malformedV1.snapshot)).toBe(false);

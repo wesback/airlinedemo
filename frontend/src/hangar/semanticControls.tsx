@@ -100,8 +100,9 @@ export function buildHangarSemanticControls(source: unknown, descriptor?: SceneD
 export function HangarSemanticControls({envelope,scene,descriptor,manifest,onActivate,onCommand,children}:HangarSemanticControlsProps){
   const source=scene??envelope; const built=buildHangarSemanticControls(source,descriptor,onActivate,onCommand); const statusControls=built.controls.filter((c)=>c.kind==='status');
   const interactive=built.controls.filter((c)=>c.kind!=='status');
-  if (built.error) return <><style>{`.hangar-semantic-control{${HANGAR_FOCUS_STYLE}}`}</style><section aria-label="Hangar semantic controls"><p role="alert">{built.error}</p></section></>;
-  return <><style>{`.hangar-semantic-control{${HANGAR_FOCUS_STYLE}}`}</style><section aria-label="Hangar semantic controls">
+  // The focus outline lives in hangarMode.css: the production CSP blocks inline <style> elements.
+  if (built.error) return <><section aria-label="Hangar semantic controls"><p role="alert">{built.error}</p></section></>;
+  return <><section aria-label="Hangar semantic controls">
     {built.error&&<p role="alert">{built.error}</p>}
     {statusControls.map((status)=><p key={status.id} role="status">{status.name}: {objectOf(source)&&objectOf(source.case)&&objectOf(source.case.status)?Object.entries(source.case.status).map(([key,value])=>`${key}: ${value??'none'}`).join('; '):'text status'}</p>)}
     <div aria-label="Hangar scene objects">{interactive.filter((c)=>c.kind==='object').map((control)=><button className="hangar-semantic-control" type="button" key={control.id} onClick={()=>activateHangarSemanticControl(control)} aria-label={control.name}>{control.name}</button>)}</div>

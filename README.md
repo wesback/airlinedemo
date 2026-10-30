@@ -40,6 +40,10 @@ python3 scripts/tests/test_deploy_script.py
 
 Use committed synthetic fixtures only. Local development must not ingest live records or connect to a production service.
 
+For a walk-through demo, start the API with `Demo__SeedCases=true Demo__SeedJourney=true Demo__Passcode=<passcode>`. The journey seeder places the three case-pack aircraft at different gates (waiting for technical review, waiting for finance, waiting for legal) with recorded AI agent events, so the journey board and the 3D hangar have something to show. To finish the journey, open `cp-case-a`, switch to the legal reviewer to sign off, then switch to the presenter (transition lead) and release the aircraft to the next lessee; the release is gate-checked, audited and simulated. Terraform sets both seed flags for the demo Container App. The journey seeder only advances cases that are still empty (revision 0); it does not overwrite existing case work.
+
+The interface opens on the journey board: every aircraft in the return pool sits at its current gate, and each case opens as a step-by-step journey that marks AI agent steps, automated rules and human decisions. The 3D hangar button in the top bar switches to the walkable hangar for the same aircraft.
+
 ## Quick deploy
 
 For a demonstration environment, sign in with `az login` and run one command twice. Everything Azure CLI already knows (tenant, subscription, your object id, name and email) is read from the sign-in, every resource name and network range derives from `--prefix`, and the protected Terraform state backend is created for you (Entra-only, no shared keys, versioned, public network access disabled and reached through an enforced network security perimeter `nsp-<prefix>-tfstate` that admits only this machine's address; a rerun updates the address).

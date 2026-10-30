@@ -112,13 +112,13 @@ export function GuidedJourney({scene,envelope,adapter,onActivate}:GuidedJourneyP
     h('h2',null,`${journeyName} guided journey`),
     message?h('p',{role:message.includes('Unable')||message.includes('scope')?'alert':'status'},message):null,
     journey.olderHistoryAvailable?h('button',{type:'button',onClick:()=>void open(),disabled:loading,'aria-label':'Open delivered ARR older history'},'Open delivered ARR older history'):null,
-    h('ol',{ 'aria-label':journeyName+' journey steps'},journey.steps.map((step)=>h('li',{key:step.id},
+    h('ol',{ 'aria-label':journeyName+' journey steps'},journey.steps.map((step)=>h('li',{key:step.id,className:step.future?'is-future':undefined},
       h('button',{type:'button',disabled:!step.available,'aria-disabled':!step.available,onClick:()=>onActivate?.(),'aria-label':step.label},step.label),
       step.summary?h('span',null,` — ${step.summary}`):null,
       step.runId?h('span',null,` Run: ${step.runId}`):null,
       step.basisId?h('span',null,` Basis: ${step.basisId} v${step.basisVersion}`):null,
       step.actorLabel?h('span',null,` Actor: ${step.actorLabel}`):null,
-      step.invalidReason?h('span',{role:'alert'},`Invalid: ${step.invalidReason}`):null,
+      step.future?h('span',{className:'hangar-journey__future'},' Not reached yet'):step.invalidReason?h('span',{role:'alert'},`Invalid: ${step.invalidReason}`):null,
       ...step.evidence.map((w)=>h('button',{key:w.witnessId,type:'button','aria-label':`Evidence witness ${w.witnessId}`,onClick:()=>onActivate?.()},`${w.displayLabel??`Witness ${w.witnessId}`} page ${w.page}`))
     )))
   );

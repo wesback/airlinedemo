@@ -1,0 +1,682 @@
+/* Hangar mode layout. Colours come from src/styles/tokens.css, which switches them for the dark theme. */
+
+.hangar-mode {
+  display: grid;
+  gap: 20px;
+  font-family: var(--av-font);
+  color: var(--av-text);
+}
+
+.hangar-mode__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hangar-mode__eyebrow,
+.hangar-card__eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--av-text-3);
+}
+
+.hangar-mode__title {
+  margin: 0;
+  font-size: 1.75rem;
+  line-height: 1.2;
+  color: var(--av-text);
+}
+
+.hangar-mode__lede {
+  margin: 6px 0 0;
+  color: var(--av-text-2);
+  max-width: 60ch;
+}
+
+.hangar-mode__snapshot {
+  margin: 6px 0 0;
+  font-size: 0.8125rem;
+  color: var(--av-text-3);
+}
+
+.hangar-mode__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 20px;
+  align-items: start;
+}
+
+.hangar-mode__main {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Buttons */
+
+.hangar-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.hangar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--av-line-strong);
+  border-radius: var(--av-radius-s);
+  background: var(--av-surface);
+  color: var(--av-text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms var(--av-ease), border-color 160ms var(--av-ease), box-shadow 160ms var(--av-ease);
+}
+
+.hangar-btn:hover:not(:disabled) {
+  background: var(--av-surface-2);
+  border-color: var(--av-text-3);
+}
+
+.hangar-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hangar-btn--primary {
+  background: var(--av-green);
+  border-color: var(--av-green);
+  color: #ffffff;
+}
+
+.hangar-btn--primary:hover:not(:disabled) {
+  background: var(--av-green-strong);
+  border-color: var(--av-green-strong);
+}
+
+.hangar-btn--ghost {
+  background: transparent;
+}
+
+.hangar-btn--quiet {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 0.8125rem;
+}
+
+.hangar-btn--toggle[aria-pressed='true'] {
+  background: var(--av-ai-soft);
+  border-color: var(--av-ai);
+  color: var(--av-text);
+}
+
+.hangar-mode :is(button, a, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--av-focus);
+  outline-offset: 2px;
+}
+
+/* Moved from semanticControls.tsx: the production CSP blocks inline <style> elements. */
+.hangar-semantic-control:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+/* Toolbar and segmented control */
+
+.hangar-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.hangar-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hangar-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--av-line);
+  border-radius: var(--av-radius);
+  background: var(--av-surface-2);
+}
+
+.hangar-segmented button {
+  min-height: 32px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: var(--av-radius-s);
+  background: transparent;
+  color: var(--av-text-2);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms var(--av-ease), color 160ms var(--av-ease);
+}
+
+.hangar-segmented button:hover {
+  color: var(--av-text);
+}
+
+.hangar-segmented button[aria-pressed='true'] {
+  background: var(--av-surface);
+  color: var(--av-text);
+  box-shadow: var(--av-shadow);
+}
+
+/* 3D stage */
+
+.hangar-stage {
+  position: relative;
+  min-height: 62vh;
+  height: 62vh;
+  overflow: hidden;
+  border-radius: var(--av-radius-l);
+  border: 1px solid var(--av-navy-3);
+  background: radial-gradient(ellipse at 50% 30%, var(--av-navy-2), var(--av-navy) 70%);
+  box-shadow: var(--av-shadow-lift);
+  color: var(--av-on-navy);
+}
+
+.hangar-stage--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.hangar-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--av-on-navy-2);
+  border-top-color: var(--av-green);
+  border-radius: 50%;
+  animation: hangar-spin 900ms linear infinite;
+}
+
+@keyframes hangar-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* The fibre canvas sizes itself to its parent; every wrapper must carry the stage height. */
+.hangar-stage > .hangar-scene,
+.hangar-stage .hangar-scene > .hangar-label-host,
+.hangar-stage .hangar-label-host > div:first-child {
+  height: 100%;
+  width: 100%;
+}
+
+.hangar-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+.hangar-stage .hangar-label-host {
+  overflow: hidden;
+}
+
+.hangar-stage__banner {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: var(--av-radius-s);
+  background: var(--av-human-soft);
+  color: var(--av-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* In-scene keyboard controls stay reachable but appear only while focused. */
+.hangar-scene__controls {
+  position: absolute;
+  z-index: 3;
+  left: 12px;
+  top: 12px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.hangar-scene__controls:focus-within,
+.hangar-scene__controls:focus {
+  width: auto;
+  height: auto;
+  clip-path: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  padding: 8px;
+  border-radius: var(--av-radius);
+  background: var(--av-surface);
+  color: var(--av-text);
+  box-shadow: var(--av-shadow-lift);
+}
+
+.hangar-scene-label {
+  padding: 6px 10px;
+  border-radius: var(--av-radius-s);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  max-width: 220px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  will-change: transform;
+}
+
+.hangar-scene-label::first-line {
+  font-weight: 700;
+  font-size: 0.8125rem;
+}
+
+.hangar-scene-label--selected {
+  border-width: 2px;
+}
+
+.hangar-legend {
+  position: absolute;
+  z-index: 2;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0;
+  padding: 6px 12px;
+  list-style: none;
+  border-radius: var(--av-radius-s);
+  background: rgba(8, 20, 40, 0.72);
+  color: var(--av-on-navy);
+  font-size: 0.75rem;
+}
+
+.hangar-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hangar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.hangar-dot--done { background: var(--av-green); }
+.hangar-dot--human { background: var(--av-human); }
+.hangar-dot--ai { background: var(--av-ai); }
+
+/* Side panel and cards */
+
+.hangar-side {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.hangar-card {
+  padding: 16px;
+  border: 1px solid var(--av-line);
+  border-radius: var(--av-radius);
+  background: var(--av-surface);
+  box-shadow: var(--av-shadow);
+  min-width: 0;
+}
+
+.hangar-card h3,
+.hangar-card h4 {
+  margin-top: 0;
+}
+
+.hangar-card__title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.hangar-card__headline {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.hangar-card--selection {
+  display: grid;
+  gap: 8px;
+  border-top: 4px solid var(--av-green);
+}
+
+.hangar-card--selection .hangar-btn--primary {
+  justify-self: start;
+}
+
+.hangar-facts {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.hangar-facts div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+}
+
+.hangar-facts dt {
+  color: var(--av-text-3);
+  font-size: 0.8125rem;
+}
+
+.hangar-facts dd {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.hangar-evidence {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--av-line);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.hangar-evidence h2 { font-size: 0.8125rem; font-weight: 700; color: var(--av-text-3); margin: 0 0 8px; }
+.hangar-evidence h3 { font-size: 0.9375rem; font-weight: 700; margin: 14px 0 6px; letter-spacing: 0.01em; }
+.hangar-evidence > section > button,
+.hangar-evidence article button {
+  display: inline-flex; margin: 0 6px 6px 0; padding: 4px 10px; font: inherit; font-size: 0.75rem; font-weight: 600;
+  color: var(--av-text-2); background: var(--av-surface-2); border: 1px solid var(--av-line); border-radius: 999px; cursor: pointer;
+}
+.hangar-evidence > section > button:hover:not(:disabled),
+.hangar-evidence article button:hover:not(:disabled) { border-color: var(--av-green); color: var(--av-text); }
+.hangar-evidence button:disabled { opacity: 0.55; cursor: not-allowed; }
+/* The case facts above already show status, owner, next action and capability; keep these lines for assistive tech only. */
+.hangar-evidence section[aria-label^='Selection '] > p:nth-of-type(-n + 4) {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.hangar-evidence article {
+  margin-top: 8px; padding: 10px 12px; border: 1px solid var(--av-line); border-radius: 10px; background: var(--av-surface-2);
+}
+.hangar-evidence article p { margin: 0 0 6px; color: var(--av-text-2); }
+
+.hangar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  width: fit-content;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.hangar-pill::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.hangar-pill--done { background: var(--av-green-soft); color: var(--av-green-strong); }
+.hangar-pill--human { background: var(--av-human-soft); color: var(--av-text); }
+.hangar-pill--human::before { background: var(--av-human); }
+.hangar-pill--ai { background: var(--av-ai-soft); color: var(--av-text); }
+.hangar-pill--ai::before { background: var(--av-ai); }
+
+.hangar-case-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hangar-case {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--av-line);
+  border-radius: var(--av-radius-s);
+  background: var(--av-surface-2);
+}
+
+.hangar-case--selected {
+  border-color: var(--av-green);
+  box-shadow: inset 3px 0 0 var(--av-green);
+}
+
+.hangar-case__text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.hangar-case__model {
+  font-weight: 700;
+}
+
+.hangar-case__meta,
+.hangar-muted {
+  margin: 0;
+  color: var(--av-text-2);
+  font-size: 0.8125rem;
+}
+
+.hangar-case__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+/* Fallback views */
+
+.hangar-fallback {
+  display: grid;
+  gap: 16px;
+}
+
+.hangar-notice {
+  padding: 16px 18px;
+  border: 1px solid var(--av-human);
+  border-left-width: 5px;
+  border-radius: var(--av-radius);
+  background: var(--av-human-soft);
+  color: var(--av-text);
+}
+
+.hangar-notice__title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.hangar-notice p {
+  margin: 0;
+}
+
+.hangar-notice a {
+  color: inherit;
+  font-weight: 600;
+}
+
+.hangar-fallback-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+
+.hangar-fallback-side {
+  display: grid;
+  gap: 14px;
+}
+
+.hangar-data-room__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hangar-data-room__item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--av-line);
+  border-radius: var(--av-radius);
+  background: var(--av-surface-2);
+}
+
+.hangar-data-room__select {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--av-line-strong);
+  border-radius: var(--av-radius-s);
+  background: var(--av-surface);
+  color: var(--av-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hangar-data-room__select:hover:not(:disabled) {
+  border-color: var(--av-green);
+}
+
+.hangar-data-room__model {
+  font-weight: 700;
+}
+
+.hangar-data-room__case {
+  color: var(--av-text-2);
+  font-size: 0.8125rem;
+}
+
+.hangar-data-room__sources {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--av-text-2);
+}
+
+.hangar-data-room__sources dt {
+  font-weight: 600;
+  color: var(--av-text);
+}
+
+.hangar-data-room__sources dd {
+  margin: 0 0 4px;
+}
+
+/* Accessibility and diagnostics */
+
+.hangar-details {
+  border: 1px solid var(--av-line);
+  border-radius: var(--av-radius);
+  background: var(--av-surface);
+}
+
+.hangar-details > summary {
+  padding: 12px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hangar-details__body {
+  display: grid;
+  gap: 14px;
+  padding: 0 16px 16px;
+}
+
+.hangar-walk {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--av-line-strong);
+  border-radius: var(--av-radius-s);
+}
+
+.hangar-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 960px) {
+  .hangar-mode__layout,
+  .hangar-fallback-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hangar-stage {
+    min-height: 420px;
+    height: 56vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hangar-btn,
+  .hangar-segmented button {
+    transition: none;
+  }
+
+  .hangar-spinner {
+    animation: none;
+  }
+}
+
+/* Guided journey: a compact timeline instead of raw run metadata. */
+.hangar-card--journey h2 { font-size: 1.0625rem; font-weight: 700; margin: 0 0 10px; }
+.hangar-card--journey ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: hangar-step; }
+.hangar-card--journey li {
+  position: relative; padding: 0 0 0 30px; font-size: 0.8125rem; line-height: 1.45; color: var(--av-text-2); counter-increment: hangar-step;
+}
+.hangar-card--journey li::before {
+  content: counter(hangar-step); position: absolute; left: 0; top: 0; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 0.6875rem; font-weight: 700; color: #fff; background: var(--av-green);
+}
+.hangar-card--journey li.is-future::before { background: var(--av-surface-2); color: var(--av-text-3); border: 1px solid var(--av-line); }
+.hangar-card--journey li.is-future { color: var(--av-text-3); }
+.hangar-card--journey li > button:first-child {
+  font: inherit; font-weight: 700; color: var(--av-text); background: none; border: 0; padding: 0; cursor: pointer;
+}
+.hangar-card--journey li > button:first-child:disabled { color: var(--av-text-3); cursor: default; }
+.hangar-card--journey li > button:not(:first-child) {
+  display: inline-flex; margin: 6px 6px 0 0; padding: 2px 8px; font: inherit; font-size: 0.75rem; font-weight: 600;
+  color: var(--av-text-2); background: var(--av-surface-2); border: 1px solid var(--av-line); border-radius: 999px; cursor: pointer;
+}
+.hangar-card--journey li > button:not(:first-child):hover { border-color: var(--av-green); color: var(--av-text); }
+.hangar-journey__future { font-style: italic; }

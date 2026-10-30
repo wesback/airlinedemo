@@ -4,6 +4,7 @@ import { createDOMRenderer, FluentProvider, RendererProvider } from '@fluentui/r
 import App from './App';
 import { altivaneDarkTheme, altivaneLightTheme, resolveAltivaneThemeChoice, type AltivaneThemeChoice } from './theme/altivaneTheme';
 import { getRendererAttributes } from './theme/altivaneRenderer';
+import { ThemeControlContext } from './theme/themeControl';
 
 export function AltivaneRoot({ children = <App /> }: { children?: ReactNode }) {
   const [choice, setChoice] = useState<AltivaneThemeChoice>(() => {
@@ -35,7 +36,11 @@ export function AltivaneRoot({ children = <App /> }: { children?: ReactNode }) {
 
   return (
     <RendererProvider renderer={renderer}>
-      <FluentProvider theme={theme}>{children}</FluentProvider>
+      <FluentProvider theme={theme}>
+        <ThemeControlContext.Provider value={{ theme: resolvedChoice, toggle: () => setChoice(resolvedChoice === 'dark' ? 'light' : 'dark') }}>
+          {children}
+        </ThemeControlContext.Provider>
+      </FluentProvider>
     </RendererProvider>
   );
 }

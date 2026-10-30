@@ -40,6 +40,29 @@ function material(color: string, basic = false, opacity = 1): THREE.MeshStandard
   return result;
 }
 
+function addHangarLighting(root: THREE.Group, m: any) {
+  const sky = new THREE.HemisphereLight(0xffffff, HANGAR_SCENE_THEME.floor, 1.6);
+  sky.name = 'HangarSkyLight'; root.add(sky);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+  ambient.name = 'HangarAmbientLight'; root.add(ambient);
+  const width = Number(m?.layout?.floorSlab?.width) || 90;
+  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  key.name = 'HangarKeyLight'; key.position.set(width * 0.35, width * 0.75, width * 0.5); root.add(key); root.add(key.target);
+  const fill = new THREE.DirectionalLight(0xdfe7f2, 0.9);
+  fill.name = 'HangarFillLight'; fill.position.set(-width * 0.45, width * 0.4, -width * 0.35); root.add(fill); root.add(fill.target);
+}
+
+/** Releases the GPU resources of a scene group built by buildHangarAircraftSceneGroups. */
+export function disposeHangarSceneGroup(root: THREE.Object3D | null | undefined) {
+  if (!root) return;
+  root.traverse(object => {
+    if (!(object instanceof THREE.Mesh)) return;
+    object.geometry?.dispose();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const item of materials) item?.dispose?.();
+  });
+}
+
 function box(name: string, size: [number, number, number], position: [number, number, number], mat: THREE.Material, parent: THREE.Object3D) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), mat);
   mesh.name = name; mesh.position.set(...position); parent.add(mesh); return mesh;
@@ -141,6 +164,7 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
   const descriptor = validateHangarAircraftDescriptor(manifest);
   if (!descriptor.valid || !viewIsValid(sceneView)) return null;
   const m = manifest as any; const root = new THREE.Group(); root.name = 'HangarAircraftScene';
+  addHangarLighting(root, m);
 
   const floor = new THREE.Mesh(new THREE.BoxGeometry(m.layout.floorSlab.width, m.layout.floorSlab.height, m.layout.floorSlab.depth), material(HANGAR_SCENE_THEME.floor));
   floor.name = 'Floor'; floor.position.y = -m.layout.floorSlab.height / 2; root.add(floor);
@@ -242,12 +266,21 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
       root.traverse(object => { if (object.name === `Aircraft${selectedId.slice(8,9)}`) selected = selected ?? object; });
     }
     if (selected) {
-      const bounds = new THREE.Box3().setFromObject(selected);
+      // An aircraft is highlighted as a whole, not only its fuselage mesh.
+      let highlight: THREE.Object3D = selected;
+      const aircraftLetter = /^SYN-CP-([ABC])-AIR-001$/.exec(selectedId)?.[1];
+      if (aircraftLetter) root.traverse(object => { if (object.name === `Aircraft${aircraftLetter}`) highlight = object; });
+      const bounds = new THREE.Box3().setFromObject(highlight);
       const size = bounds.getSize(new THREE.Vector3());
       const centre = bounds.getCenter(new THREE.Vector3());
       const radius = Math.max(size.x, size.z, 1) * 0.58;
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.12, 8, 32), material(HANGAR_SCENE_THEME.selection));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, Math.max(0.18, radius * 0.025), 12, 64), material(HANGAR_SCENE_THEME.selection));
       ring.name = 'SelectionRing'; ring.rotation.x = Math.PI / 2; ring.position.set(centre.x, 0.05, centre.z); root.add(ring);
+      highlight.traverse(object => {
+        if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial) || object.material.visible === false) return;
+        object.material.emissive.set(HANGAR_SCENE_THEME.selection);
+        object.material.emissiveIntensity = 0.28;
+      });
     }
   }
 

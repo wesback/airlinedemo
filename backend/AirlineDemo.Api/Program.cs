@@ -128,6 +128,8 @@ SourceFixtureLoader.LoadPinned(
 await app.Services.GetRequiredService<AircraftCasePackPublisher>().PublishAsync(
     app.Services.GetRequiredService<AircraftCasePackLoader>(), 0);
 DemoCaseSeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>());
+DemoJourneySeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>(),
+    app.Services.GetRequiredService<EvidencePackageStore>());
 if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error); return; }
 
 app.UseTransportSecurityHeaders();
@@ -145,6 +147,7 @@ app.MapEvidenceEndpoints();
 app.MapAssessmentEndpoints();
 app.MapMockResponseEndpoints();
 app.MapFinanceEndpoints();
+app.MapReleaseEndpoints();
 app.MapCaseHistoryEndpoints();
 app.MapDemoRunReset();
 app.MapSourceModeEndpoints();

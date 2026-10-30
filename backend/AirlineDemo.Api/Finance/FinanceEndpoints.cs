@@ -43,8 +43,18 @@ public static class FinanceDemoData
                 new TechnicalReview("reviewer-1", true, 2)),
             []);
         foreach (var caseId in new[] { "case-001", "case-002", "case-003" }) store.Set(caseId, inputs);
+        // The journey aircraft carry a current notice draft so the legal reviewer can sign off and the aircraft can be released.
+        foreach (var caseId in JourneyCaseIds)
+            store.Set(caseId, inputs with { NoticeDrafts = [JourneyNoticeDraft(caseId)] });
         return store;
     }
+
+    public static readonly string[] JourneyCaseIds = ["cp-case-a", "cp-case-b", "cp-case-c"];
+
+    public static NoticeDraft JourneyNoticeDraft(string caseId) =>
+        new($"OBL-1-{caseId}-draft-1", "OBL-1", 1, ["REQ-1"], new DateTimeOffset(2026, 10, 15, 0, 0, 0, TimeSpan.Zero),
+            NoticeDraftStatus.Current,
+            $"Synthetic return condition notice for {caseId}: records package reviewed on basis v1, ready for redelivery.");
 }
 
 public static class FinanceEndpoints
