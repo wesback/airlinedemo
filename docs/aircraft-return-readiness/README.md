@@ -107,10 +107,11 @@ The [scored-evaluation format](../../backend/AirlineDemo.Api.Tests/Fixtures/Eval
 
 Arms: A is the rules baseline, B the bounded gpt-6-luna agent, C the bounded agent on the larger evaluation model (`evaluation_model_name`, for example gpt-6-sol), and D a single gpt-6-luna call without tools. Every model arm receives the case inputs and the claims to verify without their labels, and must answer with the JSON contract in `FourArmEvaluationRunner.AnswerContract`. Costs use the list prices in the job's `Evaluation__Rates__*` settings and ignore cached input, so they are upper bounds.
 
-With `evaluation_model_name` and `evaluation_model_version` set, Terraform deploys the evaluation model and the manual job `caj-<prefix>-eval`. To run it on a released image and read the report:
+With `evaluation_model_name` and `evaluation_model_version` set, Terraform deploys the evaluation model and the manual job `caj-<prefix>-eval`. To run it on a released image and read the report, point the job at the image first. Passing `--image` to `job start` replaces the whole container template for that run, which drops the command and settings:
 
 ```sh
-az containerapp job start -g <resource-group> -n caj-<prefix>-eval --image <registry>/airline-api@<digest> --container-name evaluation
+az containerapp job update -g <resource-group> -n caj-<prefix>-eval --container-name evaluation --image <registry>/airline-api@<digest>
+az containerapp job start -g <resource-group> -n caj-<prefix>-eval
 az containerapp job logs show -g <resource-group> -n caj-<prefix>-eval --container evaluation --follow > eval.log
 sed -n '/EVALUATION_REPORT_BEGIN/,/EVALUATION_REPORT_END/p' eval.log | sed '1d;$d' | tr -d '\n' | base64 -d | gunzip > evaluation-report.json
 ```

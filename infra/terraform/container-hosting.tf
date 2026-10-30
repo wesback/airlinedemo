@@ -189,8 +189,10 @@ resource "azurerm_container_app" "app" {
 
 # The frozen four-arm evaluation (DD-044) runs on demand with the app's image and identity, never inside the web app.
 # The environment keeps no console logs, so the job prints the report as gzip+base64 lines between markers and
-# then stays alive for an hour so an operator can read it from the log stream. Start it with the released digest:
-#   az containerapp job start -g <rg> -n <job> --image <registry>/airline-api@<digest> --container-name evaluation
+# then stays alive for an hour so an operator can read it from the log stream. Point it at the released digest, then
+# start it; `job start --image` would replace the container template for that run and drop the command and settings:
+#   az containerapp job update -g <rg> -n <job> --container-name evaluation --image <registry>/airline-api@<digest>
+#   az containerapp job start -g <rg> -n <job>
 locals {
   evaluation_job_name = "caj-${local.name_prefix}-eval"
   evaluation_command  = <<-SH
@@ -304,7 +306,7 @@ resource "azurerm_container_app_job" "evaluation" {
     }
   }
 
-  # Each run is started with the released digest (az containerapp job start --image); Terraform sets only the first one.
+  # Each run uses the released digest set with az containerapp job update --image; Terraform sets only the first one.
   lifecycle {
     ignore_changes = [template[0].container[0].image]
   }
