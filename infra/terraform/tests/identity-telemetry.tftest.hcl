@@ -260,8 +260,8 @@ run "M-14_app_identity_grants_are_exact" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "DENY") && strcontains(s, "OBJECT::audit.case_events")]) == 4
-    error_message = "Audit UPDATE, DELETE, ALTER and CONTROL must stay explicitly denied to the app identity."
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "DENY") && strcontains(s, "OBJECT::audit.case_events")]) == 3 && contains(output.app_sql_grant_statements, "REVOKE CONTROL ON OBJECT::audit.case_events FROM [id-airline-app];") && !contains(output.app_sql_grant_statements, "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];")
+    error_message = "Deny audit UPDATE, DELETE and ALTER; revoke the legacy CONTROL denial so SELECT/INSERT remain effective."
   }
 
 
@@ -297,15 +297,33 @@ run "source_read_windows_app_grant_is_exact" {
       "GRANT SELECT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.case_decisions TO [id-airline-app];",
       "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_work_items TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_work_items TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_work_items TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_pack_request_windows TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_pack_request_windows TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.case_pack_request_windows TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.investigation_traces TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.investigation_traces TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.investigation_trace_steps TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.investigation_trace_steps TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_assessments TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_assessments TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_request_receipts TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_request_receipts TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_journey_events TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_journey_events TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.case_pack_reset_receipts TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.case_pack_reset_receipts TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
       "GRANT UPDATE ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
+      "REVOKE CONTROL ON OBJECT::audit.case_events FROM [id-airline-app];",
       "GRANT SELECT ON OBJECT::audit.case_events TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::audit.case_events TO [id-airline-app];",
       "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];",
       "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];",
       "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];",
-      "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];",
       "DENY ALTER ON SCHEMA::dbo TO [id-airline-app];",
     ]
     error_message = "App SQL grants must equal the exact ordered grant set, including only SELECT, INSERT and UPDATE on dbo.source_read_windows."
@@ -333,6 +351,8 @@ run "source_read_windows_app_grant_is_exact" {
       "IF DATABASE_PRINCIPAL_ID('id-airline-migration') IS NULL CREATE USER [id-airline-migration] FROM EXTERNAL PROVIDER;",
       "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];",
       "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];",
+      "GRANT CREATE TABLE TO [id-airline-migration];",
+      "GRANT SELECT, INSERT ON OBJECT::dbo.__EFMigrationsHistory TO [id-airline-migration];",
     ]
     error_message = "Only the migration identity may receive schema ALTER, and only on dbo and audit."
   }
@@ -351,9 +371,8 @@ run "audit_table_remains_append_only_after_source_read_grant" {
       "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];",
       "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];",
       "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];",
-      "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];",
     ]
-    error_message = "Audit case_events grants must remain exactly SELECT and INSERT, with UPDATE, DELETE, ALTER and CONTROL denied."
+    error_message = "Audit case_events grants must remain exactly SELECT and INSERT, with UPDATE, DELETE and ALTER denied."
   }
 }
 
@@ -390,8 +409,8 @@ run "M-14_app_role_scopes_are_exact_literals" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 12 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
-    error_message = "App SQL grants on dbo must be exactly SELECT, INSERT and UPDATE on the case tables and source-read ledger, never the whole schema."
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 30 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
+    error_message = "App SQL grants on dbo must cover exactly the adapter tables, with append-only history access and no schema-wide grants."
   }
 }
 

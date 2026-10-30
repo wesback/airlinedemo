@@ -217,3 +217,12 @@ run "app_seeds_demo_cases" {
     error_message = "The app container must set Demo__SeedCases to true so the demo cases exist."
   }
 }
+
+run "app_uses_durable_sql_case_state" {
+  command = plan
+
+  assert {
+    condition     = one([for e in azurerm_container_app.app[0].template[0].container[0].env : e.value if e.name == "Persistence__CaseStateProvider"]) == "Sql"
+    error_message = "The app must select the SQL store rather than writing to the non-root container filesystem."
+  }
+}

@@ -98,8 +98,8 @@ run "sql_restore_and_audit_lifetime_are_configured" {
   }
 
   assert {
-    condition     = contains(output.app_sql_grant_statements, "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];")
-    error_message = "The app identity must be explicitly denied UPDATE, DELETE, ALTER and CONTROL on audit.case_events."
+    condition     = contains(output.app_sql_grant_statements, "DENY UPDATE ON OBJECT::audit.case_events TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY DELETE ON OBJECT::audit.case_events TO [id-airline-app];") && contains(output.app_sql_grant_statements, "DENY ALTER ON OBJECT::audit.case_events TO [id-airline-app];") && !contains(output.app_sql_grant_statements, "DENY CONTROL ON OBJECT::audit.case_events TO [id-airline-app];")
+    error_message = "Deny audit UPDATE, DELETE and ALTER without a CONTROL denial that also blocks append/read."
   }
 
   assert {
@@ -121,6 +121,8 @@ run "audit_grants_remain_append_only" {
       "IF DATABASE_PRINCIPAL_ID('id-airline-migration') IS NULL CREATE USER [id-airline-migration] FROM EXTERNAL PROVIDER;",
       "GRANT ALTER ON SCHEMA::dbo TO [id-airline-migration];",
       "GRANT ALTER ON SCHEMA::audit TO [id-airline-migration];",
+      "GRANT CREATE TABLE TO [id-airline-migration];",
+      "GRANT SELECT, INSERT ON OBJECT::dbo.__EFMigrationsHistory TO [id-airline-migration];",
     ]
     error_message = "The migration grant statements must be exactly the expected set: no schema-change grant may target any other identity."
   }

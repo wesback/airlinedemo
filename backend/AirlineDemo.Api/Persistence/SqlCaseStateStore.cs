@@ -762,7 +762,8 @@ public static class CaseStateStoreRegistration
 
     private const string RequiredAuthentication = "Active Directory Managed Identity";
 
-    private static readonly string[] ForbiddenKeys = ["userid", "user", "uid", "password", "pwd", "accesstoken"];
+    private static readonly string[] ForbiddenKeys = ["password", "pwd", "accesstoken"];
+    private static readonly string[] IdentityKeys = ["userid", "user", "uid"];
 
     /// <summary>
     /// Selects the case-state store with <c>Persistence:CaseStateProvider</c>: <c>File</c> (default) or <c>Sql</c>.
@@ -798,7 +799,7 @@ public static class CaseStateStoreRegistration
         return services;
     }
 
-    /// <summary>Rejects any connection string that carries a username, password, or token, or that does not use managed identity.</summary>
+    /// <summary>Allows a GUID client ID to select a managed identity, but rejects usernames, passwords, and tokens.</summary>
     public static void ValidateManagedIdentityConnectionString(string connectionString)
     {
         if (connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries).Any(s => !s.Contains('=')))
@@ -816,7 +817,14 @@ public static class CaseStateStoreRegistration
         if (pairs.Any(p => ForbiddenKeys.Contains(p.Key)))
         {
             throw new InvalidOperationException(
-                "ConnectionStrings:CaseState must not contain a user ID, password, or access token; use managed identity.");
+                "ConnectionStrings:CaseState must not contain a password or access token; use managed identity.");
+        }
+
+        var identities = pairs.Where(p => IdentityKeys.Contains(p.Key)).ToList();
+        if (identities.Count > 1 || identities.Any(p => !Guid.TryParseExact(p.Value, "D", out _)))
+        {
+            throw new InvalidOperationException(
+                "ConnectionStrings:CaseState may specify only one managed identity client ID as a GUID, not a username.");
         }
 
         // A repeated Authentication key would let a later value override the managed identity setting.
