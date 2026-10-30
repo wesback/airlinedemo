@@ -1,12 +1,9 @@
-import { createElement, type ComponentType } from 'react';
-
 vi.mock('@react-three/fiber', () => ({ Canvas: () => null }));
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HangarGuideLineController, createHangarGuideLineController } from '../src/hangar/guideLine';
 import HangarGuideLineAdapter from '../src/hangar/GuideLineAdapter';
-import App, { type HangarEntryAppProps } from '../src/App';
-import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import { renderHangarMode, stubCaseApi } from './hangarAppHarness';
 import userEvent from '@testing-library/user-event';
 
 const floor=[{x:-5,z:-5},{x:5,z:-5},{x:5,z:5},{x:-5,z:5}];
@@ -48,13 +45,11 @@ describe('Hangar guide line',()=>{
 
     cleanup();
     stubCaseApi();
-    render(createElement(App as ComponentType<HangarEntryAppProps>,{
+    renderHangarMode({
       hangarBrowserSupported:true,
       hangarWebGl2Probe:{webgl2:true},
       hangarAircraftSelectionHandler:selection,
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button',{name:'Enter Hangar'}));
+    });
     fireEvent.click(await screen.findByRole('button',{name:'Open data rack'}));
     fireEvent.click(screen.getByRole('menuitem',{name:'Air One'}));
     const appWalk=screen.getByRole('region',{name:'Walk region'});
@@ -115,17 +110,15 @@ describe('Hangar guide line',()=>{
     cleanup();
     stubCaseApi();
     const productionSelection=vi.fn();
-    render(createElement(App as ComponentType<HangarEntryAppProps>,{
-      hangarBrowserSupported:true,hangarWebGl2Probe:{webgl2:true},
-      hangarAircraftSelectionHandler:productionSelection,
-    }));
-    await signInAsReviewer();
     // Diagnostics calls: console output and beacons. The Hangar's local diagnostics never leave the page.
     const beacon=vi.fn(()=>true); Object.defineProperty(navigator,'sendBeacon',{value:beacon,configurable:true});
     const consoleSpies=(['log','info','warn','error','debug'] as const).map(level=>vi.spyOn(console,level).mockImplementation(()=>{}));
     const diagnosticsCalls=()=>beacon.mock.calls.length+consoleSpies.reduce((sum,spy)=>sum+spy.mock.calls.length,0);
     const requestsBeforeEnter=vi.mocked(fetch).mock.calls.length;
-    fireEvent.click(screen.getByRole('button',{name:'Enter Hangar'}));
+    renderHangarMode({
+      hangarBrowserSupported:true,hangarWebGl2Probe:{webgl2:true},
+      hangarAircraftSelectionHandler:productionSelection,
+    });
     await screen.findByRole('button',{name:'Refresh Hangar scene'});
     const requestsAfterEnter=vi.mocked(fetch).mock.calls.length;
     expect(requestsAfterEnter).toBe(requestsBeforeEnter + 4);

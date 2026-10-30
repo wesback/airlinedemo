@@ -1,0 +1,76 @@
+@font-face {
+  font-family: 'Manrope';
+  src: url('../assets/fonts/manrope-latin-wght.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Brand */
+  --av-navy: #19223f;
+  --av-navy-2: #232e52;
+  --av-navy-3: #2f3b63;
+  --av-green: #639a5e;
+  --av-green-strong: #3d7339;
+  --av-green-soft: #e6f0e4;
+  --av-green-line: #71b06c;
+
+  /* Actors: who does the step */
+  --av-ai: #3b6fd4;
+  --av-ai-soft: #e7eefb;
+  --av-human: #a0661a;
+  --av-human-soft: #fbf1df;
+  --av-rules: #5b6478;
+  --av-rules-soft: #eceef2;
+  --av-alert: #b4432f;
+  --av-alert-soft: #f9e6e2;
+
+  /* Surfaces */
+  --av-page: #f3f4f7;
+  --av-surface: #ffffff;
+  --av-surface-2: #f8f9fb;
+  --av-line: #e0e3ea;
+  --av-line-strong: #c9ceda;
+  --av-text: #19223f;
+  --av-text-2: #565c71;
+  --av-text-3: #6e7488;
+  --av-on-navy: #ffffff;
+  --av-on-navy-2: #b9c0d6;
+
+  --av-radius-s: 6px;
+  --av-radius: 10px;
+  --av-radius-l: 16px;
+  --av-shadow: 0 1px 2px rgb(25 34 63 / 6%), 0 4px 16px rgb(25 34 63 / 6%);
+  --av-shadow-lift: 0 2px 4px rgb(25 34 63 / 8%), 0 12px 32px rgb(25 34 63 / 12%);
+  --av-focus: 0 0 0 3px rgb(99 154 94 / 45%);
+
+  --av-font: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --av-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --av-green: #79b373;
+  --av-green-strong: #8cc487;
+  --av-green-soft: #1f3324;
+  --av-ai: #8aacf2;
+  --av-ai-soft: #1d2a48;
+  --av-human: #e0a84a;
+  --av-human-soft: #3a2c14;
+  --av-rules: #a3abbd;
+  --av-rules-soft: #2a3040;
+  --av-alert: #ec8a76;
+  --av-alert-soft: #45231d;
+  --av-page: #12172a;
+  --av-surface: #1b2238;
+  --av-surface-2: #212a44;
+  --av-line: #2e3753;
+  --av-line-strong: #3d4869;
+  --av-text: #eef0f6;
+  --av-text-2: #b7bdd0;
+  --av-text-3: #959cb2;
+  --av-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 25%);
+  --av-shadow-lift: 0 2px 4px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 35%);
+  color-scheme: dark;
+}

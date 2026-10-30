@@ -8,7 +8,7 @@ declare module 'three' {
   export class Raycaster { setFromCamera(coords:Vector2,camera:PerspectiveCamera):void; intersectObject(object:Object3D,recursive?:boolean):Array<{distance:number;object:Object3D}>; }
   export class Mesh extends Object3D { constructor(geometry?:any,material?:any); geometry:any; material:any; rotation:{x:number;y:number;z:number}; }
   export class Material { type:string; map:any; visible:boolean; }
-  export class MeshStandardMaterial extends Material { constructor(options?:Record<string,any>); color:{getHexString():string}; roughness:number; metalness:number; transparent:boolean; opacity:number; }
+  export class MeshStandardMaterial extends Material { constructor(options?:Record<string,any>); color:{getHexString():string}; roughness:number; metalness:number; transparent:boolean; opacity:number; emissive:{set(color:string|number):unknown}; emissiveIntensity:number; dispose():void; }
   export class MeshBasicMaterial extends Material { constructor(options?:Record<string,any>); color?:{getHexString():string}; transparent:boolean; opacity:number; }
   export class BoxGeometry { constructor(width:number,height:number,depth:number); parameters:{width:number;height:number;depth:number}; }
   export class CapsuleGeometry { constructor(radius:number,length:number,capSegments:number,radialSegments:number); boundingSphere?:{radius:number}; }
@@ -19,5 +19,9 @@ declare module 'three' {
   export class CatmullRomCurve3 extends Curve<Vector3> { constructor(points:Vector3[],closed?:boolean,curveType?:string,tension?:number); }
   export class TubeGeometry { constructor(curve:Curve<Vector3>,tubularSegments?:number,radius?:number,radialSegments?:number,closed?:boolean); parameters:{path:Curve<Vector3>; tubularSegments:number; radius:number; radialSegments:number; closed:boolean}; }
   export class TorusGeometry { constructor(radius:number,tube:number,radialSegments:number,tubularSegments:number,arc?:number); parameters:{radius:number;tube:number;radialSegments:number;tubularSegments:number;arc:number}; }
-  export class Box3 { setFromObject(object:Object3D):this; getSize(target:Vector3):Vector3; getCenter(target:Vector3):Vector3; min:{y:number}; }
+  export class Box3 { setFromObject(object:Object3D):this; getSize(target:Vector3):Vector3; getCenter(target:Vector3):Vector3; min:{y:number}; max:{y:number}; }
+  export class Light extends Object3D { color:{set(color:string|number):unknown}; intensity:number; }
+  export class HemisphereLight extends Light { constructor(skyColor?:string|number,groundColor?:string|number,intensity?:number); }
+  export class AmbientLight extends Light { constructor(color?:string|number,intensity?:number); }
+  export class DirectionalLight extends Light { constructor(color?:string|number,intensity?:number); target:Object3D; }
 }

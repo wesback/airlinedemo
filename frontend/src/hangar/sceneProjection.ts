@@ -22,7 +22,7 @@ export function validateHangarSceneEnvelope(envelope: unknown): ProjectionResult
   if (!nonempty(c.caseId)) return {valid:false,scene:null,error:'Invalid scene case identifier'};
   if (typeof c.status!=='object'||c.status===null||Array.isArray(c.status)||typeof envelope.canResetBlockedVariant!== 'boolean'||!Array.isArray(envelope.allowedActions)||!Array.isArray(envelope.history)||!Array.isArray(envelope.evidence)||!Array.isArray(envelope.documentRefs)) return {valid:false,scene:null,error:'Malformed hangar scene envelope'};
   if (typeof c.capabilityLabel!=='string'||!HANGAR_CAPABILITY_LABELS.includes(c.capabilityLabel as typeof HANGAR_CAPABILITY_LABELS[number])) return {valid:false,scene:null,error:'Unknown capability label'};
-  const permission = c.permission ?? c.permissions;
+  const permission = c.permission ?? c.permissions ?? envelope.canResetBlockedVariant;
   if (permission === undefined || (typeof permission!== 'boolean' && (!isObject(permission) || typeof permission.canResetBlockedVariant!== 'boolean'))) return {valid:false,scene:null,error:'Missing scene permission snapshot'};
   if (!Array.isArray(envelope.objects)||envelope.objects.length!==4) return {valid:false,scene:null,error:'Invalid scene object set'};
   const allowedKinds=new Set(['aircraft','engine','component']); const ids=new Set<string>();

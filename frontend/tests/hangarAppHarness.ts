@@ -1,7 +1,16 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
+import { createElement } from 'react';
 import { vi } from 'vitest';
+import HangarMode, { type HangarModeProps } from '../src/hangar/HangarMode';
 
-/** Stubs the API calls App makes for one signed-in technical reviewer; a model (.glb/.gltf) request calls `onModelRequest`. */
+export const HANGAR_TEST_SESSION: HangarModeProps['session'] = { id: 'reviewer-1', displayName: 'Ada Reviewer', role: 'technical-reviewer', csrfToken: 'token', caseScopes: ['case-001'] };
+
+/** Renders the hangar mode for the stubbed technical reviewer; it enters the hangar on mount. */
+export function renderHangarMode(props: Partial<HangarModeProps> = {}) {
+  return render(createElement(HangarMode, { session: HANGAR_TEST_SESSION, ...props }));
+}
+
+/** Stubs the API calls the hangar makes for one signed-in technical reviewer; a model (.glb/.gltf) request calls `onModelRequest`. */
 export function stubCaseApi(onModelRequest: () => void = () => {}) {
   const envelope = (caseId: string, name: string, category: string, revision: number) => {
     const letter = caseId.slice(-1).toUpperCase();
@@ -43,14 +52,4 @@ export function stubCaseApi(onModelRequest: () => void = () => {}) {
     }
     throw new Error(`Unexpected request: ${method} ${url}`);
   }));
-}
-
-/** Signs in as the stubbed reviewer and waits for the case dashboard. */
-export async function signInAsReviewer() {
-  fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-  await screen.findByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' });
-  fireEvent.click(screen.getByRole('radio', { name: 'Ada Reviewer (technical-reviewer)' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-  await screen.findByText('Revision: 7');
 }

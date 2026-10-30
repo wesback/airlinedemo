@@ -11,8 +11,8 @@ describe('Hangar build budget wiring', () => {
     expect(viteIndex).toBeGreaterThanOrEqual(0);
     expect(budgetIndex).toBeGreaterThan(viteIndex);
 
-    const app = readFileSync('src/App.tsx', 'utf8');
-    expect(app).toContain("await import('./hangar/entryController')");
+    const app = readFileSync('src/hangar/HangarMode.tsx', 'utf8');
+    expect(app).toContain("await import('./entryController')");
     expect(app).toContain('selectHangarEntry');
     expect(app).toContain('hangarLazyLoader ??');
     expect(app).not.toMatch(/@react-three\/fiber.*(?:import|from)/s);
@@ -31,14 +31,14 @@ describe('Hangar build budget wiring', () => {
     expect(checker).toContain('hangarFiles.has(rel)');
 
     const runtimeLazyLoad = readFileSync('tests/HangarEntryLazyLoad.test.tsx', 'utf8');
-    expect(runtimeLazyLoad).toContain('HangarEntry lazy loads only after selection');
+    expect(runtimeLazyLoad).toContain('HangarEntry lazy loads only after the hangar mounts');
     expect(runtimeLazyLoad).toContain('modelRequest).not.toHaveBeenCalled()');
     expect(runtimeLazyLoad).toContain('hangarLazyLoader');
 
     const runtime = spawnSync(process.execPath, ['-e', `
       const fs = require('node:fs');
       const source = fs.readFileSync('tests/HangarEntryLazyLoad.test.tsx', 'utf8');
-      const required = ['HangarEntry lazy loads only after selection', 'modelRequest).not.toHaveBeenCalled()', 'hangarLazyLoader'];
+      const required = ['HangarEntry lazy loads only after the hangar mounts', 'modelRequest).not.toHaveBeenCalled()', 'hangarLazyLoader'];
       const missing = required.filter((snippet) => !source.includes(snippet));
       if (missing.length) {
         console.error('Missing runtime lazy-load assertions:', missing.join(', '));

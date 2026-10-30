@@ -1,10 +1,9 @@
 import { createElement, type ComponentType } from 'react';
 
 vi.mock('@react-three/fiber', () => ({ Canvas: () => null }));
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import App, { type HangarEntryAppProps } from '../src/App';
-import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import { renderHangarMode, stubCaseApi } from './hangarAppHarness';
 import { confirmHangarRackMenuEntry } from '../src/hangar/rackMenu';
 import userEvent from '@testing-library/user-event';
 import {
@@ -17,20 +16,17 @@ import {
   loadHangarScene,
 } from '../src/hangar/entryController';
 
-const HangarApp = App as ComponentType<HangarEntryAppProps>;
 
 describe('HangarEntry', () => {
   it('Hangar App composes walk region and follow camera', async () => {
     stubCaseApi();
     const selection = vi.fn();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: () => { function Scene() { return createElement('canvas', { 'aria-label': '3D hangar scene' }); } return Scene; },
       hangarAircraftSelectionHandler: selection,
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
     const walk = screen.getByRole('region', { name: 'Walk region' });
     expect((walk as HTMLElement).tabIndex).toBe(0);
@@ -106,13 +102,11 @@ afterEach(() => {
       }
       return evidenceOriginal(input, init);
     });
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; },
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
 
     expect(screen.getByLabelText('Hangar scene objects').querySelectorAll('button')).toHaveLength(12);
@@ -145,13 +139,11 @@ afterEach(() => {
       }
       return original(input, init);
     });
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; },
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByRole('button', { name: 'View Air Three' });
     fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
     expect(screen.getAllByRole('button', { name: 'Reset blocked variant' }).length).toBeGreaterThanOrEqual(1);
@@ -165,7 +157,7 @@ afterEach(() => {
         return latest(input, init);
       });
       vi.spyOn(window, 'confirm').mockReturnValue(true);
-      fireEvent.click(screen.getAllByRole('button', { name: 'Reset blocked variant' }).at(-1)!);
+      fireEvent.click(within(screen.getByLabelText('Case C blocked variant reset')).getByRole('button', { name: 'Reset blocked variant' }));
       await screen.findByText(`Reset rejected (${status}).`);
       expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('reset-blocked-variant')).length).toBe(before + 1);
       cleanup();
@@ -180,9 +172,7 @@ afterEach(() => {
         if (url === '/api/v1/cases/cp-case-c/reset-blocked-variant') return new Response(JSON.stringify({ error: 'rejected' }), { status, headers: { 'Content-Type': 'application/json' } });
         return original(input, init);
       });
-      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } }));
-      await signInAsReviewer();
-      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } });
       await screen.findByRole('button', { name: 'View Air Three' });
       fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
     }
@@ -199,9 +189,7 @@ afterEach(() => {
       }
       return deniedOriginal(input, init);
     });
-    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } });
     await screen.findByRole('button', { name: 'View Air Three' });
     fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
     expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
@@ -212,8 +200,6 @@ afterEach(() => {
     const roleOriginal = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === '/api/auth/users') return new Response(JSON.stringify([{ id: 'operator-1', displayName: 'Morgan Operator', role: 'aircraft-operator' }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      if (url === '/api/auth/sign-in') return new Response(JSON.stringify({ id: 'operator-1', displayName: 'Morgan Operator', role: 'aircraft-operator', caseScopes: ['case-001'], csrfToken: 'token' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       if (url === '/api/v1/cases/cp-case-c/scene' && (init?.method ?? 'GET') === 'GET') {
         const envelope = await roleOriginal(input, init).then((response) => response.json());
         envelope.case.permission = true; envelope.canResetBlockedVariant = true; envelope.allowedActions = ['reset'];
@@ -221,14 +207,7 @@ afterEach(() => {
       }
       return roleOriginal(input, init);
     });
-    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } }));
-    fireEvent.change(screen.getByLabelText('Demo passcode'), { target: { value: 'demo-pass' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('radio', { name: 'Morgan Operator (aircraft-operator)' });
-    fireEvent.click(screen.getByRole('radio', { name: 'Morgan Operator (aircraft-operator)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await screen.findByText('Revision: 7');
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    renderHangarMode({ session: { id: 'operator-1', displayName: 'Morgan Operator', role: 'aircraft-operator', csrfToken: 'token', caseScopes: ['case-001'] }, hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement("canvas", { "aria-label": "3D hangar scene" }); } return Scene; } });
     await screen.findByRole('button', { name: 'View Air Three' });
     fireEvent.click(screen.getByRole('button', { name: 'View Air Three' }));
     expect(screen.queryByRole('button', { name: 'Reset blocked variant' })).toBeNull();
@@ -238,9 +217,7 @@ afterEach(() => {
     stubCaseApi();
     function Throws(): never { throw new Error('canvas render failed'); }
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement(Throws); } return Scene; } }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => { function Scene() { return createElement(Throws); } return Scene; } });
     await screen.findByRole('alert', { name: 'Hangar fallback' });
     expect(screen.getByText(/Last labelled server state: Rules-based, revision 7/)).toBeTruthy();
     expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes('reset-blocked-variant') && (init?.method ?? 'GET') === 'POST')).toHaveLength(0);
@@ -248,13 +225,11 @@ afterEach(() => {
 
   it('HangarEntry loads scene envelopes in exact case-list order', async () => {
     stubCaseApi();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: () => { function Scene() { return null; } return Scene; },
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
     const requests = vi.mocked(fetch).mock.calls.map(([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`);
     expect(requests.filter((request) => request.includes('/api/v1/cases'))).toEqual([
@@ -283,9 +258,7 @@ afterEach(() => {
         if (url === '/api/v1/cases') return new Response(JSON.stringify(testCase.list), { status: 200, headers: { 'Content-Type': 'application/json' } });
         return original(input, init);
       });
-      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
-      await signInAsReviewer();
-      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() });
       await screen.findByText(/Invalid hangar scene contract/);
       expect(document.querySelectorAll('canvas')).toHaveLength(0);
       cleanup(); vi.unstubAllGlobals();
@@ -303,9 +276,7 @@ afterEach(() => {
         if (url === '/api/v1/cases/cp-case-a/scene') return new Response(sceneCase.body === null ? null : JSON.stringify(sceneCase.body), { status: 200, headers: { 'Content-Type': 'application/json' } });
         return original(input, init);
       });
-      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
-      await signInAsReviewer();
-      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() });
       await screen.findByText(/Invalid hangar scene contract/);
       expect(document.querySelectorAll('canvas')).toHaveLength(0);
       cleanup(); vi.unstubAllGlobals();
@@ -321,9 +292,7 @@ afterEach(() => {
       }, objects: [{ objectId: 'SYN-CP-B-AIR-001', kind: 'aircraft', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-ENG-001', kind: 'engine', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-CMP-001', kind: 'component', caseId: 'cp-case-b' }, { objectId: 'SYN-CP-B-CMP-002', kind: 'component', caseId: 'cp-case-b' }], canResetBlockedVariant: false, allowedActions: [], history: [], evidence: [], documentRefs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return originalMismatch(input, init);
     });
-    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() });
     await screen.findByText(/Invalid hangar scene contract/);
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
     expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input)).filter((url) => url.endsWith('/scene'))).toEqual(['/api/v1/cases/cp-case-a/scene']);
@@ -338,9 +307,7 @@ afterEach(() => {
         if (url === '/api/v1/cases/cp-case-a/scene') return new Response(null, { status });
         return original(input, init);
       });
-      render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() }));
-      await signInAsReviewer();
-      fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+      renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: vi.fn() });
       await screen.findByText(/Hangar refresh failed/);
       expect(document.querySelectorAll('canvas')).toHaveLength(0);
       cleanup(); vi.unstubAllGlobals();
@@ -350,11 +317,9 @@ afterEach(() => {
   it('HangarEntry queues overlapping focus and explicit refreshes and rejects the lower revision', async () => {
     stubCaseApi();
     const selection = vi.fn();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarAircraftSelectionHandler: selection,
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
     const original = vi.mocked(fetch).getMockImplementation()!;
     let resolveFocus!: (value: Response) => void; let resolveExplicit!: (value: Response) => void;
@@ -410,14 +375,12 @@ afterEach(() => {
   it('HangarEntry production Data Room confirmation starts mapped guide route', async () => {
     stubCaseApi();
     const selection = vi.fn();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: () => { function ProductionScene() { return null; } return ProductionScene; },
       hangarAircraftSelectionHandler: selection,
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     fireEvent.click(await screen.findByRole('button', { name: 'Open data rack' }));
     // App offers only its Data Room entries: an unmapped identifier such as AIR-X has no menu item to confirm.
     expect(screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label'))).toEqual(['Air One', 'Air Two', 'Air Three']);
@@ -451,13 +414,11 @@ afterEach(() => {
   it('HangarEntry production guide arrival uses shared aircraft selection once', async () => {
     stubCaseApi();
     const selection = vi.fn();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarAircraftSelectionHandler: selection,
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     fireEvent.click(await screen.findByRole('button', { name: 'Pointer select AIR-1' }));
     expect(selection).toHaveBeenCalledTimes(1);
     expect(selection).toHaveBeenLastCalledWith('AIR-1');
@@ -488,13 +449,11 @@ afterEach(() => {
     expect(getHangarFallbackReason({ contractVersion: 1, browserSupported: false, webgl2: { webgl2: true } })).toBe('unsupported_browser');
 
     stubCaseApi();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: false,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: vi.fn(),
-    }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByText('Your browser is not supported. Use the current or previous major version of Chrome or Edge.');
 
     const renderedLabels = ['Select case', 'View status', 'View evidence', 'Follow journey', 'Open review'];
@@ -506,13 +465,11 @@ afterEach(() => {
   it('hangar UI rejects fallback entry before mounting a canvas', async () => {
     stubCaseApi();
 
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: false,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: vi.fn(),
-    } as HangarEntryAppProps));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
 
     await screen.findByText('Your browser is not supported. Use the current or previous major version of Chrome or Edge.');
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
@@ -530,17 +487,15 @@ afterEach(() => {
       expect(await screen.findByText(message)).toBeTruthy();
     }
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    expect(document.activeElement?.id).toBe('cap-technical-review');
+    expect(document.activeElement?.id).toBe('hangar-case-status-heading');
 
     cleanup();
     const nullLoader = vi.fn();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: null,
       hangarLazyLoader: nullLoader,
-    } as HangarEntryAppProps));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByText('WebGL 2 is unavailable. Enable hardware acceleration or use a WebGL 2-capable browser.');
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
     expect(nullLoader).not.toHaveBeenCalled();
@@ -549,26 +504,22 @@ afterEach(() => {
   it('supported versions load once and contract fallback renders no canvas with a non-3D link', async () => {
     stubCaseApi();
     const loader = vi.fn();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: loader,
-    } as HangarEntryAppProps));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await waitFor(() => expect(loader).toHaveBeenCalledTimes(1));
     expect(document.querySelectorAll('canvas')).toHaveLength(1);
 
     cleanup();
-    render(createElement(HangarApp, {
+    renderHangarMode({
       hangarContractVersion: 2,
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: loader,
-    } as HangarEntryAppProps));
+    });
     // A fresh mount verifies contract rejection with the same production entry path.
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await screen.findByText(/Invalid hangar scene contract/);
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
     expect(loader).toHaveBeenCalledTimes(1);

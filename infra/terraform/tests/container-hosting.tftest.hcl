@@ -216,6 +216,11 @@ run "app_seeds_demo_cases" {
     condition     = length([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Demo__SeedCases"]) == 1 && length([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Demo__SeedCases" && e.value == "true"]) == 1
     error_message = "The app container must set Demo__SeedCases to true so the demo cases exist."
   }
+
+  assert {
+    condition     = length([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Demo__SeedJourney"]) == 1 && length([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Demo__SeedJourney" && e.value == "true"]) == 1
+    error_message = "The app container must set Demo__SeedJourney to true so the return-readiness journey is available."
+  }
 }
 
 run "app_uses_durable_sql_case_state" {

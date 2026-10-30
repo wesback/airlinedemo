@@ -1,11 +1,10 @@
-import { createElement, type ComponentType } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createElement } from 'react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import HangarNon3dDataRoom, { HangarNon3dDataRoomController, activateHangarDataRoomCase, scopedInitialEntries } from '../src/hangar/non3dDataRoom';
 import { HANGAR_SOURCE_IDS, SOURCE_UNAVAILABLE_TEXT } from '../src/hangar/sourceSummary';
-import App, { type HangarEntryAppProps } from '../src/App';
-import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import { renderHangarMode, stubCaseApi } from './hangarAppHarness';
 
 const entries = [
   { caseId:'cp-case-a', name:'Case A', category:'narrow-body', unavailable:false, sources:HANGAR_SOURCE_IDS.map(sourceId=>({sourceId,mode:'available' as const,coverage:true,modeText:'mode: available',coverageText:'coverage: true',text:`${sourceId}: mode: available; coverage: true`})) },
@@ -20,18 +19,20 @@ describe('HangarNon3dDataRoom', () => {
   it('Hangar App non-3D Data Room parity', async () => {
     stubCaseApi();
     const selection = vi.fn();
-    render(createElement(App as ComponentType<HangarEntryAppProps>, {
+    // The non-3D fallback offers the same Data Room aircraft as the 3D rack.
+    renderHangarMode({ hangarBrowserSupported: false, hangarWebGl2Probe: { webgl2: true }, hangarAircraftSelectionHandler: selection });
+    const dataRoom = await screen.findByRole('region', { name: 'Data Room aircraft' });
+    expect(within(dataRoom).getAllByRole('listitem').map(item => item.getAttribute('data-case-id'))).toEqual(['cp-case-a', 'cp-case-b', 'cp-case-c']);
+    fireEvent.click(within(dataRoom).getByRole('button', { name: 'Air One, narrow-body' }));
+    expect(selection.mock.calls.map(([caseId]) => caseId)).toEqual(['AIR-1']);
+
+    cleanup();
+    renderHangarMode({
       hangarBrowserSupported: true,
       hangarWebGl2Probe: { webgl2: true },
       hangarLazyLoader: () => { function Scene() { return createElement('canvas', { 'aria-label': '3D hangar scene' }); } return Scene; },
       hangarAircraftSelectionHandler: selection,
-    }));
-    await signInAsReviewer();
-    expect(screen.getByRole('heading', { name: 'Data Room aircraft' })).toBeTruthy();
-    expect(screen.getAllByRole('listitem').map(item => item.getAttribute('data-case-id'))).toEqual(['cp-case-a', 'cp-case-b', 'cp-case-c']);
-    fireEvent.click(screen.getByRole('button', { name: 'Case A, narrow-body' }));
-    expect(selection.mock.calls.map(([caseId]) => caseId)).toEqual(['AIR-1']);
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    });
     await screen.findByRole('button', { name: 'Refresh Hangar scene' });
     expect(screen.getByRole('region', { name: 'Walk region' })).toBeTruthy();
     expect(document.querySelector('[data-hangar-app-composition="true"]')).not.toBeNull();

@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// @ts-ignore -- Vitest loads node:fs at runtime; this package intentionally has no Node declaration dependency.
+import { readFileSync } from 'node:fs';
 import HangarSemanticControls, {
   HANGAR_CONTROL_DEFICIENCY_ERROR, HANGAR_FOCUS_STYLE,
   activateHangarSemanticControl, buildHangarSemanticControls, handleHangarSemanticKeydown,
@@ -44,8 +46,11 @@ describe('HangarSemanticControls',()=>{
   it('HangarSemanticControls preserves focus and Tab navigation',async()=>{
     const descriptor=[{objectId:'SYN-CP-A-AIR-001',caseId:'cp-case-a',kind:'aircraft',activate:vi.fn()}];
     const {container}=render(<><input aria-label="Evidence text"/><aside aria-label="Evidence panel"><button>Evidence</button></aside><section data-hangar-camera-region aria-label="Camera controls" tabIndex={0}><input aria-label="Camera text"/></section><HangarSemanticControls scene={scene()} descriptor={descriptor} onActivate={vi.fn()}/></>);
-    const style=container.querySelector('style')?.textContent??'';
-    expect(style).toContain('outline'); expect(style).not.toContain('outline: none');
+    // CSP forbids inline <style>; the focus rule ships in the hangar stylesheet instead.
+    expect(container.querySelector('style')).toBeNull();
+    const css=readFileSync('src/hangar/hangarMode.css','utf8');
+    const rule=css.match(/\.hangar-semantic-control:focus-visible\s*\{([^}]*)\}/)?.[1]??'';
+    expect(rule).toContain('outline: 2px solid'); expect(rule).not.toContain('outline: none');
     const user=userEvent.setup(); const evidenceText=screen.getByLabelText('Evidence text');
     evidenceText.focus(); await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('button',{name:'Evidence'}));

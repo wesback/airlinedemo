@@ -162,6 +162,11 @@ resource "azurerm_container_app" "app" {
       }
 
       env {
+        name  = "Demo__SeedJourney"
+        value = "true"
+      }
+
+      env {
         name        = "Demo__Passcode"
         secret_name = "demo-passcode"
       }

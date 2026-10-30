@@ -1,10 +1,9 @@
 import { createElement, useEffect, type ComponentType } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import App, { type HangarEntryAppProps } from '../src/App';
 import HangarLocalDiagnostics, { buildHangarLocalDiagnostics, HANGAR_LOCAL_FALLBACK_CODES } from '../src/hangar/localDiagnostics';
 import { HangarCanvasAdapter, createHangarOwnedPerspectiveCamera } from '../src/hangar/HangarCanvasAdapter';
-import { signInAsReviewer, stubCaseApi } from './hangarAppHarness';
+import { renderHangarMode, stubCaseApi } from './hangarAppHarness';
 import { loadHangarScene } from '../src/hangar/entryController';
 
 const productionCanvasHarness = vi.hoisted(() => ({ mounts: vi.fn(), canvases: [] as HTMLCanvasElement[] }));
@@ -28,7 +27,6 @@ vi.mock('@react-three/fiber', async () => {
   }
 });
 
-const HangarApp = App as ComponentType<HangarEntryAppProps>;
 
 afterEach(() => {
   cleanup();
@@ -77,10 +75,8 @@ describe('HangarLocalDiagnostics', () => {
     productionCanvasHarness.canvases.length = 0;
     const mountCanvas = productionCanvasHarness.mounts;
     const loader = vi.fn(async () => loadHangarScene());
-    render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: loader }));
-    await signInAsReviewer();
+    renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: loader });
     mutationCalls.length = 0;
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
     await waitFor(() => expect(mountCanvas).toHaveBeenCalledTimes(1));
     const contextCanvas = productionCanvasHarness.canvases[0];
     expect(contextCanvas).toBeInstanceOf(HTMLCanvasElement);
@@ -97,7 +93,7 @@ describe('HangarLocalDiagnostics', () => {
     fireEvent(contextCanvas, new Event('webglcontextrestored'));
     expect(mountCanvas).toHaveBeenCalledTimes(1);
     expect(screen.queryByLabelText('Hangar 3D scene')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload hangar' }));
     await waitFor(() => expect(mountCanvas).toHaveBeenCalledTimes(2));
     expect(productionCanvasHarness.canvases).toHaveLength(2);
     expect(productionCanvasHarness.canvases[1]).not.toBe(productionCanvasHarness.canvases[0]);
@@ -112,9 +108,7 @@ describe('HangarLocalDiagnostics', () => {
       .mockReturnValueOnce(3400);
     productionCanvasHarness.canvases.length = 0;
     productionCanvasHarness.mounts.mockClear();
-    const successView = render(createElement(HangarApp, { hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => loadHangarScene(), hangarMonotonicClock: clock }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    const successView = renderHangarMode({ hangarBrowserSupported: true, hangarWebGl2Probe: { webgl2: true }, hangarLazyLoader: () => loadHangarScene(), hangarMonotonicClock: clock });
     await screen.findByLabelText('Hangar 3D scene');
     expect(screen.getByLabelText('Open local diagnostics')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Open local diagnostics'));
@@ -126,9 +120,7 @@ describe('HangarLocalDiagnostics', () => {
 
     successView.unmount();
     const fallbackClock = vi.fn(() => 1000);
-    const fallbackView = render(createElement(HangarApp, { hangarBrowserSupported: false, hangarWebGl2Probe: { webgl2: false }, hangarLazyLoader: () => loadHangarScene(), hangarMonotonicClock: fallbackClock }));
-    await signInAsReviewer();
-    fireEvent.click(screen.getByRole('button', { name: 'Enter Hangar' }));
+    const fallbackView = renderHangarMode({ hangarBrowserSupported: false, hangarWebGl2Probe: { webgl2: false }, hangarLazyLoader: () => loadHangarScene(), hangarMonotonicClock: fallbackClock });
     await screen.findByRole('alert');
     fireEvent.click(screen.getByLabelText('Open local diagnostics'));
     const fallbackPanel = screen.getByRole('region', { name: 'Local diagnostics panel' });

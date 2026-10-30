@@ -9,6 +9,8 @@ export type HangarNon3dDataRoomProps = {
   summaryReader?: SourceSummaryReader; onSelect?: HangarNon3dDataRoomSelectionHandler;
   onConfirm?: HangarNon3dDataRoomSelectionHandler; onActivate?: HangarNon3dDataRoomSelectionHandler;
   browserIdentifier?: unknown;
+  /** Optional presentation names by case id, shown above the data-driven case name. */
+  displayNames?: Record<string, string>;
 };
 
 export class HangarNon3dDataRoomController {
@@ -60,7 +62,7 @@ export function scopedInitialEntries(entries: HangarSourceSummaryEntry[] | null 
   return entries.filter(entry => scoped.has(entry.caseId));
 }
 
-export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, summaryReader, onSelect, onConfirm, onActivate, browserIdentifier }: HangarNon3dDataRoomProps) {
+export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, summaryReader, onSelect, onConfirm, onActivate, browserIdentifier, displayNames }: HangarNon3dDataRoomProps) {
   const [projectedEntries, setProjectedEntries] = useState<HangarSourceSummaryEntry[]>([]);
   const entries = initialEntries !== undefined
     ? scopedInitialEntries(initialEntries, scope)
@@ -90,18 +92,22 @@ export function HangarNon3dDataRoom({ entries: initialEntries, caseList, scope, 
   return createElement('section', { id: 'non-3d-data-room', 'aria-labelledby': 'non-3d-data-room-heading', 'data-hangar-data-room-non3d': 'true' },
     createElement('h3', { id: 'non-3d-data-room-heading' }, 'Data Room aircraft'),
     invalidBrowserIdentifier ? createElement('p', { role: 'alert' }, HANGAR_NON_3D_DATA_ROOM_INVALID_ENTRY) : null,
-    createElement('ul', { 'aria-label': 'Data Room in-scope cases' }, entries.map((entry, index) => {
+    createElement('ul', { 'aria-label': 'Data Room in-scope cases', className: 'hangar-data-room__list' }, entries.map((entry, index) => {
+      const displayName = displayNames?.[entry.caseId];
       const unavailable = entry.unavailable || !entry.sources;
       const accessibleName = `${entry.name}, ${entry.category}${unavailable ? `, ${SOURCE_UNAVAILABLE_TEXT}` : ''}`;
-      return createElement('li', { key: entry.caseId, 'data-case-id': entry.caseId, 'data-case-index': String(index) },
+      return createElement('li', { key: entry.caseId, className: 'hangar-data-room__item', 'data-case-id': entry.caseId, 'data-case-index': String(index) },
         createElement('button', {
           type: 'button', 'aria-label': accessibleName, disabled: unavailable,
           onClick: () => controller.activate(entry.caseId),
           onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); controller.activate(entry.caseId); } },
-        }, createElement('span', null, `${entry.name} — ${entry.category}`)),
+          className: 'hangar-data-room__select',
+        }, displayName
+          ? [createElement('span', { key: 'model', className: 'hangar-data-room__model' }, displayName), createElement('span', { key: 'case', className: 'hangar-data-room__case' }, `${entry.name} – ${entry.category}`)]
+          : createElement('span', null, `${entry.name} — ${entry.category}`)),
         unavailable
           ? createElement('p', { role: 'status', 'aria-label': `${entry.name} source status: unavailable` }, SOURCE_UNAVAILABLE_TEXT)
-          : createElement('dl', { 'aria-label': `${entry.name} five-source summary` }, (entry.sources ?? []).map(source =>
+          : createElement('dl', { 'aria-label': `${entry.name} five-source summary`, className: 'hangar-data-room__sources' }, (entry.sources ?? []).map(source =>
               createElement('div', { key: source.sourceId, role: 'group', 'aria-label': `${source.sourceId} source status` }, createElement('dt', null, source.sourceId), createElement('dd', null, `${source.sourceId}: ${source.modeText}; ${source.coverageText}`)))),
       );
     })));

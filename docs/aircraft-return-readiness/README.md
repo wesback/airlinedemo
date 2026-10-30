@@ -95,7 +95,9 @@ The documented lifecycle is revision, protected state bootstrap, Terraform plan/
 
 ## Seed, run and reset
 
-The application loads its committed synthetic source fixtures and embedded demo fixture at startup. Confirm the fixtures and their hashes at the recorded revision; do not replace them with live records. Sign in using the approved demo passcode and synthetic demo-user roles obtained through the authorized secret-distribution process. Exercise the baseline, routine mock-inbox request, ambiguous-evidence review, and blocked-document paths.
+The demo Container App enables `Demo__SeedCases` and `Demo__SeedJourney`. At startup, the journey seeder places three synthetic case-pack aircraft at different return-readiness gates and records illustrative AI and human-review events. It only changes a case whose revision is 0, so a restart does not replace existing work. Confirm the fixtures and their hashes at the recorded revision; do not replace them with live records. Sign in using the approved demo passcode and synthetic demo-user roles obtained through the authorized secret-distribution process.
+
+To walk through the complete return-to-release flow, open `cp-case-a`, sign off the pending obligations as the legal reviewer, then switch to the presenter (transition lead) and release it to the next lessee. The release endpoint checks the technical, reserve, and legal gates, records the handover note in the audit trail, and marks the aircraft released; it does not perform an external handoff. The other seeded aircraft remain available to demonstrate earlier gates. Also exercise the baseline, routine mock-inbox request, ambiguous-evidence review, and blocked-document paths.
 
 Use the run-specific reset action to start a fresh demo run. Confirm that it changes only that run, preserves audit history, and does not ingest evaluation answers. A reset is not a database wipe. If a live run is unsuitable, stop and use the recorded fallback rather than hiding an error or pending state.
 
