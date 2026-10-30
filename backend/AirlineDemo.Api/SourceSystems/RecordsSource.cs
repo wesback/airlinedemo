@@ -42,7 +42,7 @@ public sealed class RecordsSource()
     internal static readonly SourceFixtureManifest CoreManifest = new()
     {
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
-        SourceFixtureVersion = "2026.10.1",
+        SourceFixtureVersion = SourceFixtureManifest.SupportedSourceFixtureVersion,
         ScenarioDate = "2026-10-01",
         Sha256 = "119f0945431845ff34c55dac02b49e9e059498f31adc4d73df745fdde2e03f21",
         RecordCounts = new Dictionary<string, int>

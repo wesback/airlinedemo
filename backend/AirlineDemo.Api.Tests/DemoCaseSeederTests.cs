@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Investigation;
@@ -27,6 +28,77 @@ public sealed class DemoCaseSeederTests : IDisposable
         var values = new Dictionary<string, string?>();
         if (value is not null) values["Demo:SeedCases"] = value;
         return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
+
+    [Fact]
+    public async Task Demo_host_pins_the_separate_source_case_without_inventing_decisions_or_rewriting_history()
+    {
+        var config = new Dictionary<string, string?>
+        {
+            ["Demo:SeedCases"] = "true", ["Demo:SeedJourney"] = "true",
+            ["Persistence:CaseStateProvider"] = "File", ["CaseState:Path"] = PathFor("source-demo.json"),
+        };
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(config)));
+        using var client = factory.CreateClient();
+        var store = factory.Services.GetRequiredService<ICaseStateStore>();
+        var scope = store.AuthorizeCase("case-001", "presenter");
+        var state = store.Read(scope);
+        Assert.Equal(1, state.Revision);
+        Assert.Equal("source-basis.gathered", Assert.Single(state.Audit).Action);
+        Assert.Equal("demo-source-seeder", state.Audit[0].Actor);
+        Assert.Empty(state.Assessments ?? []);
+        var session = factory.Services.GetRequiredService<DemoSessionStore>()
+            .Create(new DemoUser("reader", "Reader", "presenter", ["case-001"]));
+        client.DefaultRequestHeaders.Add("Cookie", $"{DemoAuthEndpoints.CookieName}={session.Id}");
+        using var response = await client.GetAsync("/api/v1/cases/case-001/compliance-evidence", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(["Cape Town", "EASA", "EU sanctions", "GDPR", "IFRS 16", "UK sanctions", "US sanctions"],
+            body.RootElement.GetProperty("regimes").EnumerateArray().Select(r => r.GetProperty("regime").GetString()).ToArray());
+        Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("basisDecision").ValueKind);
+        Assert.All(body.RootElement.GetProperty("regimes").EnumerateArray().SelectMany(r => r.GetProperty("requirements").EnumerateArray()),
+            r => Assert.Equal("needs_review", r.GetProperty("status").GetString()));
+        var before = JsonSerializer.Serialize(state);
+        var calls = 0;
+        await DemoJourneySeeder.SeedSourceEvidenceAsync(new ConfigurationBuilder().AddInMemoryCollection(config).Build(),
+            store, _ => { calls++; throw new InvalidOperationException(); });
+        Assert.Equal(0, calls);
+        Assert.Equal(before, JsonSerializer.Serialize(store.Read(scope)));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Source_demo_disabled_or_unowned_case_never_gathers_records(bool enabled, bool owned)
+    {
+        var store = new CaseStateStore(PathFor());
+        if (owned) store.CreateCase("case-001", "presenter");
+        var config = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Demo:SeedJourney"] = enabled.ToString() }).Build();
+        var calls = 0;
+        await DemoJourneySeeder.SeedSourceEvidenceAsync(config, store,
+            _ => { calls++; throw new InvalidOperationException(); });
+        Assert.Equal(0, calls);
+        if (owned) Assert.Equal(0, store.Read(store.AuthorizeCase("case-001", "presenter")).Revision);
+    }
+
+    [Fact]
+    public async Task Source_demo_concurrent_commit_wins_without_rewriting_pins_or_audit()
+    {
+        var store = new CaseStateStore(PathFor());
+        var scope = store.CreateCase("case-001", "presenter");
+        var config = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Demo:SeedJourney"] = "true" }).Build();
+        CaseState? winner = null;
+        await DemoJourneySeeder.SeedSourceEvidenceAsync(config, store, _ =>
+        {
+            winner = store.Commit(scope, 0, new CaseCommit(CaseStateStore.CreateBasisVersion(1, "intervening evidence", ""),
+                null, "presenter", "submit-evidence", "Intervening submission")).State;
+            return Task.FromResult(new GatheredSourceBasis([], "source snapshot that must not be stored"));
+        });
+        Assert.Equal(JsonSerializer.Serialize(winner), JsonSerializer.Serialize(store.Read(scope)));
     }
 
     [Fact]

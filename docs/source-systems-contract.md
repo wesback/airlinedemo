@@ -40,7 +40,17 @@ The port is read-only. It has no write, update or delete members, and it has no 
 | `utilization` | `hours` | Non-negative decimal string; flight-hour utilization. |
 | `utilization` | `cycles` | Non-negative decimal string; cycle utilization. |
 
-An `applicability` payload contains exactly `requirementId` (required, non-empty string), optional `regime` (`EASA`, `FAA-91`, `FAA-121` or `Other`), and optional `responsibleParty` (`lessee-operator`, `lessor`, `camo` or `unassigned`). An unlisted value or any additional field is rejected. The fixture applicability record is synthetic and identifies requirement `SYN-AD-2026-014`.
+An `applicability` payload contains exactly `requirementId` (required, non-empty string), optional `regime` (`EASA`, `FAA-91`, `FAA-121`, `Other`, `Cape Town`, `GDPR`, `IFRS 16`, `EU sanctions`, `US sanctions` or `UK sanctions`), and optional `responsibleParty` (`lessee-operator`, `lessor`, `camo` or `unassigned`). An unlisted value or any additional field is rejected. The original fixture applicability record is synthetic and identifies requirement `SYN-AD-2026-014`.
+
+### Case evidence projection
+
+`GET /api/v1/cases/{caseId}/compliance-evidence` returns a metadata-only, read-only view of one stored evidence basis. `decisionId=<positive integer>` selects a technical-review audit sequence; without it the latest technical review is selected, or the latest basis when no review exists. Unknown query parameters and malformed IDs return `400 / invalid_request`; unsupported versions return `400 / unsupported_contract_version`. Missing sessions return `401 / unauthenticated`; denied roles, out-of-scope cases and absent decisions return `404 / not_found`. Corrupt or inconsistent stored evidence returns `422 / evidence_incomplete`. POST, PUT, PATCH and DELETE return 405 without writing.
+
+The endpoint takes one case snapshot and never refreshes source systems. Regimes and responsible parties come only from validated applicability pins on that basis. A later source version or assessment cannot rewrite an earlier decision's evidence. Each reference contains only `sourceId`, `recordId`, `recordVersion` and `access`; source payloads, document text and decision reasons are excluded. Decision metadata contains the audit sequence, event identity, actor, role, timestamp and accept/reject value.
+
+This endpoint has an explicitly approved, additive presenter exception to SRC DD-023: an in-scope presenter may see pinned identifiers and versions from every source, with `access: not_permitted` still marking the lack of source-payload access. Existing source and dossier APIs are unchanged. Technical, finance and legal reviewers retain their original per-source permissions. References denied to those roles have null record identity and version. Legal reviewers cannot see technical applicability tags, so receive no regime groups. Executives and unknown roles have no access to this endpoint.
+
+`met_by_evidence` means a supported, basis-pinned baseline assessment and an accepting technical review, not a regulatory determination. `not_assessed` reflects a matching, unassessed specialist flag with complete applicability and evidence. Missing, stale, duplicate or unassigned tags, absent evidence, denied evidence metadata, unresolved witnesses and rejected findings produce `needs_review`. Matching uses the exact requirement ID and regime; EU, US and UK sanctions are separate. A basis-wide review is shown separately from requirements linked to assessed findings. Untagged flags and assessment requirements remain visible as needing review where their metadata is permitted. No regime is inferred from a flag or added by the client.
 
 ## Finance payloads
 
@@ -111,6 +121,8 @@ The records source uses ARR's document identifiers and versions for the `case-00
 The new finance records use the typed kind `maintenance_reserve` with the common fields (`recordedAmount`, `collectedAmount`, `currency`, `period`, `dueDate`, `rateBasis`, `rate`). The `case-001` finance records keep their earlier kinds.
 
 The contracts fixture contains seven synthetic `specialist_flag` records: one each for `cape_town`, `ifrs16`, `gdpr` and `other`, and three for `sanctions` (regimes `EU`, `US` and `UK`). Each record has a distinct related requirement identifier and one of the accepted result values. It also contains one synthetic `cape_town_interest` record with reference-only values and no legal conclusion.
+
+Pack `2026.10.2` adds six technical applicability records on `case-001` for those existing Cape Town, GDPR, IFRS 16 and EU/US/UK sanctions requirement IDs. Their responsible party is `unassigned`: the fixture does not invent a customer's ownership decision, so these rows need review. The previous pack version remains readable, but new publication uses `2026.10.2`; changing an already-published version's content remains refused. Every manifest declares the complete count table: technical 19, maintenance 6, finance 7, records 10 and contracts 12. IATA is absent because no applicability record establishes it.
 
 ### Signing
 

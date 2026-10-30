@@ -77,7 +77,7 @@ public sealed class ApplicabilityTagTests
         }
         Assert.Empty(h.Inbox.Requests);
 
-        foreach (var regime in new[] { "EASA", "FAA-91", "FAA-121", "Other" })
+        foreach (var regime in new[] { "EASA", "FAA-91", "FAA-121", "Other", "Cape Town", "GDPR", "IFRS 16", "EU sanctions", "US sanctions", "UK sanctions" })
         {
             var claim = ClaimBody();
             claim["requirementId"] = RequirementId;
@@ -175,7 +175,7 @@ public sealed class ApplicabilityTagTests
         {
             ["requirementId"] = RequirementId,
         }));
-        foreach (var regime in new[] { "EASA", "FAA-91", "FAA-121", "Other" })
+        foreach (var regime in new[] { "EASA", "FAA-91", "FAA-121", "Other", "Cape Town", "GDPR", "IFRS 16", "EU sanctions", "US sanctions", "UK sanctions" })
         {
             Assert.Empty(ApplicabilityPayloadValidator.Validate(new Dictionary<string, object?>
             {
@@ -202,7 +202,7 @@ public sealed class ApplicabilityTagTests
             ["Applicability requirementId must be a non-empty string."],
             ApplicabilityPayloadValidator.Validate(new Dictionary<string, object?> { ["requirementId"] = 14 }));
         Assert.Equal(
-            ["Applicability regime must be EASA, FAA-91, FAA-121 or Other."],
+            ["Applicability regime is not supported."],
             ApplicabilityPayloadValidator.Validate(new Dictionary<string, object?>
             {
                 ["requirementId"] = RequirementId,

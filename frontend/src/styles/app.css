@@ -27,6 +27,16 @@ button:disabled { cursor: not-allowed; }
 }
 .av-skip:focus { top: 12px; }
 .av-muted { color: var(--av-text-2); }
+.av-evidence { display: grid; gap: 20px; }
+.av-evidence-requirement, .av-evidence-responsibility {
+  margin-top: 12px; padding: 18px; border: 1px solid var(--av-line);
+  border-radius: var(--av-radius); background: var(--av-surface-2); overflow-wrap: anywhere;
+}
+.av-evidence-requirement header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
+.av-evidence h4, .av-evidence h5 { margin: 8px 0; }
+.av-evidence ul { padding-inline-start: 20px; }
+.av-evidence-decision { margin-top: 12px; color: var(--av-text-2); }
+.av-evidence a { color: var(--av-text); text-decoration: underline; }
 .av-loading { padding: 48px 0; color: var(--av-text-2); text-align: center; }
 
 /* ---------- Brand ---------- */

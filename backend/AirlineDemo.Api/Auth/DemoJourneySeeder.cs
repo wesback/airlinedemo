@@ -53,6 +53,27 @@ public static class DemoJourneySeeder
         }
     }
 
+    public static async Task SeedSourceEvidenceAsync(IConfiguration configuration, ICaseStateStore store,
+        Func<string, Task<GatheredSourceBasis>> gather)
+    {
+        const string caseId = "case-001";
+        if (!bool.TryParse(configuration["Demo:SeedJourney"], out var enabled) || !enabled
+            || store.OwnerOf(caseId) != Owner) return;
+        var scope = store.AuthorizeCase(caseId, Owner);
+        if (store.Read(scope).Revision != 0) return;
+        var sourceBasis = await gather(caseId);
+        try
+        {
+            store.Commit(scope, 0, new CaseCommit(CaseStateStore.CreateBasisVersion(1, sourceBasis.Content, ""),
+                null, "demo-source-seeder", "source-basis.gathered",
+                "Signed synthetic source records pinned for the separate source-system demonstration."));
+        }
+        catch (RevisionConflictException)
+        {
+            // An intervening operation wins; existing evidence and decisions must not be rewritten.
+        }
+    }
+
     private static void SeedCase(ICaseStateStore store, CaseScope scope, Plan plan)
     {
         var basis = CaseStateStore.CreateBasisVersion(1, $"Return evidence package for {plan.CaseId}", string.Empty);

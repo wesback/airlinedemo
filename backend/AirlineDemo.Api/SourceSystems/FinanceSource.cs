@@ -93,7 +93,7 @@ public sealed class FinanceSource()
     internal static readonly SourceFixtureManifest CoreManifest = new()
     {
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
-        SourceFixtureVersion = "2026.10.1",
+        SourceFixtureVersion = SourceFixtureManifest.SupportedSourceFixtureVersion,
         ScenarioDate = "2026-10-01",
         Sha256 = "9858a0828bedbcb9e33e6ced062f2582abfdad452df4dc76b500202d338a8743",
         RecordCounts = new Dictionary<string, int>

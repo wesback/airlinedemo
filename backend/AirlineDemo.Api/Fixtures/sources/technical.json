@@ -47,6 +47,60 @@
       "payload": { "requirementId": "SYN-AD-2026-014", "regime": "EASA", "responsibleParty": "lessee-operator" }
     },
     {
+      "recordId": "tech-app-cape-town-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "applicability",
+      "synthetic": true,
+      "payload": { "requirementId": "REQ-CAPE-TOWN", "regime": "Cape Town", "responsibleParty": "unassigned" }
+    },
+    {
+      "recordId": "tech-app-gdpr-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "applicability",
+      "synthetic": true,
+      "payload": { "requirementId": "REQ-GDPR", "regime": "GDPR", "responsibleParty": "unassigned" }
+    },
+    {
+      "recordId": "tech-app-ifrs16-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "applicability",
+      "synthetic": true,
+      "payload": { "requirementId": "REQ-IFRS16", "regime": "IFRS 16", "responsibleParty": "unassigned" }
+    },
+    {
+      "recordId": "tech-app-sanctions-eu-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "applicability",
+      "synthetic": true,
+      "payload": { "requirementId": "REQ-SANCTIONS-EU", "regime": "EU sanctions", "responsibleParty": "unassigned" }
+    },
+    {
+      "recordId": "tech-app-sanctions-us-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "applicability",
+      "synthetic": true,
+      "payload": { "requirementId": "REQ-SANCTIONS-US", "regime": "US sanctions", "responsibleParty": "unassigned" }
+    },
+    {
+      "recordId": "tech-app-sanctions-uk-001",
+      "recordVersion": 1,
+      "asOf": "2026-10-01",
+      "caseId": "case-001",
+      "kind": "applicability",
+      "synthetic": true,
+      "payload": { "requirementId": "REQ-SANCTIONS-UK", "regime": "UK sanctions", "responsibleParty": "unassigned" }
+    },
+    {
       "recordId": "tech-a-airworthiness-001",
       "recordVersion": 1,
       "asOf": "2026-10-01",

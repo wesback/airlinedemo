@@ -5,6 +5,7 @@ import { ActorGlyph, ActorTag, AircraftArt, CheckIcon } from './Art';
 import { StepPanel, type JourneyData } from './StepPanels';
 import { aiBriefFor } from './aiBriefs';
 import { AiInsightCard } from './AiInsight';
+import ComplianceEvidence from './ComplianceEvidence';
 
 type Props = {
   session: Session;
@@ -12,14 +13,16 @@ type Props = {
   onBack: () => void;
   onSwitchPersona: (userId: string) => void;
   onChanged: () => void;
+  onOpenCase: (caseId: string) => void;
 };
 
 const optional = <T,>(url: string) => getJson<T>(url).catch(() => null);
 
-export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, onChanged }: Props) {
+export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, onChanged, onOpenCase }: Props) {
   const [data, setData] = useState<JourneyData | null>(null);
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<StepId | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   const load = useCallback(async () => {
@@ -39,12 +42,13 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
     }
   }, [caseId]);
 
-  useEffect(() => { setData(null); setSelected(null); void load(); }, [load, session.id]);
+  useEffect(() => { setData(null); setSelected(null); setEvidenceOpen(false); void load(); }, [load, session.id]);
   useEffect(() => { headingRef.current?.focus(); }, [caseId]);
 
   const refresh = useCallback(async () => { await load(); onChanged(); }, [load, onChanged]);
 
   const aircraft = aircraftFor(caseId);
+  const sourceDemo = caseId === 'case-001';
   if (failed) {
     return (
       <main className="av-page" id="main">
@@ -70,19 +74,19 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
 
       <section className="av-hero">
         <div className="av-hero-text">
-          <p className="av-hero-type">{aircraft.manufacturer} {aircraft.model}</p>
-          <h1 ref={headingRef} tabIndex={-1}>{aircraft.registration}</h1>
-          <div className="av-transfer">
+          <p className="av-hero-type">{sourceDemo ? 'Synthetic source-system demonstration' : `${aircraft.manufacturer} ${aircraft.model}`}</p>
+          <h1 ref={headingRef} tabIndex={-1}>{sourceDemo ? caseId : aircraft.registration}</h1>
+          {!sourceDemo && <div className="av-transfer">
             <span><small>From</small>{aircraft.outgoingLessee}</span>
             <svg viewBox="0 0 120 24" aria-hidden="true" preserveAspectRatio="none"><path d="M2 18 C 40 18 70 6 118 6" /></svg>
             <span><small>To</small>{aircraft.nextLessee}</span>
-          </div>
+          </div>}
           {wait && (
             <p className={`av-wait av-wait-${wait.actor} av-wait-large`}><ActorGlyph actor={wait.actor} size={14} />{wait.label}</p>
           )}
         </div>
         <div className="av-hero-art">
-          <AircraftArt category={aircraft.category} title={`${aircraft.manufacturer} ${aircraft.model} side view`} />
+          <AircraftArt category={aircraft.category} title={sourceDemo ? 'Synthetic source-system case illustration' : `${aircraft.manufacturer} ${aircraft.model} side view`} />
         </div>
         <div className="av-hero-progress" aria-label={`${passed} of ${STEPS.length} gates passed`}>
           <span className="av-hero-progress-bar"><span className={`av-progress-fill av-progress-${passed}`} /></span>
@@ -113,7 +117,10 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
             </ol>
           </nav>
 
-          <section className="av-panel" aria-labelledby="step-heading">
+          <section className="av-panel" aria-labelledby={evidenceOpen ? 'evidence-heading' : 'step-heading'}>
+            {evidenceOpen ? <ComplianceEvidence key={`${caseId}:${session.id}`} caseId={caseId} onClose={() => setEvidenceOpen(false)}
+              sourceCase={!sourceDemo && session.caseScopes.includes('case-001')
+                ? { id: 'case-001', open: () => onOpenCase('case-001') } : undefined} /> : <>
             <header className="av-panel-head">
               <div>
                 <p className="av-panel-kicker">Gate {activeIndex + 1} of {STEPS.length}</p>
@@ -129,9 +136,15 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
               <button type="button" className="av-button av-button-ghost" disabled={activeIndex === 0} onClick={() => setSelected(STEPS[activeIndex - 1].id)}>Previous gate</button>
               <button type="button" className="av-button av-button-secondary" disabled={activeIndex === STEPS.length - 1} onClick={() => setSelected(STEPS[activeIndex + 1].id)}>Next gate</button>
             </footer>
+            </>}
           </section>
 
           <div className="av-journey-side">
+          {session.role !== 'executive' && <aside className="av-activity" aria-label="Decision dossier">
+            <h2>Decision dossier</h2>
+            <p className="av-muted">Requirements, pinned record versions and recorded reviews.</p>
+            <button type="button" className="av-button av-button-secondary" onClick={() => setEvidenceOpen(true)}>Compliance evidence</button>
+          </aside>}
           {(() => {
             const brief = aiBriefFor(data.record.caseId, data.history);
             return brief && activeId !== 'investigation'
@@ -143,7 +156,7 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
             {activityFrom(data.record.audit).length === 0 ? <p className="av-muted">No activity yet. The aircraft has just arrived.</p> : (
               <ol>
                 {activityFrom(data.record.audit).map((item) => (
-                  <li key={item.key} className={`av-activity-${item.actor}`}>
+                  <li key={item.key} id={`case-activity-${item.key}`} tabIndex={-1} className={`av-activity-${item.actor}`}>
                     <span className="av-activity-dot"><ActorGlyph actor={item.actor} size={12} /></span>
                     <div>
                       <p>{item.what}</p>

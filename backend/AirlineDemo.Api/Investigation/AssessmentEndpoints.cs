@@ -1,6 +1,7 @@
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.SourceSystems;
 using AirlineDemo.Api.Requests;
 using AirlineDemo.Api.Reviews;
 
@@ -78,7 +79,7 @@ public static class AssessmentEndpoints
                 (submitted.Regime is not null && !new[] { "EU", "US", "UK" }.Contains(submitted.Regime, StringComparer.Ordinal)) ||
                 (isMissingRequirement &&
                     (string.IsNullOrWhiteSpace(submitted.RequirementId)
-                     || submitted.EvidenceRegime is not ("EASA" or "FAA-91" or "FAA-121" or "Other"))))
+                     || !ApplicabilityPayloadValidator.Regimes.Contains(submitted.EvidenceRegime, StringComparer.Ordinal))))
             {
                 return Results.BadRequest(new { error = "Assessment claim fields are invalid." });
             }
