@@ -231,3 +231,45 @@ run "app_uses_durable_sql_case_state" {
     error_message = "The app must select the SQL store rather than writing to the non-root container filesystem."
   }
 }
+
+run "evaluation_job_exists_only_with_an_evaluation_model" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_container_app_job.evaluation) == 0
+    error_message = "Without evaluation_model_name no evaluation job is created."
+  }
+}
+
+run "evaluation_job_runs_the_scored_report_with_the_app_identity" {
+  command = plan
+
+  variables {
+    evaluation_model_name    = "gpt-eval-test"
+    evaluation_model_version = "1111-11-11"
+  }
+
+  assert {
+    condition = (can(regex("(?s)resource \"azurerm_container_app_job\" \"evaluation\" \\{.*identity_ids\\s*=\\s*\\[azurerm_user_assigned_identity\\.app\\.id\\]", file("container-hosting.tf"))) &&
+      azurerm_container_app_job.evaluation[0].replica_retry_limit == 0 &&
+    azurerm_container_app_job.evaluation[0].manual_trigger_config[0].parallelism == 1)
+    error_message = "The evaluation job runs once, manually, with the app's identity."
+  }
+
+  assert {
+    condition = (strcontains(azurerm_container_app_job.evaluation[0].template[0].container[0].command[2], "--evaluate-v2") &&
+      strcontains(azurerm_container_app_job.evaluation[0].template[0].container[0].command[2], "--report \"synthetic demonstration result\"") &&
+      strcontains(azurerm_container_app_job.evaluation[0].template[0].container[0].command[2], "--arm-c-manifest /app/config/model-manifest-arm-c.json") &&
+    strcontains(azurerm_container_app_job.evaluation[0].template[0].container[0].command[2], "EVALUATION_REPORT_END"))
+    error_message = "The job runs the labelled scored report and prints it between markers."
+  }
+
+  assert {
+    condition = (toset([for e in azurerm_container_app_job.evaluation[0].template[0].container[0].env : e.name]) == toset([
+      "AZURE_CLIENT_ID", "ModelGateway__Endpoint", "ModelGateway__Audience", "ModelGateway__DeploymentName", "ModelGateway__Model",
+      "ModelGateway__ModelVersion", "Evaluation__Rates__B__InputPerMillion", "Evaluation__Rates__B__OutputPerMillion",
+      "Evaluation__Rates__C__InputPerMillion", "Evaluation__Rates__C__OutputPerMillion", "Evaluation__Rates__D__InputPerMillion",
+    "Evaluation__Rates__D__OutputPerMillion"]))
+    error_message = "The job gets only gateway settings and token rates: no SQL connection, no passcode and no seeding flags."
+  }
+}

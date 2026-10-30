@@ -26,6 +26,10 @@ if (args.Length > 0 && args[0] == AirlineDemo.Api.Evidence.PdfWorker.PdfWorkerEn
 
 var evaluationCommand = args.Length > 0 && args[0] == "--evaluate-v2";
 var builder = WebApplication.CreateBuilder(evaluationCommand ? [] : args);
+// The evaluation command writes its JSON result to stdout, so its logs go to stderr.
+if (evaluationCommand)
+    builder.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(
+        options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 builder.Services.AddHostedService<TransportSecurityStartupValidator>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddAirlineDiagnostics(builder.Configuration);
@@ -130,7 +134,7 @@ await app.Services.GetRequiredService<AircraftCasePackPublisher>().PublishAsync(
 DemoCaseSeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>());
 DemoJourneySeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>(),
     app.Services.GetRequiredService<EvidencePackageStore>());
-if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error); return; }
+if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error, rates: Program.ReadEvaluationRates(app.Configuration)); return; }
 
 app.UseTransportSecurityHeaders();
 
@@ -161,6 +165,44 @@ app.Run();
 public partial class Program
 {
 
+    /// <summary>The scored report: metrics plus a per-dispatch trace summary, without prompts, answers or document text.</summary>
+    internal static object EvaluationReport(FourArmEvaluationResult result, string label,
+        IReadOnlyDictionary<EvaluationArm, EvaluationTokenRates>? rates) => new
+    {
+        result.SuiteSha256,
+        FigureLabel = label,
+        EffectiveConfigurations = result.EffectiveConfigurations.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+        Rates = rates?.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value),
+        result.TokenUsage,
+        Scoring = EvaluationScorer.Score(result, null, label, rates),
+        Dispatches = result.Cases.SelectMany(item => item.Arms.Select(dispatch => new
+        {
+            item.CaseId,
+            item.Category,
+            Arm = dispatch.Arm.ToString(),
+            Outcome = dispatch.Failure?.ErrorType ?? "completed",
+            dispatch.ElapsedMilliseconds,
+            dispatch.InputTokens,
+            dispatch.OutputTokens,
+            ModelCalls = dispatch.ModelCalls.Count,
+            dispatch.ToolOrder,
+            dispatch.ForbiddenActionAttempts
+        }))
+    };
+
+    internal static IReadOnlyDictionary<EvaluationArm, EvaluationTokenRates>? ReadEvaluationRates(IConfiguration configuration)
+    {
+        var rates = new Dictionary<EvaluationArm, EvaluationTokenRates>();
+        foreach (var arm in new[] { EvaluationArm.B, EvaluationArm.C, EvaluationArm.D })
+        {
+            var section = configuration.GetSection($"Evaluation:Rates:{arm}");
+            if (decimal.TryParse(section["InputPerMillion"], System.Globalization.CultureInfo.InvariantCulture, out var input) &&
+                decimal.TryParse(section["OutputPerMillion"], System.Globalization.CultureInfo.InvariantCulture, out var output))
+                rates[arm] = new(input, output);
+        }
+        return rates.Count == 0 ? null : rates;
+    }
+
     internal static void RegisterProductionEvaluationExecutors(IServiceCollection services)
     {
         foreach (var arm in Enum.GetValues<EvaluationArm>())
@@ -185,19 +227,24 @@ public partial class Program
     }
 
     internal static async Task<int> RunEvaluationCommandAsync(
-        string[] args, FourArmEvaluationRunner runner, TextWriter output, TextWriter error, CancellationToken cancellationToken = default)
+        string[] args, FourArmEvaluationRunner runner, TextWriter output, TextWriter error, CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<EvaluationArm, EvaluationTokenRates>? rates = null)
     {
         try
         {
-            if (args.Length != 8) throw new EvaluationInputException("four explicit suite and arm inputs are required");
+            if (args.Length is not (8 or 10)) throw new EvaluationInputException("four explicit suite and arm inputs are required");
             var values = args.Chunk(2).ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
-            if (!values.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(
-                    ["--suite-manifest", "--cases", "--arm-b-manifest", "--arm-c-manifest"]) ||
+            string[] required = ["--suite-manifest", "--cases", "--arm-b-manifest", "--arm-c-manifest"];
+            if (!values.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(args.Length == 8 ? required : [.. required, "--report"]) ||
                 values.Values.Any(string.IsNullOrWhiteSpace))
                 throw new EvaluationInputException("evaluation arguments are invalid");
+            if (values.TryGetValue("--report", out var reportLabel) && !EvaluationScorer.FigureLabels.Contains(reportLabel, StringComparer.Ordinal))
+                throw new EvaluationInputException("evaluation report label is not an allowed figure label");
             var options = new EvaluationRunOptions(values["--suite-manifest"], values["--cases"], values["--arm-b-manifest"], values["--arm-c-manifest"]);
             var result = await runner.RunAsync(options, cancellationToken);
-            await output.WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(result));
+            await output.WriteLineAsync(reportLabel is null
+                ? System.Text.Json.JsonSerializer.Serialize(result)
+                : System.Text.Json.JsonSerializer.Serialize(EvaluationReport(result, reportLabel, rates)));
             return 0;
         }
         catch (Exception ex) when (ex is EvaluationInputException or AirlineDemo.Api.Investigation.ModelGateException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException or ArgumentException)

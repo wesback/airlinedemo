@@ -81,6 +81,7 @@ public sealed class FourArmEvaluationRunnerTests
         public int AgentFinalCalls { get; private set; }
         public int DirectCalls { get; private set; }
         public List<string[]> DeclaredToolSets { get; } = [];
+        public List<string> Prompts { get; } = [];
         public ChatClientMetadata Metadata { get; } = new("bounded-agent-test");
 
         public Task<ChatResponse> GetResponseAsync(
@@ -88,6 +89,7 @@ public sealed class FourArmEvaluationRunnerTests
         {
             Calls++;
             var request = messages.ToList();
+            Prompts.AddRange(request.Select(message => message.Text));
             if (request.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Any())
             {
                 ToolResults++;
@@ -402,6 +404,52 @@ public sealed class FourArmEvaluationRunnerTests
             .GetProperty("ModelCalls")[0].GetProperty("Response").GetString());
         Assert.Equal(1, result.RootElement.GetProperty("Cases")[0].GetProperty("Arms")[3]
             .GetProperty("ModelCalls").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Report_mode_scores_the_run_and_sends_claims_without_their_labels()
+    {
+        using var files = new Inputs();
+        var chat = new BoundedAgentChatClient();
+        var services = new ServiceCollection();
+        services.AddSingleton<Func<ApprovedModelManifest, IChatClient>>(_ => _ => chat);
+        Program.RegisterProductionEvaluationExecutors(services);
+        services.AddTransient<FourArmEvaluationRunner>();
+        using var provider = services.BuildServiceProvider();
+        var output = new StringWriter();
+        var error = new StringWriter();
+        string[] args = [.. Args(files.Options), "--report", "synthetic demonstration result"];
+
+        Assert.Equal(0, await Program.RunEvaluationCommandAsync(args, provider.GetRequiredService<FourArmEvaluationRunner>(),
+            output, error, TestContext.Current.CancellationToken));
+        Assert.Empty(error.ToString());
+        var userPrompts = chat.Prompts.Where(prompt => prompt.Contains("Claims to verify:", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(200, userPrompts.Length);
+        foreach (var hidden in new[] { "supportLabel", "expectedResult", "expectedState", "annotations", "\"unsupported\"", "\"contradicted\"" })
+            Assert.All(userPrompts, prompt => Assert.DoesNotContain(hidden, prompt, StringComparison.Ordinal));
+
+        var text = output.ToString();
+        foreach (var leaked in new[] { "bounded-answer", "production-answer", "Claims to verify", "pageText", "Prompt" })
+            Assert.DoesNotContain(leaked, text, StringComparison.Ordinal);
+        using var report = JsonDocument.Parse(text);
+        var root = report.RootElement;
+        Assert.Equal("synthetic demonstration result", root.GetProperty("FigureLabel").GetString());
+        Assert.Equal(160, root.GetProperty("Dispatches").GetArrayLength());
+        Assert.Equal(40, root.GetProperty("Dispatches").EnumerateArray().Count(dispatch =>
+            dispatch.GetProperty("Arm").GetString() == "A" && dispatch.GetProperty("Outcome").GetString() == "completed"));
+        var rulesArm = root.GetProperty("Scoring").GetProperty("Arms")[0];
+        Assert.Equal("A", rulesArm.GetProperty("Arm").GetString());
+        Assert.Equal(1m, rulesArm.GetProperty("Metrics").GetProperty("citationExistenceRate").GetProperty("Value").GetProperty("Value").GetDecimal());
+        Assert.Equal(1m, rulesArm.GetProperty("Metrics").GetProperty("blockedVsMissingCorrectness").GetProperty("Value").GetProperty("Value").GetDecimal());
+        var agentDispatch = root.GetProperty("Dispatches")[1];
+        Assert.Equal(("B", "completed", 2), (agentDispatch.GetProperty("Arm").GetString(), agentDispatch.GetProperty("Outcome").GetString(),
+            agentDispatch.GetProperty("ModelCalls").GetInt32()));
+        Assert.Equal(["evaluation_get_case_overview"], agentDispatch.GetProperty("ToolOrder").EnumerateArray().Select(tool => tool.GetString()));
+
+        var rejected = new StringWriter();
+        Assert.Equal(2, await Program.RunEvaluationCommandAsync([.. Args(files.Options), "--report", "measured"],
+            provider.GetRequiredService<FourArmEvaluationRunner>(), new StringWriter(), rejected, TestContext.Current.CancellationToken));
+        Assert.Equal("evaluation rejected: EvaluationInputException", rejected.ToString().Trim());
     }
 
     [Fact]

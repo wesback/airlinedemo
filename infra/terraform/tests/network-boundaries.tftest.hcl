@@ -504,3 +504,44 @@ run "rejects_invalid_gateway_audience" {
   variables { gateway_audience = "bad value" }
   expect_failures = [var.gateway_audience]
 }
+
+run "gateway_admits_the_evaluation_model_only_when_configured" {
+  command = plan
+
+  override_resource {
+    target          = azuread_application.gateway
+    override_during = plan
+    values = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+
+  assert {
+    condition     = strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "return model != \"gpt-demo-test\";")
+    error_message = "Without an evaluation model the gateway admits only the app's deployment."
+  }
+}
+
+run "gateway_admits_both_models_with_an_evaluation_model" {
+  command = plan
+
+  override_resource {
+    target          = azuread_application.gateway
+    override_during = plan
+    values = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+
+  variables {
+    evaluation_model_name    = "gpt-eval-test"
+    evaluation_model_version = "1111-11-11"
+  }
+
+  assert {
+    condition     = strcontains(azurerm_api_management_api_operation_policy.gateway_chat_completions.xml_content, "return model != \"gpt-demo-test\" && model != \"gpt-eval-test\";")
+    error_message = "With an evaluation model the gateway admits exactly the app's and the evaluation deployment."
+  }
+}

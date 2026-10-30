@@ -186,3 +186,133 @@ resource "azurerm_container_app" "app" {
     azurerm_private_dns_zone_virtual_network_link.demo,
   ]
 }
+
+# The frozen four-arm evaluation (DD-044) runs on demand with the app's image and identity, never inside the web app.
+# The environment keeps no console logs, so the job prints the report as gzip+base64 lines between markers and
+# then stays alive for an hour so an operator can read it from the log stream. Start it with the released digest:
+#   az containerapp job start -g <rg> -n <job> --image <registry>/airline-api@<digest> --container-name evaluation
+locals {
+  evaluation_job_name = "caj-${local.name_prefix}-eval"
+  evaluation_command  = <<-SH
+    dotnet AirlineDemo.Api.dll --evaluate-v2 \
+      --suite-manifest /app/evaluation/v2/manifest.json --cases /app/evaluation/v2/cases.jsonl \
+      --arm-b-manifest /app/config/model-manifest.json --arm-c-manifest /app/config/model-manifest-arm-c.json \
+      --report "synthetic demonstration result" > /tmp/evaluation-report.json
+    echo "EVALUATION_EXIT=$?"
+    echo "EVALUATION_REPORT_BEGIN"
+    gzip -c /tmp/evaluation-report.json | base64 | tr -d '\n' | fold -w 1000
+    echo
+    echo "EVALUATION_REPORT_END"
+    sleep 3600
+  SH
+}
+
+resource "azurerm_container_app_job" "evaluation" {
+  count                        = local.deploy_application && var.evaluation_model_name != null ? 1 : 0
+  name                         = local.evaluation_job_name
+  location                     = azurerm_resource_group.demo.location
+  resource_group_name          = azurerm_resource_group.demo.name
+  container_app_environment_id = azurerm_container_app_environment.demo.id
+  workload_profile_name        = "Consumption"
+  replica_timeout_in_seconds   = 14400
+  replica_retry_limit          = 0
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.acr.login_server
+    identity = azurerm_user_assigned_identity.app.id
+  }
+
+  template {
+    container {
+      name    = "evaluation"
+      image   = "${azurerm_container_registry.acr.login_server}/airline-api@${var.image_digest}"
+      cpu     = 0.5
+      memory  = "1Gi"
+      command = ["/bin/sh", "-c", local.evaluation_command]
+
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.app.client_id
+      }
+
+      env {
+        name  = "ModelGateway__Endpoint"
+        value = local.model_endpoint
+      }
+
+      env {
+        name  = "ModelGateway__Audience"
+        value = local.gateway_audience
+      }
+
+      env {
+        name  = "ModelGateway__DeploymentName"
+        value = local.gateway_model_deployment
+      }
+
+      env {
+        name  = "ModelGateway__Model"
+        value = var.model_name
+      }
+
+      env {
+        name  = "ModelGateway__ModelVersion"
+        value = var.model_version
+      }
+
+      # Azure retail prices, USD per million uncached tokens, GlobalStandard in swedencentral (gpt-6-luna for B and D,
+      # gpt-6-sol for C). Cached-input discounts are not applied, so reported costs are an upper bound.
+      env {
+        name  = "Evaluation__Rates__B__InputPerMillion"
+        value = "0.10"
+      }
+
+      env {
+        name  = "Evaluation__Rates__B__OutputPerMillion"
+        value = "0.50"
+      }
+
+      env {
+        name  = "Evaluation__Rates__C__InputPerMillion"
+        value = "2.00"
+      }
+
+      env {
+        name  = "Evaluation__Rates__C__OutputPerMillion"
+        value = "10.00"
+      }
+
+      env {
+        name  = "Evaluation__Rates__D__InputPerMillion"
+        value = "0.10"
+      }
+
+      env {
+        name  = "Evaluation__Rates__D__OutputPerMillion"
+        value = "0.50"
+      }
+    }
+  }
+
+  # Each run is started with the released digest (az containerapp job start --image); Terraform sets only the first one.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
+  depends_on = [
+    azurerm_role_assignment.app_acr_pull,
+    azurerm_private_endpoint.demo,
+    azurerm_private_dns_zone_virtual_network_link.demo,
+    azurerm_cognitive_deployment.evaluation,
+  ]
+}
