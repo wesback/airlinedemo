@@ -231,7 +231,8 @@ public static class EvidenceEndpoints
                 "The AI agent's answer failed the citation check (every finding must quote its source page verbatim), so it was discarded. The package goes to a technical reviewer without AI findings.",
                 []);
         }
-        catch (Exception ex) when (ModelFailureDetail.IsModelServiceFailure(ex, ct))
+        catch (Exception ex) when (ModelFailureDetail.IsModelServiceFailure(ex, ct)
+            || (!ct.IsCancellationRequested && ex is InvestigationLimitExceededException { Breach: InvestigationBreach.Retries }))
         {
             Log(services, "Records investigation model call failed for {CaseId}: {Reason}", caseId, ModelFailureDetail.Describe(ex));
             return new InvestigationHandover("escalated",
