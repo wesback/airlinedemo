@@ -403,7 +403,10 @@ public sealed class BoundedInvestigator(
             }
         }
 
-        private static bool IsTransient(Exception ex) => ex is HttpRequestException or TimeoutException;
+        private static bool IsTransient(Exception ex) =>
+            ex is HttpRequestException or TimeoutException ||
+            ex is System.ClientModel.ClientResultException { Status: 408 or 429 } ||
+            ex is System.ClientModel.ClientResultException { Status: >= 500 and <= 599 };
 
         private static long EstimateInputBytes(IEnumerable<ChatMessage> request, ChatOptions? options) =>
             request.Sum(message => message.Contents.Sum(content => content is TextContent text

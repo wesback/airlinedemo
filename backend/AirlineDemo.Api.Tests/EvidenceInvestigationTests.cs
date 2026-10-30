@@ -632,6 +632,34 @@ public sealed class EvidenceInvestigationTests : IDisposable
     }
 
     [Fact]
+    public async Task ExhaustedModelRetriesEscalateToTechnicalReviewInsteadOfFailingTheUpload()
+    {
+        var model = new UnreachableModelClient();
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        using var response = await PostDemoPackageAsync(client, presenter, "case-001");
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        Assert.Equal(3, model.Calls);
+
+        var store = new CaseStateStore(_statePath);
+        var state = store.Read(ScopeFor(store));
+        Assert.Equal(["package-received", "investigation-escalated"], state.JourneyEvents!.Select(e => e.EventType));
+        Assert.Equal("The AI agent could not reach the model service, so no findings were produced. The package goes to a technical reviewer, who checks the records manually.",
+            state.JourneyEvents[1].Summary);
+        var item = Assert.Single(state.WorkItems!);
+        Assert.Equal(("review-case-001", "open", "technical-reviewer"), (item.ItemId, item.State, item.Owner));
+        Assert.Equal("escalated", store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId)!.Outcome);
+
+        using var repeat = await PostDemoPackageAsync(client, presenter, "case-001");
+        Assert.Equal(HttpStatusCode.OK, repeat.StatusCode);
+        Assert.Equal(3, model.Calls);
+        Assert.Equal(state.Revision, new CaseStateStore(_statePath).Read(ScopeFor(store)).Revision);
+    }
+
+    [Fact]
     public async Task UnregisteredDocumentIsPinnedButNeverSentToTheModel()
     {
         var model = new CountingChatClient();
@@ -664,6 +692,24 @@ public sealed class EvidenceInvestigationTests : IDisposable
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
+        public void Dispose() { }
+    }
+
+    private sealed class UnreachableModelClient : IChatClient
+    {
+        public int Calls { get; private set; }
+        public ChatClientMetadata Metadata { get; } = new("unreachable");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new HttpRequestException("model service unavailable");
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
     }
 
