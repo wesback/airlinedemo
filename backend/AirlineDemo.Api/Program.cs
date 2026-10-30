@@ -134,6 +134,13 @@ await app.Services.GetRequiredService<AircraftCasePackPublisher>().PublishAsync(
 DemoCaseSeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>());
 DemoJourneySeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>(),
     app.Services.GetRequiredService<EvidencePackageStore>());
+await DemoJourneySeeder.SeedSourceEvidenceAsync(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>(),
+    caseId => EvidenceIntake.GatherSourceBasisAsync(caseId,
+        app.Services.GetRequiredService<ISourceSystem<TechnicalPayload>>(),
+        app.Services.GetRequiredService<ISourceSystem<MaintenancePayload>>(),
+        app.Services.GetRequiredService<ISourceSystem<FinancePayload>>(),
+        app.Services.GetRequiredService<ISourceSystem<RecordsPayload>>(),
+        app.Services.GetRequiredService<ISourceSystem<ContractsPayload>>()));
 if (evaluationCommand) { Environment.ExitCode = await RunEvaluationCommandAsync(args[1..], app.Services.GetRequiredService<FourArmEvaluationRunner>(), Console.Out, Console.Error, rates: Program.ReadEvaluationRates(app.Configuration)); return; }
 
 app.UseTransportSecurityHeaders();
@@ -147,6 +154,7 @@ app.MapWorkspaceEndpoints();
 app.MapReadinessSummaryEndpoints();
 app.MapTechnicalReviewEndpoints();
 app.MapDecisionDossierEndpoints();
+app.MapComplianceEvidenceEndpoints();
 app.MapEvidenceEndpoints();
 app.MapAssessmentEndpoints();
 app.MapMockResponseEndpoints();

@@ -53,6 +53,49 @@ beforeEach(() => { window.history.replaceState({}, '', '/'); window.localStorage
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('journey app', () => {
+  it('opens the read-only compliance view from the case decision dossier', async () => {
+    stubApi({
+      'GET /api/v1/cases/cp-case-c/compliance-evidence': () => json({
+        basisVersion: 1, currentBasis: true, applicabilityAccess: 'permitted', regimes: [], untagged: [],
+        basisDecision: null, decisions: [],
+        responsibilities: { platform: ['Access control', 'Audit trail', 'Pinned evidence'], customer: ['Review evidence and record decisions'], limitation: 'Evidence only.' },
+      }),
+    });
+    window.history.replaceState({}, '', '/cases/cp-case-c');
+    render(<App />);
+    await signInAs('Riley Reviewer');
+    fireEvent.click(within(await screen.findByRole('complementary', { name: 'Decision dossier' })).getByRole('button', { name: 'Compliance evidence' }));
+    expect(await screen.findByRole('heading', { name: 'Compliance evidence', level: 2 })).toBeTruthy();
+    expect(await screen.findByText('No permitted, tagged regimes are recorded on this basis. Needs review.')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Open source-system case' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to journey' }));
+    expect(await screen.findByRole('heading', { name: 'Technical review', level: 2 })).toBeTruthy();
+  });
+
+  it('navigates an authorized presenter to a separate source case without labelling it as a pool aircraft', async () => {
+    const emptyEvidence = { basisVersion: 1, currentBasis: true, applicabilityAccess: 'permitted', regimes: [], untagged: [],
+      basisDecision: null, decisions: [], responsibilities: { platform: [], customer: [], limitation: 'Evidence only.' } };
+    stubApi({
+      'GET /api/auth/users': () => json([{ id: 'presenter', displayName: 'Pat Presenter', role: 'presenter' }]),
+      'POST /api/auth/sign-in': () => json({ ...reviewer, id: 'presenter', role: 'presenter', caseScopes: ['cp-case-c', 'case-001'] }),
+      'GET /api/v1/cases/cp-case-c/compliance-evidence': () => json(emptyEvidence),
+      'GET /api/cases/case-001': () => json({ caseId: 'case-001', revision: 1, basis: [{ version: 1 }], audit: [] }),
+      'GET /api/v1/cases/case-001/compliance-evidence': () => json(emptyEvidence),
+    });
+    window.history.replaceState({}, '', '/cases/cp-case-c');
+    render(<App />);
+    await signInAs('Pat Presenter');
+    fireEvent.click(within(await screen.findByRole('complementary', { name: 'Decision dossier' })).getByRole('button', { name: 'Compliance evidence' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Open source-system case' }));
+    expect(await screen.findByRole('heading', { name: 'case-001', level: 1 })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-001');
+    expect(screen.getByText('Synthetic source-system demonstration')).toBeTruthy();
+    fireEvent.click(within(await screen.findByRole('complementary', { name: 'Decision dossier' })).getByRole('button', { name: 'Compliance evidence' }));
+    expect(await screen.findByText('No permitted, tagged regimes are recorded on this basis. Needs review.')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Open source-system case' })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/v1/cases/case-001/compliance-evidence')).toBe(true);
+  });
+
   it('signs in and shows the aircraft at its gate with the human waiting state', async () => {
     stubApi();
     render(<App />);

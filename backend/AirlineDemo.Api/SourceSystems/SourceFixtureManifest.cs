@@ -8,7 +8,7 @@ public sealed record SourceFixtureManifest
 {
     public const string SupportedSchemaVersion = "1";
 
-    public const string SupportedSourceFixtureVersion = "2026.10.1";
+    public const string SupportedSourceFixtureVersion = "2026.10.2";
 
     public static readonly IReadOnlyList<string> RequiredSources =
         ["technical", "maintenance", "finance", "records", "contracts"];
@@ -42,9 +42,9 @@ public sealed record SourceFixtureManifest
         {
             problems.Add("sourceFixtureVersion is required.");
         }
-        else if (SourceFixtureVersion != SupportedSourceFixtureVersion)
+        else if (SourceFixtureVersion is not ("2026.10.1" or SupportedSourceFixtureVersion))
         {
-            problems.Add($"sourceFixtureVersion '{SourceFixtureVersion}' is not supported; expected '{SupportedSourceFixtureVersion}'.");
+            problems.Add($"sourceFixtureVersion '{SourceFixtureVersion}' is not supported; expected '2026.10.1' or '{SupportedSourceFixtureVersion}'.");
         }
 
         if (!DateOnly.TryParseExact(ScenarioDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))

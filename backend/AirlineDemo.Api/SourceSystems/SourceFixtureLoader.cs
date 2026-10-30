@@ -62,7 +62,7 @@ public static class SourceFixtureLoader
 
     // Release-controlled SubjectPublicKeyInfo (DER, base64) of the fixture signing key. Its private key stays outside the repository.
     private const string PinnedPublicKeySpkiBase64 =
-        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzFuUnBD24ALV/VuFsjhHG6oxPSdSziOR+ZGa5CTrGvbzWtmf9Hmm4Q4UTXGWNrxsSlaUNeZjZ42fh5cB8SwgMEqpo7VXQW63ncSXJS5gTksxHedHApQ7IcTju48kbpmu6fl4i6zhMDgZxfjrRBRflHMtyd2Rb+bQNaMGgLm9fjGd7TmwrDlq6kkCHykYzROoSxIAuUsr5yBG8bsWz1wHpdrdzL2t3o3jH/SZHyRVDgTN8Ug2FkEUUYqhbVcobdQK5z/xHh7R5J1PBzSm8Igjwnghamj/OH4ThqblOuhvAbjdTyR28qncaVuu9Z/FRaseqkWTuuTAFcQaRW+u7LQUXwIDAQAB";
+        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxFgH5+yCDqhYsdB8pcJ2oEsYD+o+J3OrXPmaD9NOEEuNxgCf5rjZjyb1usKV9nnpdBpPfkjLn7baD5qmzNFkrjQqB1tR/rykUzGg0nRotAj70B4HGLPwXwQ/squ0bavWbP53OBHIPH0t6n7xREKJV5RKV/0vMuwQAV7yypRO7Ti5Q8PqxOd4W7JEZr4BQnr1trbxwLUHAd1p7J0iZ56Neq0FIANm17e4nD2tU/mX9zc6CvT5inxQ+37dO/KtYz7zEEPYIhY98YpoHhT7HlJKFJh3HQzWTBXF/vAzgEyeIDFX2bUNxylQjDj/txWbcnN4V4DXub/SUWQ90Lo4L85jgQIDAQAB";
 
     private static readonly JsonSerializerOptions ManifestOptions = new() { PropertyNameCaseInsensitive = true };
 

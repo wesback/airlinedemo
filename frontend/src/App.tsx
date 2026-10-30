@@ -110,6 +110,7 @@ function SignedInShell({ session, route, navigate, notice, onSwitchPersona, onSi
       )}
       {route.view === 'case' && (
         <CaseJourney session={session} caseId={route.caseId} onBack={() => navigate({ view: 'board' })}
+          onOpenCase={(caseId) => navigate({ view: 'case', caseId })}
           onSwitchPersona={onSwitchPersona} onChanged={() => void fleet.reload()} />
       )}
       {route.view === 'hangar' && (

@@ -90,7 +90,7 @@ public sealed class DecisionDossierService(ICaseStateStore store, TimeProvider t
         basis = versions[version - 1];
         return true;
     }
-    private static bool ValidBasisDigest(IReadOnlyList<BasisVersion> versions, BasisVersion basis)
+    internal static bool ValidBasisDigest(IReadOnlyList<BasisVersion> versions, BasisVersion basis)
     {
         var contentDigest = Digest(basis.Content).ToUpperInvariant();
         var previous = basis.Version == 1 ? string.Empty : versions[basis.Version - 2].BasisDigest;

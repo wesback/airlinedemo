@@ -257,7 +257,7 @@ public sealed class ContractsSource : ISourceSystem<ContractsPayload>
     internal static readonly SourceFixtureManifest CoreManifest = new()
     {
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
-        SourceFixtureVersion = "2026.10.1",
+        SourceFixtureVersion = SourceFixtureManifest.SupportedSourceFixtureVersion,
         ScenarioDate = "2026-10-01",
         Sha256 = "b3e7cbc75cb162baba2df9afd754110450e86929bbcac4244e8f09c38835f981",
         RecordCounts = new Dictionary<string, int>

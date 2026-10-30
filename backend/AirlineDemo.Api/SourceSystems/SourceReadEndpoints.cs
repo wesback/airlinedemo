@@ -126,7 +126,7 @@ public static class SourceReadEndpoints
             await budget.ReleaseAsync(leaseId.Value, time.GetUtcNow());
         }
     }
-    private static bool Allowed(string role, string sourceId) => role switch
+    internal static bool Allowed(string role, string sourceId) => role switch
     {
         "technical-reviewer" => sourceId is "technical" or "maintenance" or "records",
         "finance-reviewer" => sourceId is "technical" or "finance",

@@ -222,6 +222,8 @@ public sealed record TechnicalPayload(IReadOnlyDictionary<string, string> Fields
 public static class ApplicabilityPayloadValidator
 {
     private static readonly string[] AllowedFields = ["requirementId", "regime", "responsibleParty"];
+    public static IReadOnlyList<string> Regimes { get; } = Array.AsReadOnly(new[]
+        { "EASA", "FAA-91", "FAA-121", "Other", "Cape Town", "GDPR", "IFRS 16", "EU sanctions", "US sanctions", "UK sanctions" });
 
     public static IReadOnlyList<string> Validate<TValue>(IReadOnlyDictionary<string, TValue>? fields)
     {
@@ -241,9 +243,9 @@ public static class ApplicabilityPayloadValidator
         }
 
         if (fields.TryGetValue("regime", out var regime)
-            && regime is not ("EASA" or "FAA-91" or "FAA-121" or "Other"))
+            && (regime is not string value || !Regimes.Contains(value, StringComparer.Ordinal)))
         {
-            problems.Add("Applicability regime must be EASA, FAA-91, FAA-121 or Other.");
+            problems.Add("Applicability regime is not supported.");
         }
 
         if (fields.TryGetValue("responsibleParty", out var responsibleParty)
@@ -280,12 +282,12 @@ public sealed class TechnicalSource()
     internal static readonly SourceFixtureManifest CoreManifest = new()
     {
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
-        SourceFixtureVersion = "2026.10.1",
+        SourceFixtureVersion = SourceFixtureManifest.SupportedSourceFixtureVersion,
         ScenarioDate = "2026-10-01",
-        Sha256 = "6ab94417003ffcf678ff6a15684c656ded931ffe37d773122952c60314eef744",
+        Sha256 = "766a833cbba7fca3f454f33a0de111d5b7d38729ed3097037ae7b75f4182b0dc",
         RecordCounts = new Dictionary<string, int>
         {
-            ["technical"] = 13,
+            ["technical"] = 19,
             ["maintenance"] = 0,
             ["finance"] = 0,
             ["records"] = 0,

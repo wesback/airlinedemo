@@ -59,6 +59,12 @@ public sealed class TechnicalFinanceSourceTests
                 ("tech-utilization-2026-08", 1, "case-001", "utilization", new DateOnly(2026, 8, 31), true),
                 ("tech-utilization-2026-09", 1, "case-001", "utilization", new DateOnly(2026, 9, 30), true),
                 ("tech-applicability-001", 1, "case-001", "applicability", new DateOnly(2026, 10, 1), false),
+                ("tech-app-cape-town-001", 1, "case-001", "applicability", new DateOnly(2026, 10, 1), false),
+                ("tech-app-gdpr-001", 1, "case-001", "applicability", new DateOnly(2026, 10, 1), false),
+                ("tech-app-ifrs16-001", 1, "case-001", "applicability", new DateOnly(2026, 10, 1), false),
+                ("tech-app-sanctions-eu-001", 1, "case-001", "applicability", new DateOnly(2026, 10, 1), false),
+                ("tech-app-sanctions-us-001", 1, "case-001", "applicability", new DateOnly(2026, 10, 1), false),
+                ("tech-app-sanctions-uk-001", 1, "case-001", "applicability", new DateOnly(2026, 10, 1), false),
             },
             technicalRecords.Select(r => (r.RecordId, r.RecordVersion, r.CaseId, r.Kind, r.AsOf, r.Stale)).ToArray());
         Assert.All(technicalRecords, r => Assert.Equal("technical", r.SourceId));
@@ -70,6 +76,12 @@ public sealed class TechnicalFinanceSourceTests
                 "cycles=151;hours=198.0;periodEnd=2026-08-31;periodStart=2026-08-01",
                 "cycles=164;hours=212.5;periodEnd=2026-09-30;periodStart=2026-09-01",
                 "regime=EASA;requirementId=SYN-AD-2026-014;responsibleParty=lessee-operator",
+                "regime=Cape Town;requirementId=REQ-CAPE-TOWN;responsibleParty=unassigned",
+                "regime=GDPR;requirementId=REQ-GDPR;responsibleParty=unassigned",
+                "regime=IFRS 16;requirementId=REQ-IFRS16;responsibleParty=unassigned",
+                "regime=EU sanctions;requirementId=REQ-SANCTIONS-EU;responsibleParty=unassigned",
+                "regime=US sanctions;requirementId=REQ-SANCTIONS-US;responsibleParty=unassigned",
+                "regime=UK sanctions;requirementId=REQ-SANCTIONS-UK;responsibleParty=unassigned",
             },
             technicalRecords.Select(r => Flatten(r.Payload.Fields)).ToArray());
 
@@ -230,7 +242,7 @@ public sealed class TechnicalFinanceSourceTests
                 fields => new TechnicalPayload(fields)));
 
         Assert.Equal(
-            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' has 13 records; manifest declares 12.",
+            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' has 19 records; manifest declares 12.",
             error.Message);
     }
 

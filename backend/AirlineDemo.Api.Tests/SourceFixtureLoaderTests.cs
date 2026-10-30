@@ -39,6 +39,9 @@ public sealed class SourceFixtureLoaderTests
         Assert.Equal(ValidDigest, manifest.Sha256);
         Assert.Equal(4, manifest.RecordCounts["technical"]);
         Assert.Empty(manifest.Validate());
+        Assert.Empty((manifest with { SourceFixtureVersion = "2026.10.2" }).Validate());
+        Assert.Equal(["sourceFixtureVersion '2026.10.3' is not supported; expected '2026.10.1' or '2026.10.2'."],
+            (manifest with { SourceFixtureVersion = "2026.10.3" }).Validate());
     }
 
     // AC-004: unsupported schema version, invalid scenario date, malformed digest and a missing source count are rejected.
@@ -349,7 +352,7 @@ public sealed class SourceFixtureLoaderTests
         int recordCount)
     {
         Assert.Equal("1", manifest.SchemaVersion);
-        Assert.Equal("2026.10.1", manifest.SourceFixtureVersion);
+        Assert.Equal("2026.10.2", manifest.SourceFixtureVersion);
         Assert.Equal("2026-10-01", manifest.ScenarioDate);
         Assert.Equal(digest, manifest.Sha256);
         Assert.Equal(recordCount, manifest.RecordCounts[source]);
@@ -358,7 +361,7 @@ public sealed class SourceFixtureLoaderTests
     private static void AssertManifestMetadata(JsonElement manifest, string source, string digest, int recordCount)
     {
         Assert.Equal("1", manifest.GetProperty("schemaVersion").GetString());
-        Assert.Equal("2026.10.1", manifest.GetProperty("sourceFixtureVersion").GetString());
+        Assert.Equal("2026.10.2", manifest.GetProperty("sourceFixtureVersion").GetString());
         Assert.Equal("2026-10-01", manifest.GetProperty("scenarioDate").GetString());
         Assert.Equal(digest, manifest.GetProperty("sha256").GetString());
         Assert.Equal(recordCount, manifest.GetProperty("recordCounts").GetProperty(source).GetInt32());
