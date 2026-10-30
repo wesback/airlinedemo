@@ -44,7 +44,7 @@ resource "azurerm_role_assignment" "app_telemetry" {
 
 # Data-plane SQL contract for the app identity. ARM cannot grant SQL database permissions, so the exact
 # T-SQL is exported as output `app_sql_grant_statements` for the migration identity to run.
-# Audit tables are append-only for the app: GRANT SELECT/INSERT only, UPDATE/DELETE/ALTER/CONTROL denied.
+# Audit tables are append-only: deny mutation, not CONTROL (which also denies SELECT/INSERT).
 locals {
   app_sql_grants = {
     operational = ["SELECT", "INSERT", "UPDATE"]
@@ -52,7 +52,11 @@ locals {
     audit       = ["SELECT", "INSERT"]
   }
   # Case tables the app may read and write. The SQL adapter story (#179) owns the schema and keeps this list in step.
-  app_case_tables = ["cases", "case_documents", "case_decisions"]
+  app_case_tables = ["cases", "case_documents", "case_decisions", "case_work_items", "case_pack_request_windows"]
+  app_append_only_tables = [
+    "investigation_traces", "investigation_trace_steps", "case_assessments",
+    "case_request_receipts", "case_journey_events", "case_pack_reset_receipts",
+  ]
   # Shared ledger keeps source-read limits atomic across app instances.
   app_source_read_table = "dbo.source_read_windows"
   # The one audit table the app may append to and read. Never the whole audit schema.
@@ -61,9 +65,11 @@ locals {
   app_sql_grant_statements = concat(
     ["IF DATABASE_PRINCIPAL_ID('${local.app_sql_user}') IS NULL CREATE USER [${local.app_sql_user}] FROM EXTERNAL PROVIDER;"],
     flatten([for t in local.app_case_tables : [for p in local.app_sql_grants.operational : "GRANT ${p} ON OBJECT::dbo.${t} TO [${local.app_sql_user}];"]]),
+    flatten([for t in local.app_append_only_tables : [for p in local.app_sql_grants.audit : "GRANT ${p} ON OBJECT::dbo.${t} TO [${local.app_sql_user}];"]]),
     [for p in local.app_sql_grants.source_read : "GRANT ${p} ON OBJECT::${local.app_source_read_table} TO [${local.app_sql_user}];"],
+    ["REVOKE CONTROL ON OBJECT::${local.app_audit_table} FROM [${local.app_sql_user}];"],
     [for p in local.app_sql_grants.audit : "GRANT ${p} ON OBJECT::${local.app_audit_table} TO [${local.app_sql_user}];"],
-    [for p in ["UPDATE", "DELETE", "ALTER", "CONTROL"] : "DENY ${p} ON OBJECT::${local.app_audit_table} TO [${local.app_sql_user}];"],
+    [for p in ["UPDATE", "DELETE", "ALTER"] : "DENY ${p} ON OBJECT::${local.app_audit_table} TO [${local.app_sql_user}];"],
     ["DENY ALTER ON SCHEMA::dbo TO [${local.app_sql_user}];"],
   )
 }
@@ -82,6 +88,8 @@ locals {
     "IF DATABASE_PRINCIPAL_ID('${local.migration_sql_user}') IS NULL CREATE USER [${local.migration_sql_user}] FROM EXTERNAL PROVIDER;",
     "GRANT ALTER ON SCHEMA::dbo TO [${local.migration_sql_user}];",
     "GRANT ALTER ON SCHEMA::audit TO [${local.migration_sql_user}];",
+    "GRANT CREATE TABLE TO [${local.migration_sql_user}];",
+    "GRANT SELECT, INSERT ON OBJECT::dbo.__EFMigrationsHistory TO [${local.migration_sql_user}];",
   ]
 }
 

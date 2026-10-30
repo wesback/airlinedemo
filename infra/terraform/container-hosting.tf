@@ -122,6 +122,11 @@ resource "azurerm_container_app" "app" {
       }
 
       env {
+        name  = "Persistence__CaseStateProvider"
+        value = "Sql"
+      }
+
+      env {
         name  = "ConnectionStrings__CaseState"
         value = "Server=tcp:${local.sql_server_name}.database.windows.net,1433;Database=${local.sql_database_name};Authentication=Active Directory Managed Identity;User Id=${azurerm_user_assigned_identity.app.client_id};Encrypt=True;TrustServerCertificate=False;"
       }

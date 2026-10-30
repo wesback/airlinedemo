@@ -228,6 +228,44 @@ public sealed class SqlCaseStateStoreTests
         Assert.Contains("AddCaseStateStore(builder.Configuration)", program);
     }
 
+    [Theory]
+    [InlineData("User Id")]
+    [InlineData("UID")]
+    [InlineData("User")]
+    public void Runtime_registration_accepts_user_assigned_managed_identity_client_id(string key)
+    {
+        const string clientId = "18cb6492-bde1-400e-8d46-60a58e9927de";
+        var connectionString = $"Server=tcp:case-state.database.windows.net,1433;Database=casestate;Encrypt=True;Authentication=Active Directory Managed Identity;{key}={clientId};";
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Persistence:CaseStateProvider"] = "Sql",
+            ["ConnectionStrings:CaseState"] = connectionString,
+        }).Build();
+        var services = new ServiceCollection().AddCaseStateStore(configuration);
+        using var provider = services.BuildServiceProvider();
+        Assert.IsType<SqlCaseStateStore>(provider.GetRequiredService<ICaseStateStore>());
+        var parsed = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
+        Assert.Equal(clientId, parsed.UserID);
+        Assert.Equal(Microsoft.Data.SqlClient.SqlAuthenticationMethod.ActiveDirectoryManagedIdentity, parsed.Authentication);
+    }
+
+    [Theory]
+    [InlineData("User Id=reviewer;")]
+    [InlineData("User Id=;")]
+    [InlineData("User Id=18cb6492bde1400e8d4660a58e9927de;")]
+    [InlineData("User Id={18cb6492-bde1-400e-8d46-60a58e9927de};")]
+    [InlineData("User Id=18cb6492-bde1-400e-8d46-60a58e9927de;UID=18cb6492-bde1-400e-8d46-60a58e9927de;")]
+    public void Runtime_registration_rejects_username_or_ambiguous_identity(string suffix)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Persistence:CaseStateProvider"] = "Sql",
+            ["ConnectionStrings:CaseState"] = "Server=case-state.database.windows.net;Database=casestate;Authentication=Active Directory Managed Identity;" + suffix,
+        }).Build();
+        var error = Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddCaseStateStore(configuration));
+        Assert.Equal("ConnectionStrings:CaseState may specify only one managed identity client ID as a GUID, not a username.", error.Message);
+    }
+
     // AC1: commits and audit reads issue only SELECT and INSERT against case_events; no generated command updates or deletes it.
     [Fact]
     public void AC1_generated_audit_commands_are_append_only()
